@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.list.input.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "limit": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/limit"
+    },
+    "cursor": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/cursor"
+    },
+    "projectLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "projectsCursor": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/cursor"
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "dependentRequired": {
+    "projectsCursor": [
+      "agentId"
+    ]
+  },
+  "allOf": [
+    {
+      "not": {
+        "required": [
+          "cursor",
+          "agentId"
+        ],
+        "properties": {
+          "cursor": {},
+          "agentId": {}
+        }
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "cursor",
+          "projectsCursor"
+        ],
+        "properties": {
+          "cursor": {},
+          "projectsCursor": {}
+        }
+      }
+    }
+  ]
+}

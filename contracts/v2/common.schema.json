@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/common.schema.json",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "waitMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30000
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[0-9]{13}_[0-9a-f]{32}$"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "preparing_inputs",
+        "running",
+        "waiting_input",
+        "cancelling",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "hostAttachment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "download_url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "file_name": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "mime_type": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "file_id",
+            "download_url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "uri"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "transferId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "transferId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/hostAttachment"
+      }
+    },
+    "caller": {
+      "type": "object",
+      "properties": {
+        "principalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "principalId",
+        "clientId"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

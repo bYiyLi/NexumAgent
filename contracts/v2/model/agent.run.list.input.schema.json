@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.run.list.input.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "status": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/status"
+    },
+    "scriptName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source": {
+      "enum": [
+        "inline",
+        "named",
+        "history"
+      ]
+    },
+    "projectId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "contextId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "from": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/time"
+    },
+    "to": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/time"
+    },
+    "limit": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/limit"
+    },
+    "cursor": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/cursor"
+    }
+  },
+  "required": [
+    "agentId"
+  ],
+  "additionalProperties": false
+}

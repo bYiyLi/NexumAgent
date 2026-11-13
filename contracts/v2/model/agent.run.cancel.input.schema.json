@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.run.cancel.input.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "runId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    }
+  },
+  "required": [
+    "agentId",
+    "runId"
+  ],
+  "additionalProperties": false
+}

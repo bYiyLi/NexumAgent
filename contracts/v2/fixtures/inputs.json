@@ -1,0 +1,244 @@
+[
+  {
+    "contract": "agent.list",
+    "valid": true,
+    "value": {}
+  },
+  {
+    "contract": "agent.list",
+    "valid": false,
+    "value": {
+      "projectsCursor": "page"
+    }
+  },
+  {
+    "contract": "agent.list",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "cursor": "p"
+    }
+  },
+  {
+    "contract": "agent.open",
+    "valid": true,
+    "value": {
+      "agentId": "a"
+    }
+  },
+  {
+    "contract": "agent.open",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "contextId": "ctx",
+      "projectId": "p"
+    }
+  },
+  {
+    "contract": "agent.open",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "path": "/work",
+      "projectId": "p"
+    }
+  },
+  {
+    "contract": "agent.close",
+    "valid": true,
+    "value": {
+      "contextId": "ctx"
+    }
+  },
+  {
+    "contract": "agent.close",
+    "valid": false,
+    "value": {
+      "contextId": "ctx",
+      "force": true
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": true,
+    "value": {
+      "contextId": "ctx",
+      "script": "return 1",
+      "input": null,
+      "waitMs": 0,
+      "requestId": "req_1794591000000_0123456789abcdef0123456789abcdef"
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": true,
+    "value": {
+      "contextId": "ctx",
+      "scriptName": "browser/capture.js"
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "ctx",
+      "script": "x",
+      "scriptName": "x.js"
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "ctx",
+      "script": "x",
+      "timeoutMs": 0
+    }
+  },
+  {
+    "contract": "agent.run.get",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "runId": "r"
+    }
+  },
+  {
+    "contract": "agent.run.get",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "requestId": "req_1794591000000_0123456789abcdef0123456789abcdef"
+    }
+  },
+  {
+    "contract": "agent.run.get",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "runId": "r",
+      "requestId": "req_1794591000000_0123456789abcdef0123456789abcdef"
+    }
+  },
+  {
+    "contract": "agent.run.input",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "runId": "r",
+      "waitId": "w",
+      "input": false
+    }
+  },
+  {
+    "contract": "agent.run.input",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "runId": "r",
+      "waitId": "w"
+    }
+  },
+  {
+    "contract": "agent.run.cancel",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "runId": "r"
+    }
+  },
+  {
+    "contract": "agent.run.cancel",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "runId": "r",
+      "waitMs": 1
+    }
+  },
+  {
+    "contract": "agent.run.list",
+    "valid": true,
+    "value": {
+      "agentId": "a",
+      "source": "history",
+      "from": "2026-11-14T00:00:00Z",
+      "limit": 100
+    }
+  },
+  {
+    "contract": "agent.run.list",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "source": "replay"
+    }
+  },
+  {
+    "contract": "agent.run.list",
+    "valid": false,
+    "value": {
+      "agentId": "a",
+      "from": "2026-99-14T00:00:00Z"
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": true,
+    "value": {
+      "contextId": "ctx",
+      "script": "return 1",
+      "attachments": [
+        {
+          "file_id": "f",
+          "download_url": "https://example.com/f"
+        },
+        {
+          "uri": "nexum://agents/a/resources/r"
+        }
+      ]
+    }
+  },
+  {
+    "contract": "agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "ctx",
+      "script": "return 1",
+      "attachments": [
+        {
+          "path": "/tmp/secret"
+        }
+      ]
+    }
+  },
+  {
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "cancel",
+      "id": "rpc"
+    }
+  },
+  {
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "cancel",
+      "id": "rpc",
+      "runId": "r"
+    }
+  },
+  {
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc",
+      "operation": "agent.run.start",
+      "context": {},
+      "input": {}
+    }
+  }
+]

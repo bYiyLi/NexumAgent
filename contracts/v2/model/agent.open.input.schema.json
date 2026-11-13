@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.open.input.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "projectId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    },
+    "contextId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    }
+  },
+  "required": [
+    "agentId"
+  ],
+  "additionalProperties": false,
+  "not": {
+    "required": [
+      "projectId",
+      "path"
+    ],
+    "properties": {
+      "projectId": {},
+      "path": {}
+    }
+  }
+}

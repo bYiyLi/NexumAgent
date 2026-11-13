@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.close.input.schema.json",
+  "type": "object",
+  "properties": {
+    "contextId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    }
+  },
+  "required": [
+    "contextId"
+  ],
+  "additionalProperties": false
+}

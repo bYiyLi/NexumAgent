@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/envelope.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "enum": [
+            "agent.open",
+            "agent.close",
+            "agent.run.start",
+            "agent.run.get",
+            "agent.run.input",
+            "agent.run.cancel",
+            "agent.run.list",
+            "agent.resources.list",
+            "agent.resources.read",
+            "agent.context.read",
+            "agent.maintenance.execute",
+            "agent.maintenance.get",
+            "agent.maintenance.cancel"
+          ]
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/caller"
+            },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "allowedRoots": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "required": [
+                "agentId"
+              ],
+              "additionalProperties": false
+            },
+            "connection": {
+              "type": "object",
+              "properties": {
+                "cloudEnvironment": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "connectionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "cloudEnvironment",
+                "connectionId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "caller",
+            "authorization",
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "input": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "operation",
+        "context",
+        "input"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "output": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "output"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "error": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/error"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "cancel"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "enum": [
+            "agent.run.changed",
+            "agent.catalog.changed"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

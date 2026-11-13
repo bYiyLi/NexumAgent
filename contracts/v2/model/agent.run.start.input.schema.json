@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.run.start.input.schema.json",
+  "type": "object",
+  "properties": {
+    "contextId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "script": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1048576
+    },
+    "scriptName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "replayRunId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "input": {},
+    "attachments": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/attachments"
+    },
+    "requestId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/requestId"
+    },
+    "pwd": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    },
+    "waitMs": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "contextId"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": [
+        "script"
+      ],
+      "properties": {
+        "script": {}
+      }
+    },
+    {
+      "required": [
+        "scriptName"
+      ],
+      "properties": {
+        "scriptName": {}
+      }
+    },
+    {
+      "required": [
+        "replayRunId"
+      ],
+      "properties": {
+        "replayRunId": {}
+      }
+    }
+  ]
+}

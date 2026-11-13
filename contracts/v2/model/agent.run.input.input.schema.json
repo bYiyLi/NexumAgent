@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.run.input.input.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "runId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "waitId": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+    },
+    "input": {},
+    "attachments": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/attachments"
+    },
+    "waitMs": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
+    }
+  },
+  "required": [
+    "agentId",
+    "runId",
+    "waitId",
+    "input"
+  ],
+  "additionalProperties": false
+}
