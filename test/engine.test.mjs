@@ -10,13 +10,81 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { EventEmitter, once } from "node:events";
 import { SqliteStore } from "../dist/storage/sqlite.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine, callerKey } from "../dist/runtime/engine.js";
 import { canonicalJson, newRequestId } from "../dist/contracts/json.js";
+import { ResourceManager } from "../dist/extensions/resources.js";
 
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
+
+async function resourceFixture(t) {
+  const events = new EventEmitter(),
+    controls = new Map();
+  let manager;
+  const setup = await fixture(t, ({ store }) => {
+    manager = new ResourceManager(store, { cleanupTimeoutMs: 30 });
+    const instance = manager.instance(
+      {
+        type: "extension",
+        owner: "@test/engine",
+        namespace: "engine-test",
+        version: "1",
+        revision: "one",
+      },
+      {
+        signal: new AbortController().signal,
+        assertActive: () => {},
+        authorize: () => {},
+      },
+    );
+    return {
+      resources: manager,
+      bindings(services) {
+        const resources = instance.bind({
+          runId: services.runId,
+          signal: services.signal,
+          assertActive: services.assertCurrent,
+          authorize: () => {},
+        });
+        return {
+          managed: {
+            async open(background = false) {
+              services.assertActive();
+              const closed = Promise.withResolvers();
+              const entry = {
+                closed,
+                stops: 0,
+                closeOnDispose: false,
+                ref: undefined,
+              };
+              const value = {
+                closed: closed.promise,
+                dispose() {
+                  entry.stops++;
+                  if (entry.closeOnDispose) closed.resolve();
+                },
+              };
+              entry.ref = await resources.register({ kind: "session", value });
+              controls.set(entry.ref.id, entry);
+              if (background) await resources.handoff(entry.ref.id);
+              events.emit("registered", entry.ref.id);
+              return entry.ref.id;
+            },
+            async close(id) {
+              services.assertActive();
+              const ref = await resources.get(id);
+              return { id, status: (await manager.dispose(ref)).status };
+            },
+          },
+        };
+      },
+    };
+  });
+  return { ...setup, manager, controls, events };
+}
 async function fixture(t, options = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "nexum-engine-")),
     workDir = path.join(root, "work");
@@ -60,7 +128,9 @@ async function fixture(t, options = {}) {
     bindings: (services) => ({
       runtime: { requestInput: services.requestInput },
     }),
-    ...options,
+    ...(typeof options === "function"
+      ? options({ store, loader, scripts })
+      : options),
   });
   const start = (input) =>
     engine.start(caller, { contextId: work.contextId, ...input });
@@ -522,4 +592,68 @@ test("failed result persistence records failure without publishing a nonexistent
   assert.equal(historical.run.status, "succeeded");
   assert.equal(historical.result, null);
   assert.equal(historical.unavailable.code, "result_unavailable");
+});
+
+test("run completion waits for actual managed closure, persists unconfirmed facts and still accepts cancellation", async (t) => {
+  const f = await resourceFixture(t);
+  const registered = once(f.events, "registered");
+  const started = await f.start({
+    script: "return await managed.open();",
+    waitMs: 0,
+  });
+  const [id] = await registered;
+  const closing = await f.engine.observe(caller, started.run.runId, 150);
+  assert.equal(closing.run.status, "running");
+  assert.equal(closing.run.cleanup.phase, "cleanup");
+  assert.equal(closing.run.cleanup.unconfirmed[0].id, id);
+  assert.equal(closing.result, null);
+  assert.equal(f.controls.get(id).stops, 1);
+  const cancelled = f.engine.cancel(caller, started.run.runId);
+  assert.equal(cancelled.run.status, "cancelling");
+  f.controls.get(id).closed.resolve();
+  const done = await f.finish(started.run.runId);
+  assert.equal(done.run.status, "cancelled");
+  assert.equal(done.run.cleanup.closed, 1);
+  assert.deepEqual(done.run.cleanup.unconfirmed, []);
+});
+
+test("handed-off resources survive the creator terminal state and new runs explicitly control the original instance", async (t) => {
+  const f = await resourceFixture(t);
+  const started = await f.start({ script: "return await managed.open(true);" });
+  assert.equal(started.run.status, "succeeded");
+  const id = started.result.data,
+    control = f.controls.get(id);
+  assert.equal(control.ref.signal.aborted, false);
+  f.engine.cancel(caller, started.run.runId);
+  assert.equal(control.stops, 0);
+  control.closeOnDispose = true;
+  const stopped = await f.start({
+    script: "return await managed.close(context.input);",
+    input: id,
+  });
+  assert.equal(stopped.run.status, "succeeded");
+  assert.equal(stopped.result.data.status, "closed");
+  assert.equal(f.store.getResource(id).originRunId, started.run.runId);
+  assert.equal(f.store.getResource(id).ownerRunId, null);
+  assert.equal((await f.finish(started.run.runId)).run.status, "succeeded");
+});
+
+test("root errors and resource cleanup failures retain separate facts until closure is confirmed", async (t) => {
+  const f = await resourceFixture(t);
+  const registered = once(f.events, "registered");
+  const started = await f.start({
+    script: "await managed.open();throw new Error('private message');",
+    waitMs: 0,
+  });
+  const [id] = await registered;
+  const closing = await f.engine.observe(caller, started.run.runId, 150);
+  assert.equal(closing.run.status, "running");
+  assert.equal(closing.run.cleanup.cause.phase, "execute");
+  assert.equal(closing.run.cleanup.unconfirmed[0].id, id);
+  assert.doesNotMatch(JSON.stringify(closing), /private message/);
+  f.controls.get(id).closed.resolve();
+  const done = await f.finish(started.run.runId);
+  assert.equal(done.run.status, "failed");
+  assert.equal(done.run.error.phase, "execute");
+  assert.equal(done.run.cleanup.closed, 1);
 });

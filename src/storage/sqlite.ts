@@ -999,6 +999,50 @@ export class SqliteStore {
     });
   }
 
+  resourceDiagnostic(
+    id: string,
+    status: string,
+    diagnostic: JsonObject,
+  ): ResourceRecord {
+    requireCondition(
+      ["registered", "stopping", "unconfirmed"].includes(status),
+      "invalid_resource_diagnostic",
+      "Diagnostic updates cannot assert physical closure.",
+    );
+    return this.#transaction(() => {
+      const resource = this.getResource(id);
+      requireCondition(
+        resource.bootId === this.bootId,
+        "resource_unavailable",
+        "The old Agent resource cannot be controlled.",
+      );
+      if (resource.closedAt !== null) return resource;
+      this.#db
+        .prepare(
+          "UPDATE managed_resources SET status=?,diagnostic_json=?,revision=revision+1 WHERE resource_id=? AND closed_at IS NULL",
+        )
+        .run(status, canonicalJson(diagnostic), id);
+      return this.getResource(id);
+    });
+  }
+
+  saveCleanup(id: string, cleanup: JsonObject, now = Date.now()): RunRecord {
+    return this.#transaction(() => {
+      const run = this.getRun(id);
+      requireCondition(
+        run.bootId === this.bootId && run.endedAt === null,
+        "run_state_conflict",
+        "Only a live run can update its unfinished cleanup facts.",
+      );
+      this.#db
+        .prepare(
+          "UPDATE runs SET cleanup_json=?,revision=revision+1,updated_at=? WHERE run_id=? AND ended_at IS NULL",
+        )
+        .run(canonicalJson(cleanup), now, id);
+      return this.getRun(id);
+    });
+  }
+
   resourcesForRun(runId: string): ResourceRecord[] {
     return this.#db
       .prepare(

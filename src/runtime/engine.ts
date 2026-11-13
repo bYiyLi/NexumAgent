@@ -23,6 +23,7 @@ import { ModuleLoader, type ModuleUse } from "./modules.js";
 import { ScriptCatalog, scriptHeader, type ScriptSnapshot } from "./scripts.js";
 import { createHash } from "node:crypto";
 import { atomicText, contains, privateDirectory } from "./paths.js";
+import type { ResourceManager } from "../extensions/resources.js";
 import {
   authorizeCall,
   callerKey,
@@ -54,6 +55,8 @@ export interface RunServices {
   readonly context: JsonObject;
   readonly deadlineAt: number;
   assertActive(): void;
+  /** Existing operations keep current authority while root admission is closed. */
+  assertCurrent(): void;
   requestInput(request: InputRequest): Promise<JsonObject>;
 }
 export interface EngineOptions {
@@ -77,6 +80,7 @@ export interface EngineOptions {
     services: RunServices,
   ): Promise<JsonObject[]>;
   capacity?: number;
+  resources?: ResourceManager;
 }
 export interface RunView {
   run: RunRecord;
@@ -178,6 +182,11 @@ export class RunEngine extends EventEmitter {
     this.loader = loader;
     this.scripts = scripts;
     this.#options = options;
+    requireCondition(
+      !options.resources || options.resources.store === store,
+      "runtime_profile_mismatch",
+      "Managed resources must use this runtime's actual Agent/profile store.",
+    );
   }
 
   #publish(runId: string): void {
@@ -306,6 +315,7 @@ export class RunEngine extends EventEmitter {
         return scope.context;
       },
       assertActive: () => this.#assertActive(scope),
+      assertCurrent: () => this.#assertCurrent(scope),
       requestInput: (request: InputRequest) =>
         this.#requestInput(scope, request),
     });
@@ -372,12 +382,16 @@ export class RunEngine extends EventEmitter {
     this.#publish(scope.runId);
   }
   #assertActive(scope: Scope): void {
-    this.#checkDeadline(scope);
     requireCondition(
       scope.accepting && !scope.controller.signal.aborted,
       "run_stopping",
       "The run no longer accepts new managed work.",
     );
+    this.#assertCurrent(scope);
+  }
+  #assertCurrent(scope: Scope): void {
+    this.#checkDeadline(scope);
+    scope.controller.signal.throwIfAborted();
     this.#authorize(scope.caller, {
       action: "operation",
       run: this.store.getRun(scope.runId),
@@ -678,6 +692,37 @@ export class RunEngine extends EventEmitter {
       );
     }
     await Promise.allSettled([...scope.deliveries]);
+    let cleanup: JsonObject = {};
+    if (this.#options.resources) {
+      if (error && !scope.controller.signal.aborted)
+        scope.controller.abort(
+          new AgentError(
+            "run_failed",
+            "The root execution failed; managed work must stop.",
+          ),
+        );
+      const resources = this.#options.resources;
+      let report = await resources.cleanupRun(
+        scope.runId,
+        scope.controller.signal.reason,
+      );
+      if (report.unconfirmed.length) {
+        this.store.saveCleanup(
+          scope.runId,
+          { phase: "cleanup", ...report, ...(error ? { cause: error } : {}) },
+          this.#now(scope),
+        );
+        this.#publish(scope.runId);
+        // A bounded cleanup attempt is over; physical closure remains unconfirmed.
+        // Wait on actual resource evidence without polling or manufacturing a terminal state.
+        await resources.waitForRunClosure(scope.runId);
+        report = await resources.cleanupRun(
+          scope.runId,
+          scope.controller.signal.reason,
+        );
+      }
+      cleanup = report;
+    }
     this.#checkDeadline(scope);
     const run = this.store.getRun(scope.runId);
     const status = run.stop
@@ -687,7 +732,6 @@ export class RunEngine extends EventEmitter {
       : error
         ? "failed"
         : "succeeded";
-    // Managed SDK operations/resources add their confirmed cleanup before this commit.
     this.store.transitionRun(
       run.runId,
       run.revision,
@@ -695,6 +739,7 @@ export class RunEngine extends EventEmitter {
       {
         ...(error ? { error } : {}),
         ...(resultRef ? { resultRef } : {}),
+        cleanup,
         source: {
           ...run.source,
           modules: [...moduleUses.values()].map((use) => ({ ...use })),
