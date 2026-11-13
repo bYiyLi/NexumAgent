@@ -7,6 +7,7 @@ import vm from "node:vm";
 import { createHash } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
+import { executionGlobals } from "./globals.js";
 
 export const defaultBuiltins = Object.freeze([
   "assert",
@@ -290,7 +291,7 @@ export class ModuleLoader {
     return pathToFileURL(actual).href;
   }
 
-  async execute(
+  compile(
     code: string,
     parameters: Readonly<Record<string, unknown>>,
     options: {
@@ -298,7 +299,7 @@ export class ModuleLoader {
       onModule?: (use: ModuleUse) => void;
       console?: Console;
     } = {},
-  ): Promise<unknown> {
+  ): () => Promise<unknown> {
     const record = (authorized: AuthorizedModule, entry: string) => {
       if (authorized.version && authorized.kind !== "builtin")
         this.#loaded.set(authorized.packageName ?? entry, authorized.version);
@@ -347,23 +348,7 @@ export class ModuleLoader {
       "A public SDK alias is not a JavaScript identifier.",
     );
     const realm = vm.createContext(
-      Object.assign(Object.create(null), {
-        console: options.console ?? console,
-        Buffer,
-        URL,
-        URLSearchParams,
-        TextEncoder,
-        TextDecoder,
-        AbortController,
-        AbortSignal,
-        fetch,
-        structuredClone,
-        setTimeout,
-        clearTimeout,
-        setInterval,
-        clearInterval,
-        queueMicrotask,
-      }),
+      Object.assign(Object.create(null), executionGlobals(options.console)),
     );
     const entry = vm.compileFunction(
       '"use strict"; return (async function () {\n' +
@@ -386,6 +371,15 @@ export class ModuleLoader {
         },
       },
     );
-    return await entry(...names.map((name) => publicParameters[name]));
+    return () =>
+      entry(...names.map((name) => publicParameters[name])) as Promise<unknown>;
+  }
+
+  async execute(
+    code: string,
+    parameters: Readonly<Record<string, unknown>>,
+    options: Parameters<ModuleLoader["compile"]>[2] = {},
+  ): Promise<unknown> {
+    return await this.compile(code, parameters, options)();
   }
 }

@@ -561,6 +561,7 @@ export class SqliteStore {
       resultRef?: string;
       logsRef?: string;
       source?: JsonObject;
+      scriptName?: string;
       error?: JsonObject;
       cleanup?: JsonObject;
     } = {},
@@ -604,7 +605,7 @@ export class SqliteStore {
         );
       this.#db
         .prepare(
-          `UPDATE runs SET status=?,revision=revision+1,code_ref=?,input_ref=?,result_ref=?,logs_ref=?,
+          `UPDATE runs SET status=?,revision=revision+1,code_ref=?,input_ref=?,result_ref=?,logs_ref=?,script_name=?,
         source_json=?,error_json=?,cleanup_json=?,started_at=?,ended_at=?,updated_at=? WHERE run_id=? AND revision=? AND ended_at IS NULL`,
         )
         .run(
@@ -613,6 +614,7 @@ export class SqliteStore {
           patch.inputRef ?? run.inputRef,
           patch.resultRef ?? run.resultRef,
           patch.logsRef ?? run.logsRef,
+          patch.scriptName ?? run.scriptName,
           canonicalJson(patch.source ?? run.source),
           patch.error
             ? canonicalJson(patch.error)
@@ -656,6 +658,44 @@ export class SqliteStore {
         )
         .run(id);
       return { accepted: true, run: this.getRun(id) };
+    });
+  }
+
+  savePreparation(
+    id: string,
+    revision: number,
+    patch: {
+      codeRef: string;
+      inputRef?: string;
+      logsRef?: string;
+      source: JsonObject;
+      scriptName?: string;
+    },
+  ): RunRecord {
+    return this.#transaction(() => {
+      const run = this.getRun(id);
+      requireCondition(
+        run.status === "preparing_inputs" &&
+          !run.stop &&
+          run.revision === revision,
+        "run_state_conflict",
+        "Preparation is no longer current.",
+      );
+      this.#db
+        .prepare(
+          `UPDATE runs SET code_ref=?,input_ref=?,logs_ref=?,source_json=?,script_name=?,revision=revision+1
+        WHERE run_id=? AND revision=? AND status='preparing_inputs'`,
+        )
+        .run(
+          patch.codeRef,
+          patch.inputRef ?? run.inputRef,
+          patch.logsRef ?? run.logsRef,
+          canonicalJson(patch.source),
+          patch.scriptName ?? run.scriptName,
+          id,
+          revision,
+        );
+      return this.getRun(id);
     });
   }
 
@@ -953,6 +993,27 @@ export class SqliteStore {
       )
       .all(runId)
       .map((row) => decode<ResourceRecord>(row));
+  }
+
+  scriptUsage(callerKey: string): {
+    owner: string;
+    scriptName: string;
+    count: number;
+    lastStartedAt: number;
+  }[] {
+    return this.#db
+      .prepare(
+        `SELECT json_extract(source_json,'$.origin.owner') owner,
+      script_name scriptName,count(*) count,max(started_at) lastStartedAt FROM runs
+      WHERE caller_key=? AND started_at IS NOT NULL AND script_name IS NOT NULL
+      AND json_type(source_json,'$.origin.owner')='text' GROUP BY owner,script_name`,
+      )
+      .all(callerKey) as {
+      owner: string;
+      scriptName: string;
+      count: number;
+      lastStartedAt: number;
+    }[];
   }
 
   getState(

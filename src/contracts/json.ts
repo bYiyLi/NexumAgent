@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { types } from "node:util";
 import { AgentError, requireCondition } from "./errors.js";
 import type { JsonValue } from "./types.js";
 
@@ -30,6 +31,11 @@ export function canonicalJson(value: unknown, maxBytes = 1024 * 1024): string {
       "Only JSON values are accepted.",
     );
     requireCondition(
+      !types.isProxy(input),
+      "invalid_json",
+      "Proxy objects are not accepted as JSON data.",
+    );
+    requireCondition(
       !ancestors.has(input),
       "invalid_json",
       "Circular JSON values are not accepted.",
@@ -57,7 +63,24 @@ export function canonicalJson(value: unknown, maxBytes = 1024 * 1024): string {
       }
       const prototype = Object.getPrototypeOf(input);
       requireCondition(
-        prototype === Object.prototype || prototype === null,
+        !types.isProxy(prototype),
+        "invalid_json",
+        "A JSON object's prototype must not be a Proxy.",
+      );
+      const constructor =
+        prototype && Object.getOwnPropertyDescriptor(prototype, "constructor");
+      const plainRealmObject =
+        prototype &&
+        Object.getPrototypeOf(prototype) === null &&
+        constructor &&
+        "value" in constructor &&
+        typeof constructor.value === "function" &&
+        Function.prototype.toString.call(constructor.value) ===
+          Function.prototype.toString.call(Object);
+      requireCondition(
+        prototype === Object.prototype ||
+          prototype === null ||
+          plainRealmObject,
         "invalid_json",
         "A JSON object must have a plain prototype.",
       );

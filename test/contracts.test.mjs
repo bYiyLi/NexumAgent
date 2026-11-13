@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 import {
   validateContract,
   compileInputSchema,
@@ -87,6 +88,24 @@ test("canonical intent preserves array order, null and rejects lossy values with
     { code: "invalid_json" },
   );
   assert.equal(called, false);
+  assert.throws(
+    () =>
+      canonicalJson(
+        Object.create(
+          new Proxy(
+            {},
+            {
+              getOwnPropertyDescriptor() {
+                called = true;
+                return undefined;
+              },
+            },
+          ),
+        ),
+      ),
+    { code: "invalid_json" },
+  );
+  assert.equal(called, false);
   assert.throws(() => canonicalJson("x".repeat(1025), 1024), {
     code: "data_too_large",
   });
@@ -115,4 +134,41 @@ test("request expiry is decidable after mappings have been deleted", () => {
   assert.throws(() => requestWindow("req_opaque", now), {
     code: "invalid_request_id",
   });
+});
+
+test("SDK JSON accepts a plain object from the guest realm without invoking proxy traps or class conversions", () => {
+  assert.equal(
+    canonicalJson(
+      vm.runInNewContext('({message:"question",inputSchema:{type:"integer"}})'),
+    ),
+    '{"inputSchema":{"type":"integer"},"message":"question"}',
+  );
+  let called = false;
+  assert.throws(
+    () =>
+      canonicalJson(
+        new Proxy(
+          {},
+          {
+            getPrototypeOf() {
+              called = true;
+              return null;
+            },
+            ownKeys() {
+              called = true;
+              return [];
+            },
+          },
+        ),
+      ),
+    { code: "invalid_json" },
+  );
+  assert.equal(called, false);
+  assert.throws(
+    () =>
+      canonicalJson(
+        vm.runInNewContext("new (class X {constructor(){this.x=1;}})"),
+      ),
+    { code: "invalid_json" },
+  );
 });
