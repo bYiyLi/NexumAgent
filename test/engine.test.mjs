@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  realpathSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -86,7 +87,9 @@ async function resourceFixture(t) {
   return { ...setup, manager, controls, events };
 }
 async function fixture(t, options = {}) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-engine-")),
+  const root = realpathSync.native(
+      mkdtempSync(path.join(tmpdir(), "nexum-engine-")),
+    ),
     workDir = path.join(root, "work");
   mkdirSync(workDir);
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');

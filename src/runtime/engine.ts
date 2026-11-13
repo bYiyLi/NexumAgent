@@ -213,13 +213,15 @@ export class RunEngine extends EventEmitter {
       "snapshot_unavailable",
       "The retained run snapshot is unavailable.",
     );
-    const root = realpathSync(path.join(this.scripts.work, "tmp", "runs"));
+    const root = realpathSync.native(
+      path.join(this.scripts.work, "tmp", "runs"),
+    );
     requireCondition(
       contains(this.scripts.work, root),
       "snapshot_unavailable",
       "The retained run root was redirected outside the Agent work directory.",
     );
-    const filename = realpathSync(path.resolve(this.store.root, ref));
+    const filename = realpathSync.native(path.resolve(this.store.root, ref));
     requireCondition(
       contains(root, filename) &&
         statSync(filename).isFile() &&
@@ -443,7 +445,7 @@ export class RunEngine extends EventEmitter {
       this.#publish(run.runId);
       directory = this.#directory(run.runId);
       const work = await this.#options.loadWork(scope.work);
-      const pwd = realpathSync(input.pwd ?? scope.work.pwd);
+      const pwd = realpathSync.native(input.pwd ?? scope.work.pwd);
       requireCondition(
         statSync(pwd).isDirectory(),
         "invalid_pwd",

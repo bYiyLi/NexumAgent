@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -17,7 +17,9 @@ const origin = {
   revision: "one",
 };
 function fixture(t, options = {}) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-resources-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-resources-")),
+  );
   mkdirSync(path.join(root, "work"));
   const store = new SqliteStore(root, {
     agentId: "agent",

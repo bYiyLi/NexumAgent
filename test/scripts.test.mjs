@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  realpathSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -38,7 +39,9 @@ function code(name, more = {}, body = "return context.input;") {
   );
 }
 function fixture(t) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-scripts-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-scripts-")),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, "work"));
   const work = path.join(root, "work");

@@ -22,7 +22,7 @@ import {
 function fixture(t) {
   const temporary = mkdtempSync(path.join(tmpdir(), "nexum-discovery-"));
   t.after(() => rmSync(temporary, { recursive: true, force: true }));
-  const root = realpathSync(temporary),
+  const root = realpathSync.native(temporary),
     home = path.join(root, "home"),
     work = path.join(root, "work"),
     project = path.join(root, "project");
@@ -31,7 +31,7 @@ function fixture(t) {
     const file = path.join(base, relative);
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, text);
-    return realpathSync(file);
+    return realpathSync.native(file);
   }
   const options = { agentId: "a", home, work, projectRoot: project };
   return { root, home, work, project, write, options };

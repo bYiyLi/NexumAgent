@@ -116,7 +116,7 @@ export class ModuleLoader {
       "invalid_boot_id",
       "The boot identity is invalid.",
     );
-    const actual = realpathSync(work);
+    const actual = realpathSync.native(work);
     requireCondition(
       statSync(actual).isDirectory(),
       "invalid_work",
@@ -125,7 +125,7 @@ export class ModuleLoader {
     const directory = path.join(actual, "tmp", "runtime", bootId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     requireCondition(
-      contained(actual, realpathSync(directory)),
+      contained(actual, realpathSync.native(directory)),
       "module_path_escape",
       "The runtime loader directory escapes work.",
     );
@@ -174,7 +174,7 @@ export class ModuleLoader {
       specifier.startsWith(".") ||
       path.isAbsolute(specifier);
     if (file) {
-      const moduleRoot = realpathSync(path.join(this.work, "modules"));
+      const moduleRoot = realpathSync.native(path.join(this.work, "modules"));
       requireCondition(
         contained(this.work, moduleRoot),
         "module_path_escape",
@@ -183,7 +183,7 @@ export class ModuleLoader {
       const candidate = specifier.startsWith("file:")
         ? fileURLToPath(specifier)
         : path.resolve(moduleRoot, specifier);
-      const actual = realpathSync(candidate);
+      const actual = realpathSync.native(candidate);
       requireCondition(
         contained(moduleRoot, actual),
         "module_not_allowed",
@@ -240,13 +240,13 @@ export class ModuleLoader {
       "module_not_allowed",
       "This package is not a declared direct dependency of work.",
     );
-    const modules = realpathSync(path.join(this.work, "node_modules"));
+    const modules = realpathSync.native(path.join(this.work, "node_modules"));
     requireCondition(
       contained(this.work, modules),
       "module_path_escape",
       "The npm environment escapes work.",
     );
-    const root = realpathSync(path.join(modules, name));
+    const root = realpathSync.native(path.join(modules, name));
     requireCondition(
       contained(modules, root),
       "module_not_allowed",
@@ -282,7 +282,7 @@ export class ModuleLoader {
         : mode === "import"
           ? this.#bridge.resolveFromWork(authorized.specifier)
           : pathToFileURL(this.#require.resolve(authorized.specifier)).href;
-    const actual = realpathSync(fileURLToPath(entry));
+    const actual = realpathSync.native(fileURLToPath(entry));
     requireCondition(
       authorized.root && contained(authorized.root, actual),
       "module_not_allowed",

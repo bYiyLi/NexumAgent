@@ -9,6 +9,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
@@ -26,7 +27,7 @@ const skill = (name, description = "用途") =>
   `---\nname: ${name}\ndescription: ${description}\n---\nBODY FOR ${name}\n`;
 function fixture(t) {
   const temporary = mkdtempSync(path.join(tmpdir(), "nexum-work-"));
-  const root = realpathSync(temporary),
+  const root = realpathSync.native(temporary),
     work = path.join(root, "work"),
     home = path.join(root, "home"),
     project = path.join(root, "project"),
@@ -37,7 +38,7 @@ function fixture(t) {
     const filename = path.join(base, relative);
     mkdirSync(path.dirname(filename), { recursive: true });
     writeFileSync(filename, text);
-    return realpathSync(filename);
+    return realpathSync.native(filename);
   }
   write(
     work,
@@ -128,6 +129,7 @@ function fixture(t) {
     work,
     home,
     project,
+    aliasProject: path.join(temporary, "project"),
     secondProject,
     store,
     scripts,
@@ -145,6 +147,20 @@ function fixture(t) {
     revoke: () => (allowed = false),
   };
 }
+
+test("native sync and async identities agree for aliased paths before Project resolution and visibility", async (t) => {
+  const f = fixture(t);
+  const file = f.write(f.project, "AGENTS.md", "x".repeat(65537));
+  f.setDisabled([
+    { kind: "instruction", key: selectorKey("instruction", file) },
+  ]);
+  const opened = await f.open({ path: f.aliasProject });
+  assert.equal(opened.project.root, await realpath(f.aliasProject));
+  assert.equal(opened.project.root, f.project);
+  assert.equal(f.store.root, await realpath(f.root));
+  assert.equal(opened.agent.paths.work, await realpath(f.work));
+  assert.equal(opened.project.instructions.length, 0);
+});
 
 test("work authorization fails closed for async/boolean callbacks and fixes caller identity before queued work", async (t) => {
   const f = fixture(t);

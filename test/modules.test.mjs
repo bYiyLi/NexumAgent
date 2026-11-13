@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  realpathSync,
   mkdirSync,
   writeFileSync,
   rmSync,
@@ -14,7 +15,9 @@ import test from "node:test";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 
 async function fixture(t) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-modules-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-modules-")),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const work = path.join(root, "work");
   const modules = path.join(work, "modules");

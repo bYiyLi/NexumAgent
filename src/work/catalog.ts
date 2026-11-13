@@ -57,7 +57,7 @@ export class DocumentCatalog {
   readonly scripts: ScriptCatalog;
   readonly policy: ModulePolicy;
   constructor(work: string, scripts: ScriptCatalog, policy: ModulePolicy) {
-    this.work = realpathSync(work);
+    this.work = realpathSync.native(work);
     this.scripts = scripts;
     this.policy = policy;
     requireCondition(
@@ -76,7 +76,9 @@ export class DocumentCatalog {
     const packages: PackageInfo[] = [];
     let manifest: Record<string, Record<string, unknown>> = {};
     try {
-      const filename = realpathSync(path.join(this.work, "package.json"));
+      const filename = realpathSync.native(
+        path.join(this.work, "package.json"),
+      );
       requireCondition(
         contains(this.work, filename),
         "module_path_escape",
@@ -117,9 +119,11 @@ export class DocumentCatalog {
         homepage: null,
       };
       try {
-        const modules = realpathSync(path.join(this.work, "node_modules"));
-        const root = realpathSync(path.join(modules, name));
-        const filename = realpathSync(path.join(root, "package.json"));
+        const modules = realpathSync.native(
+          path.join(this.work, "node_modules"),
+        );
+        const root = realpathSync.native(path.join(modules, name));
+        const filename = realpathSync.native(path.join(root, "package.json"));
         requireCondition(
           contains(this.work, modules) &&
             contains(modules, root) &&
@@ -149,7 +153,7 @@ export class DocumentCatalog {
         const types = data.types ?? data.typings;
         if (typeof types === "string") {
           try {
-            const actual = realpathSync(path.resolve(root, types));
+            const actual = realpathSync.native(path.resolve(root, types));
             if (contains(root, actual) && statSync(actual).isFile())
               info.types = actual;
           } catch (error) {
@@ -191,7 +195,7 @@ export class DocumentCatalog {
       await boundedFile(path.join(docs, "scripts.md"), 8 * 1024 * 1024, signal)
     ).bytes.toString("utf8");
     for (const link of links) {
-      const actual = realpathSync(link.path);
+      const actual = realpathSync.native(link.path);
       requireCondition(
         contains(docs, actual) &&
           statSync(actual).isFile() &&

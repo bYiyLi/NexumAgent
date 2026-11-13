@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  realpathSync,
   rmSync,
   mkdirSync,
   symlinkSync,
@@ -20,7 +21,9 @@ const binding = {
   cloudEnvironment: "cloud_test",
 };
 function setup(t) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-store-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-store-")),
+  );
   const store = new SqliteStore(root, binding);
   t.after(() => {
     store.close();
@@ -52,7 +55,9 @@ function start(store, work, more = {}) {
 }
 
 test("profile storage cannot follow a state junction into another root", (t) => {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-profile-path-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-profile-path-")),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const outside = path.join(root, "outside");
   const agentRoot = path.join(root, "agent");
@@ -102,7 +107,9 @@ test("initialization creates a bound WAL database; future and mismatched stores 
 });
 
 test("failed initial migration rolls back schema and preserves existing data", (t) => {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-migrate-"));
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-migrate-")),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, "state"));
   const filename = path.join(root, "state/runtime.sqlite");

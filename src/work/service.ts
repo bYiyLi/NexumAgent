@@ -229,7 +229,7 @@ export class WorkService {
       if (input.path)
         requireCondition(
           previous.projectId !== null &&
-            realpathSync(input.path) === previous.pwd,
+            realpathSync.native(input.path) === previous.pwd,
           "context_binding_mismatch",
           "Refresh cannot switch the work directory or attach a Project.",
         );
@@ -239,7 +239,7 @@ export class WorkService {
     if (projectId || (!previous && input.path)) {
       const target = projectId
         ? { projectId }
-        : { path: realpathSync(input.path!) };
+        : { path: realpathSync.native(input.path!) };
       resolved = await this.#options.resolveProject(caller, target, signal);
       requireCondition(
         resolved.project.projectId &&
@@ -247,10 +247,10 @@ export class WorkService {
         "project_binding_mismatch",
         "The catalog returned a different Project identity.",
       );
-      const actual = realpathSync(resolved.project.root);
+      const actual = realpathSync.native(resolved.project.root);
       requireCondition(
         statSync(actual).isDirectory() &&
-          (!input.path || actual === realpathSync(input.path)),
+          (!input.path || actual === realpathSync.native(input.path)),
         "project_binding_mismatch",
         "The catalog root does not match the requested local directory.",
       );
@@ -500,8 +500,8 @@ export class WorkService {
         "An entry instruction must be delivered completely within its byte budget.",
       );
     for (const skill of published.skills) {
-      const root = realpathSync(skill.path),
-        file = realpathSync(skill.skillFile);
+      const root = realpathSync.native(skill.path),
+        file = realpathSync.native(skill.skillFile);
       requireCondition(
         contains(this.#scripts.docs, root) &&
           contains(root, file) &&
@@ -572,8 +572,10 @@ export class WorkService {
   }
 
   #bundle(work: WorkRecord): Bundle {
-    const root = realpathSync(path.join(this.#scripts.work, "tmp", "contexts"));
-    const filename = realpathSync(
+    const root = realpathSync.native(
+      path.join(this.#scripts.work, "tmp", "contexts"),
+    );
+    const filename = realpathSync.native(
       path.resolve(this.#store.root, work.snapshotRef),
     );
     requireCondition(
@@ -662,7 +664,7 @@ export class WorkService {
         "material_unavailable",
         "The instruction source is unavailable.",
       );
-      const actual = realpathSync(instruction.path);
+      const actual = realpathSync.native(instruction.path);
       requireCondition(
         actual === instruction.path &&
           work.projectId !== null &&
@@ -681,9 +683,11 @@ export class WorkService {
       "material_forbidden",
       "This material is not an enabled, resolved member of the work snapshot.",
     );
-    const root = realpathSync(skill.path);
-    const entry = realpathSync(skill.skillFile);
-    const actual = realpathSync(path.resolve(root, relativePath ?? "SKILL.md"));
+    const root = realpathSync.native(skill.path);
+    const entry = realpathSync.native(skill.skillFile);
+    const actual = realpathSync.native(
+      path.resolve(root, relativePath ?? "SKILL.md"),
+    );
     requireCondition(
       root === skill.path &&
         entry === skill.skillFile &&

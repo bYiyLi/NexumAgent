@@ -21,7 +21,7 @@ export function contains(root: string, candidate: string): boolean {
 
 // Internal persistence helpers, not a public filesystem SDK.
 export function privateDirectory(root: string, ...parts: string[]): string {
-  const boundary = realpathSync(root);
+  const boundary = realpathSync.native(root);
   requireCondition(
     boundary === root,
     "storage_path_escape",
@@ -42,7 +42,7 @@ export function privateDirectory(root: string, ...parts: string[]): string {
       "An internal directory must be a directory and must not redirect to another location.",
     );
     if (!existing) mkdirSync(next, { recursive: false, mode: 0o700 });
-    current = realpathSync(next);
+    current = realpathSync.native(next);
     requireCondition(
       contains(boundary, current),
       "storage_path_escape",

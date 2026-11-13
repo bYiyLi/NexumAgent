@@ -89,7 +89,7 @@ export class SqliteStore {
       "The Agent root must not redirect to another profile.",
     );
     mkdirSync(root, { recursive: true, mode: 0o700 });
-    this.root = realpathSync(root);
+    this.root = realpathSync.native(root);
     this.binding = Object.freeze({ ...binding });
     const directory = path.join(this.root, "state");
     requireCondition(
@@ -98,7 +98,7 @@ export class SqliteStore {
       "The lifecycle directory must not be redirected.",
     );
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const relative = path.relative(this.root, realpathSync(directory));
+    const relative = path.relative(this.root, realpathSync.native(directory));
     requireCondition(
       relative !== ".." &&
         !relative.startsWith(".." + path.sep) &&

@@ -155,7 +155,7 @@ export class ScriptCatalog {
     agentId: string,
     sources: () => readonly ScriptSource[] = () => [],
   ) {
-    this.work = realpathSync(work);
+    this.work = realpathSync.native(work);
     this.owner = `local:${agentId}`;
     this.local = privateDirectory(this.work, "scripts");
     this.docs = privateDirectory(this.work, "docs");
@@ -196,10 +196,12 @@ export class ScriptCatalog {
         "A script source must have an absolute directory.",
       );
       if (source.type === "extension") {
-        const modules = realpathSync(path.join(this.work, "node_modules"));
+        const modules = realpathSync.native(
+          path.join(this.work, "node_modules"),
+        );
         requireCondition(
           contains(this.work, modules) &&
-            contains(modules, realpathSync(source.directory)),
+            contains(modules, realpathSync.native(source.directory)),
           "script_source_invalid",
           "Extension scripts must come from the registered Agent npm environment.",
         );
@@ -215,7 +217,7 @@ export class ScriptCatalog {
   ): ScriptSnapshot {
     scriptFilename(filename);
     if (directory === this.local) privateDirectory(this.work, "scripts");
-    const root = realpathSync(directory);
+    const root = realpathSync.native(directory);
     requireCondition(
       readdirSync(root).filter(
         (name) => name.toLowerCase() === filename.toLowerCase(),
@@ -224,7 +226,7 @@ export class ScriptCatalog {
       "This script name has a portable filename collision.",
     );
     const candidate = path.join(root, filename);
-    const actual = realpathSync(candidate);
+    const actual = realpathSync.native(candidate);
     requireCondition(
       contains(root, actual) && path.basename(actual) === filename,
       "script_path_escape",
