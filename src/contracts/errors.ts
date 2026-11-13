@@ -24,6 +24,7 @@ export function requireCondition(
   value: unknown,
   code: string,
   message: string,
+  details?: JsonObject,
 ): asserts value {
-  if (!value) throw new AgentError(code, message);
+  if (!value) throw new AgentError(code, message, details);
 }

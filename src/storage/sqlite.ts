@@ -282,6 +282,9 @@ export class SqliteStore {
   getWork(id: string): WorkRecord {
     return this.#get("work_contexts", "context_id", id, "context_not_found");
   }
+  activeWork(id: string, callerKey: string, now = Date.now()): WorkRecord {
+    return this.#activeWork(id, callerKey, now);
+  }
   getRun(id: string): RunRecord {
     return this.#get("runs", "run_id", id, "run_not_found");
   }
@@ -335,6 +338,16 @@ export class SqliteStore {
     );
     const id = newId("ctx");
     return this.#transaction(() => {
+      if (input.projectId)
+        requireCondition(
+          !this.#db
+            .prepare(
+              "SELECT 1 FROM close_receipts WHERE project_id=? AND expires_at>? LIMIT 1",
+            )
+            .get(input.projectId, now),
+          "project_closed",
+          "This project was closed; resolve a new catalog identity before opening work.",
+        );
       this.#db
         .prepare(
           `INSERT INTO work_contexts VALUES(?,?,?,?,1,'open',?,?,?,?,?,NULL)`,

@@ -11,7 +11,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, newId } from "../contracts/json.js";
-import type { JsonObject, JsonValue } from "../contracts/types.js";
+import type {
+  ContributionOrigin,
+  JsonObject,
+  JsonValue,
+} from "../contracts/types.js";
 import { compileInputSchema } from "../contracts/validation.js";
 import { extensionNamespace, scriptFilename } from "./names.js";
 import { atomicText, contains, privateDirectory } from "./paths.js";
@@ -29,9 +33,7 @@ interface ScriptOriginBase {
   namespace: string | null;
   version: string | null;
 }
-export interface ScriptOrigin extends ScriptOriginBase, JsonObject {
-  revision: string;
-}
+export type ScriptOrigin = ContributionOrigin;
 export interface ScriptSnapshot {
   name: string | null;
   code: string;

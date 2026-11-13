@@ -2,6 +2,14 @@ export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
+export interface ContributionOrigin extends JsonObject {
+  type: "local" | "platform" | "extension";
+  owner: string;
+  namespace: string | null;
+  version: string | null;
+  revision: string;
+}
+
 export const runStatuses = [
   "accepted",
   "preparing_inputs",

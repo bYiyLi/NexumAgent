@@ -23,13 +23,14 @@ import { ModuleLoader, type ModuleUse } from "./modules.js";
 import { ScriptCatalog, scriptHeader, type ScriptSnapshot } from "./scripts.js";
 import { createHash } from "node:crypto";
 import { atomicText, contains, privateDirectory } from "./paths.js";
+import {
+  authorizeCall,
+  callerKey,
+  fixedCaller,
+  type Caller,
+} from "../contracts/caller.js";
+export { callerKey, type Caller } from "../contracts/caller.js";
 
-export interface Caller {
-  readonly principalId: string;
-  readonly clientId: string;
-  readonly host?: string;
-  readonly model?: string;
-}
 export interface StartInput {
   contextId: string;
   script?: string;
@@ -67,7 +68,7 @@ export interface EngineOptions {
       origin?: ScriptSnapshot["origin"];
     },
   ): void;
-  loadWork(work: WorkRecord): JsonObject;
+  loadWork(work: WorkRecord): JsonObject | Promise<JsonObject>;
   encodeResult(value: unknown, services: RunServices): Promise<JsonObject>;
   bindings(services: RunServices): Readonly<Record<string, unknown>>;
   prepareAttachments?(
@@ -119,17 +120,6 @@ function failure(error: unknown, phase: string): JsonObject {
     phase,
   };
 }
-export const callerKey = (caller: Caller): string =>
-  digest({ principalId: caller.principalId, clientId: caller.clientId });
-
-function fixedCaller(caller: Caller): Caller {
-  return Object.freeze({
-    principalId: caller.principalId,
-    clientId: caller.clientId,
-    ...(caller.host === undefined ? {} : { host: caller.host }),
-    ...(caller.model === undefined ? {} : { model: caller.model }),
-  });
-}
 function frozenJson(value: JsonObject): JsonObject {
   const copy = JSON.parse(canonicalJson(value, 2 * 1024 * 1024)) as JsonObject;
   const freeze = (item: JsonValue): void => {
@@ -177,6 +167,13 @@ export class RunEngine extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(0); // Each observer has a bounded, individually cancelled once listener.
+    requireCondition(
+      scripts.work === path.join(store.root, "work") &&
+        loader.work === scripts.work &&
+        scripts.owner === `local:${store.binding.agentId}`,
+      "runtime_profile_mismatch",
+      "Runtime components must use this Agent's one profile/work environment.",
+    );
     this.store = store;
     this.loader = loader;
     this.scripts = scripts;
@@ -186,9 +183,15 @@ export class RunEngine extends EventEmitter {
   #publish(runId: string): void {
     this.emit(runId);
   }
+  #authorize(
+    caller: Caller,
+    target: Parameters<EngineOptions["authorize"]>[1],
+  ): void {
+    authorizeCall(() => this.#options.authorize(caller, target));
+  }
   #run(caller: Caller, runId: string, action: string): RunRecord {
     const run = this.store.getRun(runId);
-    this.#options.authorize(caller, { action, run });
+    this.#authorize(caller, { action, run });
     this.#checkDeadline(this.#scopes.get(runId));
     return this.store.getRun(runId);
   }
@@ -229,7 +232,7 @@ export class RunEngine extends EventEmitter {
     validateContract("agent.run.start", input);
     input = JSON.parse(canonicalJson(input)) as StartInput;
     caller = fixedCaller(caller);
-    this.#options.authorize(caller, { action: "start" });
+    this.#authorize(caller, { action: "start" });
     const { waitMs: _wait, attachments: _attachments, ...intent } = input;
     const accepted = this.store.acceptRun({
       callerKey: callerKey(caller),
@@ -262,7 +265,7 @@ export class RunEngine extends EventEmitter {
       capacity: this.#options.capacity,
     });
     if (accepted.duplicate)
-      this.#options.authorize(caller, { action: "get", run: accepted.run });
+      this.#authorize(caller, { action: "get", run: accepted.run });
     else {
       const scope = this.#scope(accepted.run, caller);
       this.#scopes.set(scope.runId, scope);
@@ -375,7 +378,7 @@ export class RunEngine extends EventEmitter {
       "run_stopping",
       "The run no longer accepts new managed work.",
     );
-    this.#options.authorize(scope.caller, {
+    this.#authorize(scope.caller, {
       action: "operation",
       run: this.store.getRun(scope.runId),
     });
@@ -425,14 +428,14 @@ export class RunEngine extends EventEmitter {
       );
       this.#publish(run.runId);
       directory = this.#directory(run.runId);
-      const work = this.#options.loadWork(scope.work);
+      const work = await this.#options.loadWork(scope.work);
       const pwd = realpathSync(input.pwd ?? scope.work.pwd);
       requireCondition(
         statSync(pwd).isDirectory(),
         "invalid_pwd",
         "The requested working directory is not a directory.",
       );
-      this.#options.authorize(scope.caller, {
+      this.#authorize(scope.caller, {
         action: "prepare",
         work: scope.work,
         path: pwd,
@@ -484,7 +487,7 @@ export class RunEngine extends EventEmitter {
       businessInput = Object.hasOwn(input, "input")
         ? input.input!
         : (businessInput! ?? null);
-      this.#options.authorize(scope.caller, {
+      this.#authorize(scope.caller, {
         action: "script",
         run: this.store.getRun(scope.runId),
         origin: snapshot.origin,
@@ -569,7 +572,10 @@ export class RunEngine extends EventEmitter {
           2 * 1024 * 1024,
         ),
       );
-      const logsFile = path.join(directory, "console.log");
+      const logsFile = path.join(
+        privateDirectory(this.store.root, "logs", "runs", run.runId),
+        "console.log",
+      );
       atomicText(logsFile, "");
       let log = "";
       let logError: unknown;
