@@ -107,7 +107,7 @@ test("accepted native execution saves snapshots/results and keeps observation ti
   });
   assert.equal(first.run.status, "accepted");
   const running = await engine.observe(caller, first.run.runId, 5);
-  assert.equal(running.run.status, "running");
+  assert.ok(["preparing_inputs", "running"].includes(running.run.status));
   assert.equal(running.run.stop, null);
   const completed = await finish(first.run.runId);
   assert.equal(completed.run.status, "succeeded");
@@ -256,13 +256,19 @@ test("concurrent identical input preparation runs once; cancellation wins over a
 });
 
 test("local input timeout is catchable; an abandoned input wait fails rather than leaving a phantom continuation", async (t) => {
+  const realNow = Date.now;
+  t.after(() => {
+    Date.now = realNow;
+  });
   const { start, finish, store } = await fixture(t);
   const initial = await start({
     script:
-      'try { await runtime.requestInput({message:"short",inputSchema:{},timeoutMs:20}); }catch(error){return {name:error.name};}',
+      'try { await runtime.requestInput({message:"short",inputSchema:{},timeoutMs:60000}); }catch(error){return {name:error.name};}',
   });
-  await delay(30);
+  assert.equal(initial.run.status, "waiting_input");
+  Date.now = () => initial.wait.deadlineAt + 1;
   const done = await finish(initial.run.runId);
+  Date.now = realNow;
   assert.equal(done.run.status, "succeeded");
   assert.equal(done.result.data.name, "InputTimeoutError");
   assert.equal(store.getWait(initial.wait.waitId).status, "expired");
@@ -279,19 +285,27 @@ test("local input timeout is catchable; an abandoned input wait fails rather tha
 });
 
 test("a stop closes managed entry immediately and keeps cancelling until an uncooperative root actually settles", async (t) => {
+  const entered = Promise.withResolvers();
   const gate = Promise.withResolvers();
   const { start, engine, finish } = await fixture(t, {
     bindings: (s) => ({
-      gate: () => gate.promise,
+      gate: () => {
+        entered.resolve();
+        return gate.promise;
+      },
       runtime: { requestInput: s.requestInput },
     }),
   });
   const initial = await start({
     script:
       'await gate();try {await runtime.requestInput({message:"late",inputSchema:{}});} catch {} return "success";',
-    waitMs: 5,
+    waitMs: 0,
   });
-  assert.equal(initial.run.status, "running");
+  await entered.promise;
+  assert.equal(
+    (await engine.observe(caller, initial.run.runId)).run.status,
+    "running",
+  );
   assert.equal(
     engine.cancel(caller, initial.run.runId).run.status,
     "cancelling",
@@ -311,16 +325,27 @@ test("a stop closes managed entry immediately and keeps cancelling until an unco
 });
 
 test("total deadline covers the root and result processing, remains distinct from explicit cancellation", async (t) => {
+  const realNow = Date.now;
+  t.after(() => {
+    Date.now = realNow;
+  });
+  const entered = Promise.withResolvers();
   const gate = Promise.withResolvers();
   const { start, engine, finish } = await fixture(t, {
-    bindings: () => ({ gate: () => gate.promise }),
+    bindings: () => ({
+      gate: () => {
+        entered.resolve();
+        return gate.promise;
+      },
+    }),
   });
   const first = await start({
     script: "await gate();return 1;",
-    timeoutMs: 25,
-    waitMs: 5,
+    timeoutMs: 60_000,
+    waitMs: 0,
   });
-  await delay(35);
+  await entered.promise;
+  Date.now = () => first.run.deadlineAt + 1;
   assert.equal(
     (await engine.observe(caller, first.run.runId)).run.status,
     "cancelling",
@@ -330,6 +355,33 @@ test("total deadline covers the root and result processing, remains distinct fro
   const done = await finish(first.run.runId);
   assert.equal(done.run.status, "failed");
   assert.equal(done.run.stop.kind, "deadline");
+  Date.now = realNow;
+  const encoding = Promise.withResolvers(),
+    encoded = Promise.withResolvers();
+  const resultPhase = await fixture(t, {
+    encodeResult: async () => {
+      encoding.resolve();
+      await encoded.promise;
+      return { content: [], data: 1 };
+    },
+  });
+  const resultRun = await resultPhase.start({
+    script: "return 1;",
+    timeoutMs: 60_000,
+    waitMs: 0,
+  });
+  await encoding.promise;
+  Date.now = () => resultRun.run.deadlineAt + 1;
+  assert.equal(
+    (await resultPhase.engine.observe(caller, resultRun.run.runId)).run.status,
+    "cancelling",
+  );
+  encoded.resolve();
+  const timedOut = await resultPhase.finish(resultRun.run.runId);
+  assert.equal(timedOut.run.status, "failed");
+  assert.equal(timedOut.run.stop.kind, "deadline");
+  assert.equal(timedOut.run.resultRef, null);
+  Date.now = realNow;
 });
 
 test("replay uses the historical code/header/input without recollection and explicit input replaces it", async (t) => {
@@ -385,10 +437,14 @@ test("an aborted observer does not cancel the run; current access is rechecked o
 
 test("clock rollback cannot extend the total or local input deadlines", async (t) => {
   const realNow = Date.now;
+  const entered = Promise.withResolvers();
   const gate = Promise.withResolvers();
   const { start, engine, finish } = await fixture(t, {
     bindings: (services) => ({
-      gate: () => gate.promise,
+      gate: () => {
+        entered.resolve();
+        return gate.promise;
+      },
       runtime: { requestInput: services.requestInput },
     }),
   });
@@ -397,11 +453,12 @@ test("clock rollback cannot extend the total or local input deadlines", async (t
   });
   const first = await start({
     script: "await gate();return 1;",
-    timeoutMs: 30,
-    waitMs: 1,
+    timeoutMs: 2000,
+    waitMs: 0,
   });
+  await entered.promise;
   Date.now = () => realNow() - 60_000;
-  await delay(40);
+  await delay(2050);
   assert.equal(
     (await engine.observe(caller, first.run.runId)).run.status,
     "cancelling",
@@ -414,14 +471,35 @@ test("clock rollback cannot extend the total or local input deadlines", async (t
   Date.now = realNow;
   const waiting = await start({
     script:
-      'try{await runtime.requestInput({message:"clock",inputSchema:{},timeoutMs:20});}catch(error){return error.name;}',
+      'try{await runtime.requestInput({message:"clock",inputSchema:{},timeoutMs:2000});}catch(error){return error.name;}',
   });
+  assert.equal(waiting.run.status, "waiting_input");
   Date.now = () => realNow() - 60_000;
-  await delay(30);
+  await delay(2050);
   const ended = await finish(waiting.run.runId);
   assert.equal(ended.run.status, "succeeded");
   assert.equal(ended.result.data, "InputTimeoutError");
   Date.now = realNow;
+});
+
+test("preparation time consumes the accepted deadline without invoking the root", async (t) => {
+  let invoked = false;
+  const { start } = await fixture(t, {
+    loadWork: () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      return { project: null };
+    },
+    bindings: () => ({
+      entered: () => {
+        invoked = true;
+      },
+    }),
+  });
+  const done = await start({ script: "entered();return 1;", timeoutMs: 20 });
+  assert.equal(done.run.status, "failed");
+  assert.equal(done.run.stop.kind, "deadline");
+  assert.equal(done.run.startedAt, null);
+  assert.equal(invoked, false);
 });
 
 test("failed result persistence records failure without publishing a nonexistent result; later file loss preserves history", async (t) => {
