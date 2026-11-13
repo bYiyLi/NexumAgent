@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
@@ -83,12 +83,38 @@ export class SqliteStore {
       "invalid_binding",
       "The Agent database requires a complete binding.",
     );
+    requireCondition(
+      !lstatSync(root, { throwIfNoEntry: false })?.isSymbolicLink(),
+      "storage_path_escape",
+      "The Agent root must not redirect to another profile.",
+    );
     mkdirSync(root, { recursive: true, mode: 0o700 });
     this.root = realpathSync(root);
     this.binding = Object.freeze({ ...binding });
     const directory = path.join(this.root, "state");
+    requireCondition(
+      !lstatSync(directory, { throwIfNoEntry: false })?.isSymbolicLink(),
+      "storage_path_escape",
+      "The lifecycle directory must not be redirected.",
+    );
     mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const relative = path.relative(this.root, realpathSync(directory));
+    requireCondition(
+      relative !== ".." &&
+        !relative.startsWith(".." + path.sep) &&
+        !path.isAbsolute(relative),
+      "storage_path_escape",
+      "The lifecycle directory must remain inside this Agent root.",
+    );
     const filename = path.join(directory, "runtime.sqlite");
+    for (const candidate of [filename, filename + "-wal", filename + "-shm"]) {
+      const existing = lstatSync(candidate, { throwIfNoEntry: false });
+      requireCondition(
+        !existing || (!existing.isSymbolicLink() && existing.isFile()),
+        "storage_path_escape",
+        "Database files must be regular files inside the lifecycle directory.",
+      );
+    }
     this.#db = new DatabaseSync(filename, {
       timeout: 100,
       enableForeignKeyConstraints: true,
@@ -97,9 +123,10 @@ export class SqliteStore {
     try {
       if (process.platform !== "win32") chmodSync(filename, 0o600);
       this.#db.exec(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
+        "PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
       );
       for (const [pragma, expected] of [
+        ["locking_mode", "exclusive"],
         ["journal_mode", "wal"],
         ["synchronous", 2],
         ["foreign_keys", 1],
@@ -419,7 +446,8 @@ export class SqliteStore {
     requireCondition(
       Number.isSafeInteger(timeout) &&
         timeout > 0 &&
-        Number.isSafeInteger(now + timeout),
+        Number.isSafeInteger(now + timeout) &&
+        now + timeout <= 253402300799999,
       "invalid_timeout",
       "The runtime deadline is invalid.",
     );
