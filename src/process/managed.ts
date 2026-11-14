@@ -1,6 +1,7 @@
 import { EventEmitter, once } from "node:events";
 import { performance } from "node:perf_hooks";
-import { AgentError } from "../contracts/errors.js";
+import { AgentError, isAgentError } from "../contracts/errors.js";
+import { types } from "node:util";
 import { safeErrorData } from "../contracts/error-data.js";
 import type { JsonObject } from "../contracts/types.js";
 import type { ResourceRef, ManagedResource } from "../extensions/resources.js";
@@ -46,6 +47,47 @@ const initialFacts: ProcessFacts = {
   stopRequested: false,
   forceRequested: false,
 };
+
+function defaultEofAlreadyClosed(cause: unknown, facts: ProcessFacts): boolean {
+  const code = (value: unknown): unknown => {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      types.isProxy(value) ||
+      !types.isNativeError(value)
+    )
+      return undefined;
+    const field = Object.getOwnPropertyDescriptor(value, "code");
+    return field && "value" in field ? field.value : undefined;
+  };
+  const value = code(cause);
+  if (
+    [
+      "process_stdin_closed",
+      "process_input_closed",
+      "EPIPE",
+      "ERR_STREAM_DESTROYED",
+      "ERR_STREAM_WRITE_AFTER_END",
+    ].includes(value as string)
+  )
+    return true;
+  if (value === "process_closed") return facts.closed;
+  const inner = isAgentError(cause)
+    ? Object.getOwnPropertyDescriptor(cause, "cause")
+    : undefined;
+  return (
+    value === "process_input_failed" &&
+    !!inner &&
+    "value" in inner &&
+    [
+      "process_stdin_closed",
+      "process_input_closed",
+      "EPIPE",
+      "ERR_STREAM_DESTROYED",
+      "ERR_STREAM_WRITE_AFTER_END",
+    ].includes(code(inner.value) as string)
+  );
+}
 
 /** Cold public-protocol resource. No process, environment probe or log is opened by construction. */
 export class ManagedProcess extends EventEmitter implements ManagedResource {
@@ -293,18 +335,32 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
     this.#started = true;
     this.#preparing = false;
     this.#publish();
-    if (
-      this.input.input !== undefined ||
-      (!this.input.tty &&
-        this.mode === "exec" &&
-        !this.#backend.facts().rootExited &&
-        !this.#backend.facts().closed)
-    )
+    if (this.input.input !== undefined)
       await this.#backend.write(
-        this.input.input ?? new Uint8Array(),
+        this.input.input,
         !this.input.tty && this.mode === "exec",
         signal,
       );
+    else if (
+      !this.input.tty &&
+      this.mode === "exec" &&
+      !this.#backend.facts().rootExited &&
+      !this.#backend.facts().closed
+    ) {
+      try {
+        await this.#backend.write(new Uint8Array(), true, signal);
+      } catch (cause) {
+        signal.throwIfAborted();
+        // This is only an idempotent close of an empty Agent write end. Explicit
+        // input/user writes, fatal backend errors and unknown I/O failures retain
+        // their failures; actual process/output closure is still awaited.
+        if (
+          this.#backend.failure !== undefined ||
+          !defaultEofAlreadyClosed(cause, this.#backend.facts())
+        )
+          throw cause;
+      }
+    }
     signal.throwIfAborted();
   }
   async #finish(): Promise<void> {

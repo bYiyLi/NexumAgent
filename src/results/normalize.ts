@@ -4,6 +4,7 @@ import { Blob, File } from "node:buffer";
 import { AgentError } from "../contracts/errors.js";
 import { isPlainRecord } from "../contracts/json.js";
 import type { JsonObject, JsonValue } from "../contracts/types.js";
+import { transferOffer } from "../transfer/offers.js";
 import {
   createOutput,
   outputIntent,
@@ -15,6 +16,8 @@ export interface NormalizeOptions {
   pwd?: string;
   /** Diagnostic location; long prefixes are bounded and marked in conversions/errors. */
   resolveContent?(value: unknown, position: string): Promise<JsonValue>;
+  /** Issued Offers use this same walk/budget, including explicit pure data. */
+  resolveTransferOffer?(value: unknown): Promise<JsonValue>;
   assertCurrent?(): void;
   maxDepth?: number;
   maxNodes?: number;
@@ -450,6 +453,18 @@ export async function normalizeData(
       );
     ancestors.add(input);
     try {
+      if (transferOffer(input)) {
+        if (!options.resolveTransferOffer)
+          problem(
+            "result_transfer_resolver_required",
+            "An issued Offer requires its controlled transfer result resolver.",
+            position,
+          );
+        const data = await options.resolveTransferOffer(input);
+        options.assertCurrent?.();
+        converted(position, "TransferOffer", "transfer-snapshot");
+        return await visit(data, position, depth, true);
+      }
       const known = outputIntent(input);
       if (known?.kind === "json")
         return await visit(known.value, position, depth, true);

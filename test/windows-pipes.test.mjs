@@ -296,16 +296,26 @@ test(
   },
   async (t) => {
     const f = setup(t);
+    const release = path.join(f.root, "release-descendant-tail");
     const descendant = `
-setTimeout(() => process.stdout.write('descendant-tail\\n'), 1500);
-setTimeout(() => process.exit(0), 1700);`;
+const { existsSync } = require('node:fs');
+const poll = setInterval(() => {
+  if (!existsSync(${JSON.stringify(release)})) return;
+  clearInterval(poll);
+  process.stdout.write('descendant-tail\\n', error => process.exit(error ? 92 : 0));
+}, 10);
+setTimeout(() => process.exit(93), 10000).unref();
+process.send('ready', error => { if (error) process.exit(94); });`;
     await f.backend.start(
       f.node(`
 const {spawn} = require('node:child_process');
 const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {
-  stdio: ['ignore', 'inherit', 'inherit'], env: process.env, windowsHide: true
+  // Windows Node gives non-detached children its own kill-on-parent-exit Job.
+  // detached skips that inner Job, without breaking out of Nexum's outer Job.
+  detached: process.platform === 'win32',
+  stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env: process.env, windowsHide: true
 });
-child.once('spawn', () => process.exit(23));
+child.once('message', value => process.exit(value === 'ready' ? 23 : 95));
 child.once('error', () => process.exit(91));`),
     );
     await eventually(() => f.backend.facts().rootExited);
@@ -313,6 +323,9 @@ child.once('error', () => process.exit(91));`),
     assert.equal(f.backend.facts().outputComplete, false);
     assert.equal(f.backend.facts().treeStopped, false);
     assert.equal(f.backend.facts().closed, false);
+    // Hold the real descendant alive until these intermediate facts have been
+    // observed. No timing guess or spawn event substitutes for business ready.
+    writeFileSync(release, "continue");
     await within(f.backend.closed);
     assert.match(f.text("stdout"), /descendant-tail/);
     assert.equal(f.backend.facts().outputComplete, true);
@@ -335,6 +348,7 @@ test(
       f.node(`
 const {spawn} = require('node:child_process');
 spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {
+  detached: process.platform === 'win32',
   stdio: ['ignore', 'inherit', 'inherit'], env: process.env, windowsHide: true
 });
 process.stdin.resume();
@@ -606,13 +620,41 @@ test(
   },
   async (t) => {
     const f = setup(t);
+    const koffiPath = createRequire(import.meta.url).resolve("koffi");
     await f.backend.start(
       f.node(`
-require('node:fs').closeSync(0);
-process.stdout.write('input-closed-ready');
-setTimeout(() => process.exit(90), 12000);`),
+const koffi = require(${JSON.stringify(koffiPath)});
+const kernel32 = koffi.load('kernel32.dll');
+const getStdHandle = kernel32.func('void * __stdcall GetStdHandle(uint32_t which)');
+const setStdHandle = kernel32.func('int32_t __stdcall SetStdHandle(uint32_t which, void *handle)');
+const closeHandle = kernel32.func('int32_t __stdcall CloseHandle(void *handle)');
+const exitProcess = kernel32.func('void __stdcall ExitProcess(uint32_t code)');
+const stdinHandle = getStdHandle(4294967286);
+if (typeof stdinHandle !== 'bigint' || stdinHandle === 0n || stdinHandle === 0xffffffffffffffffn)
+  exitProcess(91);
+// libuv deliberately makes fs.close(0..2) a no-op on Windows. Its stdin stream
+// owns a duplicated HANDLE, so close both actual owners in this fixture only.
+const input = process.stdin;
+input.on('error', () => exitProcess(92));
+input.once('close', () => {
+  if (!setStdHandle(4294967286, null) || !closeHandle(stdinHandle)) exitProcess(93);
+  process.stdout.write('input-closed-ready');
+});
+process.stdout.on('error', () => exitProcess(94));
+input.destroy();
+// Never use fd0 again or run CRT exit cleanup on its now-invalid cached alias.
+// Normal cleanup is the owned Job termination; this bounds failed assertions.
+setTimeout(() => exitProcess(90), 12000);`),
     );
-    await eventually(() => f.text("stdout").includes("input-closed-ready"));
+    await eventually(() => {
+      const facts = f.backend.facts();
+      assert.equal(
+        facts.rootExited,
+        false,
+        `The stdin-close fixture exited during setup (${facts.exitCode}).`,
+      );
+      return f.text("stdout").includes("input-closed-ready");
+    });
     await assert.rejects(
       within(
         f.backend.write(Buffer.alloc(128 * 1024, 0x61), false, liveSignal()),

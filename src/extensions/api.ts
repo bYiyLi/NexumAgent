@@ -4,10 +4,17 @@ import type { InputRequest } from "../runtime/engine.js";
 import type { OutputAPI } from "../sdk/output.js";
 import type { ResourceService } from "./resources.js";
 import type { StateService } from "./state.js";
+import type { TransferService } from "./transfer.js";
 
 export interface AccessTarget {
   type:
-    "path" | "url" | "resource" | "connection" | "agent-state" | "user-state";
+    | "path"
+    | "url"
+    | "resource"
+    | "connection"
+    | "agent-state"
+    | "user-state"
+    | "transfer";
   value: string;
   access: string;
 }
@@ -31,6 +38,7 @@ export interface Invocation {
   readonly resources: ResourceService;
   readonly output: OutputAPI;
   readonly state: StateService;
+  readonly transfer: TransferService;
   log(entry: LogEntry): void;
   progress(value: JsonObject): void;
   authorize(target: AccessTarget): void;

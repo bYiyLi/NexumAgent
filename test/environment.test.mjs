@@ -351,9 +351,9 @@ test(
       pids = path.join(root, "pids.json");
     writeFileSync(
       slow,
-      `import {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';
+      `import {spawn} from 'node:child_process';import {writeFileSync,renameSync} from 'node:fs';
 const child=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000);'],{stdio:'ignore'});
-child.on('spawn',()=>writeFileSync(${JSON.stringify(pids)},JSON.stringify({root:process.pid,child:child.pid})));
+child.on('spawn',()=>{writeFileSync(${JSON.stringify(pids + ".pending")},JSON.stringify({root:process.pid,child:child.pid}));renameSync(${JSON.stringify(pids + ".pending")},${JSON.stringify(pids)});});
 setInterval(()=>{},1000);`,
     );
     writeFileSync(

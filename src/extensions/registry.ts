@@ -30,7 +30,13 @@ import {
   type OutputOptions,
 } from "../sdk/output.js";
 import { unavailableState, type StateService } from "./state.js";
+import { unavailableTransfer, type TransferService } from "./transfer.js";
 import { snapshotBlob } from "../results/artifacts.js";
+import {
+  transferOffer,
+  rebuildTransferOffer,
+  transferSafeJSON,
+} from "../transfer/offers.js";
 import {
   ResourceManager,
   type ResourceInstance,
@@ -80,6 +86,14 @@ export interface RegistryOptions {
     assertCurrent(): void;
     authorize(target: AccessTarget): void;
   }): StateService;
+  transfer?(binding: {
+    readonly context: Readonly<JsonObject>;
+    readonly runId: string;
+    readonly signal: AbortSignal;
+    readonly deadline: number;
+    assertCurrent(): void;
+    authorize(target: AccessTarget): void;
+  }): TransferService;
   authorize(policy: RegistryPolicy): void;
   log(
     origin: ContributionOrigin,
@@ -259,6 +273,7 @@ interface ResultSnapshot {
   internalOnly: Set<object>;
   bytes: number;
   nodes: number;
+  safeOffers?: boolean;
 }
 // Match the largest supported inline byte budget; transport/encoder still
 // applies the configured media limits and counts repeated delivery occurrences.
@@ -480,6 +495,48 @@ export class ExtensionRegistry {
         inner.list(query),
     });
     entry.protected.add(api);
+    return api;
+  }
+  #protectTransfer(
+    entry: Entry,
+    inner: TransferService,
+    assertAllowed: (method: string) => void,
+  ): TransferService {
+    if (types.isPromise(inner))
+      void Promise.prototype.then.call(inner, undefined, () => {});
+    requireCondition(
+      inner &&
+        typeof inner === "object" &&
+        !types.isProxy(inner) &&
+        !types.isPromise(inner) &&
+        ["createUpload", "createDownload", "get", "list", "cancel"].every(
+          (name) => typeof Reflect.get(inner, name) === "function",
+        ),
+      "transfer_configuration",
+      "A transfer provider must synchronously return the five public methods.",
+    );
+    const invoke = <T>(method: string, action: () => T): T => {
+      assertAllowed(method);
+      return action();
+    };
+    const api: TransferService = Object.freeze({
+      createUpload: (options: Parameters<TransferService["createUpload"]>[0]) =>
+        invoke("createUpload", () => inner.createUpload(options)),
+      createDownload: (
+        options: Parameters<TransferService["createDownload"]>[0],
+      ) => invoke("createDownload", () => inner.createDownload(options)),
+      get: (
+        id: Parameters<TransferService["get"]>[0],
+        options?: Parameters<TransferService["get"]>[1],
+      ) => invoke("get", () => inner.get(id, options)),
+      list: (options?: Parameters<TransferService["list"]>[0]) =>
+        invoke("list", () => inner.list(options)),
+      cancel: (id: Parameters<TransferService["cancel"]>[0]) =>
+        invoke("cancel", () => inner.cancel(id)),
+    });
+    entry.protected.add(inner);
+    entry.protected.add(api);
+    for (const method of Object.values(api)) entry.protected.add(method);
     return api;
   }
   async #initialize(entry: Entry): Promise<ExtensionHandle> {
@@ -836,6 +893,7 @@ export class ExtensionRegistry {
                   "connection",
                   "agent-state",
                   "user-state",
+                  "transfer",
                 ].includes(target.type) &&
                 segment(target.value) &&
                 segment(target.access),
@@ -851,6 +909,20 @@ export class ExtensionRegistry {
                 "A method must declare the shared-state capability it uses.",
               );
             }
+            if (target.type === "transfer") {
+              requireCondition(
+                [
+                  "createUpload",
+                  "createDownload",
+                  "get",
+                  "list",
+                  "cancel",
+                ].includes(target.access) &&
+                  method.permissions.includes(`transfer.${target.access}`),
+                "undeclared_permission",
+                "A method must declare the transfer capability it uses.",
+              );
+            }
             this.#authorize({ ...policy, target: json(target) });
           };
           const state =
@@ -863,6 +935,25 @@ export class ExtensionRegistry {
           entry.protected.add(state);
           entry.protected.add(state.agent);
           entry.protected.add(state.user);
+          const transfer = this.#protectTransfer(
+            entry,
+            this.#options.transfer?.({
+              context: services.context,
+              runId: services.runId,
+              signal: services.signal,
+              deadline: services.deadlineAt,
+              assertCurrent: current,
+              authorize,
+            }) ?? unavailableTransfer(current),
+            (access) => {
+              current();
+              requireCondition(
+                method.permissions.includes(`transfer.${access}`),
+                "undeclared_permission",
+                "A method must declare the transfer capability it uses.",
+              );
+            },
+          );
           const call: Invocation = Object.freeze({
             context: services.context,
             operationId,
@@ -871,13 +962,16 @@ export class ExtensionRegistry {
             resources,
             output: createOutput(services.context.pwd as string, current),
             state,
+            transfer,
             log: (value: LogEntry) => {
               current();
               this.#log(entry, value, services.runId, operationId);
             },
             progress: (value: JsonObject) => {
               current();
-              const data = json(value);
+              const data = frozen(
+                JSON.parse(transferSafeJSON(value, 16384)),
+              ) as JsonObject;
               canonicalJson(data, 16384);
               this.#options.progress(
                 entry.source.origin,
@@ -930,6 +1024,7 @@ export class ExtensionRegistry {
     }
   }
   #media(value: unknown): boolean {
+    if (transferOffer(value)) return true;
     if (outputIntent(value)) return true;
     if (Array.isArray(value))
       return value.length > 0 && value.every((item) => this.#media(item));
@@ -951,7 +1046,13 @@ export class ExtensionRegistry {
   }
   #failure(entry: Entry, cause: unknown): unknown {
     try {
-      return this.#result(entry, cause);
+      return this.#result(entry, cause, {
+        copies: new Map(),
+        internalOnly: new Set(),
+        bytes: 0,
+        nodes: 0,
+        safeOffers: true,
+      });
     } catch {
       return new AgentError(
         "invalid_sdk_result",
@@ -1058,6 +1159,21 @@ export class ExtensionRegistry {
     );
     const existing = snapshot.copies.get(value);
     if (existing) return existing;
+    const offer = transferOffer(value);
+    if (offer) {
+      const data = this.#result(
+        entry,
+        offer.snapshot,
+        snapshot,
+        false,
+        depth + 1,
+      );
+      const copy = snapshot.safeOffers
+        ? (data as object)
+        : rebuildTransferOffer(value, data);
+      snapshot.copies.set(value, copy);
+      return copy;
+    }
     requireCondition(
       snapshot.copies.size < 100000,
       "data_too_large",
@@ -1282,7 +1398,7 @@ export class ExtensionRegistry {
     runId?: string,
     operationId?: string,
   ): void {
-    const data = json(value);
+    const data = frozen(JSON.parse(transferSafeJSON(value, 16384))) as LogEntry;
     requireCondition(
       ["debug", "info", "warn", "error"].includes(data.level) &&
         typeof data.message === "string",

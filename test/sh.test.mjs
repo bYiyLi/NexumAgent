@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { SqliteStore } from "../dist/storage/sqlite.js";
@@ -470,11 +471,17 @@ test("a failed output append never publishes a false complete history after the 
   };
   let row;
   try {
-    const result = await f.start("return await sh.exec(context.input);", {
+    const accepted = await f.start("return await sh.exec(context.input);", {
       input: command(
         'process.stdout.write("not-saved");setInterval(()=>{},1000);',
       ),
+      waitMs: 0,
     });
+    const result = await until(
+      () => f.finish(accepted.run.runId),
+      (value) => value.run.endedAt !== null,
+      15000,
+    );
     assert.equal(result.run.status, "failed");
     row = f.store.resourcesForRun(result.run.runId)[0];
     assert.notEqual(row.closedAt, null);
@@ -652,12 +659,116 @@ test("fast zero-output, stdout and nonzero execs are not mistaken for default EO
   }
 });
 
+test("default empty EOF accepts confirmed input closure while explicit input and unknown I/O retain safe failures", async (t) => {
+  const f = await fixture(t);
+  const module = await import(
+    new URL(
+      `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pipes"}.js`,
+      import.meta.url,
+    ).href
+  );
+  const Backend =
+    process.platform === "win32"
+      ? module.WindowsProcessBackend
+      : module.PipeProcessBackend;
+  const write = Backend.prototype.write,
+    start = ManagedProcess.prototype.start;
+  let mode = "closed",
+    calls = 0,
+    observed,
+    originalFailure;
+  ManagedProcess.prototype.start = async function (...args) {
+    observed = this;
+    return await start.apply(this, args);
+  };
+  Backend.prototype.write = async function (bytes, eof, signal) {
+    signal.throwIfAborted();
+    calls++;
+    if (mode === "explicit")
+      throw new AgentError(
+        "process_input_closed",
+        "Explicit input was not delivered.",
+      );
+    if (mode === "unknown") {
+      const native = Object.assign(new Error("private native I/O failure"), {
+        code: "EIO",
+      });
+      Object.defineProperty(native, Symbol("host-private"), {
+        value: { callback() {} },
+      });
+      originalFailure = new AgentError(
+        "process_input_failed",
+        "The native input failed.",
+        undefined,
+        { cause: native },
+      );
+      throw originalFailure;
+    }
+    await write.call(this, bytes, eof, signal);
+    throw new AgentError(
+      "process_input_failed",
+      "EOF acknowledgement raced with close.",
+      undefined,
+      {
+        cause:
+          mode === "pipe"
+            ? Object.assign(new Error("The pipe is already closed."), {
+                code: "EPIPE",
+              })
+            : new AgentError(
+                "process_stdin_closed",
+                "The input is already closed.",
+              ),
+      },
+    );
+  };
+  try {
+    const input = command(
+      'process.stdin.resume();process.stdin.on("end",()=>process.stdout.write("closed-eof"));',
+    );
+    for (mode of ["closed", "pipe"]) {
+      const result = data(
+        await f.start("return await sh.exec(context.input);", { input }),
+      );
+      assert.match(text(result), /closed-eof/);
+      assert.equal(result.outputComplete, true);
+    }
+    assert.ok(calls > 0);
+    mode = "explicit";
+    const explicit = data(
+      await f.start(
+        'try{await sh.exec(context.input);}catch(e){return {code:e.code,processId:e.details.processId,cause:Object.hasOwn(e,"cause")};}',
+        { input: { ...input, input: "" } },
+      ),
+    );
+    assert.equal(explicit.code, "process_input_closed");
+    assert.match(explicit.processId, /^res_/);
+    assert.equal(explicit.cause, false);
+    mode = "unknown";
+    const failure = data(
+      await f.start(
+        'try{await sh.exec(context.input);}catch(e){return {code:e.code,causeCode:e.details.causeCode,processId:e.details.processId,cause:Object.hasOwn(e,"cause")};}',
+        { input },
+      ),
+    );
+    assert.equal(failure.code, "process_input_failed");
+    assert.equal(failure.causeCode, "EIO");
+    assert.equal(failure.cause, false);
+    assert.match(failure.processId, /^res_/);
+    assert.equal(observed.failure, originalFailure);
+    assert.notEqual(f.store.getResource(failure.processId).closedAt, null);
+  } finally {
+    Backend.prototype.write = write;
+    ManagedProcess.prototype.start = start;
+  }
+});
+
 test("exec waits for descendant-held output and paginated retained bytes preserve the real tail", async (t) => {
   const f = await fixture(t);
   const result = data(
     await f.start("return await sh.exec(context.input);", {
       input: command(
-        'const {spawn}=require("node:child_process");spawn(process.execPath,["-e",\'setTimeout(()=>{process.stdout.write("x".repeat(512*1024));process.stderr.write("DESCENDANT-TAIL");},150);\'],{stdio:["ignore","inherit","inherit"]});process.stdout.write("ROOT-EXIT");process.exit(0);',
+        'const {spawn}=require("node:child_process");const child=spawn(process.execPath,["-e",\'process.once("disconnect",()=>setTimeout(()=>{process.stdout.write("x".repeat(512*1024),()=>process.stderr.write("DESCENDANT-TAIL"));},150));process.send("ready");\'],{detached:process.platform==="win32",stdio:["ignore","inherit","inherit","ipc"]});child.once("message",message=>{if(message==="ready")process.stdout.write("ROOT-EXIT",()=>process.exit(0));});',
       ),
     }),
   );
@@ -681,7 +792,17 @@ test("exec waits for descendant-held output and paginated retained bytes preserv
     .filter((item) => item.stream === "stderr")
     .map((item) => item.data)
     .join("");
-  assert.equal(stdout, "ROOT-EXIT" + "x".repeat(512 * 1024));
+  const expected = "ROOT-EXIT" + "x".repeat(512 * 1024);
+  assert.equal(
+    Buffer.byteLength(stdout),
+    Buffer.byteLength(expected),
+    "retained stdout byte length",
+  );
+  assert.equal(
+    createHash("sha256").update(stdout).digest("hex"),
+    createHash("sha256").update(expected).digest("hex"),
+    "retained stdout byte hash",
+  );
   assert.equal(stderr, "DESCENDANT-TAIL");
 });
 
@@ -692,13 +813,23 @@ test("public signal reports delivery separately from actual managed closure", as
       input: command("setInterval(()=>{},1000);", { background: true }),
     }),
   ).processId;
+  if (process.platform === "win32") {
+    const unsupported = data(
+      await f.start(
+        'try{await sh.signal({processId:context.input,signal:"SIGTERM"});}catch(e){return e.code;}',
+        { input: processId },
+      ),
+    );
+    assert.equal(unsupported, "process_signal_unsupported");
+    assert.equal(data(await f.get(processId)).controlAvailable, true);
+  }
+  const requested = process.platform === "win32" ? "SIGKILL" : "SIGTERM";
   const receipt = data(
-    await f.start(
-      'return await sh.signal({processId:context.input,signal:"SIGTERM"});',
-      { input: processId },
-    ),
+    await f.start("return await sh.signal(context.input);", {
+      input: { processId, signal: requested },
+    }),
   );
-  assert.equal(receipt.requested, "SIGTERM");
+  assert.equal(receipt.requested, requested);
   assert.equal(receipt.delivered, true);
   const ended = await until(
     () => f.get(processId, { waitMs: 100 }),

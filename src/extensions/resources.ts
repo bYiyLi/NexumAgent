@@ -160,6 +160,7 @@ export class ResourceManager extends EventEmitter {
   readonly store: SqliteStore;
   #entries = new Map<string, Entry>();
   #identities = new WeakMap<ManagedResource, Entry>();
+  #references = new WeakMap<ResourceRef, Entry>();
   #owners = new Set<Owner>();
   #timeout: number;
   #capacity: number;
@@ -587,6 +588,7 @@ export class ResourceManager extends EventEmitter {
         });
         this.#entries.set(row.resourceId, entry);
         this.#identities.set(value, entry);
+        this.#references.set(ref, entry);
         const forward = (signal: AbortSignal) => {
           const stop = () => {
             void this.#dispose(entry, signal.reason).catch((error) => {
@@ -614,34 +616,83 @@ export class ResourceManager extends EventEmitter {
         return entry.ref as ResourceRef<T>;
       },
       handoff: async (id: string) => {
-        this.#active(owner, binding, "handoff", id);
-        const row = this.#record(owner, id);
-        requireCondition(
-          binding.runId && row.originRunId === binding.runId,
-          "resource_owner_mismatch",
-          "Only the originating live call may hand off this resource.",
+        return this.#handoff(owner, binding, id, (row) =>
+          this.store.handoff(id, binding.runId!, row.revision),
         );
-        // Check the retained handoff fact only after the current authority/instance checks.
-        if (row.handedOffAt !== null) return row;
-        const entry = this.#entries.get(id);
-        requireCondition(
-          entry &&
-            row.closedAt === null &&
-            !entry.closedError &&
-            !entry.persistenceError &&
-            !entry.controller.signal.aborted,
-          "resource_unavailable",
-          "A stopped or unconfirmed resource cannot become an independent background resource.",
-        );
-        const result = this.store.handoff(id, binding.runId, row.revision);
-        // The committed DB fact precedes detachment. Failure above keeps the old cleanup association.
-        entry.detachRun?.();
-        entry.detachRun = undefined;
-        this.emit("change", id);
-        return result;
       },
     });
   }
+
+  #handoff(
+    owner: Owner,
+    binding: ResourceBinding,
+    id: string,
+    commit: (checked: Readonly<ResourceRecord>) => ResourceRecord,
+  ): ResourceRecord {
+    this.#active(owner, binding, "handoff", id);
+    const row = this.#record(owner, id);
+    requireCondition(
+      binding.runId && row.originRunId === binding.runId,
+      "resource_owner_mismatch",
+      "Only the originating live call may hand off this resource.",
+    );
+    const entry = this.#entries.get(id);
+    if (row.handedOffAt !== null) {
+      // Current authority is checked even for a repeat. Do not rerun a commit.
+      entry?.detachRun?.();
+      if (entry) entry.detachRun = undefined;
+      return row;
+    }
+    requireCondition(
+      entry &&
+        row.closedAt === null &&
+        !entry.closedError &&
+        !entry.persistenceError &&
+        !entry.controller.signal.aborted,
+      "resource_unavailable",
+      "A stopped or unconfirmed resource cannot become an independent background resource.",
+    );
+    const result = commit(Object.freeze(row));
+    const returned = canonicalJson(result, 32768);
+    const actual = this.#record(owner, id);
+    requireCondition(
+      actual.resourceId === row.resourceId &&
+        actual.originRunId === binding.runId &&
+        actual.bootId === row.bootId &&
+        actual.lifetime === "background" &&
+        actual.ownerRunId === null &&
+        actual.handedOffAt !== null &&
+        actual.closedAt === null &&
+        actual.revision > row.revision &&
+        canonicalJson(actual, 32768) === returned,
+      "resource_commit_unconfirmed",
+      "The handoff callback did not return the actual committed resource fact.",
+    );
+    // Only the independently read committed fact permits signal detachment.
+    entry.detachRun?.();
+    entry.detachRun = undefined;
+    this.emit("change", id);
+    return actual;
+  }
+
+  /** Core-only synchronous collaboration; never exposed through ResourceService or Invocation. */
+  commitHandoff(
+    ref: ResourceRef,
+    commit: (checked: Readonly<ResourceRecord>) => ResourceRecord,
+  ): ResourceRecord {
+    // Do not inspect fields/getters on an unrecognised caller-supplied object.
+    const entry = this.#references.get(ref);
+    requireCondition(
+      entry &&
+        entry.ref === ref &&
+        typeof commit === "function" &&
+        !types.isAsyncFunction(commit),
+      "invalid_resource_commit",
+      "A Core handoff needs the actual reference and a synchronous fixed domain commit.",
+    );
+    return this.#handoff(entry.owner, entry.binding, entry.ref.id, commit);
+  }
+
   #persistenceFailure(entry: Entry, cause: unknown): void {
     entry.persistenceError = cause;
     entry.rejectConfirmation(

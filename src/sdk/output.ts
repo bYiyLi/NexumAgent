@@ -4,6 +4,7 @@ import { Blob } from "node:buffer";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
+import { transferOffer } from "../transfer/offers.js";
 
 // Intents are in-process values, not an authority supplied by an object's keys
 // or prototype. Copying a descriptor cannot turn ordinary business data into media.
@@ -387,6 +388,10 @@ export function createOutput(pwd: string, current: () => void): OutputAPI {
         "Output content exceeds its depth or item budget.",
       );
       const known = outputIntent(value);
+      if (transferOffer(value)) {
+        result.push(value);
+        return;
+      }
       const collection = known?.kind === "collection" ? known.value : value;
       if (!types.isProxy(collection) && Array.isArray(collection)) {
         requireCondition(

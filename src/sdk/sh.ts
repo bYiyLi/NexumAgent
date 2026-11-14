@@ -1,5 +1,6 @@
 import path from "node:path";
 import { constants } from "node:os";
+import { types } from "node:util";
 import {
   AgentError,
   isAgentError,
@@ -118,14 +119,40 @@ function processError(cause: unknown, processId: string): AgentError {
     message:
       "The managed process failed; inspect its retained status and output.",
   });
+  const code = (value: unknown): string | undefined => {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      types.isProxy(value) ||
+      !types.isNativeError(value)
+    )
+      return;
+    const field = Object.getOwnPropertyDescriptor(value, "code");
+    return field &&
+      "value" in field &&
+      typeof field.value === "string" &&
+      /^[A-Za-z0-9_.-]{1,256}$/.test(field.value)
+      ? field.value
+      : undefined;
+  };
+  const inner =
+    cause && typeof cause === "object" && !types.isProxy(cause)
+      ? Object.getOwnPropertyDescriptor(cause, "cause")
+      : undefined;
+  const causeCode =
+    inner && "value" in inner
+      ? code(inner.value)
+      : !isAgentError(cause)
+        ? code(cause)
+        : undefined;
   return new AgentError(
     safe.code as string,
     safe.message as string,
     {
       ...(isPlainRecord(safe.details) ? safe.details : {}),
+      ...(causeCode ? { causeCode } : {}),
       processId,
     } as JsonObject,
-    { cause },
   );
 }
 function snapshot(resource: ResourceSnapshot): JsonObject {

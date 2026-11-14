@@ -6,6 +6,7 @@ import { fileTypeFromBuffer } from "file-type";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { JsonObject, JsonValue } from "../contracts/types.js";
+import type { AccessTarget } from "../extensions/api.js";
 import {
   createOutput,
   outputIntent,
@@ -19,6 +20,24 @@ import {
 } from "./artifacts.js";
 import { contentValue, normalizeData } from "./normalize.js";
 import { validateMedia } from "./media.js";
+import {
+  transferOffer,
+  transferReference,
+  issuedTransferSnapshot,
+  TransferOfferDelivery,
+  type TransferReference,
+  type IssuedTransferSnapshot,
+} from "../transfer/offers.js";
+import { parseArtifactUri } from "./artifacts.js";
+
+export interface ResultScope extends ArtifactScope {
+  readonly grantId?: string;
+  readonly authorizeTarget?: (target: AccessTarget) => void;
+}
+interface StoredTransfer {
+  reference: TransferReference;
+  snapshot: IssuedTransferSnapshot;
+}
 
 export interface ResultLimits {
   readonly textBytes?: number;
@@ -160,7 +179,15 @@ export class ResultEncoder {
   constructor(
     readonly artifacts: ArtifactStore,
     limits: ResultLimits = {},
+    readonly offers?: TransferOfferDelivery,
   ) {
+    requireCondition(
+      !offers ||
+        (offers.agentId === artifacts.agentId &&
+          offers.profileRoot === artifacts.root),
+      "result_profile_mismatch",
+      "Transfer delivery must belong to this actual Agent/profile artifact store.",
+    );
     this.limits = Object.freeze({
       textBytes: limits.textBytes ?? 64 * KiB,
       imageBytes: limits.imageBytes ?? 10 * MiB,
@@ -186,10 +213,13 @@ export class ResultEncoder {
     );
   }
 
-  async encode(value: unknown, scope: ArtifactScope): Promise<StoredResult> {
+  async encode(value: unknown, scope: ResultScope): Promise<StoredResult> {
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
     const result: StoredResult = { content: [] };
+    const transfers = new Map<string, StoredTransfer>(),
+      transferLinks = new Set<string>();
+    let transferBytes = 2;
     let inlineBytes = 0,
       textBytes = 0;
     const paths = new Map<string, Promise<ArtifactRecord>>(),
@@ -354,9 +384,57 @@ export class ResultEncoder {
       }
       return await pending;
     };
+    const resolveOffer = async (value: unknown): Promise<JsonObject> => {
+      const known = transferOffer(value);
+      requireCondition(
+        known &&
+          known.binding.ownerKey === scope.ownerKey &&
+          known.binding.grantId === scope.grantId &&
+          known.binding.agentId === this.artifacts.agentId &&
+          known.binding.profileRoot === this.artifacts.root,
+        "transfer_offer_binding_mismatch",
+        "The issued Offer does not belong to this current result binding.",
+      );
+      if (!transfers.has(known.reference.transferId)) {
+        const saved = { reference: known.reference, snapshot: known.snapshot };
+        transferBytes += Buffer.byteLength(canonicalJson(saved, 32768)) + 1;
+        requireCondition(
+          transfers.size < 1024 &&
+            transferBytes <= Math.min(this.limits.textBytes, 65536),
+          "result_transfer_too_large",
+          "The result exceeds its safe transfer-reference budget.",
+        );
+        transfers.set(known.reference.transferId, saved);
+        const resource = known.snapshot.resource;
+        if (
+          known.snapshot.direction === "download" &&
+          resource &&
+          !Array.isArray(resource) &&
+          typeof resource === "object"
+        ) {
+          const uri = resource.uri;
+          requireCondition(
+            typeof uri === "string" &&
+              parseArtifactUri(uri).agentId === this.artifacts.agentId,
+            "invalid_transfer_resource",
+            "A download Offer must reference this Agent's registered resource.",
+          );
+          if (!transferLinks.has(uri)) {
+            await append(
+              createOutput(scope.pwd, () => scope.assertCurrent()).file({
+                uri,
+              }),
+            );
+            transferLinks.add(uri);
+          }
+        }
+      }
+      return known.snapshot;
+    };
     const append = async (input: unknown): Promise<JsonObject> => {
       scope.assertCurrent();
       scope.signal?.throwIfAborted();
+      if (transferOffer(input)) return await resolveOffer(input);
       const intent = outputIntent(input);
       if (intent?.kind === "collection") {
         const refs: JsonValue[] = [];
@@ -543,6 +621,7 @@ export class ResultEncoder {
         maxBytes: this.limits.maxDataBytes,
         assertCurrent: () => scope.assertCurrent(),
         resolveContent: (value) => append(value),
+        resolveTransferOffer: resolveOffer,
       });
       result.data = normalized.data;
       if (normalized.conversions.length)
@@ -590,6 +669,8 @@ export class ResultEncoder {
       if (all) for (const item of items) await append(item);
       else await data(value);
     } else await data(value);
+    if (transfers.size)
+      result.transferOffers = [...transfers.values()] as unknown as JsonValue;
     await this.#fit(result, scope);
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
@@ -638,11 +719,25 @@ export class ResultEncoder {
         ...(item.annotations ? { annotations: item.annotations } : {}),
       };
     });
+    const transfers = this.#transfers(result);
+    const delivery: JsonObject = {
+      ...((result.delivery as JsonObject) ?? {}),
+      ...(transfers.length
+        ? {
+            transfers: transfers.map((item) => ({
+              transferId: item.reference.transferId,
+              available: false,
+              reason: "delivery_unavailable",
+              snapshot: item.snapshot,
+            })),
+          }
+        : {}),
+    };
     const structuredContent: JsonObject = {
       run,
       ...(Object.hasOwn(result, "data") ? { data: result.data! } : {}),
       ...(result.conversions ? { conversions: result.conversions } : {}),
-      ...(result.delivery ? { delivery: result.delivery } : {}),
+      ...(Object.keys(delivery).length ? { delivery } : {}),
     };
     if (fallback) {
       const text = Object.hasOwn(result, "data")
@@ -658,6 +753,50 @@ export class ResultEncoder {
       structuredContent,
       ...(result.isError === undefined ? {} : { isError: result.isError }),
     };
+  }
+  #transfers(result: StoredResult): StoredTransfer[] {
+    if (result.transferOffers === undefined) return [];
+    requireCondition(
+      Array.isArray(result.transferOffers) &&
+        result.transferOffers.length <= 1024,
+      "invalid_saved_result",
+      "Saved transfer references must be a bounded array.",
+    );
+    try {
+      canonicalJson(
+        result.transferOffers,
+        Math.min(this.limits.textBytes, 65536),
+      );
+    } catch {
+      throw new AgentError(
+        "result_transfer_too_large",
+        "Saved transfer references exceed their bounded budget.",
+      );
+    }
+    const seen = new Set<string>();
+    return result.transferOffers.map((value) => {
+      requireCondition(
+        value &&
+          !Array.isArray(value) &&
+          typeof value === "object" &&
+          Object.keys(value).every((key) =>
+            ["reference", "snapshot"].includes(key),
+          ),
+        "invalid_saved_result",
+        "A saved transfer entry contains unsupported fields.",
+      );
+      const reference = transferReference(value.reference),
+        snapshot = issuedTransferSnapshot(value.snapshot);
+      requireCondition(
+        reference.transferId === snapshot.transferId &&
+          reference.expiresAt === snapshot.expiresAt &&
+          !seen.has(reference.transferId),
+        "invalid_saved_result",
+        "Saved transfer identity and snapshot must agree without duplicates.",
+      );
+      seen.add(reference.transferId);
+      return { reference, snapshot };
+    });
   }
   async #fit(result: StoredResult, scope: ArtifactScope): Promise<void> {
     const dataText = Object.hasOwn(result, "data")
@@ -791,7 +930,7 @@ export class ResultEncoder {
 
   async render(
     result: StoredResult,
-    scope: ArtifactScope,
+    scope: ResultScope,
     run: JsonObject,
     options: RenderOptions = {},
   ): Promise<JsonObject> {
@@ -821,6 +960,29 @@ export class ResultEncoder {
       asJson(run),
       options.textFallback ?? true,
     );
+    const transfers = this.#transfers(result);
+    const applyTransfers = () => {
+      if (transfers.length) {
+        const current = transfers.map((item) => ({
+          ...(this.offers
+            ? this.offers.deliver(item.reference, scope)
+            : {
+                transferId: item.reference.transferId,
+                available: false,
+                reason: "delivery_unavailable",
+              }),
+          snapshot: item.snapshot,
+        }));
+        for (const target of [response, control]) {
+          const structured = target.structuredContent as JsonObject;
+          structured.delivery = {
+            ...((structured.delivery as JsonObject) ?? {}),
+            transfers: current,
+          };
+        }
+      }
+    };
+    applyTransfers();
     let inlineBytes = 0,
       encodedBinaryBytes = 0;
     for (let i = 0; i < result.content.length; i++) {
@@ -915,6 +1077,9 @@ export class ResultEncoder {
         else content[i]!.data = bytes.data.toString("base64");
       }
     }
+    // Resource I/O may yield long enough for a channel to be claimed, expire or
+    // lose authority. Re-project current delivery immediately before returning.
+    applyTransfers();
     requireCondition(
       Buffer.byteLength(JSON.stringify(control)) <= this.limits.textBytes,
       "result_context_too_large",

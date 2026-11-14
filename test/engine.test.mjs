@@ -621,14 +621,28 @@ test("clock rollback cannot extend the total or local input deadlines", async (t
   const realNow = Date.now;
   const entered = Promise.withResolvers();
   const gate = Promise.withResolvers();
+  const inputEvents = new EventEmitter();
+  let runSignal;
   const { start, engine, finish } = await fixture(t, {
-    bindings: (services) => ({
-      gate: () => {
-        entered.resolve();
-        return gate.promise;
-      },
-      runtime: { requestInput: services.requestInput },
-    }),
+    bindings: (services) => {
+      runSignal = services.signal;
+      return {
+        gate: () => {
+          entered.resolve();
+          return gate.promise;
+        },
+        runtime: {
+          async requestInput(request) {
+            try {
+              return await services.requestInput(request);
+            } catch (error) {
+              inputEvents.emit("rejected", error);
+              throw error;
+            }
+          },
+        },
+      };
+    },
   });
   t.after(() => {
     Date.now = realNow;
@@ -640,7 +654,9 @@ test("clock rollback cannot extend the total or local input deadlines", async (t
   });
   await entered.promise;
   Date.now = () => realNow() - 60_000;
-  await delay(2050);
+  // Await actual expiry: a timer's scheduled delay does not bound when CI runs it.
+  if (!runSignal.aborted)
+    await once(runSignal, "abort", { signal: AbortSignal.timeout(10_000) });
   assert.equal(
     (await engine.observe(caller, first.run.runId)).run.status,
     "cancelling",
@@ -657,10 +673,15 @@ test("clock rollback cannot extend the total or local input deadlines", async (t
   });
   assert.equal(waiting.run.status, "waiting_input");
   Date.now = () => realNow() - 60_000;
-  await delay(2050);
+  // observe() intentionally returns active input waits immediately, even with waitMs.
+  const [inputError] = await once(inputEvents, "rejected", {
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(inputError.code, "input_timeout");
   const ended = await finish(waiting.run.runId);
   assert.equal(ended.run.status, "succeeded");
   assert.equal(ended.result.data, "InputTimeoutError");
+  assert.ok(ended.run.endedAt >= waiting.wait.deadlineAt);
   Date.now = realNow;
 });
 

@@ -7,6 +7,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import path from "node:path";
+import { MIMEType } from "node:util";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import {
@@ -14,7 +15,19 @@ import {
   digest,
   newId,
   requestWindow,
+  isPlainRecord,
 } from "../contracts/json.js";
+import type {
+  TransferRecord,
+  TransferOwner,
+  TransferMetadata,
+  TransferFilter,
+  TransferScan,
+  PublishedTransfer,
+  TransferStop,
+  TransferFinish,
+  TransferProgress,
+} from "./transfers.js";
 import {
   terminalStatuses,
   DEFAULT_CONTROL_CAPACITY,
@@ -1141,39 +1154,909 @@ export class SqliteStore {
     now = Date.now(),
   ): ResourceRecord {
     return this.#transaction(() => {
-      const resource = this.getResource(resourceId);
-      const run = this.getRun(runId);
+      requireCondition(
+        !this.#db
+          .prepare("SELECT 1 FROM transfers WHERE resource_id=?")
+          .get(resourceId),
+        "transfer_handoff_required",
+        "A transfer must publish pending and hand off through its fixed domain command.",
+      );
+      return this.#handoffResource(resourceId, runId, revision, now);
+    });
+  }
+
+  /** Shared fixed SQL, called only from an existing transaction. */
+  #handoffResource(
+    resourceId: string,
+    runId: string,
+    revision: number,
+    now: number,
+  ): ResourceRecord {
+    const resource = this.getResource(resourceId);
+    const run = this.getRun(runId);
+    requireCondition(
+      resource.bootId === this.bootId &&
+        resource.ownerRunId === runId &&
+        resource.revision === revision &&
+        resource.closedAt === null,
+      "resource_state_conflict",
+      "This resource cannot be handed off.",
+    );
+    requireCondition(
+      (run.status === "running" || run.status === "waiting_input") && !run.stop,
+      "run_stopping",
+      "The creator already started finishing or stopping.",
+    );
+    const active = this.#db
+      .prepare(
+        "SELECT count(*) n FROM managed_resources WHERE boot_id=? AND lifetime='background' AND closed_at IS NULL",
+      )
+      .get(this.bootId)?.n as number;
+    requireCondition(
+      active < 32,
+      "background_busy",
+      "No independent background resource slot is available.",
+    );
+    this.#db
+      .prepare(
+        "UPDATE managed_resources SET lifetime='background',owner_run_id=NULL,handed_off_at=?,revision=revision+1 WHERE resource_id=? AND revision=?",
+      )
+      .run(now, resourceId, revision);
+    return this.getResource(resourceId);
+  }
+
+  #transferOwner(scope: TransferOwner): void {
+    requireCondition(
+      scope &&
+        typeof scope.callerKey === "string" &&
+        scope.callerKey.length > 0 &&
+        scope.owner &&
+        ["platform", "extension"].includes(scope.owner.type) &&
+        typeof scope.owner.owner === "string" &&
+        scope.owner.owner.length > 0 &&
+        typeof scope.owner.namespace === "string" &&
+        scope.owner.namespace.length > 0,
+      "invalid_transfer_owner",
+      "Transfers require a verified caller and fixed Core source binding.",
+    );
+  }
+
+  #transferMetadata(value: TransferMetadata): TransferMetadata {
+    const data = JSON.parse(
+      canonicalJson(value, 64 * 1024),
+    ) as TransferMetadata;
+    requireCondition(
+      isPlainRecord(data) &&
+        Object.keys(data).every((key) =>
+          [
+            "target",
+            "origin",
+            "maxBytes",
+            "startedAt",
+            "fileCommitted",
+            "file",
+            "cleanupConfirmed",
+            "stop",
+            "error",
+            "outcome",
+          ].includes(key),
+        ) &&
+        isPlainRecord(data.target) &&
+        Object.keys(data.target).every((key) =>
+          [
+            "path",
+            "resourceUri",
+            "name",
+            "mimeType",
+            "size",
+            "sha256",
+            "expectedSize",
+            "expectedSha256",
+          ].includes(key),
+        ),
+      "invalid_transfer_metadata",
+      "Transfer history accepts fixed safe target and outcome fields, never request URLs or credentials.",
+    );
+    const target = data.target;
+    requireCondition(
+      (data.maxBytes === undefined ||
+        data.maxBytes === null ||
+        (typeof data.maxBytes === "number" &&
+          Number.isSafeInteger(data.maxBytes) &&
+          data.maxBytes > 0)) &&
+        (data.startedAt === undefined ||
+          data.startedAt === null ||
+          (typeof data.startedAt === "number" &&
+            Number.isSafeInteger(data.startedAt) &&
+            data.startedAt >= 0)),
+      "invalid_transfer_metadata",
+      "A transfer keeps only its fixed accepted budget and actual claim time.",
+    );
+    if (data.origin !== undefined && data.origin !== null) {
+      const origin = data.origin;
+      requireCondition(
+        isPlainRecord(origin) &&
+          Object.keys(origin).length === 2 &&
+          typeof origin.contextId === "string" &&
+          origin.contextId.length > 0 &&
+          origin.contextId.length <= 256 &&
+          (origin.projectId === null ||
+            (typeof origin.projectId === "string" &&
+              origin.projectId.length > 0 &&
+              origin.projectId.length <= 256)),
+        "invalid_transfer_origin",
+        "The retained creator association must contain only its actual context and project identities.",
+      );
+    }
+    for (const field of ["path", "name", "mimeType", "resourceUri"] as const)
+      requireCondition(
+        target[field] === undefined ||
+          (typeof target[field] === "string" &&
+            target[field]!.length > 0 &&
+            !target[field]!.includes("\0")),
+        "invalid_transfer_metadata",
+        "Transfer target text is invalid.",
+      );
+    requireCondition(
+      (target.path === undefined ||
+        (typeof target.path === "string" && path.isAbsolute(target.path))) &&
+        (target.resourceUri === undefined ||
+          (typeof target.resourceUri === "string" &&
+            /^nexum:\/\/agents\/[^/]+\/resources\/res_[0-9a-f]{32}$/.test(
+              target.resourceUri,
+            ))),
+      "invalid_transfer_metadata",
+      "Any confirmed target must be a canonical local path or registered Nexum resource coordinate.",
+    );
+    for (const field of ["size", "expectedSize"] as const)
+      requireCondition(
+        target[field] === undefined ||
+          (typeof target[field] === "number" &&
+            Number.isSafeInteger(target[field]) &&
+            target[field]! >= 0),
+        "invalid_transfer_metadata",
+        "Transfer sizes must be non-negative safe byte counts.",
+      );
+    for (const field of ["sha256", "expectedSha256"] as const)
+      requireCondition(
+        target[field] === undefined ||
+          (typeof target[field] === "string" &&
+            /^[0-9a-f]{64}$/.test(target[field]!)),
+        "invalid_transfer_metadata",
+        "Transfer checksums must be actual SHA-256 hex values.",
+      );
+    for (const field of ["fileCommitted", "cleanupConfirmed"] as const)
+      requireCondition(
+        data[field] === undefined || typeof data[field] === "boolean",
+        "invalid_transfer_metadata",
+        "Transfer cleanup and publication facts must be boolean.",
+      );
+    if (data.file !== undefined) {
+      const file = data.file;
+      requireCondition(
+        isPlainRecord(file) &&
+          Object.keys(file).length === 6 &&
+          ["path", "name", "size", "mimeType", "sha256", "revision"].every(
+            (key) => Object.hasOwn(file, key),
+          ) &&
+          typeof file.path === "string" &&
+          path.isAbsolute(file.path) &&
+          file.path === target.path &&
+          typeof file.name === "string" &&
+          file.name === path.basename(file.path) &&
+          typeof file.size === "number" &&
+          Number.isSafeInteger(file.size) &&
+          file.size >= 0 &&
+          typeof file.mimeType === "string" &&
+          file.mimeType.length > 0 &&
+          !file.mimeType.includes("\0") &&
+          typeof file.sha256 === "string" &&
+          /^[0-9a-f]{64}$/.test(file.sha256) &&
+          typeof file.revision === "string" &&
+          /^[0-9a-f]{64}$/.test(file.revision),
+        "invalid_transfer_file",
+        "The upload receipt must retain its actual safe file facts and target.",
+      );
+      try {
+        new MIMEType(file.mimeType);
+      } catch {
+        throw new AgentError(
+          "invalid_transfer_file",
+          "The upload receipt MIME type is invalid.",
+        );
+      }
+    }
+    if (data.stop !== undefined) this.#transferStop(data.stop);
+    if (data.error !== undefined) {
+      requireCondition(
+        isPlainRecord(data.error) &&
+          Object.keys(data.error).every((key) =>
+            ["code", "message", "details"].includes(key),
+          ) &&
+          typeof data.error.code === "string" &&
+          data.error.code.length > 0 &&
+          data.error.code.length <= 256 &&
+          typeof data.error.message === "string" &&
+          data.error.message.length <= 4096 &&
+          (data.error.details === undefined ||
+            isPlainRecord(data.error.details)),
+        "invalid_transfer_metadata",
+        "Transfer failures must be safe error data.",
+      );
+      canonicalJson(data.error, 12 * 1024);
+    }
+    requireCondition(
+      data.outcome === undefined ||
+        ["succeeded", "failed", "cancelled", "expired"].includes(data.outcome),
+      "invalid_transfer_metadata",
+      "The retained transfer outcome is invalid.",
+    );
+    return data;
+  }
+
+  #transferStop(reason: TransferStop): void {
+    requireCondition(
+      isPlainRecord(reason) &&
+        Object.keys(reason).every((key) => ["kind", "code"].includes(key)) &&
+        ["cancel", "expired", "timeout", "permission", "failure"].includes(
+          reason.kind,
+        ) &&
+        typeof reason.code === "string" &&
+        reason.code.length > 0 &&
+        reason.code.length <= 256,
+      "invalid_transfer_stop",
+      "A transfer stop needs a fixed reason and safe code.",
+    );
+  }
+
+  getTransfer(id: string, scope: TransferOwner): TransferRecord {
+    this.#transferOwner(scope);
+    requireCondition(
+      typeof id === "string" && /^tr_[0-9a-f]{32}$/.test(id),
+      "invalid_transfer_id",
+      "A transfer needs its retained identity.",
+    );
+    const row = this.#get<TransferRecord>(
+      "transfers",
+      "transfer_id",
+      id,
+      "transfer_not_found",
+    );
+    const resource = this.getResource(row.resourceId);
+    requireCondition(
+      row.callerKey === scope.callerKey &&
+        resource.callerKey === row.callerKey &&
+        resource.originRunId === row.originRunId &&
+        resource.source.type === scope.owner.type &&
+        resource.source.owner === scope.owner.owner &&
+        resource.source.namespace === scope.owner.namespace,
+      "transfer_not_found",
+      "The transfer does not belong to this caller and Core source.",
+    );
+    return this.#transferOrigin(row);
+  }
+
+  #transferOrigin(row: TransferRecord): TransferRecord {
+    // Old records remain explicitly unknown; never infer history from a new run/project.
+    return {
+      ...row,
+      metadata: {
+        ...row.metadata,
+        origin: row.metadata.origin ?? null,
+        maxBytes: row.metadata.maxBytes ?? null,
+        startedAt: row.metadata.startedAt ?? null,
+      },
+    };
+  }
+
+  #currentTransfer(
+    id: string,
+    scope: TransferOwner,
+    revision: number,
+  ): TransferRecord {
+    const row = this.getTransfer(id, scope),
+      resource = this.getResource(row.resourceId);
+    requireCondition(
+      Number.isSafeInteger(revision) &&
+        revision > 0 &&
+        row.revision === revision &&
+        row.endedAt === null &&
+        resource.bootId === this.bootId,
+      "transfer_state_conflict",
+      "The transfer changed or its original live control is unavailable.",
+    );
+    return row;
+  }
+
+  createTransfer(
+    scope: TransferOwner,
+    input: {
+      resourceId: string;
+      runId: string;
+      direction: "upload" | "download";
+      maxBytes: number;
+      metadata: TransferMetadata;
+    },
+    now = Date.now(),
+  ): TransferRecord {
+    this.#transferOwner(scope);
+    const metadata = this.#transferMetadata(input.metadata);
+    requireCondition(
+      ["upload", "download"].includes(input.direction) &&
+        Object.keys(metadata).every((key) => key === "target") &&
+        Number.isSafeInteger(input.maxBytes) &&
+        input.maxBytes > 0,
+      "invalid_transfer",
+      "A new transfer has only its accepted target, not a fabricated outcome.",
+    );
+    requireCondition(
+      (metadata.target.size === undefined ||
+        metadata.target.size <= input.maxBytes) &&
+        (metadata.target.expectedSize === undefined ||
+          metadata.target.expectedSize <= input.maxBytes),
+      "resource_exhausted",
+      "The target exceeds the accepted transfer payload budget.",
+    );
+    return this.#transaction(() => {
+      const resource = this.getResource(input.resourceId),
+        run = this.getRun(input.runId);
       requireCondition(
         resource.bootId === this.bootId &&
-          resource.ownerRunId === runId &&
-          resource.revision === revision &&
-          resource.closedAt === null,
-        "resource_state_conflict",
-        "This resource cannot be handed off.",
-      );
-      requireCondition(
-        (run.status === "running" || run.status === "waiting_input") &&
+          run.bootId === this.bootId &&
+          resource.callerKey === scope.callerKey &&
+          run.callerKey === scope.callerKey &&
+          resource.source.type === scope.owner.type &&
+          resource.source.owner === scope.owner.owner &&
+          resource.source.namespace === scope.owner.namespace &&
+          resource.originRunId === input.runId &&
+          resource.ownerRunId === input.runId &&
+          resource.lifetime === "run" &&
+          resource.closedAt === null &&
+          ["preparing_inputs", "running", "waiting_input"].includes(
+            run.status,
+          ) &&
           !run.stop,
-        "run_stopping",
-        "The creator already started finishing or stopping.",
+        "transfer_state_conflict",
+        "A transfer must originate from the verified live run and its registered resource.",
       );
-      const active = this.#db
+      const id = newId("tr");
+      const captured = this.#transferMetadata({
+        ...metadata,
+        origin: { contextId: run.contextId, projectId: run.projectId },
+        maxBytes: input.maxBytes,
+        startedAt: null,
+      });
+      this.#db
         .prepare(
-          "SELECT count(*) n FROM managed_resources WHERE boot_id=? AND lifetime='background' AND closed_at IS NULL",
+          `INSERT INTO transfers(transfer_id,resource_id,caller_key,origin_run_id,direction,status,metadata_json,created_at)
+        VALUES(?,?,?,?,?,'preparing',?,?)`,
         )
-        .get(this.bootId)?.n as number;
+        .run(
+          id,
+          input.resourceId,
+          scope.callerKey,
+          input.runId,
+          input.direction,
+          canonicalJson(captured),
+          now,
+        );
+      return this.getTransfer(id, scope);
+    });
+  }
+
+  publishTransferPending(
+    id: string,
+    scope: TransferOwner,
+    input: {
+      revision: number;
+      resourceRevision: number;
+      claimDeadlineAt: number;
+      metadata?: TransferMetadata;
+    },
+    now = Date.now(),
+  ): PublishedTransfer {
+    requireCondition(
+      Number.isSafeInteger(input.claimDeadlineAt) &&
+        input.claimDeadlineAt > now,
+      "invalid_transfer_deadline",
+      "A pending offer needs its actual future claim deadline.",
+    );
+    return this.#transaction(() => {
+      const row = this.#currentTransfer(id, scope, input.revision);
       requireCondition(
-        active < 32,
-        "background_busy",
-        "No independent background resource slot is available.",
+        row.status === "preparing" && row.originRunId,
+        "transfer_state_conflict",
+        "Only the original preparing transfer can publish an offer.",
+      );
+      const supplied = input.metadata
+        ? this.#transferMetadata(input.metadata)
+        : row.metadata;
+      requireCondition(
+        supplied.origin === undefined ||
+          canonicalJson(supplied.origin) ===
+            canonicalJson(row.metadata.origin ?? null),
+        "invalid_transfer_origin",
+        "Publishing an offer cannot replace its original creator association.",
+      );
+      const metadata = this.#transferMetadata({
+        ...supplied,
+        origin: row.metadata.origin ?? null,
+        maxBytes: row.metadata.maxBytes ?? null,
+        startedAt: row.metadata.startedAt ?? null,
+      });
+      const unchangedTarget = Object.entries(row.metadata.target).every(
+        ([field, value]) =>
+          metadata.target[field as keyof TransferMetadata["target"]] === value,
+      );
+      requireCondition(
+        (supplied.maxBytes === undefined ||
+          supplied.maxBytes === row.metadata.maxBytes) &&
+          (supplied.startedAt === undefined ||
+            supplied.startedAt === row.metadata.startedAt),
+        "invalid_transfer_metadata",
+        "Publishing an offer cannot change its accepted budget or actual claim time.",
+      );
+      requireCondition(
+        Object.keys(metadata).every((key) =>
+          ["target", "origin", "maxBytes", "startedAt"].includes(key),
+        ) &&
+          unchangedTarget &&
+          (row.direction === "upload"
+            ? metadata.target.path !== undefined &&
+              (row.metadata.target.path === undefined ||
+                metadata.target.path === row.metadata.target.path)
+            : metadata.target.resourceUri !== undefined &&
+              metadata.target.size !== undefined &&
+              metadata.target.sha256 !== undefined),
+        "invalid_transfer_metadata",
+        "A pending download must reference its actual fixed artifact.",
+      );
+      requireCondition(
+        typeof metadata.maxBytes === "number" &&
+          (metadata.target.size === undefined ||
+            metadata.target.size <= metadata.maxBytes) &&
+          (metadata.target.expectedSize === undefined ||
+            metadata.target.expectedSize <= metadata.maxBytes),
+        "resource_exhausted",
+        "The prepared target exceeds the originally accepted payload budget.",
+      );
+      const resource = this.#handoffResource(
+        row.resourceId,
+        row.originRunId,
+        input.resourceRevision,
+        now,
       );
       this.#db
         .prepare(
-          "UPDATE managed_resources SET lifetime='background',owner_run_id=NULL,handed_off_at=?,revision=revision+1 WHERE resource_id=? AND revision=?",
+          `UPDATE transfers SET status='pending',claim_deadline_at=?,metadata_json=?,revision=revision+1
+        WHERE transfer_id=? AND revision=?`,
         )
-        .run(now, resourceId, revision);
-      return this.getResource(resourceId);
+        .run(
+          input.claimDeadlineAt,
+          canonicalJson(metadata),
+          id,
+          input.revision,
+        );
+      return { transfer: this.getTransfer(id, scope), resource };
     });
+  }
+
+  claimTransfer(
+    id: string,
+    scope: TransferOwner,
+    input: { revision: number; transferDeadlineAt: number },
+    now = Date.now(),
+  ): TransferRecord {
+    requireCondition(
+      Number.isSafeInteger(input.transferDeadlineAt) &&
+        input.transferDeadlineAt > now,
+      "invalid_transfer_deadline",
+      "A claimed stream needs its actual future transfer deadline.",
+    );
+    return this.#transaction(() => {
+      const row = this.#currentTransfer(id, scope, input.revision),
+        resource = this.getResource(row.resourceId);
+      requireCondition(
+        row.status === "pending" &&
+          row.claimDeadlineAt !== null &&
+          now < row.claimDeadlineAt,
+        "transfer_not_claimable",
+        "The offer is not pending or its claim deadline passed; do not reuse its URL.",
+      );
+      requireCondition(
+        resource.lifetime === "background" &&
+          resource.closedAt === null &&
+          !["stopping", "unconfirmed", "unavailable"].includes(resource.status),
+        "resource_unavailable",
+        "The actual transfer resource cannot start a new stream.",
+      );
+      requireCondition(
+        typeof row.metadata.maxBytes === "number" &&
+          row.metadata.maxBytes > 0 &&
+          row.metadata.startedAt === null,
+        "transfer_state_conflict",
+        "A new claim needs its original accepted budget and no prior claim time.",
+      );
+      const metadata = this.#transferMetadata({
+        ...row.metadata,
+        startedAt: now,
+      });
+      this.#db
+        .prepare(
+          `UPDATE transfers SET status='transferring',transfer_deadline_at=?,metadata_json=?,revision=revision+1
+        WHERE transfer_id=? AND revision=?`,
+        )
+        .run(
+          input.transferDeadlineAt,
+          canonicalJson(metadata),
+          id,
+          input.revision,
+        );
+      return this.getTransfer(id, scope);
+    });
+  }
+
+  #transferResultRef(value: string): void {
+    requireCondition(
+      typeof value === "string" &&
+        value.length > 0 &&
+        Buffer.byteLength(value) <= 8192 &&
+        !value.includes("\0") &&
+        (!/^[a-z][a-z0-9+.-]*:/i.test(value) ||
+          /^[a-z]:[\\/]/i.test(value) ||
+          /^nexum:\/\/agents\/[^/]+\/resources\/res_[0-9a-f]{32}$/.test(value)),
+      "invalid_transfer_result",
+      "A result reference is a retained local coordinate, never a request URL or token.",
+    );
+  }
+
+  #transferFileFacts(
+    row: TransferRecord,
+    metadata: TransferMetadata,
+    bytes: number,
+  ): void {
+    if (metadata.fileCommitted === true || metadata.file !== undefined) {
+      requireCondition(
+        row.direction === "upload" &&
+          row.transferDeadlineAt !== null &&
+          metadata.fileCommitted === true &&
+          (metadata.target.expectedSize === undefined ||
+            metadata.target.expectedSize === bytes) &&
+          (metadata.file === undefined ||
+            (metadata.file.size === bytes &&
+              (metadata.target.expectedSha256 === undefined ||
+                metadata.target.expectedSha256 === metadata.file.sha256))),
+        "invalid_transfer_file",
+        "Committed upload facts and any confirmed file receipt must match the actual stream.",
+      );
+    }
+    requireCondition(
+      row.metadata.file === undefined ||
+        canonicalJson(row.metadata.file) === canonicalJson(metadata.file),
+      "transfer_state_conflict",
+      "A committed upload receipt cannot be replaced or withdrawn.",
+    );
+  }
+
+  progressTransfer(
+    id: string,
+    scope: TransferOwner,
+    input: TransferProgress,
+    now = Date.now(),
+  ): TransferRecord {
+    requireCondition(
+      Number.isSafeInteger(input.bytesTransferred) &&
+        input.bytesTransferred >= 0 &&
+        (input.fileCommitted === undefined ||
+          typeof input.fileCommitted === "boolean"),
+      "invalid_transfer_progress",
+      "Progress is an actual non-negative byte count and publication fact.",
+    );
+    if (input.resultRef !== undefined) this.#transferResultRef(input.resultRef);
+    return this.#transaction(() => {
+      const row = this.#currentTransfer(id, scope, input.revision);
+      requireCondition(
+        typeof row.metadata.maxBytes === "number" &&
+          input.bytesTransferred <= row.metadata.maxBytes,
+        "resource_exhausted",
+        "Actual transfer bytes exceed the originally accepted payload budget.",
+      );
+      requireCondition(
+        input.bytesTransferred >= row.bytesTransferred &&
+          (input.bytesTransferred === row.bytesTransferred ||
+            (row.transferDeadlineAt !== null &&
+              ["transferring", "cancelling"].includes(row.status))) &&
+          (input.resultRef === undefined ||
+            row.resultRef === null ||
+            row.resultRef === input.resultRef),
+        "transfer_state_conflict",
+        "Actual progress and a committed result cannot be rolled back or replaced.",
+      );
+      const metadata = this.#transferMetadata({
+        ...row.metadata,
+        ...(input.fileCommitted === undefined
+          ? {}
+          : {
+              fileCommitted:
+                row.metadata.fileCommitted === true || input.fileCommitted,
+            }),
+        ...(input.file === undefined ? {} : { file: input.file }),
+      });
+      this.#transferFileFacts(row, metadata, input.bytesTransferred);
+      this.#db
+        .prepare(
+          `UPDATE transfers SET bytes_transferred=?,metadata_json=?,result_ref=COALESCE(?,result_ref),revision=revision+1
+        WHERE transfer_id=? AND revision=?`,
+        )
+        .run(
+          input.bytesTransferred,
+          canonicalJson(metadata),
+          input.resultRef ?? null,
+          id,
+          input.revision,
+        );
+      return this.getTransfer(id, scope);
+    });
+  }
+
+  requestTransferCancel(
+    id: string,
+    scope: TransferOwner,
+    input: { revision: number; reason: TransferStop },
+    now = Date.now(),
+  ): { accepted: boolean; transfer: TransferRecord } {
+    this.#transferStop(input.reason);
+    return this.#transaction(() => {
+      const previous = this.getTransfer(id, scope);
+      if (previous.endedAt !== null)
+        return { accepted: false, transfer: previous };
+      if (previous.status === "cancelling")
+        return {
+          accepted: previous.metadata.stop?.kind === input.reason.kind,
+          transfer: previous,
+        };
+      const row = this.#currentTransfer(id, scope, input.revision);
+      requireCondition(
+        (input.reason.kind !== "expired" ||
+          (row.status === "pending" &&
+            row.claimDeadlineAt !== null &&
+            now >= row.claimDeadlineAt)) &&
+          (input.reason.kind !== "timeout" ||
+            (row.status === "transferring" &&
+              row.transferDeadlineAt !== null &&
+              now >= row.transferDeadlineAt)),
+        "transfer_state_conflict",
+        "A deadline stop requires the corresponding actual phase and elapsed deadline.",
+      );
+      const metadata = this.#transferMetadata({
+        ...row.metadata,
+        stop: row.metadata.stop ?? input.reason,
+      });
+      this.#db
+        .prepare(
+          `UPDATE transfers SET status='cancelling',metadata_json=?,revision=revision+1
+        WHERE transfer_id=? AND revision=?`,
+        )
+        .run(canonicalJson(metadata), id, input.revision);
+      return { accepted: true, transfer: this.getTransfer(id, scope) };
+    });
+  }
+
+  finishTransfer(
+    id: string,
+    scope: TransferOwner,
+    input: TransferFinish,
+    now = Date.now(),
+  ): TransferRecord {
+    requireCondition(
+      ["succeeded", "failed", "cancelled", "expired"].includes(input.status) &&
+        typeof input.cleanupConfirmed === "boolean" &&
+        (input.fileCommitted === undefined ||
+          typeof input.fileCommitted === "boolean"),
+      "invalid_transfer_outcome",
+      "Only actual I/O and cleanup facts can settle a transfer.",
+    );
+    if (input.resultRef !== undefined) this.#transferResultRef(input.resultRef);
+    return this.#transaction(() => {
+      const row = this.#currentTransfer(id, scope, input.revision),
+        resource = this.getResource(row.resourceId);
+      requireCondition(
+        input.resultRef === undefined ||
+          row.resultRef === null ||
+          row.resultRef === input.resultRef,
+        "transfer_state_conflict",
+        "A committed transfer result cannot be replaced.",
+      );
+      requireCondition(
+        (input.status !== "succeeded" ||
+          (["transferring", "cancelling"].includes(row.status) &&
+            row.transferDeadlineAt !== null &&
+            (row.direction === "upload"
+              ? (row.metadata.fileCommitted === true ||
+                  input.fileCommitted === true) &&
+                (row.metadata.file !== undefined || input.file !== undefined)
+              : row.metadata.target.size === row.bytesTransferred))) &&
+          (input.status !== "cancelled" ||
+            row.metadata.stop?.kind === "cancel") &&
+          (input.status !== "expired" || row.metadata.stop?.kind === "expired"),
+        "invalid_transfer_outcome",
+        "The final outcome must match the actual stream or accepted stop.",
+      );
+      const confirmed = input.cleanupConfirmed && resource.closedAt !== null;
+      const metadata = this.#transferMetadata({
+        ...row.metadata,
+        fileCommitted:
+          row.metadata.fileCommitted === true || input.fileCommitted === true,
+        ...(input.file === undefined ? {} : { file: input.file }),
+        cleanupConfirmed: confirmed,
+        outcome: input.status,
+        ...(input.error === undefined ? {} : { error: input.error }),
+      });
+      this.#transferFileFacts(row, metadata, row.bytesTransferred);
+      this.#db
+        .prepare(
+          `UPDATE transfers SET status=?,ended_at=?,metadata_json=?,result_ref=COALESCE(?,result_ref),revision=revision+1
+        WHERE transfer_id=? AND revision=?`,
+        )
+        .run(
+          confirmed ? input.status : row.status,
+          confirmed ? now : null,
+          canonicalJson(metadata),
+          input.resultRef ?? null,
+          id,
+          input.revision,
+        );
+      return this.getTransfer(id, scope);
+    });
+  }
+
+  scanTransfers(
+    scope: TransferOwner,
+    filter: TransferFilter = {},
+    limit = 100,
+    cursor?: string,
+  ): TransferScan {
+    this.#transferOwner(scope);
+    requireCondition(
+      Number.isSafeInteger(limit) &&
+        limit > 0 &&
+        limit <= 1000 &&
+        isPlainRecord(filter) &&
+        Object.keys(filter).every((key) =>
+          ["direction", "status", "runId"].includes(key),
+        ),
+      "invalid_transfer_query",
+      "Transfer history needs bounded known equality filters.",
+    );
+    const statuses = [
+      "preparing",
+      "pending",
+      "transferring",
+      "cancelling",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "expired",
+      "interrupted",
+    ];
+    requireCondition(
+      (filter.direction === undefined ||
+        (typeof filter.direction === "string" &&
+          ["upload", "download"].includes(filter.direction))) &&
+        (filter.status === undefined ||
+          (typeof filter.status === "string" &&
+            statuses.includes(filter.status))) &&
+        (filter.runId === undefined ||
+          (typeof filter.runId === "string" &&
+            filter.runId.length > 0 &&
+            filter.runId.length <= 256)),
+      "invalid_transfer_query",
+      "The transfer history filter is invalid.",
+    );
+    const query = digest({
+      mode: "transfers",
+      binding: this.binding,
+      scope,
+      filter: Object.fromEntries(
+        Object.entries(filter).filter(([, value]) => value !== undefined),
+      ),
+    });
+    const where = [
+      "t.caller_key=?",
+      "json_extract(m.source_json,'$.type')=?",
+      "json_extract(m.source_json,'$.owner')=?",
+      "json_extract(m.source_json,'$.namespace')=?",
+    ];
+    const values: SQLInputValue[] = [
+      scope.callerKey,
+      scope.owner.type,
+      scope.owner.owner,
+      scope.owner.namespace!,
+    ];
+    for (const [field, column] of [
+      ["direction", "t.direction"],
+      ["status", "t.status"],
+      ["runId", "t.origin_run_id"],
+    ] as const)
+      if (typeof filter[field] === "string") {
+        where.push(`${column}=?`);
+        values.push(filter[field]!);
+      }
+    if (cursor !== undefined) {
+      try {
+        requireCondition(
+          typeof cursor === "string" &&
+            cursor.length > 0 &&
+            cursor.length <= 4096 &&
+            /^[A-Za-z0-9_-]+$/.test(cursor),
+          "invalid_cursor",
+          "The transfer history cursor is invalid.",
+        );
+        const envelope = Buffer.from(cursor, "base64url");
+        requireCondition(
+          envelope.length > 28,
+          "invalid_cursor",
+          "The transfer cursor has no authenticated position.",
+        );
+        const decipher = createDecipheriv(
+          "aes-256-gcm",
+          this.#cursorKey,
+          envelope.subarray(0, 12),
+        );
+        decipher.setAAD(Buffer.from(query));
+        decipher.setAuthTag(envelope.subarray(-16));
+        const position = JSON.parse(
+          Buffer.concat([
+            decipher.update(envelope.subarray(12, -16)),
+            decipher.final(),
+          ]).toString("utf8"),
+        ) as { time: number; id: string };
+        requireCondition(
+          Number.isSafeInteger(position.time) &&
+            position.time >= 0 &&
+            typeof position.id === "string" &&
+            /^tr_[0-9a-f]{32}$/.test(position.id),
+          "invalid_cursor",
+          "The transfer cursor belongs to another caller or filter.",
+        );
+        where.push("(t.created_at<? OR (t.created_at=? AND t.transfer_id<?))");
+        values.push(position.time, position.time, position.id);
+      } catch (cause) {
+        throw new AgentError(
+          "invalid_cursor",
+          "The transfer history cursor is invalid or no longer current.",
+          undefined,
+          { cause },
+        );
+      }
+    }
+    const rows = this.#db
+      .prepare(
+        `SELECT t.* FROM transfers t JOIN managed_resources m ON m.resource_id=t.resource_id
+      WHERE ${where.join(" AND ")} ORDER BY t.created_at DESC,t.transfer_id DESC LIMIT ?`,
+      )
+      .all(...values, limit + 1);
+    return {
+      more: rows.length > limit,
+      items: rows.slice(0, limit).map((raw) => {
+        const record = this.#transferOrigin(decode<TransferRecord>(raw));
+        const iv = randomBytes(12),
+          cipher = createCipheriv("aes-256-gcm", this.#cursorKey, iv);
+        cipher.setAAD(Buffer.from(query));
+        const ciphertext = Buffer.concat([
+          cipher.update(
+            JSON.stringify({ time: record.createdAt, id: record.transferId }),
+          ),
+          cipher.final(),
+        ]);
+        return {
+          record,
+          cursor: Buffer.concat([iv, ciphertext, cipher.getAuthTag()]).toString(
+            "base64url",
+          ),
+        };
+      }),
+    };
   }
 
   closeResource(

@@ -11,6 +11,7 @@ import {
   renameSync,
   symlinkSync,
   existsSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -357,19 +358,56 @@ test("upload cancellation and revocation stop actual writes and clean uncommitte
   }
 });
 
-test("parent replacement is detected and an unlocatable temporary file is reported rather than deleted elsewhere", async (t) => {
+test("an actual in-flight parent move or route replacement fails without altering the replacement", async (t) => {
   const f = fixture(t),
-    parent = path.join(f.work, "incoming"),
-    moved = path.join(f.work, "moved");
+    parent = path.join(f.work, "incoming-target"),
+    route = path.join(f.work, "incoming"),
+    moved = path.join(f.work, "moved"),
+    redirected = path.join(f.work, "redirected");
   mkdirSync(parent);
+  mkdirSync(redirected);
+  writeFileSync(path.join(redirected, "untouched"), "keep");
+  symlinkSync(parent, route, "junction");
   const plan = await f.plan({ path: "incoming/upload.bin" });
-  let replaced = false;
+  assert.equal(realpathSync.native(route), parent);
+  let attempted = false,
+    mutation;
   f.scope.onProgress = () => {
-    if (replaced) return;
-    replaced = true;
-    renameSync(parent, moved);
+    if (attempted) return;
+    attempted = true;
+    try {
+      renameSync(parent, moved);
+    } catch (cause) {
+      // Windows may refuse moving a directory containing an open file. That
+      // fixture failure is not evidence that the authorized parent changed.
+      if (
+        process.platform !== "win32" ||
+        !["EPERM", "EBUSY"].includes(cause.code)
+      )
+        throw cause;
+      const still = statSync(parent, { bigint: true });
+      assert.equal(String(still.dev), plan.parent.dev);
+      assert.equal(String(still.ino), plan.parent.ino);
+      assert.equal(existsSync(moved), false);
+      rmSync(route, { recursive: true });
+      symlinkSync(redirected, route, "junction");
+      assert.equal(realpathSync.native(route), redirected);
+      mutation = "route";
+      t.diagnostic(
+        `Windows refused the open-directory rename with ${cause.code}; the upload route was actually redirected instead.`,
+      );
+      return;
+    }
     mkdirSync(parent);
     writeFileSync(path.join(parent, "untouched"), "keep");
+    assert.notEqual(
+      String(statSync(parent, { bigint: true }).ino),
+      plan.parent.ino,
+    );
+    mutation = "parent";
+    t.diagnostic(
+      "The physical parent was actually moved and replaced during reception.",
+    );
   };
   const error = await receiveUpload(
     Readable.from([Buffer.from("body")]),
@@ -379,12 +417,21 @@ test("parent replacement is detected and an unlocatable temporary file is report
     () => null,
     (cause) => cause,
   );
+  assert.ok(
+    mutation,
+    `The filesystem fixture did not change its target: ${error?.cause?.code ?? error?.code ?? "no failure"}`,
+  );
   assert.equal(error.code, "file_changed");
   assert.equal(error.fileCommitted, false);
   assert.equal(error.cleanupConfirmed, false);
-  assert.equal(readFileSync(path.join(parent, "untouched"), "utf8"), "keep");
+  const replacement = mutation === "route" ? redirected : parent;
+  assert.equal(
+    readFileSync(path.join(replacement, "untouched"), "utf8"),
+    "keep",
+  );
+  assert.deepEqual(readdirSync(replacement), ["untouched"]);
   assert.equal(existsSync(plan.path), false);
-  assert.equal(readdirSync(moved).length, 1);
+  assert.equal(readdirSync(mutation === "route" ? parent : moved).length, 1);
 });
 
 test("already redirected parents fail before temporary creation; canonical write authorization is rechecked", async (t) => {
