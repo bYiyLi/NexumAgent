@@ -31,6 +31,7 @@ import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine } from "../dist/runtime/engine.js";
 import { AgentError } from "../dist/contracts/errors.js";
+import { observeRunTerminal } from "./helpers/run-observation.mjs";
 
 const caller = { principalId: "owner", clientId: "host", grantId: "grant" };
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1095,12 +1096,13 @@ test("mTLS uses the approved private cert/key/CA through a source-owned native d
     );
   await f.backend.apply(intent, ready, f.scope());
   const { engine, contextId, close } = await mountedApi(f),
-    result = await engine.start(caller, {
+    accepted = await engine.start(caller, {
       contextId,
       script:
         "return {values:await Promise.all(Array.from({length:8},async()=> (await api.crm.read()).data.value))};",
       waitMs: 3000,
     });
+  const result = await observeRunTerminal(engine, caller, accepted);
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
   assert.deepEqual(result.result.values, Array(8).fill("mutual-tls"));
   assert.deepEqual(seen, Array(8).fill(true));

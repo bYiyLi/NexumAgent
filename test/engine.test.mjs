@@ -20,6 +20,10 @@ import { canonicalJson, newRequestId } from "../dist/contracts/json.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { safeErrorData } from "../dist/contracts/error-data.js";
+import {
+  observeRunUntil,
+  observeRunTerminal,
+} from "./helpers/run-observation.mjs";
 
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
 
@@ -468,14 +472,20 @@ test("local input timeout is catchable; an abandoned input wait fails rather tha
   t.after(() => {
     Date.now = realNow;
   });
-  const { start, finish, store } = await fixture(t);
-  const initial = await start({
+  const { start, engine, store } = await fixture(t);
+  const accepted = await start({
     script:
       'try { await runtime.requestInput({message:"short",inputSchema:{},timeoutMs:60000}); }catch(error){return {name:error.name};}',
   });
+  const initial = await observeRunUntil(
+    engine,
+    caller,
+    accepted,
+    (view) => view.run.status === "waiting_input",
+  );
   assert.equal(initial.run.status, "waiting_input");
   Date.now = () => initial.wait.deadlineAt + 1;
-  const done = await finish(initial.run.runId);
+  const done = await observeRunTerminal(engine, caller, initial);
   Date.now = realNow;
   assert.equal(done.run.status, "succeeded");
   assert.equal(done.result.data.name, "InputTimeoutError");
@@ -484,16 +494,7 @@ test("local input timeout is catchable; an abandoned input wait fails rather tha
     script:
       'runtime.requestInput({message:"ignored",inputSchema:{}});return "done";',
   });
-  // An observation may first see the newly exposed wait; wait for actual root settlement.
-  let failed = await finish(abandoned.run.runId);
-  for (
-    let attempt = 0;
-    failed.run.status === "waiting_input" && attempt < 100;
-    attempt++
-  ) {
-    await delay(10);
-    failed = await finish(abandoned.run.runId);
-  }
+  const failed = await observeRunTerminal(engine, caller, abandoned);
   assert.equal(failed.run.status, "failed");
   assert.equal(failed.run.error.code, "input_not_awaited");
   assert.equal(failed.wait, null);

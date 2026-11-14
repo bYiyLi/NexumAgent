@@ -23,6 +23,7 @@ import { ResultEncoder } from "../dist/results/encoder.js";
 import { ArtifactStore } from "../dist/results/artifacts.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { outputExtension } from "../dist/sdk/output-extension.js";
+import { observeRunTerminal } from "./helpers/run-observation.mjs";
 
 const caller = {
   principalId: "person",
@@ -216,9 +217,16 @@ async function fixture(t) {
         ...options,
       });
       runs.push(result.run.runId);
-      return result;
+      return options.waitMs === undefined
+        ? observeRunTerminal(engine, caller, result)
+        : result;
     },
-    finish: (runId) => engine.observe(caller, runId, 4000),
+    finish: async (runId) =>
+      observeRunTerminal(
+        engine,
+        caller,
+        await engine.observe(caller, runId, 0),
+      ),
     render: (view) =>
       encoder.render(view.result, outputScope(view.run.runId), view.run, {
         textFallback: false,

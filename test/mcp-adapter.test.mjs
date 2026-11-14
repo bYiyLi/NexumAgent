@@ -16,6 +16,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { observeRunTerminal } from "./helpers/run-observation.mjs";
 import {
   Server,
   SUPPORTED_PROTOCOL_VERSIONS,
@@ -2549,7 +2550,9 @@ test("subscription capability controls entry publication and retained notificati
   );
   // Publishing 300 retained notifications performs real SQLite writes. Observe
   // this one admitted run through completion even on slower native CI disks.
-  const result = await f.engine.observe(caller, accepted.run.runId, 30000);
+  const result = await observeRunTerminal(f.engine, caller, accepted, {
+    timeoutMs: 90000,
+  });
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
   assert.equal(result.result.data.cursor, 300);
   assert.equal(result.result.data.events.length, 256);
