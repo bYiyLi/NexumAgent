@@ -36,7 +36,6 @@ export function appendDiagnostic(
     filename,
     constants.O_RDWR |
       constants.O_CREAT |
-      constants.O_APPEND |
       (constants.O_NOFOLLOW ?? 0) |
       (constants.O_NONBLOCK ?? 0),
     0o600,
@@ -64,7 +63,8 @@ export function appendDiagnostic(
         retry,
       }) + "\n",
     );
-    if (actual.size + entry.length > MAX_DIAGNOSTIC_BYTES) {
+    let position = actual.size;
+    if (position + entry.length > MAX_DIAGNOSTIC_BYTES) {
       const length = Math.min(actual.size, MAX_DIAGNOSTIC_BYTES / 2);
       const tail = Buffer.alloc(length);
       let read = 0;
@@ -84,18 +84,25 @@ export function appendDiagnostic(
       const retained =
         newline < 0 ? Buffer.alloc(0) : tail.subarray(newline + 1, read);
       ftruncateSync(file, 0);
-      writeAll(file, retained);
+      writeAll(file, retained, 0);
+      position = retained.length;
     }
-    writeAll(file, entry);
+    writeAll(file, entry, position);
   } finally {
     closeSync(file);
   }
 }
 
-function writeAll(file: number, bytes: Buffer): void {
+function writeAll(file: number, bytes: Buffer, position: number): void {
   let offset = 0;
   while (offset < bytes.length) {
-    const count = writeSync(file, bytes, offset, bytes.length - offset);
+    const count = writeSync(
+      file,
+      bytes,
+      offset,
+      bytes.length - offset,
+      position + offset,
+    );
     requireCondition(
       count > 0,
       "agent_log_unavailable",

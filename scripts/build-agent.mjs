@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, openSync, closeSync } from "node:fs";
 import { createHash, createPrivateKey, sign } from "node:crypto";
 import {
   cp,
@@ -33,21 +33,27 @@ export async function packageFileHash(filename) {
 }
 export const signatureMessage = (hash) =>
   Buffer.from(`NexumAgent/archive/v1\n${hash}\n`);
-function run(file, args, cwd) {
-  const result = spawnSync(file, args, {
-    cwd,
-    env: {
-      ...childEnvironment(),
-      npm_config_userconfig: path.join(cwd, ".npmrc"),
-      npm_config_globalconfig: path.join(cwd, ".npmrc"),
-    },
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  if (result.error || result.status !== 0)
-    throw new Error("An isolated package build command failed.");
-  return result.stdout;
+function run(file, args, cwd, outputFile) {
+  const output = outputFile ? openSync(outputFile, "wx", 0o600) : undefined;
+  try {
+    const result = spawnSync(file, args, {
+      cwd,
+      env: {
+        ...childEnvironment(),
+        npm_config_userconfig: path.join(cwd, ".npmrc"),
+        npm_config_globalconfig: path.join(cwd, ".npmrc"),
+      },
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024,
+      ...(output === undefined ? {} : { stdio: ["ignore", output, "pipe"] }),
+    });
+    if (result.error || result.status !== 0)
+      throw new Error("An isolated package build command failed.");
+    return result.stdout;
+  } finally {
+    if (output !== undefined) closeSync(output);
+  }
 }
 export async function fileInventory(directory) {
   const result = [];
@@ -297,8 +303,9 @@ export async function buildAgent({
             "tar.exe",
           )
         : "tar",
-      ["-czf", archive, "-C", temporary, "."],
-      root,
+      ["-czf", "-", "."],
+      temporary,
+      archive,
     );
     const hash = await packageFileHash(archive);
     const signed = {

@@ -41,7 +41,10 @@ jobs:
       - run: pnpm build
       - run: node scripts/build-extension-api.mjs
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
-      - run: pnpm --dir packages/browser check
+      - run: pnpm --dir packages/browser typecheck
+      - run: pnpm --dir packages/browser build
+      - run: node --experimental-vm-modules --test --test-timeout=120000 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/ci-test-events.mjs --test-reporter-destination=stdout "test/*.test.mjs"
+        working-directory: packages/browser
       - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
       - uses: actions/upload-artifact@v4
         with:

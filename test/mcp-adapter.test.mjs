@@ -2539,11 +2539,17 @@ test("subscription capability controls entry publication and retained notificati
     });
   const { handle } = await f.prepare(peer.config);
   f.registry.publish(handle);
-  const result = await f.start(`
+  const accepted = await f.start(
+    `
     const subscription = await mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
     await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/1", count: 300 });
     return await mcp.fixture.resources.getSubscription({ subscriptionId: subscription.subscriptionId, cursor: 0, waitMs: 1000 });
-  `);
+  `,
+    { waitMs: 0 },
+  );
+  // Publishing 300 retained notifications performs real SQLite writes. Observe
+  // this one admitted run through completion even on slower native CI disks.
+  const result = await f.engine.observe(caller, accepted.run.runId, 30000);
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
   assert.equal(result.result.data.cursor, 300);
   assert.equal(result.result.data.events.length, 256);

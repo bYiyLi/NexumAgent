@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { createReadStream, constants } from "node:fs";
+import { createReadStream, constants, openSync, closeSync } from "node:fs";
 import {
   cp,
   mkdir,
@@ -44,18 +44,27 @@ async function hashFile(filename) {
   }
   return hash.digest("hex");
 }
-function native(file, args, maxBuffer = 32 * 1024 * 1024) {
-  const result = spawnSync(file, args, {
-    env: childEnvironment(),
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer,
-  });
-  assert(
-    !result.error && result.status === 0,
-    "A native installer command failed; inspect actual state before repeating it.",
-  );
-  return result.stdout;
+function native(file, args, { cwd, inputFile } = {}) {
+  const input = inputFile
+    ? openSync(inputFile, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    : undefined;
+  try {
+    const result = spawnSync(file, args, {
+      cwd,
+      env: childEnvironment(),
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 32 * 1024 * 1024,
+      ...(input === undefined ? {} : { stdio: [input, "pipe", "pipe"] }),
+    });
+    assert(
+      !result.error && result.status === 0,
+      "A native installer command failed; inspect actual state before repeating it.",
+    );
+    return result.stdout;
+  } finally {
+    if (input !== undefined) closeSync(input);
+  }
 }
 async function directory(filename, create = true) {
   if (create) {
@@ -137,11 +146,15 @@ function configuration(value, profile) {
     value &&
       typeof value === "object" &&
       !Array.isArray(value) &&
-      Object.keys(value).length === 2 &&
+      Object.keys(value).every((key) =>
+        ["server_url", "token", "storage", "retention"].includes(key),
+      ) &&
+      Object.hasOwn(value, "server_url") &&
+      Object.hasOwn(value, "token") &&
       typeof value.server_url === "string" &&
       typeof value.token === "string" &&
       /^[\x21-\x7e]{1,8192}$/.test(value.token),
-    "Use only server_url and a valid token in the private configuration.",
+    "Use server_url, a valid token and only supported optional storage/retention policies in the private configuration.",
   );
   assert(
     value.server_url.trim() === value.server_url &&
@@ -159,7 +172,41 @@ function configuration(value, profile) {
       !server.search,
     "The selected profile Server URL is invalid.",
   );
-  return { server_url: server.href, token: value.token };
+  const result = { server_url: server.href, token: value.token };
+  for (const [field, fields, duration] of [
+    ["storage", ["max_managed_bytes"], false],
+    [
+      "retention",
+      [
+        "work_idle_ms",
+        "run_history_ms",
+        "run_logs_ms",
+        "input_attachments_ms",
+        "artifact_ms",
+        "material_copies_ms",
+      ],
+      true,
+    ],
+  ]) {
+    const policy = value[field];
+    if (policy === undefined) continue;
+    assert(
+      policy &&
+        typeof policy === "object" &&
+        [Object.prototype, null].includes(Object.getPrototypeOf(policy)) &&
+        Object.entries(policy).every(
+          ([key, number]) =>
+            fields.includes(key) &&
+            typeof number === "number" &&
+            Number.isSafeInteger(number) &&
+            number > 0 &&
+            (!duration || number <= 8_640_000_000_000_000 - Date.now()),
+        ),
+      "The optional storage/retention policy is invalid.",
+    );
+    result[field] = { ...policy };
+  }
+  return result;
 }
 export async function verifyArchive({
   archive,
@@ -265,7 +312,7 @@ export async function verifyArchive({
             "tar.exe",
           )
         : "tar";
-    const listed = native(tar, ["-tzf", archive]);
+    const listed = native(tar, ["-tzf", "-"], { inputFile: archive });
     assert(
       listed
         .split(/\r?\n/)
@@ -280,7 +327,7 @@ export async function verifyArchive({
       "The signed archive contains an unsafe path.",
     );
     const manifest = JSON.parse(
-      native(tar, ["-xOzf", archive, "./manifest.json"]),
+      native(tar, ["-xOzf", "-", "./manifest.json"], { inputFile: archive }),
     );
     assert(
       manifest.schemaVersion === 1 &&
@@ -437,7 +484,8 @@ export async function installAgent(options) {
                 "tar.exe",
               )
             : "tar",
-          ["-xzf", checked.archive, "-C", staging],
+          ["-xzf", "-"],
+          { cwd: staging, inputFile: checked.archive },
         );
         await verifyExtracted(staging, checked.manifest);
         await writeFile(

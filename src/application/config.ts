@@ -10,13 +10,27 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { AgentError, requireCondition } from "../contracts/errors.js";
+import { isPlainRecord } from "../contracts/json.js";
 import type { Profile } from "../contracts/types.js";
 
+export interface AgentStorageConfiguration {
+  readonly max_managed_bytes?: number;
+}
+export interface AgentRetentionConfiguration {
+  readonly work_idle_ms?: number;
+  readonly run_history_ms?: number;
+  readonly run_logs_ms?: number;
+  readonly input_attachments_ms?: number;
+  readonly artifact_ms?: number;
+  readonly material_copies_ms?: number;
+}
 export interface ProfileConfiguration {
   readonly profile: Profile;
   readonly root: string;
   readonly serverUrl: string;
   readonly token: string;
+  readonly storage?: Readonly<AgentStorageConfiguration>;
+  readonly retention?: Readonly<AgentRetentionConfiguration>;
 }
 function invalid(): AgentError {
   // Never attach the source text, filename, credential or parser/system cause.
@@ -24,6 +38,24 @@ function invalid(): AgentError {
     "invalid_configuration",
     "The selected Agent profile configuration is unavailable or invalid.",
   );
+}
+function numericPolicy(
+  value: unknown,
+  fields: readonly string[],
+  duration = false,
+): Readonly<Record<string, number>> | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainRecord(value)) throw invalid();
+  for (const [key, number] of Object.entries(value))
+    if (
+      !fields.includes(key) ||
+      typeof number !== "number" ||
+      !Number.isSafeInteger(number) ||
+      number <= 0 ||
+      (duration && number > 8_640_000_000_000_000 - Date.now())
+    )
+      throw invalid();
+  return Object.freeze({ ...value }) as Readonly<Record<string, number>>;
 }
 export function validateServerUrl(value: unknown, profile: Profile): URL {
   try {
@@ -120,15 +152,36 @@ export function loadProfileConfig(
       !value ||
       typeof value !== "object" ||
       Array.isArray(value) ||
-      Object.keys(value).length !== 2 ||
+      !Object.keys(value).every((key) =>
+        ["server_url", "token", "storage", "retention"].includes(key),
+      ) ||
       !Object.hasOwn(value, "server_url") ||
       !Object.hasOwn(value, "token")
     )
       throw invalid();
-    const fields = value as { server_url: unknown; token: unknown };
+    const fields = value as Record<string, unknown>;
     const serverUrl = validateServerUrl(fields.server_url, profile).href;
     const token = validateAgentToken(fields.token);
-    const configuration = { profile, root, serverUrl } as ProfileConfiguration;
+    const storage = numericPolicy(fields.storage, ["max_managed_bytes"]);
+    const retention = numericPolicy(
+      fields.retention,
+      [
+        "work_idle_ms",
+        "run_history_ms",
+        "run_logs_ms",
+        "input_attachments_ms",
+        "artifact_ms",
+        "material_copies_ms",
+      ],
+      true,
+    );
+    const configuration = {
+      profile,
+      root,
+      serverUrl,
+      ...(storage ? { storage } : {}),
+      ...(retention ? { retention } : {}),
+    } as ProfileConfiguration;
     Object.defineProperty(configuration, "token", {
       value: token,
       enumerable: false,

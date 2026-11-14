@@ -28,13 +28,12 @@ const xml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 const ps = (value) => "'" + clean(value).replaceAll("'", "''") + "'";
-const unit = (value, command = false) =>
+const unit = (value) =>
   '"' +
   clean(value)
     .replaceAll("\\", "\\\\")
     .replaceAll('"', '\\"')
-    .replaceAll("%", "%%")
-    .replaceAll("$", () => (command ? "$$" : "$")) +
+    .replaceAll("%", "%%") +
   '"';
 export function windowsArgument(value) {
   clean(value);
@@ -46,7 +45,7 @@ export function childEnvironment(source = process.env) {
   return Object.fromEntries(
     Object.entries(source).filter(
       ([key]) =>
-        !/^(?:NODE_OPTIONS|NODE_PATH|NODE_REPL_EXTERNAL_MODULE|NEXUM(?:_.*|$)|.*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION).*)$/i.test(
+        !/^(?:NODE_OPTIONS|NODE_PATH|NODE_REPL_EXTERNAL_MODULE|NEXUM(?:_.*|$)|npm_config_.*auth.*|.*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION|API_?KEY|PRIVATE_?KEY).*)$/i.test(
           key,
         ),
     ),
@@ -143,7 +142,7 @@ export function servicePlan({
   }
   if (platform === "linux") {
     const label = `nexum-agent-${profile}-${createHash("sha256").update(root).digest("hex").slice(0, 12)}.service`;
-    const content = `[Unit]\nDescription=Nexum Agent (${profile})\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=${[node, ...args].map((value) => unit(value, true)).join(" ")}\nWorkingDirectory=${clean(root).replaceAll("%", "%%")}\nEnvironment=${unit("HOME=" + home)}\nEnvironment=${unit("PATH=" + runtimePath)}\nUnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE\nRestart=on-failure\nRestartSec=10s\nTimeoutStopSec=60s\nKillMode=mixed\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
+    const content = `[Unit]\nDescription=Nexum Agent (${profile})\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=:${[node, ...args].map(unit).join(" ")}\nWorkingDirectory=${clean(root).replaceAll("%", "%%")}\nEnvironment=${unit("HOME=" + home)}\nEnvironment=${unit("PATH=" + runtimePath)}\nUnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE\nRestart=on-failure\nRestartSec=10s\nTimeoutStopSec=60s\nKillMode=mixed\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
     return {
       ...base,
       label,

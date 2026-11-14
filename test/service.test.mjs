@@ -75,7 +75,8 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
     }
     if (platform === "linux") {
       assert.match(plan.content, /Restart=on-failure/);
-      assert.match(plan.content, /User 空格 & \$\$ %%/);
+      assert.match(plan.content, /ExecStart=:"\/tmp\/User 空格 & \$ %%/);
+      assert.doesNotMatch(plan.content, /\$\$/);
       assert.match(plan.content, /WorkingDirectory=\/tmp\/User 空格 & \$ %%/);
       assert.match(plan.content, /UnsetEnvironment=NODE_OPTIONS NODE_PATH/);
     }
@@ -173,6 +174,8 @@ test("service/build child environment strips Agent credentials and Node preloads
     NODE_PATH: "/private",
     NEXUM_AGENT_TOKEN: "secret",
     OTHER_TOKEN: "secret",
+    OPENAI_API_KEY: "secret",
+    npm_config__auth: "secret",
     HOME: "/home/user",
     LANG: "zh_CN.UTF-8",
   };
@@ -181,5 +184,7 @@ test("service/build child environment strips Agent credentials and Node preloads
   assert.equal(copy.HOME, environment.HOME);
   assert.equal(copy.NODE_OPTIONS, undefined);
   assert.equal(copy.NEXUM_AGENT_TOKEN, undefined);
+  assert.equal(copy.OPENAI_API_KEY, undefined);
+  assert.equal(copy.npm_config__auth, undefined);
   assert.equal(environment.OTHER_TOKEN, "secret");
 });

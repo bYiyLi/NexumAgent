@@ -25,7 +25,7 @@ import {
 
 const temporary = async (t) => {
   const dir = realpathSync.native(
-    await mkdtemp(path.join(tmpdir(), "nexum-install-fixture-")),
+    await mkdtemp(path.join(tmpdir(), "nexum-install-fixture 空格 & $ %-")),
   );
   t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 3 }));
   return dir;
@@ -152,32 +152,8 @@ test(
           !/(?:^app\/(?:docs|state|test|archive)|private\.pem)/.test(f.path),
       ),
     );
-    const opts = optionsFor(first, keys, home);
-    let installed;
-    try {
+    const opts = optionsFor(first, keys, home),
       installed = await installAgent(opts);
-    } catch (error) {
-      if (process.platform === "win32") {
-        // This archive and destination are disposable fixtures, so native tar
-        // diagnostics contain no user configuration or credentials.
-        const probeRoot = path.join(home, "extraction-probe");
-        await mkdir(probeRoot);
-        const result = spawnSync(
-          path.join(process.env.SystemRoot, "System32", "tar.exe"),
-          ["-xzf", first.archive, "-C", probeRoot],
-          { encoding: "utf8" },
-        );
-        t.diagnostic(
-          JSON.stringify({
-            stage: "fixture-extraction-failed",
-            status: result.status,
-            code: result.error?.code,
-            stderr: result.stderr,
-          }),
-        );
-      }
-      throw error;
-    }
     assert.equal(installed.serviceRegistered, false);
     assert.equal(installed.startRequested, false);
     assert.equal(
@@ -219,6 +195,21 @@ test(
     assert.notEqual(verified.archive, first.archive);
     assert.ok((await readFile(verified.archive)).length > 1000);
     await verified.dispose();
+    const configPath = path.join(home, ".nexum-dev/config.json"),
+      policyConfig = {
+        ...opts.config,
+        storage: { max_managed_bytes: 20 * 1024 ** 3 },
+        retention: {
+          work_idle_ms: 86_400_000,
+          run_history_ms: 2 * 86_400_000,
+          run_logs_ms: 86_400_000,
+          input_attachments_ms: 86_400_000,
+          artifact_ms: 86_400_000,
+          material_copies_ms: 86_400_000,
+        },
+      },
+      configBytes = JSON.stringify(policyConfig, null, 2) + "\n";
+    await writeFile(configPath, configBytes, { mode: 0o600 });
     // A second authentic archive replaces only the selected profile's active receipt.
     await writeFile(
       path.join(keys.root, "package.json"),
@@ -238,6 +229,40 @@ test(
       config: undefined,
     });
     assert.notEqual(updated.programDir, installed.programDir);
+    assert.equal(await readFile(configPath, "utf8"), configBytes);
+    const beforeRejected = await readFile(
+      path.join(home, ".nexum-dev/program/active.json"),
+      "utf8",
+    );
+    for (const config of [
+      { ...policyConfig, unsupported: true },
+      { ...policyConfig, storage: { max_bytes: 1 } },
+      { ...policyConfig, storage: { max_managed_bytes: 1.5 } },
+      { ...policyConfig, retention: { artifact_ms: 0 } },
+      { ...policyConfig, retention: { artifact_ms: 8_640_000_000_000_000 } },
+    ])
+      await assert.rejects(
+        installAgent({
+          ...optionsFor(second, keys, home),
+          replaceConfig: true,
+          config,
+        }),
+        /configuration|policy/,
+      );
+    assert.equal(await readFile(configPath, "utf8"), configBytes);
+    assert.equal(
+      await readFile(path.join(home, ".nexum-dev/program/active.json"), "utf8"),
+      beforeRejected,
+    );
+    await installAgent({
+      ...optionsFor(second, keys, home),
+      replaceConfig: true,
+      config: policyConfig,
+    });
+    assert.deepEqual(
+      JSON.parse(await readFile(configPath, "utf8")),
+      policyConfig,
+    );
     const linkType = process.platform === "win32" ? "junction" : "dir",
       linkedVersionHome = path.join(root, "linked-version-home"),
       linkedVersions = path.join(

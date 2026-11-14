@@ -22,4 +22,6 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: node --experimental-vm-modules --test --test-timeout=120000 --test-concurrency=4 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/ci-test-events.mjs --test-reporter-destination=stdout "test/*.test.mjs"

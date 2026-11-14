@@ -105,6 +105,64 @@ test("malformed, oversized, non-UTF8, missing and expanded configuration never l
   }
 });
 
+test("owner storage and retention settings remain profile-local, immutable and explicit", (t) => {
+  const f = fixture(t);
+  const retention = {
+    work_idle_ms: 3600000,
+    run_history_ms: 86400000,
+    run_logs_ms: 43200000,
+    input_attachments_ms: 3600000,
+    artifact_ms: 7200000,
+    material_copies_ms: 86400000,
+  };
+  const filename = f.write("development", {
+    server_url: "http://127.0.0.1:3000",
+    token: credential,
+    storage: { max_managed_bytes: 4 * 1024 ** 3 },
+    retention,
+  });
+  f.write("production");
+  const bytes = readFileSync(filename);
+  const config = loadProfileConfig("development", f.home);
+  assert.deepEqual(config.storage, { max_managed_bytes: 4 * 1024 ** 3 });
+  assert.deepEqual(config.retention, retention);
+  assert.ok(Object.isFrozen(config.storage));
+  assert.ok(Object.isFrozen(config.retention));
+  assert.throws(() => {
+    config.retention.artifact_ms = 1;
+  }, TypeError);
+  assert.equal(loadProfileConfig("production", f.home).storage, undefined);
+  assert.equal(loadProfileConfig("production", f.home).retention, undefined);
+  assert.deepEqual(readFileSync(filename), bytes);
+  assert.equal(JSON.stringify(config).includes(credential), false);
+});
+
+test("owner settings reject unknown keys, malformed numbers and impossible expiry dates without leaking credentials", (t) => {
+  const f = fixture(t);
+  const values = [
+    { storage: [] },
+    { storage: null },
+    { storage: { max_managed_bytes: 0 } },
+    { storage: { max_managed_bytes: Number.MAX_SAFE_INTEGER + 1 } },
+    { storage: { untracked_limit: 1000 } },
+    { retention: [] },
+    { retention: { artifact_ms: 9_000_000_000_000_000 } },
+    { retention: { run_logs_ms: -1 } },
+    { retention: { work_idle_ms: 0.5 } },
+    { retention: { input_attachments_ms: "1000" } },
+    { retention: { material_copies_ms: null } },
+    { retention: { delete_now: 1 } },
+  ];
+  for (const policy of values) {
+    f.write("development", {
+      server_url: "http://127.0.0.1",
+      token: credential,
+      ...policy,
+    });
+    invalid(() => loadProfileConfig("development", f.home));
+  }
+});
+
 test("production transport requirements and header-safe credentials fail before any connection", (t) => {
   const f = fixture(t);
   for (const server_url of [
