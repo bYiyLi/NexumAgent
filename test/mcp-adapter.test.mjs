@@ -139,10 +139,18 @@ function installHandlers(server, options, record) {
     ) {
       process.stdin.pause();
       record({ method: "stdin-paused" });
-      setTimeout(() => {
-        record({ method: "stdin-resumed" });
-        process.stdin.resume();
-      }, 500);
+      const releaseDeadline = Date.now() + 30_000;
+      const release = setInterval(() => {
+        if (existsSync(options.stdinReleaseFile)) {
+          clearInterval(release);
+          record({ method: "stdin-resumed" });
+          process.stdin.resume();
+        } else if (Date.now() >= releaseDeadline) {
+          clearInterval(release);
+          record({ method: "stdin-release-timeout" });
+          process.exit(23);
+        }
+      }, 10);
     }
     return request.params?.cursor === "second"
       ? { [key]: items.slice(1) }
@@ -442,7 +450,7 @@ function stdioFixture(t, f, options = {}) {
   writeFileSync(
     filename,
     `
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { Server, ProtocolError, METHOD_NOT_FOUND } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/server"))};
 import { StdioServerTransport, serveStdio } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/server/stdio"))};
@@ -956,50 +964,55 @@ test("external run cancellation waits for real stdio backpressure and a cancelle
         }
       : tool,
   );
+  const stdinReleaseFile = path.join(f.root, "mcp-backpressure-release");
   const peer = stdioFixture(t, f, {
     mode: "backpressure",
+    stdinReleaseFile,
     capabilities: { tools: {} },
     tools: paddedTools,
   });
   const { handle } = await f.prepare(peer.config);
   f.registry.publish(handle);
-  await until(
-    () => peer.events().some((event) => event.method === "stdin-paused"),
-    "The real MCP fixture must pause stdin",
-  );
-  const first = await f.start(
-    'return await mcp.fixture.tools["echo-value"]({ value: 61, waitMs: 3000, padding: "x".repeat(1024 * 1024) });',
-    { waitMs: 0 },
-  );
-  await until(
-    () =>
-      f.store
-        .operationsForRun(first.run.runId)
-        .some((operation) => operation.status === "running"),
-    "The first operation must enter its pipe write",
-  );
-  await delay(20);
-  const second = await f.start(
-    'return await mcp.fixture.tools["echo-value"]({ value: 62 });',
-    { waitMs: 0 },
-  );
-  await until(
-    () =>
-      f.store
-        .operationsForRun(second.run.runId)
-        .some((operation) => operation.status === "running"),
-    "The second operation must join the transport queue",
-  );
-  f.engine.cancel(caller, second.run.runId);
-  f.engine.cancel(caller, first.run.runId);
-  await delay(20);
-  assert.equal(
-    peer.events().some((event) => event.method === "stdin-resumed"),
-    false,
-    "Cancellation should happen during actual backpressure",
-  );
-  const stopping = await f.engine.observe(caller, first.run.runId, 0);
-  assert.equal(stopping.run.status, "cancelling", JSON.stringify(stopping));
+  let first, second;
+  try {
+    await until(
+      () => peer.events().some((event) => event.method === "stdin-paused"),
+      "The real MCP fixture must pause stdin",
+    );
+    first = await f.start(
+      'return await mcp.fixture.tools["echo-value"]({ value: 61, waitMs: 3000, padding: "x".repeat(1024 * 1024) });',
+      { waitMs: 0 },
+    );
+    await until(
+      () =>
+        f.store
+          .operationsForRun(first.run.runId)
+          .some((operation) => operation.status === "running"),
+      "The first operation must enter its pipe write",
+    );
+    second = await f.start(
+      'return await mcp.fixture.tools["echo-value"]({ value: 62 });',
+      { waitMs: 0 },
+    );
+    await until(
+      () =>
+        f.store
+          .operationsForRun(second.run.runId)
+          .some((operation) => operation.status === "running"),
+      "The second operation must join the transport queue",
+    );
+    f.engine.cancel(caller, second.run.runId);
+    f.engine.cancel(caller, first.run.runId);
+    assert.equal(
+      peer.events().some((event) => event.method === "stdin-resumed"),
+      false,
+      "Cancellation should happen during actual backpressure",
+    );
+    const stopping = await f.engine.observe(caller, first.run.runId, 0);
+    assert.equal(stopping.run.status, "cancelling", JSON.stringify(stopping));
+  } finally {
+    writeFileSync(stdinReleaseFile, "release");
+  }
   const cancelledFirst = await f.finish(first.run.runId),
     cancelledSecond = await f.finish(second.run.runId);
   assert.equal(cancelledFirst.run.status, "cancelled");

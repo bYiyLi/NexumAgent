@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import {
   mkdtempSync,
   mkdirSync,
@@ -74,8 +74,8 @@ async function fixture(t) {
   const gitEnvironment = {
     ...environment.variables,
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_SYSTEM: devNull,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
     GIT_OPTIONAL_LOCKS: "0",
     LC_ALL: "C",
   };
@@ -143,6 +143,27 @@ test("construction is cold and does not initialize files or launch Git", async (
   assert.equal(existsSync(missing), false);
   assert.equal(existsSync(path.join(f.work, ".git")), false);
   assert.equal(existsSync(path.join(f.root, "state")), false);
+});
+
+test("real Git accepts its portable null path for isolated config and attributes on every platform", async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.git(["config", "--global", "--list"]), "");
+  assert.equal(f.git(["config", "--system", "--list"]), "");
+  f.put("docs/README.md", "portable Git snapshot");
+  const result = await f.service().initialize();
+  assert.equal(result.status, "committed", JSON.stringify(result));
+  assert.equal(f.git(["rev-parse", "HEAD"]).trim(), result.commit);
+  assert.equal(
+    f.git([
+      "-c",
+      "core.attributesFile=/dev/null",
+      "check-attr",
+      "--all",
+      "--",
+      "docs/README.md",
+    ]),
+    "",
+  );
 });
 
 test("initialization creates an independent local snapshot of only the fixed allowed files", async (t) => {

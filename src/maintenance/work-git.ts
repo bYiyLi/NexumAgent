@@ -10,7 +10,6 @@ import {
   realpath,
   rm,
 } from "node:fs/promises";
-import { devNull } from "node:os";
 import path from "node:path";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
@@ -23,6 +22,9 @@ import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
 
 const day = 24 * 60 * 60_000;
 const maximumOutput = 4 * 1024 * 1024;
+// Git documents /dev/null for disabled config; Git for Windows maps it to NUL.
+// Node's Windows device-path spelling is not accepted by Git.
+const gitNullPath = "/dev/null";
 const roots = [
   ".gitignore",
   "package.json",
@@ -151,8 +153,8 @@ function gitEnvironment(snapshot: EnvironmentSnapshot): Record<string, string> {
   }
   Object.assign(result, {
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_SYSTEM: devNull,
-    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_SYSTEM: gitNullPath,
+    GIT_CONFIG_GLOBAL: gitNullPath,
     GIT_TERMINAL_PROMPT: "0",
     GIT_OPTIONAL_LOCKS: "0",
     GIT_NO_LAZY_FETCH: "1",
@@ -171,7 +173,7 @@ function safeOptions(attempt: Attempt): string[] {
     "-c",
     "core.fsmonitor=false",
     "-c",
-    `core.attributesFile=${devNull}`,
+    `core.attributesFile=${gitNullPath}`,
     "-c",
     "commit.gpgSign=false",
     "-c",
