@@ -506,26 +506,55 @@ test("native npm cancellation waits for the actual install-script descendant tre
     pidFile = path.join(f.root, "install-child.pid");
   f.env.NPM_FIXTURE_INSTALL_HOLD = pidFile;
   const pending = f.apply("packages.install", candidate);
-  void pending.catch(() => {});
-  const deadline = Date.now() + 5000;
-  while (!existsSync(pidFile) && Date.now() < deadline) await delay(20);
-  assert.equal(
-    existsSync(pidFile),
-    true,
-    "The real install script must have spawned its descendant before cancellation.",
+  let outcome;
+  void pending.then(
+    () => {
+      outcome = { state: "completed" };
+    },
+    (error) => {
+      outcome = { state: "failed", code: error.code, message: error.message };
+    },
   );
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  process.kill(pid, 0);
-  f.controller.abort(new Error("fixture independent execution cancelled"));
-  await assert.rejects(pending, { code: "maintenance_cancelled" });
-  assert.equal(f.snapshots.length, 0);
-  assert.throws(
-    () => process.kill(pid, 0),
-    (error) => error.code === "ESRCH",
-  );
-  await f.modules.withPackageChanges(() =>
-    f.extensions.withPackageChanges(async () => {}),
-  );
+  try {
+    const deadline = performance.now() + 60000;
+    let pid;
+    while (true) {
+      if (existsSync(pidFile)) {
+        const value = Number(readFileSync(pidFile, "utf8").trim());
+        if (Number.isSafeInteger(value) && value > 0) {
+          pid = value;
+          break;
+        }
+      }
+      assert.equal(
+        outcome,
+        undefined,
+        `The original native install ended before its child was ready: ${JSON.stringify(outcome)}`,
+      );
+      assert.ok(
+        performance.now() < deadline,
+        `The real install script did not register its descendant; registryRequests=${f.requests()}, installMarker=${existsSync(f.marker)}`,
+      );
+      await delay(20);
+    }
+    process.kill(pid, 0);
+    f.controller.abort(new Error("fixture independent execution cancelled"));
+    await assert.rejects(pending, { code: "maintenance_cancelled" });
+    assert.equal(f.snapshots.length, 0);
+    assert.throws(
+      () => process.kill(pid, 0),
+      (error) => error.code === "ESRCH",
+    );
+    await f.modules.withPackageChanges(() =>
+      f.extensions.withPackageChanges(async () => {}),
+    );
+  } finally {
+    // Failed readiness must also stop the actual installer/tree before fixture
+    // storage and its local registry are removed.
+    if (!f.controller.signal.aborted)
+      f.controller.abort(new Error("fixture native install cleanup"));
+    await pending.catch(() => {});
+  }
 });
 
 test("a changed lock after native evaluation withdraws affected SDKs and requires a real restart", async (t) => {
