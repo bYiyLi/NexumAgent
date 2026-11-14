@@ -238,7 +238,7 @@ test("executable lookup uses each call cwd and its fixed PATH rather than Agent 
   assert.equal(one.kind, windows ? "batch" : "native");
   assert.equal(
     one.launchPath,
-    path.join(first, "bin", windows ? "example-tool.cmd" : "example-tool"),
+    path.join(first, "bin", windows ? "example-tool.CMD" : "example-tool"),
   );
   if (!windows) {
     const alias = path.join(first, "bin", "alias-node");
