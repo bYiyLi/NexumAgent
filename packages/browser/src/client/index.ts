@@ -659,10 +659,11 @@ function management(
       remove: (id: string) => call<void>("bookmarks.remove", { id }),
     },
     getAuditTrail: (o?: { limit?: number; cursor?: string }) =>
-      call<{ changes: t.ManagementAuditEntry[]; nextCursor?: string }>(
-        "getAuditTrail",
-        { options: opts("getAuditTrail", o) },
-      ),
+      call<{
+        changes: t.ManagementAuditEntry[];
+        nextCursor?: string;
+        truncated: boolean;
+      }>("getAuditTrail", { options: opts("getAuditTrail", o) }),
   });
 }
 function makeBrowser(router: Router, value: t.BrowserInfo): t.Browser {

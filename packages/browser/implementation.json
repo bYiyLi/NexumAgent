@@ -10,7 +10,7 @@
     "members": 148,
     "extraMembers": 102
   },
-  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前250项仍未逐项完成该矩阵，局部原生通过不将其标为通过。",
+  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前250项仍未逐项完成该矩阵，局部原生通过不将其标为通过。nativeCases 只关联仓库中按 coverage 标明范围的用例定义，不代表该成员的权限、失效、取消或支持平台矩阵已全部验收；实际执行版本与结果由开发记录维护。",
   "registeredNativeRoutes": [
     "tabs.list",
     "tabs.get",
@@ -1125,127 +1125,148 @@
       "id": "X016",
       "target": "selectedBrowser.windows.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X017",
       "target": "selectedBrowser.windows.getAll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X018",
       "target": "selectedBrowser.windows.create",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X019",
       "target": "selectedBrowser.windows.update",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state", "native-organization-scope"]
     },
     {
       "id": "X020",
       "target": "selectedBrowser.tabs.query",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X021",
       "target": "selectedBrowser.tabs.move",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X022",
       "target": "selectedBrowser.tabs.update",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X023",
       "target": "selectedBrowser.tabs.group",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X024",
       "target": "selectedBrowser.tabs.ungroup",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X025",
       "target": "selectedBrowser.tabs.close",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X026",
       "target": "selectedBrowser.tabGroups.query",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X027",
       "target": "selectedBrowser.tabGroups.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X028",
       "target": "selectedBrowser.tabGroups.update",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state", "native-organization-scope"]
     },
     {
       "id": "X029",
       "target": "selectedBrowser.tabGroups.move",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X030",
       "target": "selectedBrowser.bookmarks.search",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X031",
       "target": "selectedBrowser.bookmarks.getTree",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X032",
       "target": "selectedBrowser.bookmarks.create",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X033",
       "target": "selectedBrowser.bookmarks.update",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X034",
       "target": "selectedBrowser.bookmarks.move",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X035",
       "target": "selectedBrowser.bookmarks.remove",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X036",
       "target": "selectedBrowser.management.getAuditTrail",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     },
     {
       "id": "X037",
@@ -1641,7 +1662,8 @@
       "id": "X102",
       "target": "selectedBrowser.management.tabs.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-organization-state"]
     }
   ],
   "componentEvidence": {
@@ -1675,5 +1697,17 @@
     "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
     "高阶资产、站点导出、用户接管及可视化的完整真实环境、格式与失效路径验收",
     "正式公共协议包、npm/browser制品发行与端到端Host媒体交付"
-  ]
+  ],
+  "nativeScenarios": {
+    "native-organization-state": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native window/tab/group/bookmark management exposes and changes actual isolated browser state",
+      "coverage": ["normal", "result"]
+    },
+    "native-organization-scope": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native organization mutations cannot alter a window or group whose member is controlled by another run",
+      "coverage": ["scope_conflict"]
+    }
+  }
 }

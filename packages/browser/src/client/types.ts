@@ -399,6 +399,9 @@ export interface BrowserTab {
   active: boolean;
   windowId?: string;
   groupId?: string;
+  index?: number;
+  pinned?: boolean;
+  muted?: boolean;
 }
 export interface SnapshotNode {
   ref: ElementRef;
@@ -601,7 +604,11 @@ export interface ManagementCapability {
   getAuditTrail(options?: {
     limit?: number;
     cursor?: string;
-  }): Promise<{ changes: ManagementAuditEntry[]; nextCursor?: string }>;
+  }): Promise<{
+    changes: ManagementAuditEntry[];
+    nextCursor?: string;
+    truncated: boolean;
+  }>;
 }
 export type PageAssetKind =
   "other" | "script" | "font" | "image" | "stylesheet" | "video";

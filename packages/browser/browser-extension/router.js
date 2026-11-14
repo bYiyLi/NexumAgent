@@ -158,6 +158,10 @@ const nativeTab = (ctx, tab) => ({
   url: tab.url ?? "",
   active: !!tab.active,
   windowId: String(tab.windowId),
+  ...fields(tab, ["index", "pinned"]),
+  ...(typeof tab.mutedInfo?.muted === "boolean"
+    ? { muted: tab.mutedInfo.muted }
+    : {}),
   ...(tab.groupId >= 0 ? { groupId: String(tab.groupId) } : {}),
 });
 const nativeWindow = (ctx, window) => ({
@@ -1514,7 +1518,8 @@ export function createBrowserRouter(
     eventBytes = 0,
     eventTruncated = false,
     dialogSequence = 0,
-    auditSequence = 0;
+    auditSequence = 0,
+    auditTruncated = false;
   const target = (tabId, lease) => ({
     ...fields(binding ?? {}, targetFields),
     ...(tabId === undefined
@@ -1841,6 +1846,133 @@ export function createBrowserRouter(
     for (const child of children.values())
       if (child.tabId === tabId) child.active = false;
     await persist();
+  };
+  const auditBudget = 10 * 1024 * 1024;
+  const auditEpoch = crypto.randomUUID();
+  const auditSizes = new WeakMap();
+  let auditBytes = 2;
+  const auditUrl = (value) => {
+    try {
+      const url = new URL(value);
+      return ["http:", "https:", "chrome:", "edge:", "about:"].includes(
+        url.protocol,
+      )
+        ? publicUrl(value)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const managementBefore = async (ctx, args) => {
+    const [, namespace, method] = ctx.method.split("."),
+      before = {};
+    let tabs = [];
+    if (namespace === "windows") {
+      if (method === "update") {
+        const window = await chrome.windows.get(nativeId(args.id), {
+          populate: true,
+        });
+        before.windows = [nativeWindow(ctx, { ...window, tabs: undefined })];
+        tabs =
+          window.tabs ?? (await chrome.tabs.query({ windowId: window.id }));
+      } else if (options(args).tabId !== undefined)
+        tabs = [await chrome.tabs.get(nativeId(options(args).tabId))];
+    } else if (namespace === "tabs") {
+      const ids =
+        method === "group"
+          ? arrayIds(options(args).tabIds)
+          : method === "ungroup"
+            ? arrayIds(args.ids ?? args.tabIds)
+            : [tabIdOf(ctx, args)];
+      tabs = await Promise.all(ids.map((id) => chrome.tabs.get(id)));
+      const groupIds = new Set(
+        tabs.filter((tab) => tab.groupId >= 0).map((tab) => tab.groupId),
+      );
+      if (method === "group" && options(args).groupId !== undefined)
+        groupIds.add(nativeId(options(args).groupId));
+      if (groupIds.size)
+        before.groups = await Promise.all(
+          [...groupIds].map(async (id) =>
+            nativeGroup(await chrome.tabGroups.get(id)),
+          ),
+        );
+    } else if (namespace === "tabGroups") {
+      const group = await chrome.tabGroups.get(nativeId(args.id));
+      before.groups = [nativeGroup(group)];
+      tabs = await chrome.tabs.query({ groupId: group.id });
+    } else if (namespace === "bookmarks" && method !== "create") {
+      const nodes = await chrome.bookmarks.get(text(args.id, 256));
+      before.bookmarks = nodes.map((node) => {
+        const value = fields(node, ["id", "parentId", "index", "title"]),
+          url = auditUrl(node.url);
+        if (url !== undefined) value.url = url;
+        return value;
+      });
+    }
+    if (tabs.length)
+      before.tabs = tabs.map((tab) => {
+        const value = nativeTab(ctx, tab),
+          url = auditUrl(tab.url);
+        if (url === undefined) delete value.url;
+        else value.url = url;
+        return value;
+      });
+    requireValue(
+      encoder.encode(JSON.stringify(before)).byteLength <= auditBudget,
+      "OUTPUT_TOO_LARGE",
+      "The management snapshot exceeds its audit budget.",
+    );
+    ctx.signal?.throwIfAborted();
+    return before;
+  };
+  const trimAudit = () => {
+    while (
+      auditEntries.length &&
+      (auditEntries.length > 1000 ||
+        auditEntries[0].createdAt < clock() - 7 * 86400000 ||
+        auditBytes > auditBudget)
+    ) {
+      const removed = auditEntries.shift();
+      auditBytes -= auditSizes.get(removed) + (auditEntries.length ? 1 : 0);
+      auditSizes.delete(removed);
+      auditTruncated = true;
+    }
+  };
+  const appendAudit = (ctx, before, value, outcome, previous) => {
+    const [, namespace, method] = ctx.method.split(".");
+    const changedIds =
+      outcome !== "confirmed"
+        ? []
+        : namespace === "tabs"
+          ? (before.tabs ?? []).map((tab) => tab.tabId)
+          : value?.id !== undefined
+            ? [String(value.id)]
+            : namespace === "bookmarks"
+              ? (before.bookmarks ?? []).map((node) => node.id)
+              : [];
+    const entry = previous ?? {
+      id: `change_${++auditSequence}`,
+      createdAt: clock(),
+      runId: ctx.runId,
+      operationId: ctx.operationId,
+      namespace,
+      method,
+      before,
+    };
+    entry.changedIds = [...new Set(changedIds)];
+    entry.outcome = outcome;
+    if (!previous) {
+      auditEntries.push(entry);
+      const size = encoder.encode(JSON.stringify(entry)).byteLength;
+      auditBytes += size + (auditEntries.length > 1 ? 1 : 0);
+      auditSizes.set(entry, size);
+    } else if (auditSizes.has(entry)) {
+      const size = encoder.encode(JSON.stringify(entry)).byteLength;
+      auditBytes += size - auditSizes.get(entry);
+      auditSizes.set(entry, size);
+    }
+    trimAudit();
+    return entry;
   };
   const router = {
     followSessionTab: true,
@@ -2533,6 +2665,13 @@ export function createBrowserRouter(
         tabId: input.target.tabId,
       });
       const namespaceCache = new Map();
+      const audited =
+        definition.mutating && input.method.startsWith("management.");
+      const [, managementNamespace, managementMethod] = input.method.split(".");
+      let managementHandling = false,
+        managementDispatched = false,
+        managementSnapshot = {},
+        managementEntry;
       const observedChrome = new Proxy(chrome, {
         get(source, key) {
           const value = Reflect.get(source, key);
@@ -2545,7 +2684,32 @@ export function createBrowserRouter(
                   const member = Reflect.get(namespace, method);
                   return typeof member === "function"
                     ? (...args) => {
+                        const nativeMutation =
+                          audited &&
+                          managementHandling &&
+                          key === managementNamespace &&
+                          method ===
+                            (managementMethod === "close"
+                              ? "remove"
+                              : managementMethod);
+                        if (nativeMutation) actionSignal.throwIfAborted();
                         onDispatch();
+                        if (nativeMutation) {
+                          actionSignal.throwIfAborted();
+                          managementEntry ??= appendAudit(
+                            ctx,
+                            managementSnapshot,
+                            undefined,
+                            "unknown",
+                          );
+                          actionSignal.throwIfAborted();
+                          requireValue(
+                            performance.now() - ctx.started < ctx.budgetMs,
+                            "TIMEOUT",
+                            "The management action budget expired before native dispatch.",
+                          );
+                          managementDispatched = true;
+                        }
                         return Reflect.apply(member, namespace, args);
                       }
                     : member;
@@ -2573,60 +2737,60 @@ export function createBrowserRouter(
       const perform = async () => {
         active(lease);
         actionSignal.throwIfAborted();
-        if (
-          definition.mutating &&
-          ![
-            "tab.markHandoff",
-            "tabs.createTemporary",
-            "tabs.closeTemporary",
-          ].includes(input.method) &&
-          !lease.temporaryTabs?.has(nativeId(input.target.tabId ?? "0")) &&
-          !visual &&
-          router.followSessionTab &&
-          input.target.tabId !== undefined
-        )
-          await observedChrome.tabs.update(nativeId(input.target.tabId), {
-            active: true,
-          });
-        if (
-          visual &&
-          definition.mutating &&
-          input.target.tabId !== undefined &&
-          !lease.temporaryTabs?.has(nativeId(input.target.tabId)) &&
-          ![
-            "tab.markHandoff",
-            "tab.resumeUserControl",
-            "tabs.closeTemporary",
-          ].includes(input.method)
-        )
-          await router.prepareVisual(ctx);
-        actionSignal.throwIfAborted();
-        const value = await definition.handle(ctx, input.args ?? {});
-        actionSignal.throwIfAborted();
-        if (definition.mutating && input.method.startsWith("management.")) {
-          auditEntries.push({
-            id: `change_${++auditSequence}`,
-            createdAt: clock(),
-            runId: input.runId,
-            operationId: input.operationId,
-            namespace: input.method.split(".")[1],
-            method: input.method.split(".")[2],
-            before: {},
-            changedIds: value?.id
-              ? [String(value.id)]
-              : value?.groupId
-                ? [String(value.groupId)]
-                : [],
-            outcome: "confirmed",
-          });
-          while (
-            auditEntries.length > 1000 ||
-            auditEntries[0]?.createdAt < clock() - 7 * 86400000 ||
-            encoder.encode(JSON.stringify(auditEntries)).byteLength >
-              10 * 1024 * 1024
+        let before = {},
+          value;
+        try {
+          if (audited)
+            before = managementSnapshot = await managementBefore(
+              ctx,
+              input.args ?? {},
+            );
+          if (
+            definition.mutating &&
+            ![
+              "tab.markHandoff",
+              "tabs.createTemporary",
+              "tabs.closeTemporary",
+            ].includes(input.method) &&
+            !lease.temporaryTabs?.has(nativeId(input.target.tabId ?? "0")) &&
+            !visual &&
+            router.followSessionTab &&
+            input.target.tabId !== undefined
           )
-            auditEntries.shift();
+            await observedChrome.tabs.update(nativeId(input.target.tabId), {
+              active: true,
+            });
+          if (
+            visual &&
+            definition.mutating &&
+            input.target.tabId !== undefined &&
+            !lease.temporaryTabs?.has(nativeId(input.target.tabId)) &&
+            ![
+              "tab.markHandoff",
+              "tab.resumeUserControl",
+              "tabs.closeTemporary",
+            ].includes(input.method)
+          )
+            await router.prepareVisual(ctx);
+          actionSignal.throwIfAborted();
+          managementHandling = true;
+          value = await definition.handle(ctx, input.args ?? {});
+        } catch (cause) {
+          if (audited)
+            appendAudit(
+              ctx,
+              before,
+              undefined,
+              managementDispatched ? "unknown" : "failed",
+              managementEntry,
+            );
+          throw cause;
+        } finally {
+          managementHandling = false;
         }
+        if (audited)
+          appendAudit(ctx, before, value, "confirmed", managementEntry);
+        actionSignal.throwIfAborted();
         return value;
       };
       const nonBlocking =
@@ -4268,19 +4432,42 @@ export function createBrowserRouter(
         .map(({ tabId: _, ...entry }) => entry);
     },
     audit(input) {
-      const limit = input.limit ?? 100,
-        cursor = input.cursor === undefined ? 0 : Number(input.cursor);
+      trimAudit();
+      const limit = input.limit ?? 100;
+      let cursor = auditSequence + 1;
+      if (input.cursor !== undefined) {
+        const parts =
+          typeof input.cursor === "string"
+            ? /^([0-9a-f-]{36}):(0|[1-9][0-9]*)$/.exec(input.cursor)
+            : null;
+        requireValue(
+          parts,
+          "INVALID_ARGUMENT",
+          "Use the returned audit cursor to continue this history.",
+        );
+        requireValue(
+          parts[1] === auditEpoch,
+          "STALE_REF",
+          "The audit cursor belongs to another browser history instance.",
+        );
+        cursor = Number(parts[2]);
+      }
       requireValue(
         Number.isInteger(limit) &&
           limit >= 1 &&
           limit <= 100 &&
-          Number.isInteger(cursor) &&
+          Number.isSafeInteger(cursor) &&
           cursor >= 0,
       );
+      const entries = auditEntries
+        .filter((entry) => Number(entry.id.slice(7)) < cursor)
+        .reverse();
+      const changes = entries.slice(0, limit);
       return {
-        changes: auditEntries.slice(cursor, cursor + limit),
-        ...(cursor + limit < auditEntries.length
-          ? { nextCursor: String(cursor + limit) }
+        changes,
+        truncated: auditTruncated,
+        ...(entries.length > limit
+          ? { nextCursor: `${auditEpoch}:${changes.at(-1).id.slice(7)}` }
           : {}),
       };
     },

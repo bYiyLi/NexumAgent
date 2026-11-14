@@ -177,22 +177,37 @@ test(
     const result = await f.run(
       select +
         `
- const management=selected.management,created=await management.windows.create({focused:false,width:800,height:600});
- const windows=await selected.windows.getAll({populate:true});const initialTabs=await management.tabs.query({windowId:created.id});if(initialTabs.length!==1)throw Error("Native created window did not contain one tab");
- const extra=await selected.tabs.new(context.input.base+"#managed",{active:false});await management.tabs.move(extra.id,{windowId:created.id,index:-1});
- const group=await management.tabs.group({tabIds:[initialTabs[0].tabId,extra.id],createProperties:{windowId:created.id}});await management.tabGroups.update(group.groupId,{title:"Native group",color:"blue",collapsed:false});
- const observedGroup=await management.tabGroups.get(group.groupId),groups=await selected.tabGroups.query({title:"Native group"});await management.tabGroups.move(group.groupId,{index:0});await management.tabs.ungroup([extra.id]);
- await management.tabs.update(extra.id,{pinned:true});const pinned=await management.tabs.query({windowId:created.id,pinned:true});const moved=await management.tabs.get(extra.id);
- const folder=await management.bookmarks.create({title:"Nexum native folder"}),destination=await management.bookmarks.create({title:"Nexum native destination"});
- const bookmark=await management.bookmarks.create({parentId:folder.id,title:"Native bookmark",url:context.input.base});await management.bookmarks.update(bookmark.id,{title:"Native updated bookmark"});await management.bookmarks.move(bookmark.id,{parentId:destination.id,index:0});
- const found=await management.bookmarks.search("Native updated bookmark"),tree=await management.bookmarks.getTree();const flattened=[];const visit=node=>{flattened.push(node);for(const child of node.children??[])visit(child);};for(const node of tree)visit(node);
- await management.bookmarks.remove(bookmark.id);await management.bookmarks.remove(folder.id);await management.bookmarks.remove(destination.id);const removed=await management.bookmarks.search("Native updated bookmark");
- const audit=await management.getAuditTrail({limit:100});await extra.close();await management.tabs.close(initialTabs[0].tabId);const after=await management.windows.list();
- return {createdObserved:windows.some(value=>value.id===created.id),group:{title:observedGroup.title,color:observedGroup.color,found:groups.some(value=>value.id===group.groupId)},pinned:pinned.some(value=>value.tabId===extra.id),moved:moved.windowId===created.id,bookmark:found.some(value=>value.id===bookmark.id&&value.parentId===destination.id),tree:flattened.some(value=>value.id===bookmark.id),removed:removed.length,windowClosed:!after.some(value=>value.id===created.id),auditNamespaces:[...new Set(audit.changes.map(value=>value.namespace))].sort()};
+ const management=selected.management,created=await selected.windows.create({focused:false,width:800,height:600});
+ const windows=await selected.windows.getAll({populate:true});const initialTabs=await selected.tabs.query({windowId:created.id});if(initialTabs.length!==1)throw Error("Native created window did not contain one tab");
+ const resized=await selected.windows.update(created.id,{width:840,height:640});
+ const extra=await selected.tabs.new(context.input.base+"#managed",{active:false});const originalTab=await management.tabs.get(extra.id);await selected.tabs.move(extra.id,{windowId:created.id,index:-1});
+ const group=await selected.tabs.group({tabIds:[initialTabs[0].tabId,extra.id],createProperties:{windowId:created.id}}),originalGroup=await selected.tabGroups.get(group.groupId);await selected.tabGroups.update(group.groupId,{title:"Native group",color:"blue",collapsed:false});
+ const observedGroup=await management.tabGroups.get(group.groupId),groups=await selected.tabGroups.query({title:"Native group"});await selected.tabGroups.move(group.groupId,{index:0});await selected.tabs.ungroup([extra.id]);
+ await selected.tabs.update(extra.id,{pinned:true});const pinned=await selected.tabs.query({windowId:created.id,pinned:true});const moved=await management.tabs.get(extra.id);
+ const folder=await selected.bookmarks.create({title:"Nexum native folder"}),destination=await selected.bookmarks.create({title:"Nexum native destination"});
+ const bookmark=await selected.bookmarks.create({parentId:folder.id,title:"Native bookmark",url:context.input.base+'?audit-secret=private#private'});await selected.bookmarks.update(bookmark.id,{title:"Native updated bookmark"});await selected.bookmarks.move(bookmark.id,{parentId:destination.id,index:0});
+ const found=await selected.bookmarks.search("Native updated bookmark"),tree=await selected.bookmarks.getTree();const flattened=[];const visit=node=>{flattened.push(node);for(const child of node.children??[])visit(child);};for(const node of tree)visit(node);
+ await selected.bookmarks.remove(bookmark.id);await selected.bookmarks.remove(folder.id);await selected.bookmarks.remove(destination.id);const removed=await selected.bookmarks.search("Native updated bookmark");
+ await extra.close();await selected.tabs.close(initialTabs[0].tabId);const after=await selected.windows.list(),audit=await management.getAuditTrail({limit:100}),firstPage=await management.getAuditTrail({limit:2}),secondPage=await management.getAuditTrail({limit:2,cursor:firstPage.nextCursor});
+ return {createdObserved:windows.some(value=>value.id===created.id),group:{title:observedGroup.title,color:observedGroup.color,found:groups.some(value=>value.id===group.groupId)},pinned:pinned.some(value=>value.tabId===extra.id),moved:moved.windowId===created.id,bookmark:found.some(value=>value.id===bookmark.id&&value.parentId===destination.id),tree:flattened.some(value=>value.id===bookmark.id),removed:removed.length,windowClosed:!after.some(value=>value.id===created.id),auditNamespaces:[...new Set(audit.changes.map(value=>value.namespace))].sort(),audit,firstPage,secondPage,originalTab,originalGroup,created,resized,extraId:extra.id,closedId:initialTabs[0].tabId,bookmarkId:bookmark.id,destinationId:destination.id};
  `,
       { base: f.base },
     );
-    assert.deepEqual(result.result.data, {
+    const {
+      audit,
+      firstPage,
+      secondPage,
+      originalTab,
+      originalGroup,
+      created,
+      resized,
+      extraId,
+      closedId,
+      bookmarkId,
+      destinationId,
+      ...observed
+    } = result.result.data;
+    assert.deepEqual(observed, {
       createdObserved: true,
       group: { title: "Native group", color: "blue", found: true },
       pinned: true,
@@ -203,6 +218,131 @@ test(
       windowClosed: true,
       auditNamespaces: ["bookmarks", "tabGroups", "tabs", "windows"],
     });
+    assert.equal(resized.width, 840);
+    assert.equal(resized.height, 640);
+    const entry = (namespace, method, id) =>
+      audit.changes.find(
+        (value) =>
+          value.namespace === namespace &&
+          value.method === method &&
+          value.changedIds.includes(id),
+      );
+    const beforeWindow = entry(
+      "windows",
+      "update",
+      created.id,
+    ).before.windows.find((value) => value.id === created.id);
+    assert.equal(beforeWindow.width, created.width);
+    assert.equal(beforeWindow.height, created.height);
+    assert.equal(
+      entry("tabs", "move", extraId).before.tabs.find(
+        (value) => value.tabId === extraId,
+      ).windowId,
+      originalTab.windowId,
+    );
+    assert.equal(
+      entry("tabs", "update", extraId).before.tabs.find(
+        (value) => value.tabId === extraId,
+      ).pinned,
+      false,
+    );
+    assert.equal(
+      entry("tabGroups", "update", originalGroup.id).before.groups.find(
+        (value) => value.id === originalGroup.id,
+      ).color,
+      originalGroup.color,
+    );
+    const removedBookmark = entry(
+      "bookmarks",
+      "remove",
+      bookmarkId,
+    ).before.bookmarks.find((value) => value.id === bookmarkId);
+    assert.equal(removedBookmark.parentId, destinationId);
+    assert.equal(removedBookmark.title, "Native updated bookmark");
+    assert.equal(removedBookmark.url, f.base);
+    assert.equal(
+      entry("tabs", "close", closedId).before.tabs.find(
+        (value) => value.tabId === closedId,
+      ).tabId,
+      closedId,
+    );
+    assert.equal(JSON.stringify(audit).includes("audit-secret"), false);
+    assert.equal(audit.truncated, false);
+    assert.equal(firstPage.changes.length, 2);
+    assert.equal(secondPage.changes.length, 2);
+    assert.deepEqual(
+      [...firstPage.changes, ...secondPage.changes].map((value) => value.id),
+      audit.changes.slice(0, 4).map((value) => value.id),
+    );
+  },
+);
+
+test(
+  "native organization mutations cannot alter a window or group whose member is controlled by another run",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await nativeFixture(t, { html });
+    const setup = await f.run(
+      select +
+        `const extra=await selected.tabs.new(context.input.base+'?other',{active:false});const group=await selected.tabs.group({tabIds:[tab.id,extra.id]});const before=await selected.tabGroups.get(group.groupId);const window=(await selected.windows.getAll()).find(value=>value.id===before.windowId);return {group:before,window};`,
+      { base: f.base },
+    );
+    let held = await f.start(
+      select +
+        `await tab.playwright.waitForURL(context.input.base+'not-navigated',{timeoutMs:60000});`,
+      { base: f.base },
+      { timeoutMs: 90000 },
+    );
+    try {
+      const until = performance.now() + 10000;
+      while (
+        !held.operations.items.some(
+          (value) => value.method === "playwright.waitForURL",
+        )
+      ) {
+        assert.equal(held.run.endedAt, null, JSON.stringify(held));
+        assert.ok(
+          performance.now() < until,
+          "The original native waiter never became active.",
+        );
+        held = await f.observe(held.run.runId, 50);
+      }
+      const checked = await f.run(
+        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.getDefault(),failure=async action=>{try{await action();return null;}catch(error){return error.code;}};const group=await failure(()=>selected.tabGroups.update(context.input.group.id,{title:'Must not change',color:'red'})),window=await failure(()=>selected.windows.update(context.input.window.id,{width:840}));return {group,window,actualGroup:await selected.tabGroups.get(context.input.group.id),actualWindow:(await selected.windows.getAll()).find(value=>value.id===context.input.window.id),audit:await selected.management.getAuditTrail({limit:10})};`,
+        setup.result.data,
+      );
+      const value = checked.result.data;
+      t.diagnostic(
+        JSON.stringify({
+          groupError: value.group,
+          windowError: value.window,
+          originalColor: setup.result.data.group.color,
+          actualColor: value.actualGroup.color,
+          originalWidth: setup.result.data.window.width,
+          actualWidth: value.actualWindow.width,
+        }),
+      );
+      assert.equal(value.group, "TAB_ALREADY_CLAIMED");
+      assert.equal(value.window, "TAB_ALREADY_CLAIMED");
+      assert.deepEqual(value.actualGroup, setup.result.data.group);
+      assert.equal(value.actualWindow.width, setup.result.data.window.width);
+      assert.equal(
+        checked.operations.items.filter(
+          (entry) =>
+            entry.method.startsWith("management.") && entry.status === "failed",
+        ).length,
+        2,
+      );
+    } finally {
+      f.cancel(held.run.runId);
+      const until = performance.now() + 5000;
+      do {
+        held = await f.observe(held.run.runId, 50);
+        if (held.run.endedAt !== null) break;
+      } while (performance.now() < until);
+    }
+    assert.equal(held.run.status, "cancelled");
+    assert.notEqual(held.run.endedAt, null);
   },
 );
 

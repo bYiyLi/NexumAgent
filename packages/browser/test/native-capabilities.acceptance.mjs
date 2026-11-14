@@ -34,8 +34,8 @@ test(
         try {
           state = await f.start(
             select +
-              `await tab.cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16});const tree=await tab.cdp.send('Page.getFrameTree');return await tab.cdp.send('Network.loadNetworkResource',{frameId:tree.frameTree.frame.id,url:context.input.base+'held-native',options:{disableCache:true,includeCredentials:true}});`,
-            { base: f.base },
+              `await tab.cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16});const tree=await tab.cdp.send('Page.getFrameTree');try{return await tab.cdp.send('Network.loadNetworkResource',{frameId:tree.frameTree.frame.id,url:context.input.base+'held-native',options:{disableCache:true,includeCredentials:true}});}catch(error){if(context.input.mode!=='deadline'||error.code!=='TIMEOUT')throw error;await new Promise(resolve=>setTimeout(resolve,250));}`,
+            { base: f.base, mode },
             { timeoutMs: mode === "deadline" ? 4000 : 15000 },
           );
           await Promise.race([
@@ -67,7 +67,14 @@ test(
             state.run.status,
             mode === "deadline" ? "failed" : "cancelled",
           );
-          assert.equal(state.run.stop.kind, mode);
+          // The browser action budget can finish just before Core's Run timer.
+          // Keep the script live briefly for that known TIMEOUT only; the actual
+          // Run deadline and native connection/input cleanup must still be proved.
+          assert.equal(
+            state.run.stop?.kind,
+            mode,
+            JSON.stringify({ run: state.run, operations: state.operations }),
+          );
           assert.deepEqual(state.run.cleanup.unconfirmed, []);
           const next = await f.run(
             select +

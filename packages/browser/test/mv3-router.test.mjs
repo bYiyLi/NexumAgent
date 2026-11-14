@@ -266,6 +266,7 @@ function fixture(t, config = {}) {
   };
   const router = createBrowserRouter(chrome, {
     emit: (value) => emitted.push(value),
+    ...(config.clock ? { clock: config.clock } : {}),
     ...(config.persistOwned ? { persistOwned: config.persistOwned } : {}),
     ...(config.visual ? { visual: config.visual } : {}),
   });
@@ -283,7 +284,13 @@ function fixture(t, config = {}) {
   const call = (
     method,
     args = {},
-    { leaseId = "lease", id = "1", runId = leaseId, signal } = {},
+    {
+      leaseId = "lease",
+      id = "1",
+      runId = leaseId,
+      signal,
+      budgetMs = 1000,
+    } = {},
   ) =>
     router.dispatch(
       {
@@ -295,7 +302,7 @@ function fixture(t, config = {}) {
         method,
         target: target(id),
         args: { ...(args.locator ? {} : { target: target(id) }), ...args },
-        budgetMs: 1000,
+        budgetMs,
       },
       signal,
     );
@@ -546,6 +553,324 @@ test("run locks reject conflicting management changes before any group mutation 
     f.calls.find((v) => v[0] === "tabs.group")[1].tabIds,
     [1, 2],
   );
+});
+
+test("management audit captures original metadata, exact changed IDs and failed or unknown native outcomes without retaining credentials", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.chrome.tabs.update(1, {
+    pinned: false,
+    index: 2,
+    mutedInfo: { muted: true },
+  });
+  const changed = await f.call("management.tabs.update", {
+    id: "1",
+    options: { pinned: true },
+  });
+  assert.equal(changed.pinned, true);
+  assert.equal(changed.index, 2);
+  assert.equal(changed.muted, true);
+  let audit = await f.call("management.getAuditTrail", {}, { id: null });
+  const entry = audit.changes[0];
+  assert.deepEqual(entry.changedIds, ["1"]);
+  assert.equal(entry.outcome, "confirmed");
+  assert.equal(entry.before.tabs[0].pinned, false);
+  assert.equal(entry.before.tabs[0].index, 2);
+  assert.equal(entry.before.tabs[0].muted, true);
+  assert.equal(entry.before.tabs[0].url, "https://example.com/path");
+  const update = f.chrome.tabs.update;
+  f.chrome.tabs.update = async (id, value) => {
+    const result = await update(id, value);
+    if (value.pinned !== undefined) throw Error("untrusted-native-error-input");
+    return result;
+  };
+  await assert.rejects(
+    f.call("management.tabs.update", { id: "1", options: { pinned: false } }),
+    /untrusted-native-error-input/,
+  );
+  await assert.rejects(
+    f.call("management.tabs.move", { id: "99", options: { index: 0 } }),
+    /No such tab/,
+  );
+  audit = await f.call("management.getAuditTrail", {}, { id: null });
+  assert.deepEqual(
+    audit.changes.map((value) => value.outcome),
+    ["failed", "unknown", "confirmed"],
+  );
+  assert.deepEqual(audit.changes[0].changedIds, []);
+  assert.deepEqual(audit.changes[1].changedIds, []);
+  assert.equal(audit.changes[1].before.tabs[0].pinned, true);
+  for (const secret of [
+    "user:pass",
+    "secret=1",
+    "#part",
+    "untrusted-native-error-input",
+  ])
+    assert.equal(JSON.stringify(audit).includes(secret), false);
+  for (const url of [
+    "https://user:pass@example.com/bookmark?secret=1#part",
+    "data:text/html,private-body",
+    "file:///private/local-file",
+  ]) {
+    f.chrome.bookmarks.get = async () => [
+      {
+        id: "owned",
+        parentId: "folder",
+        index: 1,
+        title: "Original bookmark",
+        url,
+      },
+    ];
+    f.chrome.bookmarks.remove = async () => {};
+    await f.call("management.bookmarks.remove", { id: "owned" }, { id: null });
+    const removed = await f.call(
+      "management.getAuditTrail",
+      { options: { limit: 1 } },
+      { id: null },
+    );
+    assert.equal(removed.changes[0].outcome, "confirmed");
+    assert.deepEqual(removed.changes[0].changedIds, ["owned"]);
+    assert.equal(
+      removed.changes[0].before.bookmarks[0].url,
+      url.startsWith("https:") ? "https://example.com/bookmark" : undefined,
+    );
+  }
+});
+
+test("pending management effects stay unknown until their native result arrives, while cancellation during observation cannot dispatch a late mutation", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  f.open("observer", null);
+  const entered = Promise.withResolvers(),
+    finish = Promise.withResolvers(),
+    observed = Promise.withResolvers(),
+    resume = Promise.withResolvers();
+  const update = f.chrome.tabs.update,
+    get = f.chrome.tabs.get;
+  let mutations = 0;
+  f.chrome.tabs.update = async (id, value) => {
+    if (value.pinned !== undefined) {
+      mutations++;
+      entered.resolve();
+      await finish.promise;
+    }
+    return update(id, value);
+  };
+  const stop = new AbortController();
+  const pending = f.call(
+    "management.tabs.update",
+    { id: "1", options: { pinned: true } },
+    { signal: stop.signal },
+  );
+  const rejected = assert.rejects(pending, { name: "AbortError" });
+  try {
+    await entered.promise;
+    const first = await f.call(
+      "management.getAuditTrail",
+      {},
+      { leaseId: "observer", id: null },
+    );
+    assert.equal(first.changes.length, 1);
+    assert.equal(first.changes[0].outcome, "unknown");
+    const entryId = first.changes[0].id;
+    stop.abort();
+    finish.resolve();
+    await rejected;
+    const settled = await f.call(
+      "management.getAuditTrail",
+      {},
+      { leaseId: "observer", id: null },
+    );
+    assert.equal(settled.changes.length, 1);
+    assert.equal(settled.changes[0].id, entryId);
+    assert.equal(settled.changes[0].outcome, "confirmed");
+    assert.equal((await get(1)).pinned, true);
+    f.chrome.tabs.get = async (id) => {
+      observed.resolve();
+      await resume.promise;
+      return get(id);
+    };
+    const stopBefore = new AbortController();
+    const blocked = f.call(
+      "management.tabs.update",
+      { id: "1", options: { pinned: false } },
+      { signal: stopBefore.signal },
+    );
+    const cancelled = assert.rejects(blocked, { name: "AbortError" });
+    await observed.promise;
+    stopBefore.abort();
+    resume.resolve();
+    await cancelled;
+    assert.equal(mutations, 1);
+    const after = await f.call(
+      "management.getAuditTrail",
+      {},
+      { leaseId: "observer", id: null },
+    );
+    assert.equal(after.changes[0].outcome, "failed");
+    assert.deepEqual(after.changes[0].changedIds, []);
+    await assert.rejects(
+      f.router.dispatch(
+        {
+          ...binding,
+          actionId: "observer-rejected",
+          operationId: "op-observer-rejected",
+          runId: "lease",
+          leaseId: "lease",
+          method: "management.tabs.update",
+          target: f.target(null),
+          args: { id: "1", options: { pinned: false } },
+          budgetMs: 1000,
+        },
+        undefined,
+        () => {
+          throw Error("The dispatch observer rejected the call.");
+        },
+      ),
+      /dispatch observer rejected/,
+    );
+    assert.equal(mutations, 1);
+    const rejectedBeforeNative = await f.call(
+      "management.getAuditTrail",
+      {},
+      { leaseId: "observer", id: null },
+    );
+    assert.equal(rejectedBeforeNative.changes[0].outcome, "failed");
+    f.chrome.tabs.get = async (id) => {
+      await delay(25);
+      return get(id);
+    };
+    await assert.rejects(
+      f.call(
+        "management.tabs.update",
+        { id: "1", options: { pinned: false } },
+        { budgetMs: 5 },
+      ),
+      { code: "TIMEOUT" },
+    );
+    assert.equal(mutations, 1);
+    const expiredBeforeNative = await f.call(
+      "management.getAuditTrail",
+      {},
+      { leaseId: "observer", id: null },
+    );
+    assert.equal(expiredBeforeNative.changes[0].outcome, "failed");
+  } finally {
+    finish.resolve();
+    resume.resolve();
+    await rejected;
+  }
+});
+
+test("management audit pages stay stable across new changes and report retention gaps on reads without another mutation", async (t) => {
+  let clock = 1000000000;
+  const f = fixture(t, { clock: () => clock });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease", null);
+  for (let i = 0; i < 1005; i++)
+    await f.call(
+      "management.bookmarks.create",
+      { options: { title: "Bounded audit" } },
+      { id: null },
+    );
+  const first = await f.call(
+    "management.getAuditTrail",
+    { options: { limit: 2 } },
+    { id: null },
+  );
+  assert.equal(first.truncated, true);
+  assert.deepEqual(
+    first.changes.map((value) => value.id),
+    ["change_1005", "change_1004"],
+  );
+  await f.call(
+    "management.bookmarks.create",
+    { options: { title: "After first page" } },
+    { id: null },
+  );
+  const next = await f.call(
+    "management.getAuditTrail",
+    { options: { limit: 2, cursor: first.nextCursor } },
+    { id: null },
+  );
+  assert.deepEqual(
+    next.changes.map((value) => value.id),
+    ["change_1003", "change_1002"],
+  );
+  for (const cursor of ["", "-1", "1e2", "01", " ", "9007199254740992", 1])
+    await assert.rejects(
+      f.call("management.getAuditTrail", { options: { cursor } }, { id: null }),
+      { code: "INVALID_ARGUMENT" },
+    );
+  const reopened = fixture(t, { clock: () => clock });
+  reopened.router.start();
+  reopened.router.bind(binding);
+  reopened.open("other", null);
+  await reopened.call(
+    "management.bookmarks.create",
+    { options: { title: "Another native history" } },
+    { leaseId: "other", id: null },
+  );
+  await assert.rejects(
+    reopened.call(
+      "management.getAuditTrail",
+      { options: { cursor: first.nextCursor } },
+      { leaseId: "other", id: null },
+    ),
+    { code: "STALE_REF" },
+  );
+  clock += 7 * 86400000 + 1;
+  const expired = await f.call("management.getAuditTrail", {}, { id: null });
+  assert.deepEqual(expired.changes, []);
+  assert.equal(expired.truncated, true);
+  assert.equal(expired.nextCursor, undefined);
+});
+
+test("management snapshots honor the existing byte retention budget and refuse an oversized before state before changing the browser", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const get = f.chrome.tabs.get;
+  let title = "T".repeat(128 * 1024);
+  f.chrome.tabs.get = async (id) => ({ ...(await get(id)), title });
+  for (let i = 0; i < 90; i++)
+    await f.call("management.tabs.update", {
+      id: "1",
+      options: { pinned: !!(i % 2) },
+    });
+  const audit = await f.call("management.getAuditTrail", {}, { id: null });
+  assert.equal(audit.truncated, true);
+  assert.ok(audit.changes.length > 0 && audit.changes.length < 90);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(audit.changes)) <= 10 * 1024 * 1024,
+  );
+  const before = f.calls.filter(
+    (value) => value[0] === "tabs.update" && value[2].pinned !== undefined,
+  ).length;
+  title = "T".repeat(11 * 1024 * 1024);
+  await assert.rejects(
+    f.call("management.tabs.update", { id: "1", options: { pinned: true } }),
+    { code: "OUTPUT_TOO_LARGE" },
+  );
+  assert.equal(
+    f.calls.filter(
+      (value) => value[0] === "tabs.update" && value[2].pinned !== undefined,
+    ).length,
+    before,
+  );
+  const refused = await f.call(
+    "management.getAuditTrail",
+    { options: { limit: 1 } },
+    { id: null },
+  );
+  assert.equal(refused.changes[0].outcome, "failed");
+  assert.deepEqual(refused.changes[0].before, {});
 });
 
 test("an attached native control stays owned until actual detach confirms cleanup; late attach cannot reopen a stopped lease", async (t) => {
