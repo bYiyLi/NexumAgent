@@ -16,8 +16,10 @@ test(
     for (const mode of ["cancel", "deadline"])
       await t.test(mode, async (t) => {
         const ready = Promise.withResolvers();
+        const closed = Promise.withResolvers();
         let response,
-          clientClosed = false;
+          clientClosed = false,
+          closedAt;
         const f = await nativeFixture(t, {
           html: '<!doctype html><title>Held native request</title><script>window.released=[];addEventListener("keyup",event=>released.push(event.key));</script>',
           handleRequest(req, res) {
@@ -25,6 +27,8 @@ test(
             response = res;
             res.on("close", () => {
               clientClosed = true;
+              closedAt = performance.now();
+              closed.resolve();
             });
             ready.resolve();
             return true;
@@ -57,6 +61,19 @@ test(
             state.run.endedAt,
             null,
             JSON.stringify({ run: state.run, operations: state.operations }),
+          );
+          // Native detach and the server's socket-close event run on different
+          // event loops. Observe the actual peer close while withholding this
+          // server's response; a finished Run alone is not evidence of closure.
+          const runObservedAt = performance.now();
+          if (!clientClosed) await Promise.race([closed.promise, delay(2000)]);
+          t.diagnostic(
+            JSON.stringify({
+              mode,
+              peerClosed: clientClosed,
+              peerCloseAfterRunObservationMs:
+                closedAt === undefined ? null : closedAt - runObservedAt,
+            }),
           );
           assert.equal(
             clientClosed,

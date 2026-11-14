@@ -302,9 +302,12 @@ test("history filters and stable pages span ended resources, preserve mid-batch 
     () => first.resources.list({ state: "running", cursor: normal.nextCursor }),
     { code: "invalid_cursor" },
   );
+  // Changing trailing base64 characters can preserve every authenticated byte.
+  // Mutate the tag itself so this always tests an actually tampered envelope.
+  const tampered = Buffer.from(normal.nextCursor, "base64url");
+  tampered[tampered.length - 1] ^= 1;
   await assert.rejects(
-    () =>
-      first.resources.list({ cursor: normal.nextCursor.slice(0, -2) + "zz" }),
+    () => first.resources.list({ cursor: tampered.toString("base64url") }),
     { code: "invalid_cursor" },
   );
   for (const query of [

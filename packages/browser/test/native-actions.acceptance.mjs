@@ -48,7 +48,7 @@ test("native scaled frame click positions preserve child CSS offsets through a c
       } else if (url.pathname === "/child")
         html = `<!doctype html><style>body{margin:0}#inner{position:absolute;left:40px;top:40px;width:260px;height:160px;border:2px solid black;padding:4px;transform:scale(.8,1.1);transform-origin:top left}</style><iframe id="inner" src="/nested"></iframe>`;
       else if (url.pathname === "/nested")
-        html = `<!doctype html><style>body{margin:0}#target{position:absolute;left:20px;top:10px;width:150px;height:80px;border:0;padding:0}</style><button id="target">Nested positioned target</button><script>window.receipt={clicks:0};document.querySelector('#target').onclick=event=>{const r=event.currentTarget.getBoundingClientRect();receipt={clicks:receipt.clicks+1,x:event.clientX-r.x,y:event.clientY-r.y,trusted:event.isTrusted};};</script>`;
+        html = `<!doctype html><style>body{margin:0}#target{position:absolute;left:20px;top:10px;width:150px;height:80px;border:0;padding:0}</style><button id="target">Nested positioned target</button><script>window.receipt={clicks:0};document.querySelector('#target').onclick=event=>{const r=event.currentTarget.getBoundingClientRect();receipt={clicks:receipt.clicks+1,x:event.clientX-r.x,y:event.clientY-r.y,trusted:event.isTrusted,clientX:event.clientX,clientY:event.clientY,rect:r.toJSON(),scrollX,scrollY,devicePixelRatio};};</script>`;
       else return false;
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
@@ -57,10 +57,11 @@ test("native scaled frame click positions preserve child CSS offsets through a c
   });
   const result = await f.run(
     select +
-      `const frame=tab.playwright.frameLocator('#outer').frameLocator('#inner'),target=frame.locator('#target');await target.waitFor({state:'visible',timeoutMs:5000});await target.click({position:{x:24,y:18},timeoutMs:5000});return await target.evaluate('element=>window.receipt');`,
+      `const outer=tab.playwright.locator('#outer'),inner=tab.playwright.frameLocator('#outer').locator('#inner'),frame=tab.playwright.frameLocator('#outer').frameLocator('#inner'),target=frame.locator('#target');await target.waitFor({state:'visible',timeoutMs:5000});await target.click({position:{x:24,y:18},timeoutMs:5000});const geometry='element=>{const style=getComputedStyle(element);return {rect:element.getBoundingClientRect().toJSON(),offsetWidth:element.offsetWidth,offsetHeight:element.offsetHeight,clientLeft:element.clientLeft,clientTop:element.clientTop,paddingLeft:style.paddingLeft,paddingTop:style.paddingTop,scrollX,scrollY,devicePixelRatio};}';return {receipt:await target.evaluate('element=>window.receipt'),outer:await outer.evaluate(geometry),inner:await inner.evaluate(geometry)};`,
     { base: f.base },
   );
-  const receipt = result.result.data;
+  const { receipt } = result.result.data;
+  t.diagnostic(JSON.stringify(result.result.data));
   assert.equal(receipt.clicks, 1);
   assert.equal(receipt.trusted, true);
   assert.ok(Math.abs(receipt.x - 24) <= 1, JSON.stringify(receipt));
