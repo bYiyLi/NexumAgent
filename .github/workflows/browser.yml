@@ -72,6 +72,14 @@ jobs:
           NEXUM_BROWSER_PUBLIC_YOUTUBE_URL: https://www.youtube.com/watch?v=M7lc1UVf-VE
           NEXUM_BROWSER_PUBLIC_YOUTUBE_TEXT: YouTube
         run: node --experimental-vm-modules --test packages/browser/test/native-youtube.acceptance.mjs
+      - name: Exercise anonymous public Google Sheets and Slides export through the actual browser
+        env:
+          # Public Google Sheets quickstart fixture and official BlinkOn 6 slides.
+          NEXUM_BROWSER_PUBLIC_SHEET_URL: https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
+          NEXUM_BROWSER_PUBLIC_SHEET_TEXT: Alexandra
+          NEXUM_BROWSER_PUBLIC_SLIDES_URL: https://docs.google.com/presentation/d/1gqK9F4lGAY3TZudAtdcxzMQNEE7PcuQrGu83No3l0lw/edit
+          NEXUM_BROWSER_PUBLIC_SLIDES_TEXT: Headless Chrome
+        run: node --experimental-vm-modules --test packages/browser/test/native-workspace.acceptance.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
