@@ -833,17 +833,12 @@ for (const method of ["tab.screenshot"])
 route(
   "playwright.elementScreenshot",
   async (ctx, args) => {
-    const info = await ctx.router.page(ctx, {
+    const clip = await ctx.router.page(ctx, {
       ...args,
       ...options(args),
-      command: "elementInfo",
+      command: "elementScreenshot",
     });
-    requireValue(
-      info.length === 1,
-      "INVALID_TARGET",
-      "No element exists at these coordinates.",
-    );
-    return ctx.router.screenshot(ctx, { clip: info[0].boundingBox });
+    return ctx.router.screenshot(ctx, { clip });
   },
   { needsTab: true },
 );

@@ -426,7 +426,8 @@
       "id": "B046",
       "target": "tab.ax.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-result-modes"]
     },
     {
       "id": "B047",
@@ -474,7 +475,8 @@
       "id": "B054",
       "target": "tab.ax.write",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-result-modes"]
     },
     {
       "id": "B055",
@@ -595,13 +597,15 @@
       "id": "B074",
       "target": "tab.playwright.elementInfo",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-element-screenshot-scroll"]
     },
     {
       "id": "B075",
       "target": "tab.playwright.elementScreenshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-element-screenshot-scroll"]
     },
     {
       "id": "B076",
@@ -1733,6 +1737,28 @@
       "file": "test/native-client.acceptance.mjs",
       "test": "native independent browser profiles keep control, conflicts and offline identities isolated",
       "coverage": ["normal", "scope_conflict", "peer_offline"]
+    },
+    "native-ax-result-modes": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native AX read and write modes preserve typed MCP output, current authority and historical bytes",
+      "coverage": [
+        "normal",
+        "invalid_argument",
+        "current_permission",
+        "result",
+        "historical_bytes"
+      ]
+    },
+    "native-element-screenshot-scroll": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native element screenshots capture the actual scrolled target at multiple device scales",
+      "coverage": [
+        "normal",
+        "invalid_target",
+        "result",
+        "pixel_dimensions",
+        "scrolled_target"
+      ]
     }
   }
 }

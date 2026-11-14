@@ -21,7 +21,7 @@ const image = await tab.screenshot();
 return output.image({ data: image, mimeType: "image/jpeg" });
 ```
 
-`tab.screenshot({maxEdgePx:1200})` 限制实际图片的最长边为 1200 像素，计入浏览器的原生像素密度；`clip` 仍使用页面 CSS 坐标。小图保持原始分辨率，4000 万解码像素和 10 MiB JPEG 字节预算继续生效。
+`tab.screenshot({maxEdgePx:1200})` 限制实际图片的最长边为 1200 像素，计入浏览器的原生像素密度；`clip` 使用文档 CSS 坐标，包含页面滚动偏移。`tab.playwright.elementInfo({x,y})` 与 `elementScreenshot({x,y})` 的输入使用当前视口 CSS 坐标；前者返回视口矩形，后者自动按实际滚动偏移截取目标元素。小图保持原始分辨率，4000 万解码像素和 10 MiB JPEG 字节预算继续生效。
 
 返回本机文件路径只说明文件存在，不代表模型已经读取。文件/文档交付使用 `output.file(...)`，外部领取使用平台 `transfer.createDownload`；它们有各自的大小、当前权限和保留规则。
 

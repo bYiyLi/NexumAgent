@@ -10,6 +10,188 @@ const html = `<!doctype html><html><head><title>Nexum native capabilities</title
 const dimensions = `() => ({width:innerWidth,height:innerHeight})`;
 
 test(
+  "native element screenshots capture the actual scrolled target at multiple device scales",
+  { timeout: 60000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: '<!doctype html><title>Native scrolled screenshot</title><style>html,body{margin:0}body{width:1800px;height:2600px;background:rgb(20,40,210)}#spot{position:absolute;left:1000px;top:1300px;width:160px;height:100px;background:rgb(230,20,30)}</style><div id="spot"></div>',
+    });
+    const result = await f.run(
+      select +
+        `
+const facts=[];
+for(const dpr of [1,2]){
+  await tab.cdp.send('Emulation.setDeviceMetricsOverride',{width:800,height:600,deviceScaleFactor:dpr,mobile:false});
+  const rect=await tab.playwright.evaluate('() => {scrollTo(850,1100);const r=document.querySelector("#spot").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scrollX,scrollY};}');
+  const point={x:rect.x+rect.width/2,y:rect.y+rect.height/2,includeNonInteractable:true};
+  const info=await tab.playwright.elementInfo(point),bytes=await tab.playwright.elementScreenshot(point);
+  const image=await tab.playwright.evaluate('async data=>{const image=await createImageBitmap(new Blob([new Uint8Array(data)],{type:"image/jpeg"}));const canvas=new OffscreenCanvas(image.width,image.height),ctx=canvas.getContext("2d");ctx.drawImage(image,0,0);const pixel=Array.from(ctx.getImageData(Math.floor(image.width/2),Math.floor(image.height/2),1,1).data);const value={width:image.width,height:image.height,pixel};image.close();return value;}',Array.from(bytes));
+  facts.push({dpr,rect,box:info[0].boundingBox,image,byteLength:bytes.length});
+}
+let missing;try{await tab.playwright.elementScreenshot({x:-1,y:-1});}catch(error){missing=error.code;}
+return {facts,missing};`,
+      { base: f.base },
+    );
+    const { facts, missing } = result.result.data;
+    t.diagnostic(JSON.stringify({ facts }));
+    assert.equal(facts.length, 2);
+    for (const fact of facts) {
+      assert.equal(fact.rect.scrollX, 850);
+      assert.equal(fact.rect.scrollY, 1100);
+      assert.deepEqual(fact.box, { x: 150, y: 200, width: 160, height: 100 });
+      assert.equal(fact.image.width, 160 * fact.dpr);
+      assert.equal(fact.image.height, 100 * fact.dpr);
+      assert.ok(
+        fact.image.pixel[0] > 200 &&
+          fact.image.pixel[1] < 50 &&
+          fact.image.pixel[2] < 60,
+        JSON.stringify(fact),
+      );
+    }
+    assert.equal(missing, "INVALID_TARGET");
+    assert.deepEqual(result.run.cleanup.unconfirmed, []);
+  },
+);
+
+test(
+  "native AX read and write modes preserve typed MCP output, current authority and historical bytes",
+  { timeout: 90000 },
+  async (t) => {
+    let permitted = true;
+    const f = await nativeFixture(t, {
+      html: '<!doctype html><title>Native AX modes</title><h1>Native AX output</h1><label for="name">AX field</label><input id="name"><button>AX action</button>',
+      authorize(policy) {
+        if (
+          !permitted &&
+          ["ax.get", "ax.write"].includes(policy.method) &&
+          policy.target?.type === "connection" &&
+          policy.target.access === "read"
+        )
+          throw Object.assign(
+            new Error("Current AX observation permission was revoked."),
+            { code: "forbidden" },
+          );
+      },
+    });
+    const read = await f.run(
+      select +
+        `
+const state=await tab.ax.get(),full=await tab.ax.get('state',{disableDiffing:true});
+const before=await tab.ax.snapshot(),index=before.nodes.find(node=>node.name==='AX action'&&node.role==='button').index;
+const screenshot=await tab.ax.get('screenshot'),both=await tab.ax.get('both',{disableDiffing:true});
+const after=await tab.ax.snapshot();
+const image=async bytes=>tab.playwright.evaluate('async data=>{const image=await createImageBitmap(new Blob([new Uint8Array(data)],{type:"image/jpeg"}));const value={width:image.width,height:image.height};image.close();return value;}',Array.from(bytes));
+const reject=async action=>{try{await action();return 'unexpected';}catch(error){return error.code;}};
+return {state,full,bothState:both.state,screenshot:await image(screenshot),bothImage:await image(both.screenshot),index,afterIndex:after.nodes.find(node=>node.name==='AX action'&&node.role==='button').index,invalidGet:await reject(()=>tab.ax.get('state',{notSupported:true})),invalidWrite:await reject(()=>tab.ax.write('state',{notSupported:true}))};`,
+      { base: f.base },
+    );
+    const data = read.result.data;
+    for (const state of [data.state, data.full, data.bothState]) {
+      assert.match(state, /Native AX output/);
+      assert.match(state, /AX action/);
+    }
+    assert.equal(data.index, data.afterIndex);
+    for (const image of [data.screenshot, data.bothImage])
+      assert.ok(image.width > 0 && image.height > 0);
+    assert.equal(data.invalidGet, "INVALID_ARGUMENT");
+    assert.equal(data.invalidWrite, "INVALID_ARGUMENT");
+    const history = [];
+    for (const mode of ["default", "state", "screenshot", "both"]) {
+      const view = await f.run(
+        select +
+          `
+if(context.input.mode==='default')return await tab.ax.write();
+if(context.input.mode==='screenshot')return await tab.ax.write('screenshot');
+return await tab.ax.write(context.input.mode,{disableDiffing:true});`,
+        { base: f.base, mode },
+      );
+      const rendered = await f.encoder.render(
+        view.result,
+        f.resultScope(),
+        view.run,
+      );
+      const expected =
+        mode === "screenshot"
+          ? ["image", "text"]
+          : mode === "both"
+            ? ["text", "image", "text"]
+            : ["text", "text"];
+      assert.deepEqual(
+        rendered.content.map((item) => item.type),
+        expected,
+      );
+      assert.deepEqual(rendered.structuredContent.run, view.run);
+      assert.equal(
+        rendered.content.at(-1).text,
+        `runId: ${view.run.runId}\nstatus: succeeded`,
+      );
+      for (const item of rendered.content.slice(0, -1)) {
+        if (item.type === "text") assert.match(item.text, /Native AX output/);
+        if (item.type === "image") {
+          assert.equal(item.mimeType, "image/jpeg");
+          const bytes = Buffer.from(item.data, "base64");
+          assert.ok(bytes.length > 100);
+          assert.equal(bytes[0], 255);
+          assert.equal(bytes[1], 216);
+          assert.equal(
+            Object.hasOwn(
+              view.result.content.find((value) => value.type === "image"),
+              "data",
+            ),
+            false,
+          );
+          assert.ok(!JSON.stringify(view.result).includes(item.data));
+        }
+      }
+      assert.deepEqual(view.run.cleanup.unconfirmed, []);
+      t.diagnostic(
+        JSON.stringify({
+          mode,
+          contentTypes: expected,
+          status: view.run.status,
+        }),
+      );
+      history.push({ view, content: rendered.content });
+    }
+    await f.run(
+      select +
+        `await tab.playwright.evaluate('() => {document.querySelector("h1").textContent="Changed source";document.body.style.background="black";return true;}');return {changed:true};`,
+      { base: f.base },
+    );
+    for (const item of history) {
+      const saved = await f.encoder.render(
+        item.view.result,
+        f.resultScope(),
+        item.view.run,
+      );
+      assert.deepEqual(
+        saved.content,
+        item.content,
+        "Historical AX output must retain its original content after the source page changes.",
+      );
+    }
+    permitted = false;
+    try {
+      const denied = await f.run(
+        select +
+          `
+const reject=async action=>{try{await action();return 'unexpected';}catch(error){return error.code;}};
+return {get:await reject(()=>tab.ax.get('state')),write:await reject(()=>tab.ax.write('screenshot'))};`,
+        { base: f.base },
+      );
+      assert.deepEqual(denied.result.data, {
+        get: "forbidden",
+        write: "forbidden",
+      });
+    } finally {
+      permitted = true;
+    }
+    const native = await f.cleanupFacts();
+    assert.deepEqual(native.owned, [], JSON.stringify(native));
+  },
+);
+
+test(
   "native screenshot maxEdgePx bounds physical JPEG pixels at multiple device scales",
   { timeout: 60000 },
   async (t) => {

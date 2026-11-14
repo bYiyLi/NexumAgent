@@ -619,8 +619,25 @@ export async function pageCommand(input) {
                 : !found.some(visible);
         break;
       }
-      case "elementInfo": {
+      case "elementInfo":
+      case "elementScreenshot": {
         const node = root.elementFromPoint(input.x, input.y);
+        if (input.command === "elementScreenshot") {
+          check(
+            node,
+            "INVALID_TARGET",
+            "No element exists at these coordinates.",
+          );
+          const box = rect(node);
+          // Observe the element and its document scroll in the same native
+          // execution. Screenshot clips use document CSS coordinates.
+          value = {
+            ...box,
+            x: box.x + globalThis.scrollX,
+            y: box.y + globalThis.scrollY,
+          };
+          break;
+        }
         value = !node
           ? []
           : [

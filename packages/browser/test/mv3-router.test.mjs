@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
+import vm from "node:vm";
+import { pageCommand } from "../browser-extension/page.js";
 import {
   createBrowserRouter,
   routeDefinitions,
@@ -1248,6 +1250,39 @@ test("native screenshot defaults produce byte results, locator collections prese
     f.emitted.some((v) => v.event === "user_takeover"),
     true,
   );
+});
+
+test("serialized element screenshot clips preserve document scroll and reject a missing target", async () => {
+  const node = {
+    getBoundingClientRect: () => ({ x: 150, y: 200, width: 160, height: 100 }),
+  };
+  const document = {
+    elementFromPoint: (x, y) => (x >= 0 && y >= 0 ? node : null),
+  };
+  const context = vm.createContext({
+    document,
+    crypto,
+    TextEncoder,
+    Uint8Array,
+    scrollX: 850,
+    scrollY: 1100,
+  });
+  const execute = async (point) =>
+    JSON.parse(
+      JSON.stringify(
+        await vm.runInContext(
+          `(${pageCommand.toString()})(${JSON.stringify({ command: "elementScreenshot", pageVersion: 1, leaseId: "scroll-test", ...point })})`,
+          context,
+        ),
+      ),
+    );
+  assert.deepEqual(await execute({ x: 200, y: 250 }), {
+    ok: true,
+    value: { x: 1000, y: 1300, width: 160, height: 100 },
+  });
+  const missing = await execute({ x: -1, y: -1 });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "INVALID_TARGET");
 });
 
 test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
