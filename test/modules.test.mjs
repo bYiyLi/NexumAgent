@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { Console as NativeConsole } from "node:console";
+import { Writable } from "node:stream";
 import test from "node:test";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 
@@ -173,6 +175,51 @@ test("fresh execution scopes preserve the one npm cache but expose no previous g
   assert.equal(original.runId, "run_1");
   assert.equal(process.cwd(), before);
   assert.equal(hostSecret, "not injected");
+});
+
+test("the execution Console preserves native methods without exposing its private stream or host state", async (t) => {
+  const { loader } = await fixture(t),
+    chunks = [];
+  const stream = new Writable({
+    write(chunk, _encoding, done) {
+      chunks.push(chunk.toString());
+      done();
+    },
+  });
+  stream.reserve = () =>
+    assert.fail("private allocation callback must not be callable");
+  const logger = new NativeConsole({
+    stdout: stream,
+    stderr: stream,
+    ignoreErrors: false,
+  });
+  logger.privateState = { manager: true };
+  const originalLog = logger.log;
+  const visible = await loader.execute(
+    `
+    console.group("native group");console.log("native output");console.groupEnd();
+    console.count("native counter");console.count("native counter");
+    console.log=()=>{};
+    return {stream:typeof console._stdout,hostState:typeof console.privateState,
+      constructor:typeof console.constructor,privateNames:Object.keys(console).filter(name=>name.startsWith("_"))};
+  `,
+    {},
+    { console: logger },
+  );
+  assert.equal(visible.stream, "undefined");
+  assert.equal(visible.hostState, "undefined");
+  assert.equal(visible.constructor, "undefined");
+  assert.equal(visible.privateNames.length, 0);
+  assert.match(chunks.join(""), /native group\n  native output\n/);
+  assert.match(chunks.join(""), /native counter: 1\nnative counter: 2\n/);
+  assert.equal(logger.privateState.manager, true);
+  assert.equal(logger.log, originalLog);
+  await loader.execute(
+    'console.log("next execution still logs");',
+    {},
+    { console: logger },
+  );
+  assert.match(chunks.join(""), /next execution still logs/);
 });
 
 test("live policy is checked on repeated cached imports in the same run and on cached require", async (t) => {

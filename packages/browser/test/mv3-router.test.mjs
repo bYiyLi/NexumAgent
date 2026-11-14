@@ -144,7 +144,10 @@ function fixture(t, config = {}) {
       },
       async remove(id) {
         calls.push(["tabs.remove", id]);
+        if (config.removeHook)
+          return config.removeHook({ id, tabs, attached, onDetach, onRemoved });
         tabs.delete(id);
+        if (attached.delete(id)) onDetach.emit({ tabId: id }, "target_closed");
         onRemoved.emit(id);
       },
       async group(input) {
@@ -593,6 +596,190 @@ test("an attached native control stays owned until actual detach confirms cleanu
   );
 });
 
+test("both ordinary close entries confirm native input/stream/viewport cleanup, close only their target and keep another attached tab usable", async (t) => {
+  for (const method of ["tab.close", "management.tabs.close"])
+    await t.test(method, async (t) => {
+      const f = fixture(t);
+      f.router.start();
+      f.router.bind(binding);
+      f.open("lease", "1");
+      f.open("lease", "2");
+      await f.call("cdp.send", { method: "Runtime.enable" }, { id: "2" });
+      await f.call("cdp.send", {
+        method: "Input.dispatchKeyEvent",
+        params: { type: "keyDown", key: "Shift" },
+      });
+      await f.call("cdp.send", {
+        method: "Input.dispatchMouseEvent",
+        params: { type: "mousePressed", button: "left", x: 10, y: 20 },
+      });
+      await f.call("tab.setViewport", { size: { width: 900, height: 600 } });
+      const original = f.chrome.debugger.sendCommand;
+      let allowClose = false;
+      f.chrome.debugger.sendCommand = async (...args) => {
+        const result = await original(...args);
+        if (args[1] === "Page.printToPDF")
+          return { stream: "owned-native-stream" };
+        if (args[1] === "IO.read") throw Error("Native stream read failed");
+        if (args[1] === "IO.close" && !allowClose)
+          throw Error("Native stream close unconfirmed");
+        return result;
+      };
+      const plan = await f.call("content.plan", {
+        method: "tab.exportFile",
+        options: { format: "pdf" },
+      });
+      await assert.rejects(
+        f.call("tab.exportFile", {
+          planId: plan.id,
+          options: { format: "pdf" },
+        }),
+        /close unconfirmed/,
+      );
+      allowClose = true;
+      await f.call(
+        method,
+        method === "tab.close" ? {} : { id: "1" },
+        method === "tab.close" ? {} : { id: null },
+      );
+      const remove = f.calls.findIndex((value) => value[0] === "tabs.remove");
+      for (const native of ["IO.close", "Emulation.clearDeviceMetricsOverride"])
+        assert.ok(
+          f.calls.some(
+            (value, index) =>
+              index < remove &&
+              value[0] === "debugger.sendCommand" &&
+              value[1].tabId === 1 &&
+              value[2] === native,
+          ),
+        );
+      assert.ok(
+        f.calls.some(
+          (value, index) =>
+            index < remove &&
+            value[0] === "debugger.sendCommand" &&
+            value[2] === "Input.dispatchKeyEvent" &&
+            value[3].type === "keyUp",
+        ),
+      );
+      assert.ok(
+        f.calls.some(
+          (value, index) =>
+            index < remove &&
+            value[0] === "debugger.sendCommand" &&
+            value[2] === "Input.dispatchMouseEvent" &&
+            value[3].type === "mouseReleased",
+        ),
+      );
+      assert.equal(await f.call("tab.title", {}, { id: "2" }), "Two");
+      assert.equal(f.attached.has(2), true);
+      assert.equal(f.attached.has(1), false);
+      assert.equal(
+        f.emitted.some((value) => value.event === "user_takeover"),
+        false,
+      );
+      await assert.rejects(f.call("tab.title"), { code: "INVALID_TARGET" });
+    });
+});
+
+test("failed native close rolls back only its marker and cannot swallow a later real detach or release the original owner", async (t) => {
+  const f = fixture(t, {
+    removeHook: async () => {
+      throw Error("Native removal refused");
+    },
+  });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease", "1");
+  f.open("lease", "2");
+  await f.call("cdp.send", { method: "Runtime.enable" });
+  await assert.rejects(f.call("tab.close"), /removal refused/);
+  assert.equal(await f.call("tab.title"), "One");
+  assert.throws(() => f.open("other", "1"), { code: "TAB_ALREADY_CLAIMED" });
+  f.attached.delete(1);
+  f.chrome.debugger.onDetach.emit({ tabId: 1 }, "target_closed");
+  await assert.rejects(f.call("tab.title", {}, { id: "2" }), {
+    code: "USER_TAKEOVER",
+  });
+});
+
+test("an unconfirmed native key release prevents removal and keeps the original target owned until cleanup can really succeed", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("cdp.send", {
+    method: "Input.dispatchKeyEvent",
+    params: { type: "keyDown", key: "Shift" },
+  });
+  const original = f.chrome.debugger.sendCommand;
+  let blocked = true;
+  f.chrome.debugger.sendCommand = async (...args) => {
+    if (
+      blocked &&
+      args[1] === "Input.dispatchKeyEvent" &&
+      args[2].type === "keyUp"
+    )
+      throw Error("Native key release is unconfirmed");
+    return original(...args);
+  };
+  await assert.rejects(f.call("tab.close"), /release is unconfirmed/);
+  assert.equal(
+    f.calls.some((value) => value[0] === "tabs.remove"),
+    false,
+  );
+  assert.throws(() => f.open("other"), { code: "TAB_ALREADY_CLAIMED" });
+  assert.equal(await f.call("tab.title"), "One");
+  blocked = false;
+  await f.call("tab.close");
+  assert.equal(f.calls.filter((value) => value[0] === "tabs.remove").length, 1);
+});
+
+test("a user cancellation concurrent with an owned close still revokes the run; delayed expected target_closed after success does not", async (t) => {
+  await t.test("real user cancellation", async (t) => {
+    const f = fixture(t, {
+      removeHook: async ({ id, tabs, attached, onDetach, onRemoved }) => {
+        attached.delete(id);
+        onDetach.emit({ tabId: id }, "canceled_by_user");
+        tabs.delete(id);
+        onRemoved.emit(id);
+      },
+    });
+    f.router.start();
+    f.router.bind(binding);
+    f.open("lease", "1");
+    f.open("lease", "2");
+    await f.call("cdp.send", { method: "Runtime.enable" });
+    await assert.rejects(f.call("tab.close"), { code: "USER_TAKEOVER" });
+    await assert.rejects(f.call("tab.title", {}, { id: "2" }), {
+      code: "USER_TAKEOVER",
+    });
+  });
+  await t.test("late target closed", async (t) => {
+    let late;
+    const f = fixture(t, {
+      removeHook: async ({ id, tabs, attached, onDetach, onRemoved }) => {
+        tabs.delete(id);
+        attached.delete(id);
+        onRemoved.emit(id);
+        late = () => onDetach.emit({ tabId: id }, "target_closed");
+      },
+    });
+    f.router.start();
+    f.router.bind(binding);
+    f.open("lease", "1");
+    f.open("lease", "2");
+    await f.call("cdp.send", { method: "Runtime.enable" });
+    await f.call("tab.close");
+    late();
+    assert.equal(await f.call("tab.title", {}, { id: "2" }), "Two");
+    assert.equal(
+      f.emitted.some((value) => value.event === "user_takeover"),
+      false,
+    );
+  });
+});
+
 test("native screenshot defaults produce byte results, locator collections preserve exact query scope, and user detach fences old writes", async (t) => {
   const f = fixture(t);
   f.router.start();
@@ -707,6 +894,135 @@ test("same-run leases extend targets and local handoff releases one tab only aft
   assert.throws(() => f.open("lease", "1"), { code: "INVALID_TARGET" });
   await assert.rejects(f.call("tab.title"), { code: "INVALID_TARGET" });
   assert.equal(await f.call("tab.title", {}, { id: "2" }), "Two");
+});
+
+test("user context reads require the actual reserved tab and preserve other-run, handoff and closed-target fences", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease", "1");
+  f.open("other", "2");
+  const original = f.chrome.scripting.executeScript;
+  f.chrome.scripting.executeScript = async (input) => {
+    if (input.args[0].command === "content")
+      return [{ result: { ok: true, value: "Actual reserved text" } }];
+    return original(input);
+  };
+  const context = await f.call("user.getTabContext", { tab: "1" });
+  assert.equal(context.text, "Actual reserved text");
+  assert.equal(context.title, "One");
+  await assert.rejects(f.call("user.getTabContext", { tab: "2" }), {
+    code: "INVALID_TARGET",
+  });
+  await assert.rejects(
+    f.call("user.getTabContext", { tab: "2" }, { id: "2" }),
+    { code: "TAB_ALREADY_CLAIMED" },
+  );
+  await f.call("tab.markHandoff");
+  await assert.rejects(f.call("user.getTabContext", { tab: "1" }), {
+    code: "INVALID_TARGET",
+  });
+  f.open("lease", "3");
+  await f.call("tab.close", {}, { id: "3" });
+  await assert.rejects(
+    f.call("user.getTabContext", { tab: "3" }, { id: "3" }),
+    { code: "INVALID_TARGET" },
+  );
+});
+
+test("a raw filechooser timeout closes its last native interception and lease closure waits for actual cleanup", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const gate = Promise.withResolvers(),
+    started = Promise.withResolvers(),
+    original = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (...args) => {
+    if (args[1] === "Page.setInterceptFileChooserDialog" && !args[2].enabled) {
+      started.resolve();
+      await gate.promise;
+    }
+    return original(...args);
+  };
+  const waiter = await f.call("waiters.arm", {
+    event: "filechooser",
+    timeoutMs: 15,
+  });
+  await assert.rejects(f.call("waiters.get", { id: waiter.id }), {
+    code: "TIMEOUT",
+  });
+  await started.promise;
+  let closed = false;
+  const closing = f.router.endLease("lease").then(() => (closed = true));
+  await delay(2);
+  assert.equal(closed, false);
+  assert.throws(() => f.open("another"), { code: "TAB_ALREADY_CLAIMED" });
+  gate.resolve();
+  await closing;
+  assert.equal(closed, true);
+  assert.ok(
+    f.calls.some(
+      (value) =>
+        value[0] === "debugger.sendCommand" &&
+        value[2] === "Page.setInterceptFileChooserDialog" &&
+        value[3].enabled === false,
+    ),
+  );
+});
+
+test("expired chooser cleanup serializes before a newer arm so a late disable cannot undo its confirmed readiness", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const gate = Promise.withResolvers(),
+    started = Promise.withResolvers(),
+    original = f.chrome.debugger.sendCommand;
+  let first = true;
+  f.chrome.debugger.sendCommand = async (...args) => {
+    if (
+      first &&
+      args[1] === "Page.setInterceptFileChooserDialog" &&
+      !args[2].enabled
+    ) {
+      first = false;
+      started.resolve();
+      await gate.promise;
+    }
+    return original(...args);
+  };
+  const old = await f.call("waiters.arm", {
+    event: "filechooser",
+    timeoutMs: 10,
+  });
+  await assert.rejects(f.call("waiters.get", { id: old.id }), {
+    code: "TIMEOUT",
+  });
+  await started.promise;
+  let ready = false;
+  const next = f
+    .call("waiters.arm", { event: "filechooser", timeoutMs: 1000 })
+    .then((value) => {
+      ready = true;
+      return value;
+    });
+  await delay(2);
+  assert.equal(ready, false);
+  gate.resolve();
+  const current = await next;
+  const intercepts = () =>
+    f.calls.filter(
+      (value) =>
+        value[0] === "debugger.sendCommand" &&
+        value[2] === "Page.setInterceptFileChooserDialog",
+    );
+  assert.deepEqual(
+    intercepts().map((value) => value[3].enabled),
+    [true, false, true],
+  );
+  await f.call("waiters.cancel", { id: current.id });
+  assert.equal(intercepts().at(-1)[3].enabled, false);
 });
 
 test("navigation waiter is armed before action, buffers early events, and get does not prevent the triggering command", async (t) => {
@@ -1181,6 +1497,42 @@ test("load-state waits distinguish DOM readiness from load and require the actua
   });
   await wait;
   assert.equal(idle, true);
+});
+
+test("native WebMCP versions with only tool names report their exact registration-safety limitation without an unsafe fallback", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const original = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    const result = await original(source, method, params);
+    if (method === "WebMCP.enable")
+      f.chrome.debugger.onEvent.emit(source, "WebMCP.toolsAdded", {
+        tools: [
+          {
+            name: "submit",
+            description: "A real pre-toolId protocol descriptor",
+            frameId: "main-frame",
+            inputSchema: { type: "object" },
+          },
+        ],
+      });
+    return result;
+  };
+  const info = await f.call("capabilities.tabGet", { id: "webmcp" });
+  assert.equal(info.supported, false);
+  assert.match(info.reason, /opaque registration IDs/);
+  await assert.rejects(f.call("webmcp.fetchTools"), {
+    code: "CAPABILITY_NOT_ALLOWED",
+  });
+  assert.equal(
+    f.calls.some(
+      (call) =>
+        call[0] === "debugger.sendCommand" && call[2] === "WebMCP.invokeTool",
+    ),
+    false,
+  );
 });
 
 test("WebMCP discovery binds exact native registration IDs and cancellation targets only the original invocation", async (t) => {

@@ -445,6 +445,12 @@ export class WorkService {
       );
       try {
         signal.throwIfAborted();
+        this.#authorize(caller, {
+          action: previous ? "refresh" : "open",
+          ...(previous ? { work: previous } : {}),
+          project,
+          path: pwd,
+        });
         requireCondition(
           realpathSync.native(this.#store.root) === this.#store.root &&
             realpathSync.native(directory) === directory &&
@@ -564,6 +570,7 @@ export class WorkService {
           ? {
               ...project,
               summary,
+              descriptionItemId: description?.itemId ?? null,
               instructions: projectInstructions,
               skills: projectSkills,
               nestedInstructions:
@@ -818,6 +825,31 @@ export class WorkService {
     const work = this.#store.getWork(contextId);
     this.#authorize(caller, { action: "close", work });
     return this.#store.closeWork(contextId, callerKey(caller));
+  }
+  async closeProject(
+    caller: Caller,
+    projectId: string,
+    signal: AbortSignal,
+  ): Promise<JsonObject> {
+    caller = fixedCaller(caller);
+    requireCondition(
+      caller.source === "owner_session",
+      "forbidden",
+      "Direct Project close requires the current owner Console session.",
+    );
+    const { project } = await this.#options.resolveProject(
+      caller,
+      { projectId },
+      signal,
+    );
+    signal.throwIfAborted();
+    requireCondition(
+      project?.projectId === projectId,
+      "project_not_found",
+      "The current Project policy does not match the close target.",
+    );
+    this.#authorize(caller, { action: "close", project, path: project.root });
+    return this.#store.closeProject(projectId);
   }
   async drain(): Promise<void> {
     await Promise.allSettled([...this.#operations]);

@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
+import { EventEmitter, once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 
@@ -60,7 +62,8 @@ async function fixture(t, options = {}) {
     requests = [],
     streams = new Map(),
     sources = new Map(),
-    sockets = new Set();
+    sockets = new Set(),
+    runEvents = new EventEmitter();
   let runtime, currentPort;
   const server = createServer((request, response) => {
     request.on("error", () => {});
@@ -145,6 +148,8 @@ async function fixture(t, options = {}) {
         validateContract("wire", message);
         events.push(message);
         await options.send?.(message);
+        if (message.name === "agent.run.changed")
+          runEvents.emit(message.data.runId, message);
       },
       async request(operation, context, input, signal) {
         signal.throwIfAborted();
@@ -239,7 +244,13 @@ async function fixture(t, options = {}) {
   }
   if (options.prepare) await options.prepare({ root, work, project, write });
   currentPort = port();
-  const config = { root, profile: "development", serverUrl, token };
+  const config = {
+    root,
+    profile: "development",
+    serverUrl,
+    token,
+    ...(options.config ?? {}),
+  };
   runtime = await AgentRuntime.create(config, currentPort, bootId, {
     home: null,
     ...(options.runtime ?? {}),
@@ -274,20 +285,73 @@ async function fixture(t, options = {}) {
   }
   const open = (input = {}, policy = {}) =>
     invoke("agent.open", { agentId: "agent_fixture", ...input }, policy);
-  async function finish(value) {
-    for (
-      let count = 0;
-      count < 30 &&
-      !["succeeded", "failed", "cancelled", "interrupted"].includes(
-        value.run.status,
+  async function waitForState(value, expectedState) {
+    const runId = value.run.runId,
+      deadline = Date.now() + 15000;
+    while (value.run.status !== expectedState) {
+      assert.equal(
+        ["succeeded", "failed", "cancelled", "interrupted"].includes(
+          value.run.status,
+        ),
+        false,
+        JSON.stringify(value),
       );
-      count++
-    )
+      const remaining = deadline - Date.now();
+      assert.ok(
+        remaining > 0,
+        `Run ${runId} did not reach ${expectedState}: ${JSON.stringify(value)}`,
+      );
       value = await invoke("agent.run.get", {
         agentId: "agent_fixture",
-        runId: value.run.runId,
-        waitMs: 1000,
+        runId,
+        waitMs: Math.min(1000, remaining),
       });
+      assert.equal(value.run.runId, runId);
+    }
+    return value;
+  }
+  async function finish(value) {
+    const runId = value.run.runId,
+      deadline = Date.now() + 15000;
+    while (
+      !["succeeded", "failed", "cancelled", "interrupted"].includes(
+        value.run.status,
+      )
+    ) {
+      const remaining = deadline - Date.now();
+      assert.ok(
+        remaining > 0,
+        `Run ${runId} did not settle: ${JSON.stringify(value)}`,
+      );
+      const observation = new AbortController();
+      const changed = once(runEvents, runId, {
+        signal: AbortSignal.any([
+          observation.signal,
+          AbortSignal.timeout(remaining),
+        ]),
+      });
+      void changed.catch(() => {});
+      try {
+        value = await invoke("agent.run.get", {
+          agentId: "agent_fixture",
+          runId,
+          waitMs: Math.min(1000, remaining),
+        });
+        assert.equal(value.run.runId, runId);
+        // A delivered input can still expose the same wait while its native
+        // preparation settles. Wait for a real lifecycle event, not a busy
+        // microtask loop or a fixed sleep, before observing that Run again.
+        if (
+          value.wait &&
+          !["succeeded", "failed", "cancelled", "interrupted"].includes(
+            value.run.status,
+          )
+        )
+          await changed;
+      } finally {
+        observation.abort();
+      }
+    }
     return value;
   }
   async function run(script, input = null, workView) {
@@ -314,10 +378,14 @@ async function fixture(t, options = {}) {
     invoke,
     open,
     finish,
+    waitForState,
     run,
     authorization,
     get binding() {
       return currentPort.binding;
+    },
+    disconnect() {
+      currentPort.abort();
     },
     async reconnect() {
       currentPort.abort();
@@ -404,11 +472,12 @@ test("header enrollment, scriptName execution, default discovery and filtered hi
 test("wait continuation consumes the same Core run and uses its actual input origin", async (t) => {
   const f = await fixture(t),
     opened = await f.open();
-  const waiting = await f.invoke("agent.run.start", {
+  let waiting = await f.invoke("agent.run.start", {
     contextId: opened.contextId,
     script: `const answer=await runtime.requestInput({message:'next',inputSchema:{type:'object',properties:{value:{type:'number'}},required:['value'],additionalProperties:false}});return {value:answer.input.value};`,
-    waitMs: 1000,
+    waitMs: 0,
   });
+  waiting = await f.waitForState(waiting, "waiting_input");
   assert.equal(waiting.run.status, "waiting_input", JSON.stringify(waiting));
   const resumed = await f.finish(
     await f.invoke("agent.run.input", {
@@ -695,14 +764,16 @@ class ApprovedFixtureAuthority {
     return structuredClone(view);
   }
 }
-async function configuredFixture(t) {
+async function configuredFixture(t, options = {}) {
   const { MaintenanceRequests } = await import(
     new URL("../maintenance/requests.js", moduleUrl)
   );
   const authority = new ApprovedFixtureAuthority();
   let components, requests;
   const f = await fixture(t, {
+    ...options,
     runtime: {
+      ...options.runtime,
       configureMaintenance: async (value) => {
         components = value;
         return (requests = new MaintenanceRequests(
@@ -1153,12 +1224,13 @@ test("the default package policy imports only its verified approved snapshot and
 test("Task association controls the same waiting Run and retains its original normalized result", async (t) => {
   const f = await fixture(t),
     opened = await f.open();
-  const waiting = await f.invoke("agent.run.start", {
+  let waiting = await f.invoke("agent.run.start", {
     contextId: opened.contextId,
     script:
       "const answer=await runtime.requestInput({message:'next',inputSchema:{type:'object',properties:{value:{type:'number'}},required:['value'],additionalProperties:false}});return {value:answer.input.value};",
     waitMs: 1000,
   });
+  waiting = await f.waitForState(waiting, "waiting_input");
   const task = await f.invoke("agent.tasks.create", {
     runId: waiting.run.runId,
     ttlMs: 60000,
@@ -1368,4 +1440,584 @@ test("Console Run inspection reads original history without creating streams, Of
     ),
     { code: "authorization_scope_mismatch" },
   );
+});
+
+test("a fresh Agent owner session reads closed Project history using its current roots without borrowing a Project policy cell", async (t) => {
+  const f = await fixture(t);
+  const projectId = newId("project"),
+    projectPolicy = {
+      projectId,
+      projectRoot: f.project,
+      projectName: "Actual Project",
+      allowedRoots: [f.project],
+    };
+  const opened = await f.open({ projectId }, projectPolicy);
+  const original = await f.finish(
+    await f.invoke(
+      "agent.run.start",
+      {
+        contextId: opened.contextId,
+        script: "return {history:48};",
+        waitMs: 1000,
+      },
+      projectPolicy,
+    ),
+  );
+  assert.equal(original.run.status, "succeeded", JSON.stringify(original));
+  await f.invoke("agent.close", { contextId: opened.contextId }, projectPolicy);
+  const sessionRef = hash(Buffer.from("fresh-project-history-owner"));
+  const owner = {
+    principalId: "owner",
+    clientId: "nexum-console:" + sessionRef,
+    source: "owner_session",
+    sessionRef,
+  };
+  const inspected = await f.invoke(
+    "agent.run.inspect",
+    { runId: original.run.runId },
+    { allowedRoots: [f.project] },
+    owner,
+  );
+  assert.equal(inspected.run.projectId, projectId);
+  assert.equal(inspected.result.data.history, 48);
+  assert.equal(inspected.transient, undefined);
+  // A valid Project policy for the same session must never override a newer
+  // Agent-base request that no longer grants this directory.
+  await f.runtime.event(
+    {
+      type: "event",
+      name: "agent.authorization.changed",
+      connection: f.binding,
+      data: { caller: owner, authorization: f.authorization(projectPolicy) },
+    },
+    new AbortController().signal,
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.run.inspect",
+      { runId: original.run.runId },
+      { allowedRoots: [] },
+      owner,
+    ),
+    { code: "path_not_allowed" },
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.run.inspect",
+      { runId: original.run.runId },
+      {
+        ...projectPolicy,
+        projectId: newId("project"),
+        projectName: "Other Project",
+      },
+      owner,
+    ),
+    { code: "authorization_scope_mismatch" },
+  );
+  const history = await f.invoke(
+    "agent.run.list",
+    { agentId: "agent_fixture", limit: 20 },
+    { allowedRoots: [f.project] },
+  );
+  assert.ok(history.runs.some((run) => run.runId === original.run.runId));
+});
+
+test("current Agent authorization can resume and cancel accepted Project Runs after their Project work closes", async (t) => {
+  const f = await fixture(t),
+    projectId = newId("project");
+  const projectPolicy = {
+    projectId,
+    projectRoot: f.project,
+    projectName: "Original Project",
+    allowedRoots: [f.project],
+  };
+  const opened = await f.open({ projectId }, projectPolicy);
+  async function waitingRun() {
+    let waiting = await f.invoke(
+      "agent.run.start",
+      {
+        contextId: opened.contextId,
+        script:
+          "const answer=await runtime.requestInput({message:'continue',inputSchema:{type:'object',properties:{value:{type:'number'}},required:['value'],additionalProperties:false}});return {value:answer.input.value,project:context.project.projectId};",
+        waitMs: 1000,
+      },
+      projectPolicy,
+    );
+    waiting = await f.waitForState(waiting, "waiting_input");
+    assert.equal(waiting.run.status, "waiting_input", JSON.stringify(waiting));
+    return waiting;
+  }
+  const waiting = await waitingRun();
+  const cancelling = await waitingRun();
+  await f.invoke("agent.close", { contextId: opened.contextId }, projectPolicy);
+  await assert.rejects(
+    f.invoke(
+      "agent.run.input",
+      {
+        agentId: "agent_fixture",
+        runId: waiting.run.runId,
+        waitId: waiting.wait.waitId,
+        input: { value: 48 },
+      },
+      {
+        ...projectPolicy,
+        projectId: newId("project"),
+        projectName: "Different Project",
+      },
+    ),
+    { code: "authorization_scope_mismatch" },
+  );
+  const completed = await f.finish(
+    await f.invoke(
+      "agent.run.input",
+      {
+        agentId: "agent_fixture",
+        runId: waiting.run.runId,
+        waitId: waiting.wait.waitId,
+        input: { value: 48 },
+        waitMs: 1000,
+      },
+      { allowedRoots: [f.project] },
+    ),
+  );
+  assert.equal(completed.run.status, "succeeded", JSON.stringify(completed));
+  assert.deepEqual(completed.result.data, { value: 48, project: projectId });
+  await assert.rejects(
+    f.invoke(
+      "agent.run.cancel",
+      { agentId: "agent_fixture", runId: cancelling.run.runId },
+      { allowedRoots: [] },
+    ),
+    { code: "path_not_allowed" },
+  );
+  const stopped = await f.invoke(
+    "agent.run.cancel",
+    { agentId: "agent_fixture", runId: cancelling.run.runId },
+    { allowedRoots: [f.project] },
+  );
+  assert.equal(stopped.accepted, true);
+  assert.equal((await f.finish(stopped.view)).run.status, "cancelled");
+});
+
+test("the current Console owner controls the actual background sh resource after Project close and creator Grant revocation", async (t) => {
+  const f = await fixture(t),
+    projectId = newId("project");
+  const policy = {
+    projectId,
+    projectRoot: f.project,
+    projectName: "Process Project",
+    allowedRoots: [f.project],
+  };
+  const opened = await f.open({ projectId }, policy),
+    ready = path.join(f.project, "managed-child-ready");
+  const launched = await f.finish(
+    await f.invoke(
+      "agent.run.start",
+      {
+        contextId: opened.contextId,
+        script:
+          "return await sh.start({command:context.input.node,args:['-e',context.input.code,context.input.ready],background:true,timeoutMs:60000});",
+        input: {
+          node: process.execPath,
+          code: "require('node:fs').writeFileSync(process.argv[1],'ready');setInterval(()=>{},1000);",
+          ready,
+        },
+        waitMs: 1000,
+      },
+      policy,
+    ),
+  );
+  assert.equal(launched.run.status, "succeeded", JSON.stringify(launched));
+  const processId = launched.result.data.processId;
+  assert.match(processId, /^res_[0-9a-f]{32}$/);
+  const readyDeadline = Date.now() + 10000;
+  while (!existsSync(ready) && Date.now() < readyDeadline) await delay(10);
+  assert.equal(
+    existsSync(ready),
+    true,
+    "the managed child must actually execute before inspection",
+  );
+  const sessionRef = hash(Buffer.from("console-process-owner"));
+  const owner = {
+    principalId: "owner",
+    clientId: "nexum-console:" + sessionRef,
+    source: "owner_session",
+    sessionRef,
+  };
+  const closed = await f.invoke(
+    "agent.project.close",
+    { projectId },
+    policy,
+    owner,
+  );
+  assert.equal(closed.agentConfirmed, true);
+  assert.equal(closed.affectedContextCount, 1);
+  await assert.rejects(
+    f.invoke(
+      "agent.run.start",
+      {
+        contextId: opened.contextId,
+        script: "throw new Error('closed work must not execute')",
+      },
+      policy,
+    ),
+    { code: "context_closed" },
+  );
+  await f.runtime.event(
+    {
+      type: "event",
+      name: "agent.authorization.changed",
+      connection: f.binding,
+      data: { caller, authorization: null },
+    },
+    new AbortController().signal,
+  );
+  const page = await f.invoke(
+    "agent.process.list",
+    { projectId, limit: 20 },
+    { allowedRoots: [f.project] },
+    owner,
+  );
+  const item = page.items.find((value) => value.processId === processId);
+  assert.ok(item, JSON.stringify(page));
+  assert.equal(item.originRunId, launched.run.runId);
+  assert.equal(item.projectId, projectId);
+  assert.equal(item.lifetime, "background");
+  assert.equal(item.closedAt, null);
+  assert.equal(item.controlAvailable, true);
+  assert.equal(item.details.cwd, f.project);
+  assert.equal(item.details.args, undefined);
+  assert.equal(item.details.env, undefined);
+  assert.equal(
+    (
+      await f.invoke(
+        "agent.process.get",
+        { processId },
+        { allowedRoots: [f.project] },
+        owner,
+      )
+    ).details.closed,
+    false,
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.process.stop",
+      { processId },
+      { ...policy, projectId: newId("project"), projectName: "Other Project" },
+      owner,
+    ),
+    { code: "authorization_scope_mismatch" },
+  );
+  await assert.rejects(
+    f.invoke("agent.process.stop", { processId }, { allowedRoots: [] }, owner),
+    { code: "path_not_allowed" },
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.process.stop",
+      { processId: String(item.details.pid) },
+      { allowedRoots: [f.project] },
+      owner,
+    ),
+    { code: "invalid_arguments" },
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.process.stop",
+      { processId },
+      { allowedRoots: [f.project] },
+    ),
+    { code: "invalid_arguments" },
+  );
+  const stopped = await f.invoke(
+    "agent.process.stop",
+    { processId },
+    { allowedRoots: [f.project] },
+    owner,
+  );
+  assert.equal(stopped.accepted, true);
+  assert.ok(stopped.item.closedAt !== null, JSON.stringify(stopped));
+  assert.equal(stopped.item.details.closed, true);
+  assert.equal(stopped.item.details.treeStopped, true);
+  assert.equal(stopped.item.controlAvailable, false);
+  assert.equal(
+    (
+      await f.invoke(
+        "agent.process.stop",
+        { processId },
+        { allowedRoots: [f.project] },
+        owner,
+      )
+    ).accepted,
+    false,
+  );
+  assert.equal(
+    (
+      await f.invoke(
+        "agent.run.inspect",
+        { runId: launched.run.runId },
+        { allowedRoots: [f.project] },
+        owner,
+      )
+    ).run.status,
+    "succeeded",
+  );
+});
+
+test("shutdown drains the final bounded native extension log writes and closes stale log admission", async (t) => {
+  let entry;
+  const f = await fixture(t, {
+    runtime: {
+      modulePolicy: {
+        builtins: () => defaultBuiltins,
+        approvedPackages: () => new Map([["dispose-log-fixture", "1.0.0"]]),
+      },
+    },
+    prepare({ root, work, write }) {
+      write(path.join(work, "package.json"), {
+        type: "module",
+        dependencies: { "dispose-log-fixture": "1.0.0" },
+      });
+      const dir = path.join(work, "node_modules/dispose-log-fixture");
+      entry = path.join(dir, "extension.js");
+      write(path.join(dir, "package.json"), {
+        name: "dispose-log-fixture",
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./nexum": { types: "./extension.d.ts", import: "./extension.js" },
+        },
+        nexum: {
+          apiVersion: 1,
+          namespace: "disposeLog",
+          permissions: [],
+          docs: "./docs",
+        },
+      });
+      write(
+        path.join(dir, "extension.d.ts"),
+        "export default function createExtension(host:unknown):unknown;",
+      );
+      write(
+        path.join(dir, "docs/README.md"),
+        "# Native dispose logging fixture\n",
+      );
+      write(
+        entry,
+        "let retained;export function late(){retained.log({level:'info',message:'late-after-close'});}export default function(host){retained=host;return {methods:{},dispose(){for(let i=0;i<64;i++)host.log({level:'info',message:'actual-dispose-log',data:{index:i,padding:'x'.repeat(4096)}});}};}",
+      );
+      write(path.join(root, "state/maintenance/extensions.json"), {
+        "dispose-log-fixture": {
+          enabled: true,
+          objectId: "extension_dispose_log",
+          revision: "revision_dispose_log",
+          config: {},
+        },
+      });
+    },
+  });
+  const source = await import(pathToFileURL(entry).href);
+  await f.runtime.close();
+  const rows = readFileSync(path.join(f.root, "logs/extensions.log"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((row) => row.message === "actual-dispose-log");
+  assert.deepEqual(
+    rows.map((row) => row.data.index),
+    Array.from({ length: 64 }, (_, index) => index),
+  );
+  assert.throws(() => source.late(), { code: "log_closed" });
+});
+
+test("a control disconnect before transfer I/O admission releases the actual reservation instead of occupying a shared slot", async (t) => {
+  const f = await configuredFixture(t);
+  const created = await f.run(
+    "return await transfer.createUpload({path:'claim-fixture.bin',expectedSize:1});",
+  );
+  assert.equal(created.run.status, "succeeded", JSON.stringify(created));
+  const transferId = created.result.data.transferId;
+  const reservation = await f.invoke("agent.transfer.reserveClaim", {
+    transferId,
+  });
+  assert.equal(f.components.streams.active, 1);
+  const stream = f.incoming(Buffer.from("x"), "transfer");
+  f.disconnect();
+  try {
+    await assert.rejects(
+      f.invoke("agent.transfer.commitClaim", {
+        transferId,
+        reservationId: reservation.reservationId,
+        stream,
+        contentLength: 1,
+      }),
+      { code: "connection_closed" },
+    );
+    assert.equal(
+      f.components.streams.active,
+      0,
+      "the unused Core reservation must release immediately rather than waiting for its expiry",
+    );
+  } finally {
+    await f.reconnect();
+  }
+  await assert.rejects(
+    f.invoke("agent.transfer.releaseReservation", {
+      transferId,
+      reservationId: reservation.reservationId,
+    }),
+    { code: "invalid_transfer_reservation" },
+  );
+});
+
+test("a current Project policy that removes the Run directory stops silent native I/O without waiting for another SDK call", async (t) => {
+  const entered = Promise.withResolvers(),
+    disconnected = Promise.withResolvers();
+  const remote = createServer((request, response) => {
+    request.on("close", () => disconnected.resolve());
+    response.on("error", () => {});
+    entered.resolve();
+  });
+  await new Promise((resolve) => remote.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        remote.closeAllConnections();
+        remote.close(resolve);
+      }),
+  );
+  const f = await configuredFixture(t),
+    projectId = newId("project");
+  const policy = {
+    projectId,
+    projectRoot: f.project,
+    projectName: "Silent Project",
+    allowedRoots: [f.project],
+  };
+  const handle = await f.components.registry.prepare(
+    {
+      apiVersion: 1,
+      origin: {
+        type: "extension",
+        owner: "@test/root-removal",
+        namespace: "rootRemoval",
+        version: "1",
+        revision: "1",
+      },
+      permissions: [],
+    },
+    () => ({
+      methods: {
+        hold: {
+          description: "Await actual native HTTP",
+          permissions: [],
+          schemaDialect: "draft7",
+          inputSchema: { type: "object", additionalProperties: false },
+          async handle(_input, call) {
+            return (
+              await fetch(`http://127.0.0.1:${remote.address().port}`, {
+                signal: call.signal,
+              })
+            ).status;
+          },
+        },
+      },
+    }),
+  );
+  f.components.registry.publish(handle);
+  const opened = await f.open({ projectId }, policy);
+  const run = await f.invoke(
+    "agent.run.start",
+    {
+      contextId: opened.contextId,
+      script: "return await rootRemoval.hold({});",
+      waitMs: 0,
+    },
+    policy,
+  );
+  await entered.promise;
+  await f.runtime.event(
+    {
+      type: "event",
+      name: "agent.authorization.changed",
+      connection: f.binding,
+      data: {
+        caller,
+        authorization: f.authorization({ ...policy, allowedRoots: [] }),
+      },
+    },
+    new AbortController().signal,
+  );
+  await disconnected.promise;
+  const deadline = Date.now() + 10000;
+  while (
+    !f.components.store.getRun(run.run.runId).endedAt &&
+    Date.now() < deadline
+  )
+    await delay(10);
+  const stopped = f.components.store.getRun(run.run.runId);
+  assert.equal(stopped.status, "failed");
+  assert.equal(stopped.stop.kind, "authorization");
+  assert.equal(stopped.stop.code, "path_not_allowed");
+  assert.equal(
+    (await f.components.registry.disable(handle)).status,
+    "disabled",
+  );
+});
+
+test("the parsed owner profile policy reaches new Work, Run, artifact and managed-storage allocations", async (t) => {
+  const retention = {
+    work_idle_ms: 210000,
+    run_history_ms: 240000,
+    run_logs_ms: 180000,
+    input_attachments_ms: 120000,
+    artifact_ms: 150000,
+    material_copies_ms: 300000,
+  };
+  const f = await configuredFixture(t, {
+    config: { storage: { max_managed_bytes: 8 * 1024 * 1024 }, retention },
+  });
+  const opened = await f.open(),
+    work = f.components.store.getWork(opened.contextId);
+  assert.equal(work.expiresAt - work.lastUsedAt, retention.work_idle_ms);
+  const run = await f.run(
+    "const fs=await import('node:fs/promises');const p=await import('node:path');await fs.writeFile(p.join(context.pwd,'policy-artifact.txt'),'actual retained bytes');return output.file('policy-artifact.txt');",
+    null,
+    opened,
+  );
+  assert.equal(run.run.status, "succeeded", JSON.stringify(run));
+  const record = f.components.store.getRun(run.run.runId);
+  const stored = JSON.parse(
+    readFileSync(path.join(f.root, record.resultRef), "utf8"),
+  );
+  const artifact = stored.content[0].resource;
+  assert.equal(
+    Date.parse(artifact.expiresAt) - Date.parse(artifact.createdAt),
+    retention.artifact_ms,
+  );
+  await assert.rejects(f.components.reserve(8 * 1024 * 1024), {
+    code: "storage_quota_exceeded",
+  });
+  await f.runtime.close();
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(path.join(f.root, "state/runtime.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    const row = db
+      .prepare(
+        "SELECT retention_history_ms,retention_logs_ms,retention_inputs_ms FROM runs WHERE run_id=?",
+      )
+      .get(record.runId);
+    assert.deepEqual(
+      { ...row },
+      {
+        retention_history_ms: retention.run_history_ms,
+        retention_logs_ms: retention.run_logs_ms,
+        retention_inputs_ms: retention.input_attachments_ms,
+      },
+    );
+  } finally {
+    db.close();
+  }
 });

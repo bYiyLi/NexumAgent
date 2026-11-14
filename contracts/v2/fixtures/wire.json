@@ -5501,5 +5501,993 @@
       "endsMidLine": true,
       "treeTruncated": "false"
     }
+  },
+  {
+    "name": "Process list can omit optional pagination and project filter",
+    "contract": "wire.input:agent.process.list",
+    "valid": true,
+    "value": {}
+  },
+  {
+    "name": "Process list uses bounded owner project filter",
+    "contract": "wire.input:agent.process.list",
+    "valid": true,
+    "value": {
+      "projectId": "project_a",
+      "limit": 100,
+      "cursor": "opaque_cursor"
+    }
+  },
+  {
+    "name": "Process list preserves an empty authoritative result",
+    "contract": "wire.output:agent.process.list",
+    "valid": true,
+    "value": {
+      "items": [],
+      "nextCursor": null,
+      "observedAt": 0
+    }
+  },
+  {
+    "name": "Process list preserves authoritative native facts and Unixms",
+    "contract": "wire.output:agent.process.list",
+    "valid": true,
+    "value": {
+      "items": [
+        {
+          "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "originRunId": "run_a",
+          "contextId": null,
+          "projectId": null,
+          "status": "ready",
+          "lifetime": "background",
+          "createdAt": 0,
+          "closedAt": null,
+          "handedOffAt": 0,
+          "controlAvailable": true,
+          "details": {
+            "state": "running",
+            "pid": 12345,
+            "stdoutBytes": 0,
+            "createdAt": "ordinary reported fact"
+          }
+        }
+      ],
+      "nextCursor": "next_page",
+      "observedAt": 1794614400000
+    }
+  },
+  {
+    "name": "Process get uses registered resource identity",
+    "contract": "wire.input:agent.process.get",
+    "valid": true,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "Process get returns one explicit nullable snapshot",
+    "contract": "wire.output:agent.process.get",
+    "valid": true,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process stop uses the same registered resource identity",
+    "contract": "wire.input:agent.process.stop",
+    "valid": true,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "Process stop acceptance does not fabricate actual closed state",
+    "contract": "wire.output:agent.process.stop",
+    "valid": true,
+    "value": {
+      "accepted": true,
+      "item": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originRunId": "run_a",
+        "contextId": null,
+        "projectId": null,
+        "status": "stopping",
+        "lifetime": "background",
+        "createdAt": 0,
+        "closedAt": null,
+        "handedOffAt": 0,
+        "controlAvailable": false,
+        "details": {
+          "state": "running",
+          "pid": 12345,
+          "stdoutBytes": 0,
+          "createdAt": "ordinary reported fact"
+        }
+      }
+    }
+  },
+  {
+    "name": "Process already closed can decline duplicate stop",
+    "contract": "wire.output:agent.process.stop",
+    "valid": true,
+    "value": {
+      "accepted": false,
+      "item": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originRunId": "run_a",
+        "contextId": null,
+        "projectId": null,
+        "status": "closed",
+        "lifetime": "background",
+        "createdAt": 0,
+        "closedAt": 1794614400000,
+        "handedOffAt": 0,
+        "controlAvailable": false,
+        "details": {
+          "state": "running",
+          "pid": 12345,
+          "stdoutBytes": 0,
+          "createdAt": "ordinary reported fact"
+        }
+      }
+    }
+  },
+  {
+    "name": "Process list rejects limit 0",
+    "contract": "wire.input:agent.process.list",
+    "valid": false,
+    "value": {
+      "limit": 0
+    }
+  },
+  {
+    "name": "Process list rejects limit 101",
+    "contract": "wire.input:agent.process.list",
+    "valid": false,
+    "value": {
+      "limit": 101
+    }
+  },
+  {
+    "name": "Process list rejects limit 1.5",
+    "contract": "wire.input:agent.process.list",
+    "valid": false,
+    "value": {
+      "limit": 1.5
+    }
+  },
+  {
+    "name": "Process list rejects empty cursor",
+    "contract": "wire.input:agent.process.list",
+    "valid": false,
+    "value": {
+      "cursor": ""
+    }
+  },
+  {
+    "name": "Process list cannot inject Agent selector",
+    "contract": "wire.input:agent.process.list",
+    "valid": false,
+    "value": {
+      "agentId": "agent_other"
+    }
+  },
+  {
+    "name": "Process get never accepts arbitrary PID",
+    "contract": "wire.input:agent.process.get",
+    "valid": false,
+    "value": {
+      "pid": 12345
+    }
+  },
+  {
+    "name": "Process get rejects malformed resource identity",
+    "contract": "wire.input:agent.process.get",
+    "valid": false,
+    "value": {
+      "processId": "res_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  },
+  {
+    "name": "Process get cannot inject command execution",
+    "contract": "wire.input:agent.process.get",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "command": "echo injected"
+    }
+  },
+  {
+    "name": "Process stop never accepts arbitrary PID",
+    "contract": "wire.input:agent.process.stop",
+    "valid": false,
+    "value": {
+      "pid": 12345
+    }
+  },
+  {
+    "name": "Process stop rejects malformed resource identity",
+    "contract": "wire.input:agent.process.stop",
+    "valid": false,
+    "value": {
+      "processId": "res_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  },
+  {
+    "name": "Process stop cannot inject command execution",
+    "contract": "wire.input:agent.process.stop",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "command": "echo injected"
+    }
+  },
+  {
+    "name": "Process snapshot requires explicit nullable origin",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process snapshot rejects foreign lifetime enum",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "daemon",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process snapshot details remain a JSON object",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": []
+    }
+  },
+  {
+    "name": "Process snapshot cannot expose arbitrary controller field",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      },
+      "controller": {}
+    }
+  },
+  {
+    "name": "Process snapshot rejects invalid createdAt",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": -1,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process snapshot rejects invalid closedAt",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": -1,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process snapshot rejects invalid handedOffAt",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "background",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 9007199254740992,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process observation time must be safe nonnegative Unixms",
+    "contract": "wire.output:agent.process.list",
+    "valid": false,
+    "value": {
+      "items": [],
+      "nextCursor": null,
+      "observedAt": 9007199254740992
+    }
+  },
+  {
+    "name": "Owner session may invoke registered process list",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.list",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {}
+    }
+  },
+  {
+    "name": "MCP Caller cannot invoke internal process list",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.list",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {}
+    }
+  },
+  {
+    "name": "Owner session may invoke registered process get",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "MCP Caller cannot invoke internal process get",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "Owner session may invoke registered process stop",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.stop",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "MCP Caller cannot invoke internal process stop",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.stop",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "Process list project filter must match trusted project authority",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.process.list",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_other"
+      }
+    }
+  },
+  {
+    "name": "Process stop result names its internal operation",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "result",
+      "id": "rpc_process",
+      "operation": "agent.process.stop",
+      "output": {
+        "accepted": true,
+        "item": {
+          "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "originRunId": "run_a",
+          "contextId": null,
+          "projectId": null,
+          "status": "ready",
+          "lifetime": "background",
+          "createdAt": 0,
+          "closedAt": null,
+          "handedOffAt": 0,
+          "controlAvailable": true,
+          "details": {
+            "state": "running",
+            "pid": 12345,
+            "stdoutBytes": 0,
+            "createdAt": "ordinary reported fact"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "Process lifetime retains native instance resource ownership",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": true,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "instance",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Process lifetime cannot invent a shared resource kind",
+    "contract": "wire.type:ProcessSnapshot",
+    "valid": false,
+    "value": {
+      "processId": "res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originRunId": "run_a",
+      "contextId": null,
+      "projectId": null,
+      "status": "ready",
+      "lifetime": "shared",
+      "createdAt": 0,
+      "closedAt": null,
+      "handedOffAt": 0,
+      "controlAvailable": true,
+      "details": {
+        "state": "running",
+        "pid": 12345,
+        "stdoutBytes": 0,
+        "createdAt": "ordinary reported fact"
+      }
+    }
+  },
+  {
+    "name": "Owner session closes its exact Project without creating a Work",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.close",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "MCP caller cannot invoke internal Project close",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.close",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "Agent-only owner policy cannot close a Project",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.close",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "Owner close cannot borrow a different Project policy",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.close",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "other_project"
+      }
+    }
+  },
+  {
+    "name": "Project close cannot take a fabricated context",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.close",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a",
+        "contextId": "ctx_fake"
+      }
+    }
+  },
+  {
+    "name": "Project close confirms an admission barrier with zero existing contexts",
+    "contract": "wire.output:agent.project.close",
+    "valid": true,
+    "value": {
+      "projectId": "project_a",
+      "agentConfirmed": true,
+      "affectedContextCount": 0,
+      "closedAt": "2026-11-14T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "Project close cannot pretend unconfirmed success",
+    "contract": "wire.output:agent.project.close",
+    "valid": false,
+    "value": {
+      "projectId": "project_a",
+      "agentConfirmed": false,
+      "affectedContextCount": 0,
+      "closedAt": "2026-11-14T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "Project close count cannot be negative",
+    "contract": "wire.output:agent.project.close",
+    "valid": false,
+    "value": {
+      "projectId": "project_a",
+      "agentConfirmed": true,
+      "affectedContextCount": -1,
+      "closedAt": "2026-11-14T00:00:00.000Z"
+    }
   }
 ]

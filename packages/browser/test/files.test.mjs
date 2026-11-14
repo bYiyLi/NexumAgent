@@ -24,7 +24,10 @@ import {
 } from "../dist/extension/files.js";
 
 function fixture(t, authorize = () => {}) {
-  const root = mkdtempSync(path.join(tmpdir(), "nexum-browser-files-test-"));
+  // Match fs.promises.realpath used by the helpers, including Windows 8.3 names.
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-browser-files-test-")),
+  );
   const work = path.join(root, "work"),
     pwd = path.join(root, "project");
   mkdirSync(work);
@@ -69,7 +72,12 @@ test("downloads create durable exact snapshots with current lexical/canonical au
   assert.equal(result.mimeType, "application/pdf");
   assert.equal(
     path.dirname(result.path),
-    path.join(realpathSync(f.work), "tmp", "browser", f.call.context.runId),
+    path.join(
+      realpathSync.native(f.work),
+      "tmp",
+      "browser",
+      f.call.context.runId,
+    ),
   );
   exact(readFileSync(result.path), bytes);
   assert.equal(lstatSync(result.path).isFile(), true);
@@ -255,23 +263,35 @@ test("deadlines, unsafe run IDs, unwriteable work and redirected profile subdire
 });
 
 test("canonical read authorization is required for symlinked local sources", async (t) => {
+  const denied = Object.assign(new Error("canonical denied"), {
+    code: "forbidden",
+  });
+  let canonicalSource;
   const f = fixture(t, (target) => {
-    if (
-      target.access === "read" &&
-      target.value.startsWith(realpathSync(f.pwd) + path.sep)
-    )
-      throw Object.assign(new Error("canonical denied"), { code: "forbidden" });
+    if (target.access === "read" && target.value === canonicalSource)
+      throw denied;
   });
   const real = path.join(f.pwd, "real.bin"),
     alias = path.join(f.root, "alias");
   writeFileSync(real, "actual");
   symlinkSync(f.pwd, alias, process.platform === "win32" ? "junction" : "dir");
-  await assert.rejects(
-    prepareFiles([path.join(alias, "real.bin")], f.call, f.work),
-    {
-      code: "forbidden",
-    },
-  );
+  canonicalSource = realpathSync.native(real);
+  const requested = path.join(alias, "real.bin");
+  assert.notEqual(requested, canonicalSource);
+  for (const prepare of [
+    () => prepareFiles([requested], f.call, f.work),
+    () => materializeDownload({ path: requested }, f.call, f.work),
+  ]) {
+    const previous = f.grants.length;
+    await assert.rejects(prepare(), (error) => error === denied);
+    assert.deepEqual(
+      f.grants.slice(previous).filter((grant) => grant.access === "read"),
+      [
+        { type: "path", value: requested, access: "read" },
+        { type: "path", value: canonicalSource, access: "read" },
+      ],
+    );
+  }
   assert.deepEqual(artifacts(f.work), []);
 });
 
@@ -470,7 +490,7 @@ test("explicit download destinations use current authority and atomic no-replace
     f.call,
     f.work,
   );
-  assert.equal(result.path, path.join(realpathSync(f.pwd), "saved.bin"));
+  assert.equal(result.path, path.join(realpathSync.native(f.pwd), "saved.bin"));
   assert.equal(result.name, "saved.bin");
   exact(readFileSync(result.path), bytes);
   assert.equal(result.sha256, hash(bytes));

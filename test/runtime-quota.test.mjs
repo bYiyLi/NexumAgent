@@ -165,7 +165,6 @@ test("code, input and result grow only under real reservations and all tickets r
   ])
     assert.ok(existsSync(path.join(f.root, ref)));
   assert.ok(f.calls.some((call) => call.bytes === 65536));
-  assert.ok(f.calls.some((call) => call.bytes === MiB + 1024));
   assert.equal(f.retention.reservedBytes, 0);
   assert.equal(ended.result.data.value, 1);
 });
@@ -228,6 +227,15 @@ test("quota during input continuation keeps the original wait retryable and does
   const run = await f.engine.observe(caller, started.run.runId, 3000);
   assert.equal(run.run.status, "waiting_input");
   const waitId = run.wait.waitId;
+  // Fill actual managed storage rather than depending on a logger's old
+  // up-front allocation. The original wait must survive the refused reply.
+  mkdirSync(path.join(f.work, "data"), { recursive: true });
+  const usage = await f.retention.measure(),
+    bytes = f.retention.maxManagedBytes - usage.bytes - 256 * 1024,
+    ticket = await f.retention.reserve(bytes),
+    filler = path.join(f.work, "data", "input-quota-fill");
+  writeFileSync(filler, Buffer.alloc(bytes));
+  ticket.release();
   const rejected = await f.engine.input(caller, {
     agentId: "agent",
     runId: run.run.runId,
@@ -251,6 +259,7 @@ test("quota during input continuation keeps the original wait retryable and does
     ),
     false,
   );
+  rmSync(filler);
   await f.engine.input(caller, {
     agentId: "agent",
     runId: run.run.runId,
@@ -305,9 +314,15 @@ test("an input preparation rejection is fully released before the script catches
     runId: run.run.runId,
     waitId: run.wait.waitId,
     input: "ok",
-    waitMs: 100,
+    waitMs: 3000,
   });
-  const ended = await f.finish(run.run.runId);
+  const ended = await f.engine.observe(
+    caller,
+    run.run.runId,
+    3000,
+    undefined,
+    true,
+  );
   assert.equal(ended.run.status, "succeeded");
   assert.equal(ended.result.data.input, "ok");
   assert.equal(f.retention.reservedBytes, 0);

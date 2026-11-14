@@ -179,6 +179,28 @@ function data(result) {
   );
   return result.result.data;
 }
+async function observeSameRun(f, pending) {
+  const initial = await pending;
+  const result =
+    initial.run.endedAt === null
+      ? await f.engine.observe(caller, initial.run.runId, 10000)
+      : initial;
+  assert.equal(result.run.runId, initial.run.runId);
+  return result;
+}
+async function within(operation, message) {
+  const timeout = new AbortController();
+  try {
+    return await Promise.race([
+      operation,
+      delay(10000, undefined, { signal: timeout.signal }).then(() =>
+        assert.fail(message),
+      ),
+    ]);
+  } finally {
+    timeout.abort();
+  }
+}
 
 test("real managed storage refusal prevents process startup while control and native shutdown do not request new business space", async (t) => {
   const f = await fixture(t, () => {}, { maxManagedBytes: 1024 });
@@ -1042,10 +1064,13 @@ test("real PTY supports terminal input/resize while pipe EOF is explicitly rejec
     { tty: true, cols: 90, rows: 30, background: true },
   );
   const processId = data(
-    await f.start("return await sh.start(context.input);", { input }),
+    await observeSameRun(
+      f,
+      f.start("return await sh.start(context.input);", { input }),
+    ),
   ).processId;
   const ready = await until(
-    () => f.get(processId, { waitMs: 100 }),
+    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
     (result) => text(data(result)).includes('"tty":true'),
   );
   assert.ok(data(ready).output.every((item) => item.stream === "terminal"));
@@ -1053,34 +1078,114 @@ test("real PTY supports terminal input/resize while pipe EOF is explicitly rejec
   assert.match(text(data(ready)), /"rows":30/);
   assert.equal(
     data(
-      await f.start(
-        "return await sh.resize({processId:context.input,cols:100,rows:40});",
-        { input: processId },
+      await observeSameRun(
+        f,
+        f.start(
+          "return await sh.resize({processId:context.input,cols:100,rows:40});",
+          { input: processId },
+        ),
       ),
     ).accepted,
     true,
   );
   const resized = await until(
-    () => f.get(processId, { waitMs: 100 }),
+    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
     (result) => text(data(result)).includes("SIZE=100x40"),
   );
   assert.match(text(data(resized)), /SIZE=100x40/);
   const eof = data(
-    await f.start(
-      "try{await sh.write({processId:context.input,eof:true});}catch(e){return e.code;}",
-      { input: processId },
+    await observeSameRun(
+      f,
+      f.start(
+        "try{await sh.write({processId:context.input,eof:true});}catch(e){return e.code;}",
+        { input: processId },
+      ),
     ),
   );
   assert.match(eof, /eof|terminal|tty/i);
   data(
-    await f.start(
-      'return await sh.write({processId:context.input,data:"q"});',
-      { input: processId },
+    await observeSameRun(
+      f,
+      f.start(
+        'return await sh.write({processId:context.input,data:"q"});',
+        { input: processId },
+      ),
     ),
   );
   const ended = await until(
-    () => f.get(processId, { waitMs: 100 }),
+    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
     (result) => data(result).closedAt !== null,
   );
   assert.equal(data(ended).outputComplete, true);
+});
+
+test("forced PTY stop joins actual closure and releases storage while retaining an incomplete Windows tail", { timeout: 30000 }, async (t) => {
+  const f = await fixture(t);
+  const module = await import(
+    new URL(
+      `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pty"}.js`,
+      import.meta.url,
+    ).href
+  );
+  const Backend = process.platform === "win32"
+    ? module.WindowsProcessBackend
+    : module.PtyProcessBackend;
+  const facts = Backend.prototype.facts,
+    start = ManagedProcess.prototype.start;
+  let backend, managed;
+  Backend.prototype.facts = function () {
+    backend = this;
+    return facts.call(this);
+  };
+  ManagedProcess.prototype.start = async function (...args) {
+    managed = this;
+    return await start.apply(this, args);
+  };
+  let processId;
+  try {
+    processId = data(await observeSameRun(f, f.start(
+      "return await sh.start(context.input);",
+      { input: command(
+        'process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on("data",()=>{});process.stdout.write("force-ready\\n");setInterval(()=>{},1000);',
+        { tty: true, background: true },
+      ) },
+    ))).processId;
+  } finally {
+    Backend.prototype.facts = facts;
+    ManagedProcess.prototype.start = start;
+  }
+  assert.ok(backend);
+  assert.ok(managed);
+  assert.equal(managed.facts().pid, facts.call(backend).pid);
+  await until(
+    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
+    (result) => text(data(result)).includes("force-ready"),
+  );
+  assert.equal(f.retention.reservedBytes, 16 * 1024 * 1024 + 1024);
+  const stopped = data(await observeSameRun(f, f.start(
+    "return await sh.stop({processId:context.input,graceMs:0,forceMs:4000});",
+    { input: processId },
+  )));
+  await within(backend.closed, "The original native PTY did not actually close.");
+  assert.equal(facts.call(backend).treeStopped, true);
+  assert.equal(facts.call(backend).closed, true);
+  assert.equal(facts.call(backend).forceRequested, true);
+  await within(managed.closed, "The original managed PTY did not finish its native and log cleanup.");
+  assert.equal(stopped.confirmed, true);
+  const row = f.store.getResource(processId);
+  assert.notEqual(row.closedAt, null);
+  assert.equal(row.diagnostic.details.closed, true);
+  assert.equal(row.diagnostic.details.treeStopped, true);
+  assert.equal(f.retention.reservedBytes, 0);
+  const retained = data(await observeSameRun(f, f.get(processId)));
+  if (process.platform === "win32") {
+    assert.equal(backend.failure.code, "process_output_failed");
+    assert.equal(row.diagnostic.details.failure.code, "process_output_failed");
+    assert.equal(stopped.facts.outputComplete, false);
+    assert.equal(retained.outputComplete, false);
+    assert.equal(existsSync(`${managed.log.path}.complete`), false);
+  } else {
+    assert.equal(stopped.facts.outputComplete, true);
+    assert.equal(retained.outputComplete, true);
+  }
 });

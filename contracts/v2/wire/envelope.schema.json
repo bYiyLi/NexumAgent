@@ -2111,6 +2111,170 @@
       },
       "required": ["type", "id", "operation", "output"],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.list"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/OwnerSessionInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.list.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.list"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.list.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/OwnerSessionInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.stop"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/OwnerSessionInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.stop.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.process.stop"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.process.stop.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.project.close"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/InvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.close.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.project.close"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.close.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
     }
   ]
 }

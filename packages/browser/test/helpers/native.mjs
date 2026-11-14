@@ -214,7 +214,6 @@ export async function nativeFixture(t, options = {}) {
   const runs = new Set();
   let child,
     closed,
-    permissionSocket,
     stderr = "";
   t.after(async () => {
     for (const runId of runs) {
@@ -245,7 +244,6 @@ export async function nativeFixture(t, options = {}) {
       t.diagnostic(
         "Native test cleanup retained unconfirmed resource facts; no successful product shutdown was inferred.",
       );
-    permissionSocket?.close();
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
       await Promise.race([closed, delay(4000)]);
@@ -281,6 +279,11 @@ export async function nativeFixture(t, options = {}) {
       "--disable-sync",
       "--use-mock-keychain",
       "--password-store=basic",
+      // Chrome 158's enable-webmcp-testing flag maps to blink::features::kWebMCP.
+      // Opt-in only for native experimental conformance; stock baselines omit it.
+      ...(process.env.NEXUM_BROWSER_WEBMCP_TESTING === "1"
+        ? ["--enable-features=WebMCP"]
+        : []),
       "--remote-debugging-port=0",
       "--remote-debugging-address=127.0.0.1",
       "--enable-logging=stderr",
@@ -298,46 +301,6 @@ export async function nativeFixture(t, options = {}) {
     stderr = (stderr + data.toString()).slice(-65536);
   });
   child.on("error", () => {});
-  // Browser-native permission setup is confined to this newly created test profile.
-  // It models the explicit local-network consent required by Chrome 147+; no global feature is disabled.
-  if (process.env.NEXUM_BROWSER_GRANT_LOOPBACK === "1") {
-    const devtoolsDeadline = Date.now() + 5000;
-    while (!stderr.includes("DevTools listening on")) {
-      assert.ok(
-        Date.now() < devtoolsDeadline,
-        "isolated DevTools did not start",
-      );
-      await delay(10);
-    }
-    const endpoint = stderr.match(
-      /DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/[^\s]+)/,
-    )[1];
-    permissionSocket = new WebSocket(endpoint);
-    await once(permissionSocket, "open");
-    const permissionReply = new Promise((resolve) => {
-      permissionSocket.on("message", (body) => {
-        const value = JSON.parse(body);
-        if (value.id === 1) resolve(value);
-      });
-    });
-    permissionSocket.send(
-      JSON.stringify({
-        id: 1,
-        method: "Browser.setPermission",
-        params: {
-          permission: { name: "loopback-network" },
-          setting: "granted",
-          origin: "chrome-extension://jefnkdpjllmodpfhhjbegddododpiahf",
-        },
-      }),
-    );
-    const permissionResult = await permissionReply;
-    assert.equal(
-      permissionResult.error,
-      undefined,
-      JSON.stringify(permissionResult),
-    );
-  }
   const start = async (script, input = {}, options = {}) => {
     const view = await engine.start(caller, {
       contextId: context.contextId,

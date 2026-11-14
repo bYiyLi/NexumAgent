@@ -91,6 +91,36 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
     }
   }
 });
+test("preparing a service preview cannot overwrite the selected manifest or its Windows launcher", async (t) => {
+  const home = await temporary(t),
+    selected = planFor(process.platform, home),
+    preview = servicePlan({
+      profile: "development",
+      home,
+      platform: process.platform,
+      userId: 501,
+      windowsSid: "S-1-5-21-1-2-3-1001",
+      programDir: selected.programDir,
+      preview: true,
+    });
+  await writeServiceManifest(selected);
+  const original = await readFile(selected.manifestPath),
+    launcher = selected.launcherPath
+      ? await readFile(selected.launcherPath)
+      : null;
+  await writeServiceManifest(preview);
+  assert.notEqual(preview.manifestPath, selected.manifestPath);
+  assert.deepEqual(await readFile(selected.manifestPath), original);
+  if (launcher) {
+    assert.notEqual(preview.launcherPath, selected.launcherPath);
+    assert.deepEqual(await readFile(selected.launcherPath), launcher);
+    assert.match(
+      await readFile(preview.manifestPath, "utf16le"),
+      /service-preview-launch\.ps1/,
+    );
+  }
+});
+
 test("profile ownership and service file boundaries cannot target a project or traverse a symlink", async (t) => {
   const home = await temporary(t),
     plan = planFor(process.platform, home);

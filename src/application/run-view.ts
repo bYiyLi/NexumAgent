@@ -242,6 +242,13 @@ export async function projectRunView(
           ...(snapshot.nextOffset === undefined
             ? {}
             : { nextOffset: snapshot.nextOffset }),
+          ...(snapshot.startOffset === undefined
+            ? {}
+            : {
+                startOffset: snapshot.startOffset,
+                endOffset: snapshot.endOffset!,
+                dataOffset: snapshot.dataOffset!,
+              }),
           ...(snapshot.ref &&
           retained(ports.encoder.artifacts.root, view.run, snapshot.ref)
             ? { path: path.resolve(ports.encoder.artifacts.root, snapshot.ref) }

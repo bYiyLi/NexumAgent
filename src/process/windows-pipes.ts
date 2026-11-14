@@ -389,6 +389,20 @@ export class WindowsProcessBackend
           rootExited: this.#state.pid !== null || this.#state.rootExited,
         });
       if (active !== 0 || !this.#helperClosed || !this.#outputSettled) return;
+      if (
+        this.#state.forceRequested &&
+        this.#launch?.tty &&
+        !this.#terminalComplete
+      ) {
+        // The Job and both helper streams have physically closed. Forced
+        // helper termination can lose the ConPTY tail: that is a known output
+        // failure, not an indefinitely unknown process lifetime or a fake EOF.
+        this.#outputFailed = true;
+        this.#failure ??= new AgentError(
+          "process_output_failed",
+          "The forced Windows terminal shutdown could not retain a complete output tail.",
+        );
+      }
       this.#job.close();
       clearInterval(this.#poll);
       clearTimeout(this.#startTimer);

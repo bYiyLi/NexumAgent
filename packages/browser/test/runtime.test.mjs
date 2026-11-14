@@ -187,6 +187,7 @@ async function fixture(
   });
   const downloadSource = path.join(root, "native-download.txt"),
     downloadBytes = Buffer.alloc(150000, 57);
+  const runs = new Set();
   if (nativeDownloads) writeFileSync(downloadSource, downloadBytes);
   let plugin;
   const attached = new Set(),
@@ -214,11 +215,30 @@ async function fixture(
   t.after(async () => {
     detachGate.resolve();
     commandGate.resolve();
-    await plugin?.dispose().catch(() => {});
-    const entry = services.get("nexum-browser");
-    if (entry) await services.disable("nexum-browser").catch(() => {});
-    store.close();
-    rmSync(root, { recursive: true, force: true });
+    try {
+      // Keep the actual peer alive while cancelled runs obtain native cleanup receipts.
+      for (const runId of runs)
+        if (store.getRun(runId).endedAt === null) engine.cancel(caller, runId);
+      const end = Date.now() + 10000;
+      for (const runId of runs)
+        while (store.getRun(runId).endedAt === null) {
+          assert.ok(
+            Date.now() < end,
+            "The fixture run did not confirm cleanup before peer shutdown.",
+          );
+          await engine.observe(caller, runId, 50);
+        }
+      const entry = services.get("nexum-browser");
+      if (entry) await services.disable("nexum-browser");
+      const report = await resources.shutdown(
+        new Error("The Core browser fixture is closing."),
+      );
+      assert.deepEqual(report.unconfirmed, []);
+    } finally {
+      await plugin?.dispose().catch(() => {});
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   const enabled = await services.enable("nexum-browser");
   assert.equal(enabled.status, "enabled");
@@ -357,8 +377,25 @@ async function fixture(
     });
   plugin = connection;
   await plugin.start();
-  const start = (script, options = {}) =>
-    engine.start(caller, { contextId: context.contextId, script, ...options });
+  const start = async (script, options = {}) => {
+    let value = await engine.start(caller, {
+      contextId: context.contextId,
+      script,
+      ...options,
+    });
+    runs.add(value.run.runId);
+    if (options.waitMs === 0) return value;
+    // A returned MCP wait window is not a terminal run. Ordinary cases need the actual result.
+    const end = Date.now() + 60000;
+    while (value.run.endedAt === null) {
+      assert.ok(
+        Date.now() < end,
+        "The Core fixture run did not reach its actual terminal state.",
+      );
+      value = await engine.observe(caller, value.run.runId, 50);
+    }
+    return value;
+  };
   const end = Date.now() + 3000;
   while (!plugin.state().connected) {
     assert.ok(

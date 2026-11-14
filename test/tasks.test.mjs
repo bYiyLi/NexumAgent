@@ -223,6 +223,7 @@ test("Task handle is routable, persisted before return, and retry never starts a
 test("same caller still needs current Grant; IDs and persisted snapshots grant no authority", async (t) => {
   const f = await fixture(t);
   const run = await f.start("return 42;");
+  assert.equal((await f.finish(run.run.runId)).run.status, "succeeded");
   const task = await f.tasks.create(caller, { runId: run.run.runId });
   const next = { ...caller, grantId: "grant-b" };
   await assert.rejects(f.tasks.get(next, task.taskId), /forbidden/);
@@ -520,6 +521,7 @@ test("application handlers project the original authorized view and never create
     },
   });
   const task = await handlers["agent.tasks.create"]({ runId: run.run.runId });
+  assert.equal((await f.finish(run.run.runId)).run.status, "succeeded");
   const result = await handlers["agent.tasks.get"]({ taskId: task.taskId });
   assert.equal(result.view.runId, run.run.runId);
   assert.equal(result.view.result.data, 8);

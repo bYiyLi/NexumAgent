@@ -15,6 +15,7 @@ import {
   MAX_RESOURCES_READ_BODY_BYTES_V2,
   MAX_STATE_VALUE_BYTES_V2,
   MAX_HOST_FEATURE_BYTES_V2,
+  MAX_PROCESS_OUTPUT_BYTES_V2,
 } from "../dist/contracts/wire.js";
 
 const fixtures = JSON.parse(
@@ -41,7 +42,7 @@ test("every declared operation has registered strict input and output schemas", 
     for (const side of ["input", "output"]) {
       const emptyAllowed =
         side === "input" &&
-        ["agent.resources.list", "maintenance.request.list"].includes(op);
+        ["agent.resources.list", "agent.process.list", "maintenance.request.list"].includes(op);
       if (emptyAllowed) validateContract(`wire.${side}:${op}`, {});
       else
         assert.throws(
@@ -422,4 +423,28 @@ test("user-state budgets count preserved lone UTF16 surrogates as JSON escapes",
       }),
     { code: "data_too_large" },
   );
+});
+
+test("process receipts enforce the whole UTF8 output budget including page and stop metadata", () => {
+  const snapshot = {
+    processId: "res_" + "a".repeat(32), originRunId: null, contextId: null,
+    projectId: null, status: "ready", lifetime: "background", createdAt: 0,
+    closedAt: null, handedOffAt: null, controlAvailable: true, details: {},
+  };
+  assert.throws(() => validateContract("wire.output:agent.process.list", {
+    items: Array.from({ length: 101 }, () => snapshot), nextCursor: null, observedAt: 0,
+  }), { code: "invalid_arguments" });
+  for (const [contract, wrap] of [
+    ["wire.type:ProcessSnapshot", (item) => item],
+    ["wire.output:agent.process.get", (item) => item],
+    ["wire.output:agent.process.list", (item) => ({ items: [item], nextCursor: null, observedAt: 0 })],
+    ["wire.output:agent.process.stop", (item) => ({ accepted: true, item })],
+  ]) {
+    const output = (label) => wrap({ ...snapshot, details: { label } });
+    const overhead = Buffer.byteLength(JSON.stringify(output("")));
+    const label = "<".repeat(MAX_PROCESS_OUTPUT_BYTES_V2 - overhead);
+    assert.equal(Buffer.byteLength(JSON.stringify(output(label))), MAX_PROCESS_OUTPUT_BYTES_V2);
+    validateContract(contract, output(label));
+    assert.throws(() => validateContract(contract, output(label + "x")), { code: "data_too_large" });
+  }
 });

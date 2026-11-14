@@ -1,5 +1,5 @@
 // Runtime migrations own the executable DDL.
-export const schemaVersion = 5;
+export const schemaVersion = 7;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -220,4 +220,27 @@ CREATE TABLE task_artifacts (
   PRIMARY KEY(task_id,resource_id)
 ) STRICT;
 CREATE INDEX task_artifacts_resource ON task_artifacts(resource_id,task_id);
+`;
+
+// Retention belongs to the object that was accepted, not the next boot's config.
+// Existing rows retain the defaults under which they were originally created.
+export const migration6 = `
+ALTER TABLE runs ADD COLUMN retention_history_ms INTEGER NOT NULL DEFAULT 2592000000 CHECK(retention_history_ms>0);
+ALTER TABLE runs ADD COLUMN retention_logs_ms INTEGER NOT NULL DEFAULT 604800000 CHECK(retention_logs_ms>0);
+ALTER TABLE runs ADD COLUMN retention_inputs_ms INTEGER NOT NULL DEFAULT 86400000 CHECK(retention_inputs_ms>0);
+ALTER TABLE operations ADD COLUMN retention_history_ms INTEGER NOT NULL DEFAULT 2592000000 CHECK(retention_history_ms>0);
+ALTER TABLE managed_resources ADD COLUMN retention_history_ms INTEGER NOT NULL DEFAULT 2592000000 CHECK(retention_history_ms>0);
+ALTER TABLE managed_resources ADD COLUMN retention_logs_ms INTEGER NOT NULL DEFAULT 604800000 CHECK(retention_logs_ms>0);
+ALTER TABLE transfers ADD COLUMN retention_history_ms INTEGER NOT NULL DEFAULT 2592000000 CHECK(retention_history_ms>0);
+`;
+
+// A Console can close a registered Project before its first Work commits.
+// Keep that admission barrier without inventing a caller or a context identity.
+export const migration7 = `
+CREATE TABLE project_closures (
+  project_id TEXT PRIMARY KEY,
+  closed_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX project_closures_expiry ON project_closures(expires_at);
 `;

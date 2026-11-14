@@ -10,6 +10,7 @@ import {
   symlinkSync,
   linkSync,
   readdirSync,
+  renameSync,
 } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -433,6 +434,77 @@ test("private npm planner records count while its native node_modules remain out
   writeFileSync(path.join(plan, "package-lock.json"), "x".repeat(23));
   const measured = await f.retention.measure();
   assert.equal(measured.bytes - before.bytes, 40);
+});
+
+test("fixed Agent configuration, manifests, API sources and local modules count with their actual atomic replacement files", async (t) => {
+  const f = await fixture(t), before = await f.retention.measure();
+  const fixed = [
+    ["config.json", 11], ["work/mcp.json", 13], ["work/package.json", 17],
+    ["work/package-lock.json", 19], ["work/.gitignore", 23], ["work/.npmrc", 29],
+    ["work/api/service/config.json", 31], ["work/api/service/openapi.yaml", 37],
+    ["work/api/service/sources/reference.json", 41], ["work/modules/helpers.mjs", 43],
+    ["work/.configuration-" + "a".repeat(48), 47],
+    ["work/package.json.tmp_" + "b".repeat(32), 53],
+    ["work/package-lock.json.tmp_" + "c".repeat(32), 59],
+    ["work/.write_" + "d".repeat(32), 61],
+    ["work/AGENTS.override.md", 67], ["work/AGENTS.md", 71], ["work/CLAUDE.md", 73],
+    ["work/GEMINI.md", 79], ["work/CONTEXT.md", 83],
+  ];
+  const excluded = [
+    "work/project/package.json", "work/node_modules/dependency/index.js", "work/raw-output",
+    "work/.configuration-unowned", "work/package.json.tmp_unowned", "program/versions/example/manifest.json",
+    "work/project/AGENTS.md", "home/.agents/AGENTS.md",
+  ];
+  for (const [ref, size] of fixed) { const filename = path.join(f.root, ref); mkdirSync(path.dirname(filename), { recursive: true }); writeFileSync(filename, Buffer.alloc(size)); }
+  for (const ref of excluded) { const filename = path.join(f.root, ref); mkdirSync(path.dirname(filename), { recursive: true }); writeFileSync(filename, Buffer.alloc(4096)); }
+  const measured = await f.retention.measure();
+  assert.equal(measured.bytes - before.bytes, fixed.reduce((sum, [, size]) => sum + size, 0));
+  f.advance(31 * day); await f.retention.sweep();
+  for (const [ref] of fixed) assert.ok(existsSync(path.join(f.root, ref)));
+});
+
+test("a fixed manifest replacement is measured as both old and temp bytes until the real rename settles", async (t) => {
+  const f = await fixture(t), before = await f.retention.measure(), final = path.join(f.work, "package-lock.json"), temporary = final + ".tmp_" + "e".repeat(32);
+  writeFileSync(final, Buffer.alloc(200)); writeFileSync(temporary, Buffer.alloc(300));
+  assert.equal((await f.retention.measure()).bytes - before.bytes, 500);
+  renameSync(temporary, final);
+  assert.equal((await f.retention.measure()).bytes - before.bytes, 300);
+});
+
+test("stored MCP configuration cannot disappear from quota after its write ticket releases", async (t) => {
+  const f = await fixture(t, { quotaExtra: 35000 });
+  const body = JSON.stringify({ mcpServers: { sample: { url: "https://example.invalid", description: "x".repeat(30000) } } });
+  const ticket = await f.retention.reserve(Buffer.byteLength(body) + 1024);
+  try { writeFileSync(path.join(f.work, "mcp.json"), body); } finally { ticket.release(); }
+  await assert.rejects(f.artifact("small"), code("storage_quota_exceeded"));
+  assert.deepEqual(readdirSync(f.artifacts.directory), []); assert.equal(f.retention.reservedBytes, 0);
+  assert.ok(existsSync(path.join(f.work, "mcp.json")));
+});
+
+test("a writer released during a native usage scan cannot make its newly written bytes vanish from the next admission", async (t) => {
+  const f = await fixture(t, { quotaExtra: 1500 });
+  mkdirSync(path.join(f.work, "data"));
+  const first = await f.retention.reserve(1200), entered = Promise.withResolvers(), resume = Promise.withResolvers();
+  const nativeMeasure = f.retention.measure.bind(f.retention); let pause = true;
+  f.retention.measure = async () => {
+    const observed = await nativeMeasure();
+    if (pause) { pause = false; entered.resolve(); await resume.promise; }
+    return observed;
+  };
+  let pending;
+  try {
+    pending = f.retention.reserve(1000);
+    await entered.promise;
+    writeFileSync(path.join(f.work, "data", "first"), Buffer.alloc(1200)); first.release();
+    resume.resolve();
+    await assert.rejects(pending, code("storage_quota_exceeded"));
+    assert.equal(f.retention.reservedBytes, 0);
+    const actualRemainder = await f.retention.reserve(300); actualRemainder.release();
+  } finally {
+    resume.resolve(); first.release();
+    if (pending) await pending.then(ticket => ticket.release(), () => {});
+    f.retention.measure = nativeMeasure;
+  }
 });
 
 test("fixed Store cleanup refs remove their own files and process completion marker but reject other paths", async (t) => {

@@ -121,6 +121,62 @@ test("initialization creates a bound WAL database; future and mismatched stores 
   check.close();
 });
 
+test("Project close without a Work persists its admission barrier across restart without creating a context", (t) => {
+  const { store, root, work } = setup(t),
+    closed = store.closeProject("project-before-first-open");
+  assert.equal(closed.affectedContextCount, 0);
+  assert.equal(store.getWork(work.contextId).status, "open");
+  store.close();
+  const restarted = new SqliteStore(root, binding);
+  try {
+    assert.throws(
+      () =>
+        restarted.openWork({
+          callerKey: "caller",
+          projectId: closed.projectId,
+          pwd: root,
+          snapshotRef: "never-committed.json",
+        }),
+      { code: "project_closed" },
+    );
+    assert.equal(
+      restarted.openWork({
+        callerKey: "caller",
+        projectId: "new-project-same-root",
+        pwd: root,
+        snapshotRef: "new.json",
+      }).status,
+      "open",
+    );
+  } finally {
+    restarted.close();
+  }
+});
+
+test("owner Project close closes every caller's Work while retaining its accepted computation and independent Agent Work", (t) => {
+  const { store, work, root } = setup(t),
+    first = store.openWork({
+      callerKey: "caller",
+      projectId: "project",
+      pwd: root,
+      snapshotRef: "first.json",
+    }),
+    second = store.openWork({
+      callerKey: "another-caller",
+      projectId: "project",
+      pwd: root,
+      snapshotRef: "second.json",
+    }),
+    running = start(store, first),
+    closed = store.closeProject("project");
+  assert.equal(closed.affectedContextCount, 2);
+  for (const value of [first, second])
+    assert.equal(store.getWork(value.contextId).status, "closed");
+  assert.equal(store.getWork(work.contextId).status, "open");
+  assert.equal(store.getRun(running.runId).status, "running");
+  assert.equal(store.closeProject("project").affectedContextCount, 0);
+});
+
 test("failed initial migration rolls back schema and preserves existing data", (t) => {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-migrate-")),

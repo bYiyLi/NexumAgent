@@ -58,6 +58,7 @@ export function servicePlan({
   platform = process.platform,
   userId = process.getuid?.(),
   windowsSid,
+  preview = false,
 } = {}) {
   if (
     !profiles.has(profile) ||
@@ -136,7 +137,9 @@ export function servicePlan({
       label,
       target: `gui/${userId}/${label}`,
       domain: `gui/${userId}`,
-      manifestPath: p.join(home, "Library", "LaunchAgents", label + ".plist"),
+      manifestPath: preview
+        ? p.join(state, "service-preview.plist")
+        : p.join(home, "Library", "LaunchAgents", label + ".plist"),
       content,
     };
   }
@@ -146,7 +149,9 @@ export function servicePlan({
     return {
       ...base,
       label,
-      manifestPath: p.join(home, ".config", "systemd", "user", label),
+      manifestPath: preview
+        ? p.join(state, "service-preview.service")
+        : p.join(home, ".config", "systemd", "user", label),
       content,
     };
   }
@@ -156,7 +161,10 @@ export function servicePlan({
     .update(windowsSid + "\n" + root)
     .digest("hex")
     .slice(0, 12)}`;
-  const launcherPath = p.join(state, "service-launch.ps1");
+  const launcherPath = p.join(
+    state,
+    preview ? "service-preview-launch.ps1" : "service-launch.ps1",
+  );
   const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\n& ${ps(node)} ${args.map(ps).join(" ")}\nexit $LASTEXITCODE\n`;
   const executable = p.join(
     process.env.SystemRoot || "C:\\Windows",
@@ -183,7 +191,10 @@ export function servicePlan({
     windowsSid,
     launcherPath,
     launcher,
-    manifestPath: p.join(state, "service-task.xml"),
+    manifestPath: p.join(
+      state,
+      preview ? "service-preview.xml" : "service-task.xml",
+    ),
     content,
   };
 }

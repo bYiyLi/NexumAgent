@@ -12,7 +12,12 @@ import {
   requireCondition,
 } from "../contracts/errors.js";
 import { authorizeCall, callerKey, type Caller } from "../contracts/caller.js";
-import { canonicalJson, digest, newId } from "../contracts/json.js";
+import {
+  canonicalJson,
+  digest,
+  newId,
+  isPlainRecord,
+} from "../contracts/json.js";
 import { validateContract } from "../contracts/validation.js";
 import { validateConnectionV2 } from "../contracts/wire-validation.js";
 import type {
@@ -36,7 +41,7 @@ import type {
   WireCallerV2,
   WireAuthorizationRefreshInputV2,
 } from "../contracts/wire.js";
-import { SqliteStore } from "../storage/sqlite.js";
+import { SqliteStore, type ResourceHistoryRecord } from "../storage/sqlite.js";
 import {
   defaultBuiltins,
   ModuleLoader,
@@ -113,6 +118,7 @@ import { AgentDataPlane } from "./data-plane.js";
 import { CloudUserStateBackend } from "./user-state.js";
 import type { ProfileConfiguration } from "./config.js";
 import { AgentCatalog } from "./catalog.js";
+import { ApplicationProcesses } from "./processes.js";
 import { prepareRunAttachments, type AttachmentSource } from "./attachments.js";
 import { dispatchApplication, type ApplicationHandler } from "./dispatcher.js";
 import { projectRunView, projectRunRecord } from "./run-view.js";
@@ -243,6 +249,7 @@ export class AgentRuntime {
   #tasks!: RuntimeTasks;
   #approvedPackages!: ApprovedPackageCatalog;
   #resources: ResourceManager;
+  #processes: ApplicationProcesses;
   #artifacts: ArtifactStore;
   #retention: ProfileRetention;
   #materialRetention: MaterialRetention;
@@ -323,8 +330,23 @@ export class AgentRuntime {
         path.join(work, "package.json"),
         '{"private":true,"type":"module"}\n',
       );
-    this.#store = new SqliteStore(root, connection.binding, Date.now(), bootId);
+    this.#store = new SqliteStore(
+      root,
+      connection.binding,
+      Date.now(),
+      bootId,
+      {
+        workIdleMs: config.retention?.work_idle_ms,
+        runHistoryMs: config.retention?.run_history_ms,
+        runLogsMs: config.retention?.run_logs_ms,
+        inputAttachmentsMs: config.retention?.input_attachments_ms,
+      },
+    );
     this.#resources = new ResourceManager(this.#store);
+    this.#processes = new ApplicationProcesses(this.#resources, {
+      authorize: (caller, record, action) =>
+        this.#processAuthority(caller, record, action),
+    });
     this.#authority = new AgentAuthority(
       { ...this.#store.binding, bootId },
       work,
@@ -332,6 +354,7 @@ export class AgentRuntime {
     this.#authority.connect(connection.binding);
     this.#materialRetention = new MaterialRetention(root, {
       reserve: (bytes) => this.#retention.reserve(bytes),
+      retentionMs: config.retention?.material_copies_ms,
       liveSnapshotRefs: () =>
         new Set([
           ...this.#store.workSnapshotRefs(Date.now()),
@@ -350,6 +373,7 @@ export class AgentRuntime {
     this.#artifacts = new ArtifactStore(root, connection.binding.agentId, {
       maxFileBytes: 256 * 1024 * 1024,
       maxReadBytes: 64 * 1024 * 1024,
+      retentionMs: config.retention?.artifact_ms,
       reserve: (bytes, options) => this.#retention.reserve(bytes, options),
       retentionUntil: (id, runId, originalExpiresAt) =>
         this.#store.taskArtifactRetentionUntil(
@@ -360,6 +384,7 @@ export class AgentRuntime {
         ),
     });
     this.#retention = new ProfileRetention(this.#store, this.#artifacts, {
+      maxManagedBytes: config.storage?.max_managed_bytes,
       materialRetention: this.#materialRetention,
     });
     this.#state = new StateServices(
@@ -860,6 +885,71 @@ export class AgentRuntime {
       },
     });
   }
+  #processAuthority(
+    caller: Caller,
+    record: ResourceHistoryRecord | null,
+    action: "read" | "stop",
+  ): void {
+    requireCondition(
+      caller.source === "owner_session",
+      "forbidden",
+      "Managed process control requires the current owner session.",
+    );
+    this.#authorizeCaller(caller);
+    if (!record) return;
+    requireCondition(
+      record.originRunId,
+      "process_unavailable",
+      "The process lacks its actual accepted Run identity.",
+    );
+    const run = this.#store.getRun(record.originRunId);
+    let scope: string | null;
+    try {
+      scope = this.#boundProject(caller, run.projectId);
+    } catch (cause) {
+      if (
+        String(this.#invocation.getStore()?.operation) ===
+          "agent.process.list" &&
+        isAgentError(cause) &&
+        cause.code === "authorization_scope_mismatch"
+      )
+        throw new AgentError(
+          "forbidden",
+          "This process is outside the current Project inspection scope.",
+        );
+      throw cause;
+    }
+    const work = this.#store.getWork(run.contextId);
+    this.#authority.authorize(
+      caller,
+      { type: "path", value: work.pwd, access: "read" },
+      scope,
+    );
+    const details = record.diagnostic.details ?? {};
+    requireCondition(
+      isPlainRecord(details),
+      "process_unavailable",
+      "The registered process facts must remain an ordinary data object.",
+    );
+    const cwd = details.cwd;
+    if (cwd !== undefined) {
+      requireCondition(
+        typeof cwd === "string" && path.isAbsolute(cwd),
+        "process_unavailable",
+        "The registered process has invalid working-directory facts.",
+      );
+      this.#authority.authorize(
+        caller,
+        { type: "path", value: cwd, access: "read" },
+        scope,
+      );
+    }
+    this.#authority.authorize(
+      caller,
+      { type: "resource", value: record.resourceId, access: action },
+      scope,
+    );
+  }
   #ownerRunInspection(caller: Caller, runId: string): boolean {
     const invoke = this.#invocation.getStore();
     return (
@@ -1097,12 +1187,7 @@ export class AgentRuntime {
       target.action === "get" &&
       this.#ownerRunInspection(caller, target.run.runId)
     ) {
-      const context = this.#invocation.getStore()!.context;
-      requireCondition(
-        (context.authorization.projectId ?? null) === target.run.projectId,
-        "authorization_scope_mismatch",
-        "Run inspection must use the actual retained run's Project scope.",
-      );
+      const scope = this.#boundProject(caller, target.run.projectId);
       this.#authority.authorize(
         caller,
         {
@@ -1110,7 +1195,7 @@ export class AgentRuntime {
           value: this.#store.getWork(target.run.contextId).pwd,
           access: "read",
         },
-        target.run.projectId,
+        scope,
       );
       return;
     }
@@ -1712,11 +1797,15 @@ export class AgentRuntime {
         [
           "agent.project.resolve",
           "agent.project.inspect",
+          "agent.project.close",
           "agent.run.inspect",
           "agent.context.read",
+          "agent.process.list",
+          "agent.process.get",
+          "agent.process.stop",
         ].includes(message.operation),
         "invalid_control_direction",
-        "An owner Console session has only its current read-only project inspection operations.",
+        "An owner Console session has only its declared Project and managed-process operations.",
       );
     this.#authority.observe(message.context);
     for (const lease of this.#leases)
@@ -1793,6 +1882,14 @@ export class AgentRuntime {
         return { root, name: path.basename(root) };
       },
       "agent.open": (input) => this.#work.open(caller, input, signal),
+      "agent.project.close": async (input) => {
+        const result = await this.#work.closeProject(
+          caller,
+          input.projectId,
+          signal,
+        );
+        return { ...result, closedAt: iso(result.closedAt as number) };
+      },
       "agent.project.inspect": (input) =>
         this.#work.inspect(
           caller,
@@ -1837,8 +1934,10 @@ export class AgentRuntime {
         return projectRunView(retained, {
           encoder: this.#encoder,
           scope: this.#resultScope(caller, retained.run, signal),
-          budgets: this.#authority.current(caller, retained.run.projectId)
-            .budgets,
+          budgets: this.#authority.current(
+            caller,
+            this.#projectFor(caller, retained.run.runId),
+          ).budgets,
           readOnly: true,
           shipJson: async () => {
             throw new AgentError(
@@ -1895,6 +1994,13 @@ export class AgentRuntime {
         };
       },
       "agent.context.read": (input) => this.#readContext(caller, input, signal),
+      "agent.process.list": (input) => {
+        if (input.projectId !== undefined)
+          this.#boundProject(caller, input.projectId);
+        return this.#processes.list(caller, input);
+      },
+      "agent.process.get": (input) => this.#processes.get(caller, input),
+      "agent.process.stop": (input) => this.#processes.stop(caller, input),
       "agent.resources.list": (input) =>
         this.#listResources(caller, input, signal),
       "agent.resources.read": (input) =>

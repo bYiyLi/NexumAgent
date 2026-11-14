@@ -38,6 +38,14 @@ function fixture(t) {
 test("native diagnostics retain a bounded complete JSONL tail and fixed safe fields", (t) => {
   const f = fixture(t);
   appendDiagnostic(f.root, "development", "agent_connected", false);
+  appendDiagnostic(f.root, "development", "control_unavailable", true);
+  assert.deepEqual(
+    readFileSync(f.filename, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).code),
+    ["agent_connected", "control_unavailable"],
+  );
   const record =
     JSON.stringify({ time: "old", message: "中".repeat(80) }) + "\n";
   const initial = record.repeat(

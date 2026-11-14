@@ -52,7 +52,7 @@ function numericPolicy(
       typeof number !== "number" ||
       !Number.isSafeInteger(number) ||
       number <= 0 ||
-      (duration && number > 8_640_000_000_000_000 - Date.now())
+      (duration && number > 253_402_300_799_999 - Date.now())
     )
       throw invalid();
   return Object.freeze({ ...value }) as Readonly<Record<string, number>>;

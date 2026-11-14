@@ -2,7 +2,7 @@
   "name": "nexum-agent",
   "version": "0.0.1",
   "private": true,
-  "description": "Nexum local-first TypeScript Agent (initial scaffold)",
+  "description": "Nexum local-first programmable TypeScript Agent",
   "type": "module",
   "engines": {
     "node": ">=24.22.1 <25"

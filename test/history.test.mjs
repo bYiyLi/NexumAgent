@@ -478,7 +478,8 @@ test("get reports lost, corrupt, redirected or oversized retained details withou
   assert.equal(intact.snapshots.logs.truncated, true);
   assert.equal(
     intact.snapshots.logs.nextOffset,
-    Buffer.byteLength(intact.snapshots.logs.value),
+    intact.snapshots.logs.dataOffset +
+      Buffer.byteLength(intact.snapshots.logs.value),
   );
   assert(intact.snapshots.logs.nextOffset <= 8192);
   assert.equal(intact.snapshots.logs.value.includes("�"), false);

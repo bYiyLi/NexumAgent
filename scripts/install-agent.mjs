@@ -200,7 +200,7 @@ function configuration(value, profile) {
             typeof number === "number" &&
             Number.isSafeInteger(number) &&
             number > 0 &&
-            (!duration || number <= 8_640_000_000_000_000 - Date.now()),
+            (!duration || number <= 253_402_300_799_999 - Date.now()),
         ),
       "The optional storage/retention policy is invalid.",
     );
@@ -515,7 +515,15 @@ export async function installAgent(options) {
         home,
         programDir: destination,
         windowsSid,
+        preview: !registerService,
       });
+      const preserveActive = Boolean(old && !registerService);
+      assert(
+        !preserveActive ||
+          config === undefined ||
+          JSON.stringify(previousConfig) === JSON.stringify(nextConfig),
+        "No-register preparation cannot replace an existing active configuration.",
+      );
       if (registerService && old) {
         const previous = servicePlan({
           profile,
@@ -527,53 +535,30 @@ export async function installAgent(options) {
         if (state.registered) await serviceAction(previous, "stop");
         await serviceAction(previous, "remove");
       }
-      if (!previousConfig || config !== undefined)
+      if (!preserveActive && (!previousConfig || config !== undefined))
         await atomicJSON(configPath, nextConfig);
-      await atomicJSON(activePath, {
-        schemaVersion: 1,
-        sha256: checked.sha256,
-        version: checked.manifest.version,
-        nodeVersion: NODE_VERSION,
-        platform: process.platform,
-        arch: process.arch,
-        programDir: destination,
-        installedAt: new Date().toISOString(),
-      });
+      if (!preserveActive)
+        await atomicJSON(activePath, {
+          schemaVersion: 1,
+          sha256: checked.sha256,
+          version: checked.manifest.version,
+          nodeVersion: NODE_VERSION,
+          platform: process.platform,
+          arch: process.arch,
+          programDir: destination,
+          installedAt: new Date().toISOString(),
+        });
       if (registerService) {
         await serviceAction(plan, "install");
         if (start) await serviceAction(plan, "start");
-      } else
-        await writeServiceManifest({
-          ...plan,
-          manifestPath: path.join(
-            root,
-            "state",
-            "service-preview" +
-              (process.platform === "win32"
-                ? ".xml"
-                : process.platform === "darwin"
-                  ? ".plist"
-                  : ".service"),
-          ),
-        });
+      } else await writeServiceManifest(plan);
       return {
         profile,
         programDir: destination,
         version: checked.manifest.version,
         serviceRegistered: registerService,
         startRequested: registerService && start,
-        manifestPath: registerService
-          ? plan.manifestPath
-          : path.join(
-              root,
-              "state",
-              "service-preview" +
-                (process.platform === "win32"
-                  ? ".xml"
-                  : process.platform === "darwin"
-                    ? ".plist"
-                    : ".service"),
-            ),
+        manifestPath: plan.manifestPath,
       };
     } finally {
       if (staging) await rm(staging, { recursive: true, force: true });

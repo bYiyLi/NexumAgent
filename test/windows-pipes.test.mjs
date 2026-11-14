@@ -466,6 +466,30 @@ setTimeout(() => process.exit(90), 12000).unref();`,
 );
 
 test(
+  "Windows forced PTY closure records real Job closure and known incomplete output without inventing EOF",
+  { skip: !windows, timeout: 15000 },
+  async (t) => {
+    const f = setup(t);
+    await f.backend.start(
+      f.node(
+        "process.stdout.write('force-pty-ready\\n');setInterval(()=>{},1000);",
+        { tty: true },
+      ),
+    );
+    await eventually(() => f.text("terminal").includes("force-pty-ready"));
+    const delivered = await f.backend.signal("SIGKILL");
+    assert.equal(delivered.delivered, true);
+    await within(f.backend.closed, 8000);
+    const facts = f.backend.facts();
+    assert.equal(facts.closed, true);
+    assert.equal(facts.treeStopped, true);
+    assert.equal(facts.forceRequested, true);
+    assert.equal(facts.outputComplete, false);
+    assert.equal(f.backend.failure.code, "process_output_failed");
+  },
+);
+
+test(
   "Windows raw conout bridge preserves every byte and waits beyond idle for actual native EOF",
   {
     skip: !windows,

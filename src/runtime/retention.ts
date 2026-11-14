@@ -77,7 +77,23 @@ const managedRoots = [
   "work/skills",
   "work/.git",
   "work/.platform-controls",
+  "work/api",
+  "work/modules",
 ] as const;
+const managedFiles = [
+  "config.json",
+  "work/mcp.json",
+  "work/package.json",
+  "work/package-lock.json",
+  "work/.gitignore",
+  "work/.npmrc",
+  "work/AGENTS.override.md",
+  "work/AGENTS.md",
+  "work/CLAUDE.md",
+  "work/GEMINI.md",
+  "work/CONTEXT.md",
+] as const;
+const workTemporaryFile = /^(?:\.configuration-[0-9a-f]{48}|(?:package\.json|package-lock\.json)\.tmp_[0-9a-f]{32}|\.write_[0-9a-f]{32})$/;
 const resourcePattern = /^res_[0-9a-f]{32}$/;
 const runPattern = /^run_[0-9a-f]{32}$/;
 const absent = (cause: unknown): boolean =>
@@ -274,6 +290,27 @@ export class ProfileRetention {
       scanned = 0,
       complete = true;
     const identities = new Set<string>();
+    const countFile = (stats: Stats): void => {
+      const identity = `${stats.dev}:${stats.ino}`;
+      if (!identities.has(identity)) {
+        identities.add(identity);
+        bytes += stats.size;
+        files++;
+      }
+    };
+    const inspectFile = async (filename: string): Promise<void> => {
+      if (!complete) return;
+      if (++scanned > scanLimit) { complete = false; return; }
+      const parent = path.dirname(filename);
+      if (parent !== this.root && !await this.#directory(parent)) return;
+      await this.#root();
+      let stats: Stats;
+      try { stats = await lstat(filename); }
+      catch (cause) { if (absent(cause)) return; throw cause; }
+      if (stats.isSymbolicLink()) { symlinks++; return; }
+      requireCondition(stats.isFile(), "storage_measurement_invalid", "A fixed managed record must remain a regular file.");
+      countFile(stats);
+    };
     const walk = async (directory: string, depth: number): Promise<void> => {
       if (!complete) return;
       if (depth > 128) {
@@ -317,12 +354,7 @@ export class ProfileRetention {
             directories++;
             await walk(filename, depth + 1);
           } else if (stats.isFile()) {
-            const identity = `${stats.dev}:${stats.ino}`;
-            if (!identities.has(identity)) {
-              identities.add(identity);
-              bytes += stats.size;
-              files++;
-            }
+            countFile(stats);
           }
           if (!complete) break;
         }
@@ -340,6 +372,20 @@ export class ProfileRetention {
         await walk(directory, 0);
       }
       if (!complete) break;
+    }
+    for (const relative of managedFiles) await inspectFile(path.join(this.root, relative));
+    // Only these Core-owned siblings are inspected at work's top level. Never
+    // recurse through arbitrary projects, package dependencies or raw work files.
+    const work = path.join(this.root, "work");
+    if (complete && await this.#directory(work)) {
+      const directory = await opendir(work);
+      try {
+        for await (const entry of directory) {
+          if (++scanned > scanLimit) { complete = false; break; }
+          if (workTemporaryFile.test(entry.name)) await inspectFile(path.join(work, entry.name));
+          if (!complete) break;
+        }
+      } finally { await directory.close().catch(cause => { if ((cause as NodeJS.ErrnoException).code !== "ERR_DIR_CLOSED") throw cause; }); }
     }
     return Object.freeze({
       bytes,
@@ -371,14 +417,19 @@ export class ProfileRetention {
       (options.control === true ? 0 : this.controlHeadroomBytes);
     const admission = this.#admission.then(async () => {
       this.#admit();
+      // Earlier writers can finish and release after their path was scanned.
+      // Admissions themselves are serial, so this per-scan floor covers exactly
+      // the old commitments that may become newly visible bytes during the scan.
+      let reservedAtScanStart = this.#reserved;
       let usage = await this.measure();
       requireCondition(
         usage.complete,
         "storage_measurement_incomplete",
         "The managed usage scan could not finish within its safety budget.",
       );
-      if (bytes > maximum - usage.bytes - this.#reserved) {
+      if (bytes > maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved)) {
         await this.sweep();
+        reservedAtScanStart = this.#reserved;
         usage = await this.measure();
       }
       requireCondition(
@@ -387,7 +438,7 @@ export class ProfileRetention {
         "The managed usage scan could not finish within its safety budget.",
       );
       requireCondition(
-        bytes <= maximum - usage.bytes - this.#reserved,
+        bytes <= maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved),
         "storage_quota_exceeded",
         "Managed storage is full after eligible expired data cleanup.",
       );

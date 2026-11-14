@@ -227,7 +227,7 @@ route(
 route(
   "tab.close",
   async (ctx) => {
-    await ctx.chrome.tabs.remove(nativeId(ctx.target.tabId));
+    await ctx.router.closeNativeTab(ctx, nativeId(ctx.target.tabId));
     return null;
   },
   { needsTab: true, mutating: true },
@@ -463,7 +463,7 @@ route(
   async (ctx, args) => {
     const id = tabIdOf(ctx, args);
     ctx.router.claim(ctx.lease, id);
-    await ctx.chrome.tabs.remove(id);
+    await ctx.router.closeNativeTab(ctx, id);
     return null;
   },
   { mutating: true },
@@ -718,15 +718,15 @@ route("user.getTabContext", async (ctx, args) => {
         ? args.tab
         : args.tab.id;
   requireValue(
-    id,
+    id && ctx.target.tabId === id,
     "INVALID_TARGET",
-    "Select an actual tab before reading its context.",
+    "The user-context request must identify its exact reserved tab.",
   );
-  const sub = { ...ctx, target: ctx.router.target(id, ctx.lease) };
+  await ctx.router.resolveTab(ctx, id);
   const tab = await ctx.chrome.tabs.get(nativeId(id));
   return {
     kind: "text",
-    text: await ctx.router.page(sub, { command: "content", format: "text" }),
+    text: await ctx.router.page(ctx, { command: "content", format: "text" }),
     title: tab.title ?? "",
     url: tab.url ?? "",
     truncated: false,
@@ -1568,6 +1568,11 @@ export function createBrowserRouter(
   const canClaim = (lease, id) => {
     active(lease);
     requireValue(
+      !lease.closedTabs?.has(id),
+      "INVALID_TARGET",
+      "This native tab was already closed by this run.",
+    );
+    requireValue(
       !lease.handedOff.has(id),
       "INVALID_TARGET",
       "This run already handed this target back to the user.",
@@ -1623,6 +1628,50 @@ export function createBrowserRouter(
       waiter.value = value;
       waiter.resolve(value);
     }
+    if (waiter.event === "filechooser") {
+      const lease = leases.get(waiter.leaseId);
+      if (lease) void syncChooserIntercept(lease, waiter.tabId).catch(() => {});
+    }
+  };
+  const syncChooserIntercept = (lease, tabId) => {
+    const queues = (lease.chooserSync ??= new Map()),
+      before = queues.get(tabId) ?? Promise.resolve();
+    const task = before
+      .catch(() => {})
+      .then(async () => {
+        if (owners.get(tabId) !== lease.id || !lease.attached.has(tabId))
+          return;
+        const wanted =
+          !lease.ended &&
+          !lease.revoked &&
+          [...waiters.values()].some(
+            (waiter) =>
+              waiter.leaseId === lease.id &&
+              waiter.tabId === tabId &&
+              waiter.event === "filechooser" &&
+              !waiter.settled,
+          );
+        if (wanted === lease.fileChoosers.has(tabId)) return;
+        await chrome.debugger.sendCommand(
+          { tabId },
+          "Page.setInterceptFileChooserDialog",
+          { enabled: wanted },
+        );
+        if (wanted) lease.fileChoosers.add(tabId);
+        else lease.fileChoosers.delete(tabId);
+      });
+    queues.set(tabId, task);
+    lease.pending.set(task, {
+      tabId: String(tabId),
+      actionId: `chooser_cleanup_${crypto.randomUUID()}`,
+    });
+    void task
+      .finally(() => {
+        lease.pending.delete(task);
+        if (queues.get(tabId) === task) queues.delete(tabId);
+      })
+      .catch(() => {});
+    return task;
   };
   const cancelWaiter = (waiter) => {
     if (!waiter.settled)
@@ -1734,7 +1783,7 @@ export function createBrowserRouter(
         throw cause;
     }
   };
-  const releaseControl = async (lease, tabId) => {
+  const releaseControl = async (lease, tabId, { detach = true } = {}) => {
     if (!lease.attached.has(tabId) && !lease.intents.has(tabId)) return;
     for (const waiter of waiters.values())
       if (waiter.leaseId === lease.id && waiter.tabId === tabId)
@@ -1781,6 +1830,16 @@ export function createBrowserRouter(
           "Emulation.clearDeviceMetricsOverride",
           {},
         );
+      if (!detach) {
+        // Confirm effects while the actual page channel still exists. Do not claim target
+        // destruction released a key, viewport or stream that never received native cleanup.
+        lease.buttons.delete(tabId);
+        lease.keys.delete(tabId);
+        lease.viewports.delete(tabId);
+        lease.nativeStreams?.delete(tabId);
+        await persist();
+        return;
+      }
       lease.detaching.add(tabId);
       try {
         await chrome.debugger.detach({ tabId });
@@ -1937,6 +1996,11 @@ export function createBrowserRouter(
               );
               let changed = false;
               for (const tool of params.tools) {
+                requireValue(
+                  typeof tool.toolId === "string",
+                  "CAPABILITY_NOT_ALLOWED",
+                  "This browser's native WebMCP protocol has no opaque registration IDs; invoking a tool by name cannot preserve the observed registration.",
+                );
                 text(tool.toolId, 512);
                 if (method === "WebMCP.toolsRemoved")
                   changed = state.tools.delete(tool.toolId) || changed;
@@ -2186,7 +2250,8 @@ export function createBrowserRouter(
         if (
           !lease.ended &&
           !lease.detaching.has(source.tabId) &&
-          !lease.closingTemporaryTabs?.has(source.tabId)
+          !lease.closingTemporaryTabs?.has(source.tabId) &&
+          !(reason === "target_closed" && lease.closingTabs?.has(source.tabId))
         ) {
           lease.revoked = true;
           for (const controller of lease.controllers.values())
@@ -2722,6 +2787,72 @@ export function createBrowserRouter(
         );
       await persist();
       return { id: String(id), closed: true };
+    },
+    async closeNativeTab(ctx, id) {
+      const lease = ctx.lease;
+      canClaim(lease, id);
+      const closing = { ...ctx, target: { ...target(String(id), lease) } };
+      // Closing a different management target must never send cleanup to the caller's tab.
+      await releaseControl(lease, id, { detach: false });
+      for (const [token, stage] of lease.clipboardStages ?? [])
+        if (nativeId(stage.tabId) === id)
+          await router.clipboardPage(closing, { command: "drop", token }, true);
+      active(lease);
+      ctx.signal?.throwIfAborted();
+      (lease.closingTabs ??= new Set()).add(id);
+      let removed = false;
+      try {
+        try {
+          await ctx.chrome.tabs.remove(id);
+          removed = true;
+        } catch (cause) {
+          // Inspect an ambiguous native result; never replay the removal request.
+          try {
+            await chrome.tabs.get(id);
+          } catch (probe) {
+            if (
+              /No tab with id|Invalid tab ID/i.test(
+                String(probe?.message ?? ""),
+              )
+            )
+              removed = true;
+          }
+          if (!removed) throw cause;
+        }
+        (lease.closedTabs ??= new Set()).add(id);
+        lease.externallyDetached.add(id);
+        await releaseControl(lease, id);
+        for (const waiter of waiters.values())
+          if (waiter.leaseId === lease.id && waiter.tabId === id)
+            cancelWaiter(waiter);
+        for (const [actionId, controller] of lease.controllers)
+          if (actionId !== ctx.actionId && controller.tabId === String(id))
+            controller.stop.abort(
+              new BrowserActionError(
+                "INVALID_TARGET",
+                "The native tab was closed by this run.",
+              ),
+            );
+        const visualCtx = lease.visualContexts?.get(id);
+        if (visualCtx)
+          await visual?.releaseTab({
+            ...visualCtx,
+            signal: undefined,
+            deadline: Date.now() + 250,
+            result: false,
+          });
+        lease.visualContexts?.delete(id);
+        if (owners.get(id) === lease.id) owners.delete(id);
+        lease.tabs.delete(id);
+        lease.attached.delete(id);
+        lease.intents.delete(id);
+        await persist();
+      } finally {
+        // Success has removed the owner before a delayed detach can be delivered. Failure
+        // leaves the original owner intact and removes only this request's admission marker.
+        if (!removed || owners.get(id) !== lease.id)
+          lease.closingTabs.delete(id);
+      }
     },
     async clipboardPage(ctx, payload, cleanup = false) {
       return router.scriptPage(
@@ -4501,10 +4632,7 @@ export function createBrowserRouter(
       try {
         await router.send(ctx, "Page.enable", {});
         if (input.event === "filechooser") {
-          await router.send(ctx, "Page.setInterceptFileChooserDialog", {
-            enabled: true,
-          });
-          ctx.lease.fileChoosers.add(tabId);
+          await syncChooserIntercept(ctx.lease, tabId);
         }
         if (
           input.event === "navigation" &&
@@ -4517,6 +4645,7 @@ export function createBrowserRouter(
           });
         }
         ctx.signal?.throwIfAborted();
+        if (waiter.error) throw waiter.error;
         waiter.ready = true;
         return {
           id: waiter.id,
@@ -4525,6 +4654,8 @@ export function createBrowserRouter(
         };
       } catch (cause) {
         cancelWaiter(waiter);
+        if (input.event === "filechooser")
+          await syncChooserIntercept(ctx.lease, tabId);
         waiters.delete(waiter.id);
         throw cause;
       }
@@ -4567,23 +4698,8 @@ export function createBrowserRouter(
         "The event waiter does not belong to this run and target.",
       );
       cancelWaiter(waiter);
-      if (
-        waiter.event === "filechooser" &&
-        ![...waiters.values()].some(
-          (v) =>
-            v !== waiter &&
-            !v.settled &&
-            v.leaseId === ctx.lease.id &&
-            v.tabId === waiter.tabId &&
-            v.event === "filechooser",
-        ) &&
-        ctx.lease.fileChoosers.has(waiter.tabId)
-      ) {
-        await router.send(ctx, "Page.setInterceptFileChooserDialog", {
-          enabled: false,
-        });
-        ctx.lease.fileChoosers.delete(waiter.tabId);
-      }
+      if (waiter.event === "filechooser")
+        await syncChooserIntercept(ctx.lease, waiter.tabId);
       return { cancelled: true };
     },
     downloads(ctx) {
@@ -4599,6 +4715,7 @@ export function createBrowserRouter(
             id,
             target: source,
             suggestedFilename,
+            url,
             state,
             bytesReceived,
             totalBytes,
@@ -4606,6 +4723,7 @@ export function createBrowserRouter(
             id,
             target: source,
             suggestedFilename,
+            url,
             state,
             bytesReceived,
             ...(totalBytes === undefined ? {} : { totalBytes }),

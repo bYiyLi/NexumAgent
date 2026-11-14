@@ -1,6 +1,5 @@
 import { EventEmitter, once } from "node:events";
 import { Console } from "node:console";
-import { Writable } from "node:stream";
 import { performance } from "node:perf_hooks";
 import {
   readFileSync,
@@ -41,6 +40,7 @@ import { atomicText, contains, privateDirectory } from "./paths.js";
 import type { ResourceManager } from "../extensions/resources.js";
 import { RunOperations, type OperationHooks } from "./operations.js";
 import { qualifyControlScript } from "./control-scripts.js";
+import { RunLog, readRunLogRange } from "./run-log.js";
 import {
   authorizeCall,
   callerKey,
@@ -86,6 +86,9 @@ export interface RetainedSnapshot {
   readonly value?: JsonValue;
   readonly truncated?: true;
   readonly nextOffset?: number;
+  readonly startOffset?: number;
+  readonly endOffset?: number;
+  readonly dataOffset?: number;
 }
 export interface CancelView extends RunView {
   /** This invocation actually recorded the first stop request; it does not confirm shutdown. */
@@ -196,12 +199,10 @@ interface Scope {
   pending: PendingWait | null;
   deliveries: Set<Promise<void>>;
   inputPreparation?: Promise<void>;
-  logReservation?: { release(): void };
-  loggingClosed?: boolean;
+  log?: RunLog;
   operations: RunOperations;
   timer?: NodeJS.Timeout;
   fatal?: AgentError;
-  logError?: unknown;
 }
 
 function failure(error: unknown, phase: string): JsonObject {
@@ -553,8 +554,12 @@ export class RunEngine extends EventEmitter {
         if (kind !== "logs" && bytes > 8192)
           return { ref, status: "too_large", bytes };
         const maximum = kind === "logs" ? 4096 : 8192;
-        const buffer = Buffer.alloc(Math.min(bytes + 1, maximum + 1));
-        const count = readSync(file, buffer, 0, buffer.length, 0);
+        const range = kind === "logs" ? readRunLogRange(file, bytes) : null;
+        const dataOffset = range?.dataOffset ?? 0;
+        const buffer = Buffer.alloc(
+          Math.min(bytes - dataOffset + 1, maximum + 1),
+        );
+        const count = readSync(file, buffer, 0, buffer.length, dataOffset);
         if (kind !== "logs") {
           if (count > 8192)
             return { ref, status: "too_large", bytes: Math.max(bytes, count) };
@@ -579,8 +584,13 @@ export class RunEngine extends EventEmitter {
           status: "available",
           bytes,
           value: text,
-          ...(consumed < bytes || count > maximum
-            ? { truncated: true, nextOffset: consumed }
+          startOffset: range!.startOffset,
+          endOffset: range!.endOffset,
+          dataOffset,
+          ...(range!.startOffset > 0 ||
+          consumed < bytes - dataOffset ||
+          count > maximum
+            ? { truncated: true, nextOffset: dataOffset + consumed }
             : {}),
         };
       } finally {
@@ -746,10 +756,8 @@ export class RunEngine extends EventEmitter {
       this.#scheduleDeadline(scope);
       const begin = () => {
         void this.#drive(scope, input, pinned)
-          .finally(() => {
-            scope.loggingClosed = true;
-            scope.logReservation?.release();
-            scope.logReservation = undefined;
+          .finally(async () => {
+            await scope.log?.finish();
           })
           .catch((error) => this.#persistenceFailure(scope, error));
       };
@@ -1127,40 +1135,21 @@ export class RunEngine extends EventEmitter {
           2 * 1024 * 1024,
         ),
       );
-      const logsFile = path.join(
-        privateDirectory(this.store.root, "logs", "runs", run.runId),
-        "console.log",
+      scope.log = new RunLog(
+        this.store.root,
+        run.runId,
+        this.#options.reserve
+          ? (bytes) =>
+              this.#options.reserve!(bytes, { control: scope.controlEligible })
+          : undefined,
       );
-      scope.logReservation = await this.#options.reserve?.(1024 * 1024 + 1024, {
-        control: scope.controlEligible,
-      });
+      await scope.log.open();
       this.#assertActive(scope);
-      atomicText(logsFile, "");
-      let log = "";
-      const stream = new Writable({
-        write: (chunk, _encoding, done) => {
-          try {
-            if (scope.loggingClosed) {
-              done();
-              return;
-            }
-            if (Buffer.byteLength(log) < 1024 * 1024) {
-              log += Buffer.from(chunk)
-                .subarray(0, 1024 * 1024 - Buffer.byteLength(log))
-                .toString("utf8");
-              atomicText(logsFile, log);
-            }
-            done();
-          } catch (error) {
-            scope.logError = error;
-            done();
-          }
-        },
-      });
+      const logsFile = scope.log.filename;
       // Console inspects guest objects only when the script explicitly chooses to log them.
       const runConsole = new Console({
-        stdout: stream,
-        stderr: stream,
+        stdout: scope.log,
+        stderr: scope.log,
         ignoreErrors: false,
       });
       phase = "compile";
@@ -1196,7 +1185,7 @@ export class RunEngine extends EventEmitter {
       this.#publish(run.runId);
       phase = "execute";
       const value = await scope.operations.audit.run(execute);
-      if (scope.logError)
+      if (scope.log?.failure)
         throw new AgentError(
           "run_log_failed",
           "The local run log could not be saved.",
@@ -1221,7 +1210,7 @@ export class RunEngine extends EventEmitter {
       }
       phase = "operations";
       await scope.operations.settle();
-      if (scope.logError)
+      if (scope.log?.failure)
         throw new AgentError(
           "run_log_failed",
           "The local run log could not be saved.",
@@ -1307,7 +1296,8 @@ export class RunEngine extends EventEmitter {
       scope.operations.audit.close();
       return;
     }
-    if (scope.logError)
+    await scope.log?.finish();
+    if (scope.log?.failure)
       error ??= failure(
         new AgentError(
           "run_log_failed",
@@ -1326,11 +1316,6 @@ export class RunEngine extends EventEmitter {
         : "succeeded";
     releaseScript?.();
     releaseScript = undefined;
-    // The root can return before tracked handlers finish. Keep its captured
-    // console and reserved log budget until their actual settlement is known.
-    scope.loggingClosed = true;
-    scope.logReservation?.release();
-    scope.logReservation = undefined;
     this.store.transitionRun(
       run.runId,
       run.revision,

@@ -7,6 +7,7 @@ import {
   MAX_STATE_VALUE_BYTES_V2,
   MAX_STATE_RECEIPT_BYTES_V2,
   MAX_HOST_FEATURE_BYTES_V2,
+  MAX_PROCESS_OUTPUT_BYTES_V2,
   type WireAuthorizationV2,
   type WireConnectionV2,
   type WireEnvelopeV2,
@@ -31,15 +32,23 @@ export function validateWireSemantics(contract: string, value: unknown): void {
           [
             "agent.project.resolve",
             "agent.project.inspect",
+            "agent.project.close",
             "agent.run.inspect",
             "agent.context.read",
+            "agent.process.list",
+            "agent.process.get",
+            "agent.process.stop",
           ].includes(String(data.operation)),
-          "An owner session may only inspect its authorized project and context.",
+          "An owner session may only use its authorized Console operations.",
         );
-      if (data.operation === "agent.run.inspect")
+      if (
+        data.operation === "agent.run.inspect" ||
+        data.operation === "agent.project.close" ||
+        String(data.operation).startsWith("agent.process.")
+      )
         check(
           record(context.caller).source === "owner_session",
-          "Only an owner session may inspect retained Run facts.",
+          "Only an owner session may use internal Console operations.",
         );
       const connection = record(context.connection);
       const authorization = record(context.authorization);
@@ -48,6 +57,12 @@ export function validateWireSemantics(contract: string, value: unknown): void {
         "The policy targets a different Agent.",
       );
       const input = record(data.input);
+      if (data.operation === "agent.project.close")
+        check(
+          input.projectId === authorization.projectId &&
+            typeof authorization.projectRoot === "string",
+          "Closing a Project requires its exact current Project policy.",
+        );
       if (input.agentId !== undefined)
         check(
           input.agentId === connection.agentId,
@@ -133,6 +148,8 @@ export function validateWireSemantics(contract: string, value: unknown): void {
   } else if (contract === "wire.type:StateValue") {
     canonicalJson(data.value, MAX_STATE_VALUE_BYTES_V2);
     canonicalJson(data, MAX_STATE_RECEIPT_BYTES_V2);
+  } else if (contract === "wire.type:ProcessSnapshot") {
+    canonicalJson(data, MAX_PROCESS_OUTPUT_BYTES_V2);
   } else if (contract === "wire.type:HostFeatures") {
     canonicalJson(data, MAX_HOST_FEATURE_BYTES_V2);
   } else if (
@@ -258,6 +275,8 @@ function validateOperation(
   value: RecordValue,
   output: boolean,
 ): void {
+  if (output && operation.startsWith("agent.process."))
+    canonicalJson(value, MAX_PROCESS_OUTPUT_BYTES_V2);
   if (operation === "agent.context.read") {
     if (!output)
       check(

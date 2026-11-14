@@ -2508,6 +2508,109 @@
       },
       "required": ["caller", "authorization", "connection"],
       "additionalProperties": false
+    },
+    "ProcessId": {
+      "type": "string",
+      "pattern": "^res_[0-9a-f]{32}$"
+    },
+    "ProcessSnapshot": {
+      "type": "object",
+      "properties": {
+        "processId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ProcessId"
+        },
+        "originRunId": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contextId": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "lifetime": {
+          "enum": [
+            "run",
+            "background",
+            "instance"
+          ]
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "handedOffAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "controlAvailable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "processId",
+        "originRunId",
+        "contextId",
+        "projectId",
+        "status",
+        "lifetime",
+        "createdAt",
+        "closedAt",
+        "handedOffAt",
+        "controlAvailable",
+        "details"
+      ],
+      "additionalProperties": false
     }
   }
 }

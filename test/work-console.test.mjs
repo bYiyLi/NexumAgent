@@ -168,7 +168,7 @@ test("owner inspection exposes disabled metadata by Agent/Project while ordinary
   });
   assert.equal(opened.agent.management, undefined);
   assert.equal(opened.project.management, undefined);
-  assert.equal(opened.project.descriptionItemId, undefined);
+  assert.equal(opened.project.descriptionItemId, null);
   assert.equal(opened.project.instructions.length, 0);
   assert.equal(opened.project.skills.length, 0);
 });

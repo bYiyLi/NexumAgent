@@ -46,7 +46,8 @@ function files(root) {
   return out;
 }
 function fixture(t, authorize = () => {}) {
-  const root = realpathSync(
+  // Match native realpath spelling rather than Windows' inherited 8.3 TMP path.
+  const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-browser-artifacts-")),
     ),
     work = path.join(root, "work"),

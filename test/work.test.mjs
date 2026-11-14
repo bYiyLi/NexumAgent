@@ -338,6 +338,22 @@ test("Project open separates its instructions/Skills and applies local visibilit
   assert.equal(opened.agent.skills.length, 0);
   assert.equal(opened.project.nestedInstructions[0].content, undefined);
   assert.match(opened.project.description, /# Project\\n/);
+  assert.ok(opened.project.descriptionItemId);
+  const readme = await service.readMaterial(
+    caller,
+    opened.contextId,
+    opened.project.descriptionItemId,
+  );
+  assert.equal(readme.bytes.toString(), "# Project\n\n介绍\t说明");
+  await assert.rejects(
+    service.readMaterial(
+      caller,
+      opened.contextId,
+      opened.project.descriptionItemId,
+      "AGENTS.md",
+    ),
+    { code: "material_path_escape" },
+  );
   for (const text of [
     JSON.stringify(opened),
     readFileSync(opened.agent.materialsIndex, "utf8"),

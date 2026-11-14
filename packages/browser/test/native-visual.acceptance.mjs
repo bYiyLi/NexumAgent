@@ -49,7 +49,7 @@ test("native visual feedback preserves user groups, follows only when enabled an
       const preserved=await selected.management.tabGroups.get(context.input.userGroupId);
       const inventory=await other.assets.list();
       await selected.visibility.set(true);
-      await other.title();
+      await other.cua.move({x:42,y:64});
       const followed=await selected.tabs.selected();
       await other.markDeliverable();
       return {pointer,stationary:stationary.id,followed:followed.id,ownGroup,preserved,inventory};`,

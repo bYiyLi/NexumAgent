@@ -55,6 +55,8 @@ import {
   migration3,
   migration4,
   migration5,
+  migration6,
+  migration7,
   schemaVersion,
 } from "./schema.js";
 
@@ -100,6 +102,7 @@ const transitions: Record<RunStatus, readonly RunStatus[]> = {
 function decode<T>(row: object): T {
   const value: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(row)) {
+    if (key.startsWith("retention_")) continue;
     const json = key.endsWith("_json");
     const name = (json ? key.slice(0, -5) : key).replace(
       /_([a-z])/g,
@@ -123,6 +126,12 @@ export interface AcceptRun {
   /** Internal verdict from the fixed platform-code qualifier; never a tool argument. */
   controlEligible?: boolean;
   controlCapacity?: number;
+}
+export interface StorageRetentionOptions {
+  readonly workIdleMs?: number;
+  readonly runHistoryMs?: number;
+  readonly runLogsMs?: number;
+  readonly inputAttachmentsMs?: number;
 }
 export interface MaintenanceOperationInput {
   readonly requestId: string;
@@ -169,13 +178,29 @@ export class SqliteStore {
   #db: DatabaseSync;
   #cursorKey = randomBytes(32);
   #closed = false;
+  #retention: Required<StorageRetentionOptions>;
 
   constructor(
     root: string,
     binding: Binding,
     now = Date.now(),
     bootId: string = newId("boot"),
+    retention: StorageRetentionOptions = {},
   ) {
+    this.#retention = Object.freeze({
+      workIdleMs: retention.workIdleMs ?? 86400000,
+      runHistoryMs: retention.runHistoryMs ?? 30 * 86400000,
+      runLogsMs: retention.runLogsMs ?? 7 * 86400000,
+      inputAttachmentsMs: retention.inputAttachmentsMs ?? 86400000,
+    });
+    requireCondition(
+      Object.values(this.#retention).every(
+        (value) =>
+          Number.isSafeInteger(value) && value > 0 && value <= 253402300799999,
+      ),
+      "invalid_retention_policy",
+      "Retention periods must be positive supported millisecond durations.",
+    );
     requireCondition(
       typeof bootId === "string" && /^boot_[0-9a-f]{32}$/.test(bootId),
       "invalid_boot_id",
@@ -263,6 +288,8 @@ export class SqliteStore {
         if (version < 3) this.#db.exec(migration3);
         if (version < 4) this.#db.exec(migration4);
         if (version < 5) this.#db.exec(migration5);
+        if (version < 6) this.#db.exec(migration6);
+        if (version < 7) this.#db.exec(migration7);
         this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
@@ -667,7 +694,7 @@ export class SqliteStore {
       const run = decode<RunRecord>(row);
       requireCondition(
         run.endedAt !== null &&
-          run.endedAt + 86400000 <= now &&
+          run.endedAt <= now - (row.retention_inputs_ms as number) &&
           !this.activeRunIds().has(runId),
         "cleanup_protected",
         "Temporary inputs are still protected by live work.",
@@ -761,27 +788,27 @@ export class SqliteStore {
         }
       }
       remove("close_receipts", "context_id", "expires_at<=?", [now]);
-      const historyBefore = now - 30 * 86400000;
+      remove("project_closures", "project_id", "expires_at<=?", [now]);
       remove(
         "transfers",
         "transfer_id",
-        "ended_at IS NOT NULL AND ended_at<=?",
-        [historyBefore],
+        "ended_at IS NOT NULL AND ended_at<=?-retention_history_ms",
+        [now],
       );
       remove(
         "operations",
         "operation_id",
-        "ended_at IS NOT NULL AND ended_at<=?",
-        [historyBefore],
+        "ended_at IS NOT NULL AND ended_at<=?-retention_history_ms",
+        [now],
       );
       remove(
         "managed_resources",
         "resource_id",
         `NOT EXISTS(SELECT 1 FROM transfers t WHERE t.resource_id=managed_resources.resource_id)
-        AND ((closed_at IS NOT NULL AND closed_at<=?) OR (status='unavailable' AND boot_id!=? AND
-          json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?))
+        AND ((closed_at IS NOT NULL AND closed_at<=?-retention_history_ms) OR (status='unavailable' AND boot_id!=? AND
+          json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?-retention_history_ms))
         AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.run_id=managed_resources.owner_run_id AND r.ended_at IS NULL)`,
-        [historyBefore, this.bootId, historyBefore],
+        [now, this.bootId, now],
         (row) => {
           if (row.kind === "sh.process" && typeof row.resource_id === "string")
             files.push({
@@ -790,7 +817,9 @@ export class SqliteStore {
             });
         },
       );
-      const eligible = `ended_at IS NOT NULL AND ended_at<=?
+      const eligible = `ended_at IS NOT NULL AND ended_at<=?-runs.retention_history_ms
+        AND (logs_ref IS NULL OR ended_at<=?-runs.retention_logs_ms)
+        AND ended_at<=?-runs.retention_inputs_ms
         AND NOT EXISTS(SELECT 1 FROM mcp_tasks t WHERE t.run_id=runs.run_id)
         AND NOT EXISTS(SELECT 1 FROM run_requests q WHERE q.run_id=runs.run_id)
         AND NOT EXISTS(SELECT 1 FROM managed_resources m WHERE m.owner_run_id=runs.run_id OR m.origin_run_id=runs.run_id)
@@ -801,13 +830,13 @@ export class SqliteStore {
         "run_waits",
         "wait_id",
         `status!='waiting' AND run_id IN(SELECT run_id FROM runs WHERE ${eligible})`,
-        [historyBefore],
+        [now, now, now],
       );
       remove(
         "runs",
         "run_id",
         `${eligible} AND NOT EXISTS(SELECT 1 FROM run_waits w WHERE w.run_id=runs.run_id)`,
-        [historyBefore],
+        [now, now, now],
         (row) => {
           files.push({ kind: "run", ref: `work/tmp/runs/${row.run_id}` });
           files.push({
@@ -820,9 +849,9 @@ export class SqliteStore {
       if (processed < limit) {
         const rows = this.#db
           .prepare(
-            "SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=? AND logs_ref IS NOT NULL LIMIT ?",
+            "SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=?-retention_logs_ms AND logs_ref IS NOT NULL LIMIT ?",
           )
-          .all(now - 7 * 86400000, limit - processed);
+          .all(now, limit - processed);
         for (const row of rows) {
           this.#db
             .prepare("UPDATE runs SET logs_ref=NULL WHERE run_id=?")
@@ -838,14 +867,14 @@ export class SqliteStore {
       if (processed < limit) {
         const rows = this.#db
           .prepare(
-            `SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=?
+            `SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=?-retention_inputs_ms
           AND json_type(cleanup_json,'$.temporaryInputsExpiredAt') IS NULL
           AND NOT EXISTS(SELECT 1 FROM managed_resources m WHERE m.origin_run_id=runs.run_id AND m.boot_id=? AND m.closed_at IS NULL AND m.status!='unavailable')
           AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.origin_run_id=runs.run_id AND o.ended_at IS NULL)
           AND NOT EXISTS(SELECT 1 FROM transfers t WHERE t.origin_run_id=runs.run_id AND t.ended_at IS NULL)
           AND NOT EXISTS(SELECT 1 FROM runs live WHERE live.ended_at IS NULL AND json_extract(live.source_json,'$.replayRunId')=runs.run_id) LIMIT ?`,
           )
-          .all(now - 86400000, this.bootId, limit - processed);
+          .all(now, this.bootId, limit - processed);
         for (const row of rows) {
           files.push({
             kind: "inputs",
@@ -860,15 +889,10 @@ export class SqliteStore {
           .prepare(
             `SELECT resource_id FROM managed_resources WHERE kind='sh.process'
           AND json_type(diagnostic_json,'$.logsExpiredAt') IS NULL AND
-          ((closed_at IS NOT NULL AND closed_at<=?) OR (status='unavailable' AND boot_id!=? AND
-            json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?)) LIMIT ?`,
+          ((closed_at IS NOT NULL AND closed_at<=?-retention_logs_ms) OR (status='unavailable' AND boot_id!=? AND
+            json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?-retention_logs_ms)) LIMIT ?`,
           )
-          .all(
-            now - 7 * 86400000,
-            this.bootId,
-            now - 7 * 86400000,
-            limit - processed,
-          );
+          .all(now, this.bootId, now, limit - processed);
         for (const row of rows) {
           this.#db
             .prepare(
@@ -960,8 +984,8 @@ export class SqliteStore {
       const id = newId("op");
       this.#db
         .prepare(
-          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,status,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,'running',?,?)`,
+          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,status,created_at,updated_at,retention_history_ms)
+        VALUES(?,?,?,?,?,?,?,'running',?,?,?)`,
         )
         .run(
           id,
@@ -973,6 +997,7 @@ export class SqliteStore {
           canonicalJson(source),
           now,
           now,
+          this.#retention.runHistoryMs,
         );
       return this.getOperation(id);
     });
@@ -1083,8 +1108,8 @@ export class SqliteStore {
       const id = newId("op");
       this.#db
         .prepare(
-          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,maintenance_request_id,approved_revision,status,detail_ref,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?)`,
+          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,maintenance_request_id,approved_revision,status,detail_ref,created_at,updated_at,retention_history_ms)
+        VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?,?)`,
         )
         .run(
           id,
@@ -1099,6 +1124,7 @@ export class SqliteStore {
           input.detailRef,
           now,
           now,
+          this.#retention.runHistoryMs,
         );
       return { operation: this.getOperation(id), duplicate: false };
     });
@@ -1190,9 +1216,10 @@ export class SqliteStore {
         requireCondition(
           !this.#db
             .prepare(
-              "SELECT 1 FROM close_receipts WHERE project_id=? AND expires_at>? LIMIT 1",
+              `SELECT 1 FROM project_closures WHERE project_id=? AND expires_at>?
+               UNION ALL SELECT 1 FROM close_receipts WHERE project_id=? AND expires_at>? LIMIT 1`,
             )
-            .get(input.projectId, now),
+            .get(input.projectId, now, input.projectId, now),
           "project_closed",
           "This project was closed; resolve a new catalog identity before opening work.",
         );
@@ -1209,7 +1236,7 @@ export class SqliteStore {
           input.snapshotRef,
           now,
           now,
-          now + 86_400_000,
+          now + this.#retention.workIdleMs,
         );
       return this.getWork(id);
     });
@@ -1229,13 +1256,59 @@ export class SqliteStore {
           `UPDATE work_contexts SET revision=revision+1,snapshot_ref=?,last_used_at=?,expires_at=?
         WHERE context_id=? AND revision=? AND status='open'`,
         )
-        .run(snapshotRef, now, now + 86_400_000, id, revision).changes;
+        .run(
+          snapshotRef,
+          now,
+          now + this.#retention.workIdleMs,
+          id,
+          revision,
+        ).changes;
       requireCondition(
         changed === 1,
         "revision_conflict",
         "The work was refreshed or closed concurrently.",
       );
       return this.getWork(id);
+    });
+  }
+
+  #closeProject(projectId: string, now: number): string[] {
+    this.#db
+      .prepare(
+        `INSERT INTO project_closures VALUES(?,?,?)
+      ON CONFLICT(project_id) DO UPDATE SET expires_at=MAX(expires_at,excluded.expires_at)`,
+      )
+      .run(projectId, now, now + 86_400_000);
+    const affected = this.#db
+      .prepare(
+        "SELECT context_id FROM work_contexts WHERE project_id=? AND status='open'",
+      )
+      .all(projectId);
+    this.#db
+      .prepare(
+        "UPDATE work_contexts SET status='closed',closed_at=?,revision=revision+1 WHERE project_id=? AND status='open'",
+      )
+      .run(now, projectId);
+    return affected.map((entry) => entry.context_id as string);
+  }
+
+  closeProject(projectId: string, now = Date.now()): JsonObject {
+    requireCondition(
+      typeof projectId === "string" && projectId.length > 0,
+      "project_not_found",
+      "Project close requires its verified catalog identity.",
+    );
+    return this.#transaction(() => {
+      const affected = this.#closeProject(projectId, now),
+        receipt = this.#db
+          .prepare("SELECT closed_at FROM project_closures WHERE project_id=?")
+          .get(projectId)!;
+      return {
+        projectId,
+        agentConfirmed: true,
+        affectedContextCount: affected.length,
+        closedAt: receipt.closed_at as number,
+      };
     });
   }
 
@@ -1256,23 +1329,19 @@ export class SqliteStore {
       }
       const work = this.#activeWork(id, callerKey, now);
       const affected = work.projectId
-        ? this.#db
-            .prepare(
-              "SELECT context_id FROM work_contexts WHERE project_id=? AND status='open'",
-            )
-            .all(work.projectId)
-        : [{ context_id: id }];
-      for (const entry of affected)
+        ? this.#closeProject(work.projectId, now)
+        : [id];
+      if (!work.projectId)
         this.#db
           .prepare(
             "UPDATE work_contexts SET status='closed',closed_at=?,revision=revision+1 WHERE context_id=?",
           )
-          .run(now, entry.context_id as string);
+          .run(now, id);
       const receipt: JsonObject = {
         contextId: id,
         projectId: work.projectId,
         agentConfirmed: true,
-        affectedContextIds: affected.map((entry) => entry.context_id as string),
+        affectedContextIds: affected,
         closedAt: now,
       };
       this.#db
@@ -1410,7 +1479,7 @@ export class SqliteStore {
       this.#db
         .prepare(
           `INSERT INTO runs(run_id,caller_key,context_id,project_id,boot_id,status,source_kind,script_name,
-        source_json,accepted_at,deadline_at,updated_at,admission_class) VALUES(?,?,?,?,?,'accepted',?,?,?,?,?,?,?)`,
+        source_json,accepted_at,deadline_at,updated_at,admission_class,retention_history_ms,retention_logs_ms,retention_inputs_ms) VALUES(?,?,?,?,?,'accepted',?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           runId,
@@ -1425,6 +1494,9 @@ export class SqliteStore {
           now + timeout,
           now,
           admissionClass,
+          this.#retention.runHistoryMs,
+          this.#retention.runLogsMs,
+          this.#retention.inputAttachmentsMs,
         );
       if (request)
         this.#db
@@ -1440,7 +1512,7 @@ export class SqliteStore {
         .prepare(
           "UPDATE work_contexts SET last_used_at=?,expires_at=? WHERE context_id=?",
         )
-        .run(now, now + 86_400_000, work.contextId);
+        .run(now, now + this.#retention.workIdleMs, work.contextId);
       return { run: this.getRun(runId), duplicate: false };
     });
   }
@@ -1831,8 +1903,8 @@ export class SqliteStore {
       const id = newId("res");
       this.#db
         .prepare(
-          `INSERT INTO managed_resources(resource_id,origin_run_id,owner_run_id,caller_key,boot_id,kind,lifetime,source_json,status,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO managed_resources(resource_id,origin_run_id,owner_run_id,caller_key,boot_id,kind,lifetime,source_json,status,created_at,retention_history_ms,retention_logs_ms)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
@@ -1845,6 +1917,8 @@ export class SqliteStore {
           canonicalJson(input.source),
           input.status ?? "active",
           now,
+          this.#retention.runHistoryMs,
+          this.#retention.runLogsMs,
         );
       return this.getResource(id);
     });
@@ -2231,8 +2305,8 @@ export class SqliteStore {
       });
       this.#db
         .prepare(
-          `INSERT INTO transfers(transfer_id,resource_id,caller_key,origin_run_id,direction,status,metadata_json,created_at)
-        VALUES(?,?,?,?,?,'preparing',?,?)`,
+          `INSERT INTO transfers(transfer_id,resource_id,caller_key,origin_run_id,direction,status,metadata_json,created_at,retention_history_ms)
+        VALUES(?,?,?,?,?,'preparing',?,?,?)`,
         )
         .run(
           id,
@@ -2242,6 +2316,7 @@ export class SqliteStore {
           input.direction,
           canonicalJson(captured),
           now,
+          this.#retention.runHistoryMs,
         );
       return this.getTransfer(id, scope);
     });

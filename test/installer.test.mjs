@@ -210,7 +210,13 @@ test(
       },
       configBytes = JSON.stringify(policyConfig, null, 2) + "\n";
     await writeFile(configPath, configBytes, { mode: 0o600 });
-    // A second authentic archive replaces only the selected profile's active receipt.
+    const activePath = path.join(home, ".nexum-dev/program/active.json"),
+      selectedBytes = await readFile(activePath, "utf8"),
+      liveLauncher = path.join(home, ".nexum-dev/state/service-launch.ps1");
+    if (process.platform === "win32")
+      await writeFile(liveLauncher, "existing registered service launcher\n");
+    // No-register preparation must not switch the old service's selected
+    // program or shared launcher, even though the new archive is authentic.
     await writeFile(
       path.join(keys.root, "package.json"),
       JSON.stringify({
@@ -229,7 +235,18 @@ test(
       config: undefined,
     });
     assert.notEqual(updated.programDir, installed.programDir);
+    assert.equal(await readFile(activePath, "utf8"), selectedBytes);
     assert.equal(await readFile(configPath, "utf8"), configBytes);
+    if (process.platform === "win32") {
+      assert.equal(
+        await readFile(liveLauncher, "utf8"),
+        "existing registered service launcher\n",
+      );
+      assert.match(
+        await readFile(updated.manifestPath, "utf16le"),
+        /service-preview-launch\.ps1/,
+      );
+    }
     const beforeRejected = await readFile(
       path.join(home, ".nexum-dev/program/active.json"),
       "utf8",
@@ -240,6 +257,7 @@ test(
       { ...policyConfig, storage: { max_managed_bytes: 1.5 } },
       { ...policyConfig, retention: { artifact_ms: 0 } },
       { ...policyConfig, retention: { artifact_ms: 8_640_000_000_000_000 } },
+      { ...policyConfig, retention: { artifact_ms: 1_000_000_000_000_000 } },
     ])
       await assert.rejects(
         installAgent({
@@ -263,6 +281,16 @@ test(
       JSON.parse(await readFile(configPath, "utf8")),
       policyConfig,
     );
+    await assert.rejects(
+      installAgent({
+        ...optionsFor(second, keys, home),
+        replaceConfig: true,
+        config: { ...policyConfig, token: "different-fixture-token" },
+      }),
+      /No-register/,
+    );
+    assert.equal(await readFile(activePath, "utf8"), selectedBytes);
+    assert.equal(await readFile(configPath, "utf8"), configBytes);
     const linkType = process.platform === "win32" ? "junction" : "dir",
       linkedVersionHome = path.join(root, "linked-version-home"),
       linkedVersions = path.join(
@@ -314,8 +342,8 @@ test(
       );
     }
     const cleaned = await cleanupPrograms({ profile: "development", home });
-    assert.deepEqual(cleaned.removed, [first.sha256]);
-    assert.equal((await lstat(updated.programDir)).isDirectory(), true);
+    assert.deepEqual(cleaned.removed, [second.sha256]);
+    assert.equal((await lstat(installed.programDir)).isDirectory(), true);
     assert.deepEqual(
       (await cleanupPrograms({ profile: "development", home })).removed,
       [],

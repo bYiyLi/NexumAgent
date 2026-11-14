@@ -147,6 +147,8 @@ function permissionDenied(cause: unknown): boolean {
   const code = Object.getOwnPropertyDescriptor(cause, "code");
   return !!code && "value" in code && readDenials.has(code.value);
 }
+/** Core list projections share the resource reader's exact denial classification. */
+export const resourceReadDenied = permissionDenied;
 function resourceId(value: unknown): asserts value is string {
   requireCondition(
     typeof value === "string" && /^res_[0-9a-f]{32}$/.test(value),
@@ -301,11 +303,12 @@ export class ResourceManager extends EventEmitter {
     );
     return this.store.getRun(binding.runId).callerKey;
   }
-  #snapshot(owner: Owner, row: ResourceHistoryRecord): ResourceSnapshot {
+  #snapshot(owner: Owner | null, row: ResourceHistoryRecord): ResourceSnapshot {
     requireCondition(
-      row.source.owner === owner.origin.owner &&
-        row.source.namespace === owner.origin.namespace &&
-        row.source.type === owner.origin.type,
+      !owner ||
+        (row.source.owner === owner.origin.owner &&
+          row.source.namespace === owner.origin.namespace &&
+          row.source.type === owner.origin.type),
       "resource_owner_mismatch",
       "The retained resource belongs to another source namespace.",
     );
@@ -349,13 +352,58 @@ export class ResourceManager extends EventEmitter {
           controlAvailable:
             row.closedAt === null &&
             row.bootId === this.store.bootId &&
-            row.source.instanceId === owner.id &&
-            entry?.owner === owner &&
+            !!entry &&
+            row.source.instanceId === entry.owner.id &&
+            (!owner || entry.owner === owner) &&
             !entry.persistenceError,
         },
         32768,
       ),
     ) as ResourceSnapshot;
+  }
+  /** Trusted application port, deliberately absent from the public ResourceService. */
+  inspectResource(
+    id: string,
+    authorize: (record: ResourceHistoryRecord) => void,
+  ): ResourceSnapshot {
+    resourceId(id);
+    const record = this.store.resourceHistory(id);
+    requireCondition(
+      record.bootId === this.store.bootId,
+      "resource_unavailable",
+      "Only resource facts from this actual Agent boot are available here.",
+    );
+    authorizeCall(() => authorize(record));
+    return this.#snapshot(null, this.store.resourceHistory(id));
+  }
+  /** A fresh Core authority may stop a registered resource after its original call ended. */
+  async disposeResource(
+    id: string,
+    authorize: (record: ResourceHistoryRecord) => void,
+    reason?: unknown,
+  ): Promise<{ accepted: boolean; snapshot: ResourceSnapshot }> {
+    resourceId(id);
+    let record = this.store.resourceHistory(id);
+    requireCondition(
+      record.bootId === this.store.bootId,
+      "resource_unavailable",
+      "A resource from another Agent boot cannot be controlled.",
+    );
+    authorizeCall(() => authorize(record));
+    if (record.closedAt !== null)
+      return { accepted: false, snapshot: this.#snapshot(null, record) };
+    const entry = this.#entries.get(id);
+    requireCondition(
+      entry &&
+        entry.ref.kind === record.kind &&
+        record.source.instanceId === entry.owner.id,
+      "resource_unavailable",
+      "This process has no actual registered resource controller.",
+    );
+    await this.#dispose(entry, reason);
+    record = this.store.resourceHistory(id);
+    authorizeCall(() => authorize(record));
+    return { accepted: true, snapshot: this.#snapshot(null, record) };
   }
   #facade(owner: Owner, binding: ResourceBinding): ResourceService {
     return Object.freeze({

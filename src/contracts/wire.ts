@@ -20,10 +20,12 @@ export const MAX_RESOURCES_READ_BODY_BYTES_V2 = 128 * 1024 * 1024;
 export const MAX_HOST_BODY_BYTES_V2 = 128 * 1024 * 1024;
 export const MAX_STATE_VALUE_BYTES_V2 = 64 * 1024;
 export const MAX_STATE_RECEIPT_BYTES_V2 = MAX_STATE_VALUE_BYTES_V2 + 1024;
+export const MAX_PROCESS_OUTPUT_BYTES_V2 = 64 * 1024;
 export const POLICY_LEASE_MS_V2 = 30_000;
 export const wireOperationsV2 = [
   "agent.project.resolve",
   "agent.project.inspect",
+  "agent.project.close",
   "agent.open",
   "agent.close",
   "agent.run.start",
@@ -39,6 +41,9 @@ export const wireOperationsV2 = [
   "agent.resources.list",
   "agent.resources.read",
   "agent.context.read",
+  "agent.process.list",
+  "agent.process.get",
+  "agent.process.stop",
   "transfer.prepare",
   "transfer.revoke",
   "agent.transfer.reserveClaim",
@@ -144,6 +149,15 @@ export interface WireProjectResolveInputV2 {
 export interface WireProjectResolveOutputV2 {
   readonly root: string;
   readonly name: string;
+}
+export interface WireProjectCloseInputV2 {
+  readonly projectId: string;
+}
+export interface WireProjectCloseOutputV2 {
+  readonly projectId: string;
+  readonly agentConfirmed: true;
+  readonly affectedContextCount: number;
+  readonly closedAt: string;
 }
 export interface WireOpenInputV2 {
   readonly agentId: string;
@@ -434,6 +448,40 @@ export interface WireRunListOutputV2 {
   readonly runs: readonly WireRunV2[];
   readonly nextCursor: string | null;
   readonly observedAt: string;
+}
+export type WireProcessSnapshotV2 = {
+  readonly processId: string;
+  readonly originRunId: string | null;
+  readonly contextId: string | null;
+  readonly projectId: string | null;
+  readonly status: string;
+  readonly lifetime: "run" | "instance" | "background";
+  readonly createdAt: number;
+  readonly closedAt: number | null;
+  readonly handedOffAt: number | null;
+  readonly controlAvailable: boolean;
+  readonly details: JsonObject;
+};
+export interface WireProcessListInputV2 {
+  readonly projectId?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+export interface WireProcessListOutputV2 {
+  readonly items: readonly WireProcessSnapshotV2[];
+  readonly nextCursor: string | null;
+  readonly observedAt: number;
+}
+export interface WireProcessGetInputV2 {
+  readonly processId: string;
+}
+export type WireProcessGetOutputV2 = WireProcessSnapshotV2;
+export interface WireProcessStopInputV2 {
+  readonly processId: string;
+}
+export interface WireProcessStopOutputV2 {
+  readonly accepted: boolean;
+  readonly item: WireProcessSnapshotV2;
 }
 export interface WireResourcesListInputV2 {
   readonly cursor?: string;
@@ -914,6 +962,7 @@ export interface WireMaintenanceOAuthCompleteV2 {
 }
 export interface WireInputsV2 {
   "agent.project.resolve": WireProjectResolveInputV2;
+  "agent.project.close": WireProjectCloseInputV2;
   "agent.project.inspect": {
     readonly projectId: string;
     readonly contextId?: string;
@@ -933,6 +982,9 @@ export interface WireInputsV2 {
   "agent.resources.list": WireResourcesListInputV2;
   "agent.resources.read": WireResourcesReadInputV2;
   "agent.context.read": WireContextReadInputV2;
+  "agent.process.list": WireProcessListInputV2;
+  "agent.process.get": WireProcessGetInputV2;
+  "agent.process.stop": WireProcessStopInputV2;
   "transfer.prepare": WireTransferPrepareInputV2;
   "transfer.revoke": WireTransferRevokeInputV2;
   "agent.transfer.reserveClaim": WireTransferReserveInputV2;
@@ -964,6 +1016,7 @@ export interface WireInputsV2 {
 }
 export interface WireOutputsV2 {
   "agent.project.resolve": WireProjectResolveOutputV2;
+  "agent.project.close": WireProjectCloseOutputV2;
   "agent.project.inspect": WireOpenOutputV2;
   "agent.open": WireOpenOutputV2;
   "agent.close": WireCloseOutputV2;
@@ -980,6 +1033,9 @@ export interface WireOutputsV2 {
   "agent.resources.list": WireResourcesListOutputV2;
   "agent.resources.read": WireResourcesReadOutputV2;
   "agent.context.read": WireContextReadOutputV2;
+  "agent.process.list": WireProcessListOutputV2;
+  "agent.process.get": WireProcessGetOutputV2;
+  "agent.process.stop": WireProcessStopOutputV2;
   "transfer.prepare": WireTransferPrepareOutputV2;
   "transfer.revoke": WireTransferRevokeOutputV2;
   "agent.transfer.reserveClaim": WireTransferReserveOutputV2;

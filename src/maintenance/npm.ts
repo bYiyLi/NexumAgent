@@ -2,6 +2,7 @@ import path from "node:path";
 import { realpathSync } from "node:fs";
 import { mkdtemp, writeFile, rename, rm, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import {
   AgentError,
   isAgentError,
@@ -39,6 +40,75 @@ import type {
 } from "./requests.js";
 
 const cap = 32 * 1024 * 1024;
+// Runs in the existing managed native-child path. npm owns configuration and
+// dependency resolution; only the Agent parent is allowed to save root records.
+const npmPlannerSource = String.raw`
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const { createHash } = require('node:crypto');
+const { once } = require('node:events');
+const failure = code => Object.assign(new Error(code), { safeCode: code });
+let sourceReady = false;
+(async () => {
+  const cli = fs.realpathSync(process.argv[1]);
+  const root = fs.realpathSync(path.resolve(path.dirname(cli), '..'));
+  const fromNpm = createRequire(cli);
+  const npmPackage = path.join(root, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(npmPackage, 'utf8'));
+  if (pkg.name !== 'npm' || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(pkg.version)) throw failure('npm_planner_unsupported');
+  const files = [cli, npmPackage];
+  const resolve = specifier => {
+    const filename = fs.realpathSync(fromNpm.resolve(specifier));
+    const relative = path.relative(root, filename);
+    if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw failure('npm_planner_unsupported');
+    files.push(filename); return filename;
+  };
+  const arbEntry = resolve('@npmcli/arborist');
+  const arbPackage = resolve('@npmcli/arborist/package.json');
+  const configEntry = resolve('@npmcli/config');
+  const configPackage = resolve('@npmcli/config/package.json');
+  const definitionsEntry = resolve('@npmcli/config/lib/definitions');
+  const Arborist = fromNpm(arbEntry), Config = fromNpm(configEntry);
+  const definitions = fromNpm(definitionsEntry);
+  if (typeof Arborist.prototype.lockfileString !== 'function' || typeof Config !== 'function' ||
+      typeof definitions.flatten !== 'function' || !definitions.definitions || !definitions.shorthands) throw failure('npm_planner_unsupported');
+  const fingerprint = () => {
+    const digest = createHash('sha256').update(root);
+    for (const filename of files) digest.update('\0').update(fs.readFileSync(filename));
+    return digest.digest('hex');
+  };
+  const source = {
+    npmVersion: pkg.version,
+    arboristVersion: JSON.parse(fs.readFileSync(arbPackage, 'utf8')).version,
+    configurationVersion: JSON.parse(fs.readFileSync(configPackage, 'utf8')).version,
+    revision: fingerprint(),
+  };
+  sourceReady = true;
+  if (process.argv[2] === 'source') { process.stdout.write(JSON.stringify({ source })); return; }
+  const maximum = Number(process.argv[6]);
+  const config = new Config({ npmPath: root, ...definitions, cwd: process.cwd(), env: process.env,
+    argv: [process.execPath, cli, '--global=false', '--prefix=' + process.cwd(), '--workspaces=false', '--ignore-scripts', '--save-exact', '--no-audit', '--no-fund'] });
+  await config.load(); config.validate();
+  const arb = new Arborist({ ...config.flat, path: process.cwd(), global: false, workspaces: [], workspacesEnabled: false, ignoreScripts: true, audit: false, fund: false });
+  const lock = await arb.lockfileString(process.argv[3] === 'remove'
+    ? { rm: [process.argv[4]] } : { add: [process.argv[4] + '@' + process.argv[5]] });
+  const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+  const ideal = arb.idealTree.package;
+  for (const key of ['dependencies','devDependencies','optionalDependencies','peerDependencies','peerDependenciesMeta','bundleDependencies','bundledDependencies']) {
+    if (Object.hasOwn(ideal, key)) manifest[key] = ideal[key]; else delete manifest[key];
+  }
+  const body = JSON.stringify(manifest, null, 2) + '\n';
+  if (!Number.isSafeInteger(maximum) || maximum < 1 || Buffer.byteLength(body) > maximum || Buffer.byteLength(lock) > maximum) throw failure('npm_plan_too_large');
+  if (fingerprint() !== source.revision) throw failure('npm_planner_changed');
+  const result = Buffer.from(JSON.stringify({ source, manifest: body, lock }));
+  for (let offset = 0; offset < result.length; offset += 65536)
+    if (!process.stdout.write(result.subarray(offset, offset + 65536))) await once(process.stdout, 'drain');
+})().catch(error => {
+  const code = ['npm_planner_unsupported','npm_plan_too_large','npm_planner_changed'].includes(error.safeCode) ? error.safeCode : sourceReady ? 'npm_plan_failed' : 'npm_planner_unsupported';
+  process.stdout.write(JSON.stringify({ error: code }));
+});
+`;
 const hash = (value: string | null): string =>
   createHash("sha256")
     .update(value === null ? "missing" : `present:${value}`)
@@ -228,6 +298,21 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
   ): Promise<string> {
     scope.signal.throwIfAborted();
     authorizeCall(() => scope.assertCurrent());
+    // registry/auth still follow native npm configuration. Its installation
+    // target cannot follow a user global/prefix/workspace override.
+    return await this.#child(
+      [
+        this.#npmCli(),
+        ...args,
+        "--global=false",
+        `--prefix=${cwd}`,
+        "--workspaces=false",
+      ],
+      cwd,
+      scope,
+    );
+  }
+  #npmCli(): string {
     const cli =
       this.options.npmCli ??
       (process.platform === "win32"
@@ -252,15 +337,17 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
       "npm_unavailable",
       "Native npm requires its actual absolute CLI entry.",
     );
-    return await this.#child([cli, ...args], cwd, scope);
+    return cli;
   }
   async #child(
     args: readonly string[],
     cwd: string,
     scope: MaintenanceScope,
+    maximum = 1024 * 1024,
   ): Promise<string> {
     scope.signal.throwIfAborted();
     authorizeCall(() => scope.assertCurrent());
+    const decoder = new StringDecoder("utf8");
     let output = "",
       size = 0;
     const options: ProcessBackendOptions = {
@@ -268,11 +355,11 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         if (stream !== "stdout") return;
         size += bytes.length;
         requireCondition(
-          size <= 1024 * 1024,
+          size <= maximum,
           "npm_output_too_large",
           "Native npm output exceeds its bounded control response.",
         );
-        output += bytes.toString("utf8");
+        output += decoder.write(bytes);
       },
     };
     const backend: ProcessBackend =
@@ -336,7 +423,7 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         { exitCode: facts.exitCode },
       );
       authorizeCall(() => scope.assertCurrent());
-      return output;
+      return output + decoder.end();
     } finally {
       if (!registered) await backend.dispose();
       const cleanup = await owner.stop();
@@ -346,6 +433,92 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         "A native maintenance command has unconfirmed process-tree cleanup.",
       );
     }
+  }
+  async #planner(
+    mode: "source" | "plan",
+    cwd: string,
+    scope: MaintenanceScope,
+    intent?: MaintenanceIntent,
+    version?: string | null,
+  ): Promise<{
+    source: JsonObject;
+    manifest: string | null;
+    lock: string | null;
+  }> {
+    const output = await this.#child(
+      [
+        "--input-type=commonjs",
+        "--eval",
+        npmPlannerSource,
+        this.#npmCli(),
+        mode,
+        intent?.action ?? "",
+        intent?.name ?? "",
+        version ?? "",
+        String(cap),
+      ],
+      cwd,
+      scope,
+      mode === "plan" ? 4 * cap + 4096 : 16384,
+    );
+    let value: unknown;
+    try {
+      value = JSON.parse(output);
+    } catch {
+      /* No producer text or parser details leave this boundary. */
+    }
+    requireCondition(
+      isPlainRecord(value),
+      "npm_plan_invalid",
+      "Native npm did not return one bounded planning result.",
+    );
+    if (
+      [
+        "npm_planner_unsupported",
+        "npm_plan_too_large",
+        "npm_plan_failed",
+        "npm_planner_changed",
+      ].includes(value.error as string)
+    )
+      throw new AgentError(
+        value.error as string,
+        value.error === "npm_planner_unsupported"
+          ? "The selected npm distribution does not provide the supported in-memory planning API."
+          : value.error === "npm_plan_too_large"
+            ? "The native npm manifest or lock exceeds the managed planning byte limit; no generated root file was saved."
+            : value.error === "npm_planner_changed"
+              ? "The selected npm distribution changed during planning; no generated root file was saved."
+              : "Native npm could not prepare the dependency plan; protected source and registry details were not exposed.",
+      );
+    const source = value.source;
+    requireCondition(
+      isPlainRecord(source) &&
+        Object.keys(source).length === 4 &&
+        ["npmVersion", "arboristVersion", "configurationVersion"].every(
+          (key) =>
+            typeof source[key] === "string" &&
+            /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(
+              source[key] as string,
+            ),
+        ) &&
+        typeof source.revision === "string" &&
+        /^[0-9a-f]{64}$/.test(source.revision) &&
+        Object.keys(value).every((key) =>
+          ["source", "manifest", "lock"].includes(key),
+        ) &&
+        (mode === "source" ||
+          (typeof value.manifest === "string" &&
+            typeof value.lock === "string" &&
+            Buffer.byteLength(value.manifest) <= cap &&
+            Buffer.byteLength(value.lock) <= cap)),
+      "npm_plan_invalid",
+      "Native npm source evidence and generated root records must match their bounded contract.",
+    );
+    return {
+      source: source as JsonObject,
+      manifest: mode === "plan" ? (value.manifest as string) : null,
+      lock: mode === "plan" ? (value.lock as string) : null,
+    };
   }
   async #files(): Promise<{
     manifest: string;
@@ -418,12 +591,18 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
       declared = this.#direct(
         JSON.parse(actual.manifest) as JsonObject,
         intent.name,
-      );
+      ),
+      retained = (JSON.parse(actual.lock).packages as JsonObject)[
+        `node_modules/${intent.name}`
+      ];
     requireCondition(
       intent.target === "package" &&
         ["install", "update", "remove"].includes(intent.action) &&
         (intent.action === "remove"
-          ? !declared
+          ? !declared &&
+            (isPlainRecord(retained)
+              ? installed === retained.version
+              : installed === null)
           : declared &&
             typeof installed === "string" &&
             installed === candidate.payload.targetVersion),
@@ -635,32 +814,15 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         );
         version = raw;
       }
-      await this.#command(
-        intent.action === "remove"
-          ? [
-              "uninstall",
-              intent.name,
-              "--package-lock-only",
-              "--ignore-scripts",
-              "--no-audit",
-              "--no-fund",
-            ]
-          : [
-              "install",
-              `${intent.name}@${version}`,
-              "--package-lock-only",
-              "--ignore-scripts",
-              "--save-exact",
-              "--no-audit",
-              "--no-fund",
-            ],
+      const planned = await this.#planner(
+        "plan",
         staging,
         scope,
+        intent,
+        version,
       );
-      const nextManifest = (await textFile(
-          path.join(staging, "package.json"),
-        ))!,
-        nextLock = (await textFile(path.join(staging, "package-lock.json")))!,
+      const nextManifest = planned.manifest!,
+        nextLock = planned.lock!,
         lock = JSON.parse(nextLock) as JsonObject;
       requireCondition(
         isPlainRecord(lock.packages),
@@ -677,6 +839,10 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
           "npm_lock_invalid",
           "The confirmed package requires its exact npm source and integrity.",
         );
+      // Only this parent saves root records, after the actual producer bytes
+      // passed their limits. npm's in-memory planner never saves these files.
+      await replace(path.join(staging, "package.json"), nextManifest);
+      await replace(path.join(staging, "package-lock.json"), nextLock);
       let extensionRevision: string | null = null,
         permissions = oldPermissions,
         namespace = oldNamespace;
@@ -684,7 +850,14 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
       if (version) {
         // Fetch the confirmed tree into a private planner; no lifecycle or factory runs here.
         await this.#command(
-          ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+          [
+            "install",
+            "--ignore-scripts",
+            "--no-save",
+            "--package-lock=true",
+            "--no-audit",
+            "--no-fund",
+          ],
           staging,
           scope,
         );
@@ -754,8 +927,8 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         .filter(
           (key) =>
             key &&
-            canonicalJson(oldPackages[key] ?? null) !==
-              canonicalJson(nextPackages[key] ?? null),
+            canonicalJson(oldPackages[key] ?? null, cap) !==
+              canonicalJson(nextPackages[key] ?? null, cap),
         )
         .map((key) => ({
           name: key.slice(key.lastIndexOf("node_modules/") + 13),
@@ -820,6 +993,7 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
           oldExtensionRevision,
           extensionRevision,
           registryOrigin,
+          npmSource: planned.source,
           dependencyChanges: changes.slice(0, 200),
           dependencyChangesCount: changes.length,
           currentDeclared: declared,
@@ -849,6 +1023,13 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
     scope.assertCurrent();
     this.options.extensions.assertPackageChangeReady();
     if (intent.target === "package") {
+      const producer = await this.#planner("source", this.work, scope);
+      requireCondition(
+        canonicalJson(producer.source) ===
+          canonicalJson(candidate.payload.npmSource),
+        "maintenance_precondition_changed",
+        "The selected native npm distribution changed after confirmation.",
+      );
       const loaded = this.options.modules.loadedPackages();
       requireCondition(
         Array.isArray(candidate.payload.loaded) &&
@@ -915,6 +1096,7 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         name: intent.name,
         version: candidate.summary.version,
         registryOrigin: candidate.payload.registryOrigin ?? null,
+        npmSource: candidate.payload.npmSource ?? null,
         namespace: candidate.summary.namespace,
         permissions: [...candidate.summary.permissions],
         dependencyChanges: candidate.payload.dependencyChanges ?? [],
@@ -1097,6 +1279,29 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
               "An affected extension must actually close before npm changes its dependency tree.",
             );
           }
+          const npmOptions = [
+            "--no-save",
+            "--package-lock=true",
+            "--no-audit",
+            "--no-fund",
+          ];
+          if (packageRestart) this.options.modules.markPackageRestartRequired();
+          if (intent.action === "remove") {
+            // Keep the original direct edge visible to native npm's actual
+            // tree diff. Removing it from the files first can hide the old
+            // package from npm's workspace-disabled reconciliation filter.
+            changed = true;
+            await this.#command(
+              ["uninstall", intent.name, ...npmOptions],
+              this.work,
+              scope,
+            );
+            requireCondition(
+              (await this.#files()).revision === candidate.baseRevision,
+              "npm_plan_changed",
+              "Native npm changed the original root records before the approved plan could be saved.",
+            );
+          }
           await replace(
             path.join(this.work, "package.json"),
             candidate.payload.manifest as string,
@@ -1108,12 +1313,8 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
           );
           scope.signal.throwIfAborted();
           authorizeCall(() => scope.assertCurrent());
-          if (packageRestart) this.options.modules.markPackageRestartRequired();
-          await this.#command(
-            ["install", "--no-audit", "--no-fund"],
-            this.work,
-            scope,
-          );
+          if (intent.action !== "remove")
+            await this.#command(["install", ...npmOptions], this.work, scope);
           const { snapshot, installed, declared } = await this.#verifiedPackage(
             intent,
             candidate,

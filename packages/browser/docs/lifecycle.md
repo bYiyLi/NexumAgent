@@ -11,3 +11,5 @@ run 正常结束、失败和取消都经标准资源 `dispose/closed` 收尾。�
 原生用户 `onDetach` 已证明本包调试通道关闭。本包不会重新 attach 以释放按键或覆盖用户的新控制；不能继续确认的输入效果通过 `unconfirmedControls: true` 保留，不能称为按键已经释放或网站操作回滚。
 
 方法在本地准入、等待租约或命令排队阶段超时，报告 `dispatched: false`、`effect: "none"`。实际动作发送后才使用可能的 `effect: "unknown"`；取消排队不会在稍后偷偷执行该动作。handoff 和对话框控制保留独立控制通路。
+
+正常 `tab.close()` 或 `selected.management.tabs.close(id)` 只关闭本次明确选择的标签。关闭前确认释放该标签的本包按键、鼠标、视口和 IO；确认真实关闭后才撤掉它的所有权与等待器。同运行里的其他标签继续可用。与之并发的真实用户取消仍按用户接管处理；不能把任意 debugger 断开都解释为正常关闭。

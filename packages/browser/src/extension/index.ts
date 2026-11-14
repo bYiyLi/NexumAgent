@@ -471,6 +471,52 @@ const createExtension: ExtensionFactory = async (host) => {
               : undefined;
           const target = waiter?.target ?? targetOf(input);
           if (input.locator) validateLocatorDescription(input.locator);
+          if (pathName === "user.getTabContext") {
+            const id =
+              typeof input.tab === "string"
+                ? input.tab
+                : record(input.tab)
+                  ? input.tab.id
+                  : undefined;
+            check(
+              id === undefined || identifier(id),
+              "INVALID_TARGET",
+              "Choose an actual browser tab.",
+            );
+            const lookupTarget =
+              id === undefined ? target : { ...target, tabId: id };
+            const observed = await runtime.action(
+              id === undefined ? "tabs.selected" : "tabs.get",
+              { target: lookupTarget, ...(id === undefined ? {} : { id }) },
+              lookupTarget,
+              call,
+              false,
+            );
+            check(
+              record(observed) && record(observed.target),
+              "INVALID_TARGET",
+              "The browser has no current selected tab.",
+            );
+            const effective = validateTarget(observed.target, true);
+            check(
+              effective.browserId === target.browserId &&
+                effective.bootId === target.bootId &&
+                effective.browserSessionId === target.browserSessionId &&
+                effective.generation === target.generation &&
+                (id === undefined || effective.tabId === id),
+              "PROTOCOL_MISMATCH",
+              "The observed context target does not belong to this browser request.",
+            );
+            noteResult(service, effective, observed, "tabs.get");
+            // Reserve the exact tab under the actual run before reading any document data.
+            return runtime.action(
+              pathName,
+              { target: effective, tab: effective.tabId },
+              effective,
+              call,
+              false,
+            );
+          }
           if (pathName === "tabs.content")
             return collectTabContent(
               input,

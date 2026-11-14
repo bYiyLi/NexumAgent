@@ -26,6 +26,7 @@ interface Marker {
   kind: MaterialKind;
   ref: string;
   unreferencedSince: number | null;
+  retentionMs?: number;
 }
 interface DeletionFrame {
   directory: string;
@@ -45,6 +46,7 @@ interface MaterialDeletion {
 export interface MaterialRetentionOptions {
   readonly reserve?: ManagedReserve;
   readonly now?: () => number;
+  readonly retentionMs?: number;
   readonly liveSnapshotRefs: () => ReadonlySet<string>;
   readonly publishedDirectories?: () => ReadonlySet<string>;
 }
@@ -94,6 +96,9 @@ export class MaterialRetention {
   #directory?: Dir;
   #deletion?: MaterialDeletion;
   #sweeping?: Promise<MaterialSweep>;
+  #closing = false;
+  #closed = false;
+  #stopping?: Promise<void>;
   constructor(
     root: string,
     readonly options: MaterialRetentionOptions,
@@ -104,6 +109,14 @@ export class MaterialRetention {
       "Material retention needs the fixed Agent profile root.",
     );
     this.root = root;
+    requireCondition(
+      options.retentionMs === undefined ||
+        (Number.isSafeInteger(options.retentionMs) &&
+          options.retentionMs > 0 &&
+          options.retentionMs <= 253_402_300_799_999 - this.#now()),
+      "invalid_material_retention",
+      "New material retention must fit a positive protocol timestamp duration.",
+    );
   }
   #now(): number {
     const now = this.options.now?.() ?? Date.now();
@@ -113,6 +126,13 @@ export class MaterialRetention {
       "Material lifecycle time must be a valid timestamp.",
     );
     return now;
+  }
+  #assertOpen(): void {
+    requireCondition(
+      !this.#closing,
+      "material_retention_closed",
+      "Material retention is closing and cannot accept new work.",
+    );
   }
   #ref(directory: string): { kind: MaterialKind; ref: string } {
     requireCondition(
@@ -183,8 +203,10 @@ export class MaterialRetention {
     const actual = marker && generation(marker.ref);
     requireCondition(
       marker &&
-        Object.keys(marker).sort().join(",") ===
-          "kind,ref,schemaVersion,unreferencedSince" &&
+        [
+          "kind,ref,schemaVersion,unreferencedSince",
+          "kind,ref,retentionMs,schemaVersion,unreferencedSince",
+        ].includes(Object.keys(marker).sort().join(",")) &&
         marker.schemaVersion === 1 &&
         actual &&
         actual.ref === marker.ref &&
@@ -192,7 +214,11 @@ export class MaterialRetention {
         key(marker.ref) === hash &&
         (marker.unreferencedSince === null ||
           (Number.isSafeInteger(marker.unreferencedSince) &&
-            marker.unreferencedSince >= 0)),
+            marker.unreferencedSince >= 0)) &&
+        (marker.retentionMs === undefined ||
+          (Number.isSafeInteger(marker.retentionMs) &&
+            marker.retentionMs > 0 &&
+            marker.retentionMs <= 253_402_300_799_999)),
       "invalid_material_marker",
       "The private material lifecycle fact is invalid.",
     );
@@ -209,7 +235,7 @@ export class MaterialRetention {
     try {
       const info = fstatSync(file);
       requireCondition(
-        info.isFile() && info.size === markerBytes,
+        info.isFile() && info.nlink === 1 && info.size === markerBytes,
         "invalid_material_marker",
         "A lifecycle marker must keep its fixed regular-file size.",
       );
@@ -248,7 +274,7 @@ export class MaterialRetention {
     try {
       const info = fstatSync(file);
       requireCondition(
-        info.isFile() && info.size === markerBytes,
+        info.isFile() && info.nlink === 1 && info.size === markerBytes,
         "invalid_material_marker",
         "A material marker cannot grow during synchronous publication.",
       );
@@ -289,6 +315,7 @@ export class MaterialRetention {
     const reservation = await this.options.reserve?.(markerBytes);
     let created = false;
     try {
+      this.#assertOpen();
       privateDirectory(this.root, "state", "material-retention");
       const file = await open(
         this.#marker(ref),
@@ -306,6 +333,7 @@ export class MaterialRetention {
             kind,
             ref,
             unreferencedSince: null,
+            retentionMs: this.options.retentionMs ?? grace,
           }),
         );
         await file.sync();
@@ -326,6 +354,7 @@ export class MaterialRetention {
     kind: MaterialKind,
     directory: string,
   ): Promise<{ release(): void }> {
+    this.#assertOpen();
     const actual = this.#ref(directory);
     requireCondition(
       actual.kind === kind,
@@ -356,6 +385,7 @@ export class MaterialRetention {
           .catch(() => {});
       }
       await preparing;
+      this.#assertOpen();
     } catch (cause) {
       const count = this.#pending.get(actual.ref)! - 1;
       if (count) this.#pending.set(actual.ref, count);
@@ -367,7 +397,11 @@ export class MaterialRetention {
       release: () => {
         if (released) return;
         const count = this.#pending.get(actual.ref)!;
-        if (count === 1 && ![...this.#published.values()].includes(actual.ref))
+        if (
+          !this.#closing &&
+          count === 1 &&
+          ![...this.#published.values()].includes(actual.ref)
+        )
           this.#update(actual.ref, null);
         if (count > 1) this.#pending.set(actual.ref, count - 1);
         else this.#pending.delete(actual.ref);
@@ -376,6 +410,7 @@ export class MaterialRetention {
     });
   }
   setPublished(owner: string, directory: string | null): void {
+    if (directory !== null) this.#assertOpen();
     requireCondition(
       typeof owner === "string" &&
         owner.length > 0 &&
@@ -398,6 +433,7 @@ export class MaterialRetention {
       this.#update(next, null);
     }
     if (
+      !this.#closing &&
       previous &&
       previous !== next &&
       !this.#pending.has(previous) &&
@@ -410,6 +446,7 @@ export class MaterialRetention {
     else this.#published.delete(owner);
   }
   protectPending(directory: string): () => void {
+    this.#assertOpen();
     const ref = path.relative(this.root, directory).split(path.sep).join("/");
     requireCondition(
       /^work\/docs\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.prepare-[A-Za-z0-9_-]+$/.test(
@@ -560,6 +597,7 @@ export class MaterialRetention {
     requireCondition(
       markerIdentity.isFile() &&
         !markerIdentity.isSymbolicLink() &&
+        markerIdentity.nlink === 1 &&
         markerIdentity.size === markerBytes,
       "invalid_material_marker",
       "Only the actual fixed private lifecycle record can be removed.",
@@ -676,6 +714,7 @@ export class MaterialRetention {
       requireCondition(
         marker.isFile() &&
           !marker.isSymbolicLink() &&
+          marker.nlink === 1 &&
           marker.dev === deletion.markerIdentity.dev &&
           marker.ino === deletion.markerIdentity.ino &&
           marker.size === markerBytes,
@@ -692,6 +731,7 @@ export class MaterialRetention {
     }
   }
   sweep(limit = 100): Promise<MaterialSweep> {
+    this.#assertOpen();
     requireCondition(
       Number.isSafeInteger(limit) && limit >= 0 && limit <= 100,
       "invalid_material_batch",
@@ -783,7 +823,8 @@ export class MaterialRetention {
           this.#update(ref, now);
           continue;
         }
-        if (now - marker.unreferencedSince < grace) continue;
+        if (now - marker.unreferencedSince < (marker.retentionMs ?? grace))
+          continue;
         const current = await this.#live();
         if (
           current.has(ref) ||
@@ -806,7 +847,21 @@ export class MaterialRetention {
     }
     return { processed, removed, errors };
   }
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
+    if (this.#stopping) return this.#stopping;
+    this.#closing = true;
+    const stopping = this.#finishStop();
+    this.#stopping = stopping;
+    void stopping
+      .finally(() => {
+        if (this.#stopping === stopping) this.#stopping = undefined;
+      })
+      .catch(() => {});
+    return stopping;
+  }
+  async #finishStop(): Promise<void> {
+    await Promise.allSettled([...this.#preparing.values()]);
     await this.#sweeping?.catch(() => {});
     let failure: unknown;
     const deletion = this.#deletion;
@@ -836,5 +891,6 @@ export class MaterialRetention {
       }
     }
     if (failure) throw failure;
+    this.#closed = true;
   }
 }

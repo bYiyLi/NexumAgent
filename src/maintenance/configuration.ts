@@ -85,10 +85,13 @@ interface ApprovedRecord {
   snapshot: string;
   enabled: boolean;
 }
-interface PublicWrite {
+interface PublicFileWrite {
   file: string;
   before: string | null;
   after: string | null;
+}
+interface PublicWrite extends PublicFileWrite {
+  documents: PublicFileWrite[];
 }
 interface ApprovedState {
   binding: { agentId: string; profile: Binding["profile"] };
@@ -1855,14 +1858,95 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
     }
     current(scope);
   }
-  async #writePublic(
+  async #publicWritePlan(
     snapshot: ConfigurationSnapshot,
     remove = false,
   ): Promise<PublicWrite> {
+    const file = this.#publicLocation(snapshot.kind, snapshot.name),
+      before = await readPublic(file);
+    const plan: PublicWrite = {
+      file,
+      before,
+      after: this.#publicText(snapshot, before, remove),
+      documents: [],
+    };
+    if (snapshot.kind === "mcp" || remove) return plan;
+    let previousBytes = 0;
+    for (const document of snapshot.documents) {
+      const parts = document.file.split("/"),
+        target = publicFile(this.options.root, [
+          "api",
+          configurationDirectoryName(snapshot.name),
+          ...parts,
+        ]);
+      const previous = await readPublic(
+        target,
+        this.options.maxSourceBytes ?? 8 * 1024 * 1024,
+      );
+      previousBytes += Buffer.byteLength(previous ?? "");
+      requireCondition(
+        previousBytes <= (this.options.maxTotalSourceBytes ?? 32 * 1024 * 1024),
+        "configuration_source_too_large",
+        "Existing public source rollback data exceeds the configured fixed-source budget.",
+      );
+      plan.documents.push({
+        file: target,
+        before: previous,
+        after: Buffer.from(document.base64, "base64").toString("utf8"),
+      });
+    }
+    return plan;
+  }
+  async #writePublic(plan: PublicWrite): Promise<PublicWrite> {
+    requireCondition(
+      (await readPublic(plan.file)) === plan.before,
+      "maintenance_precondition_changed",
+      "The public configuration changed while managed storage was being reserved.",
+    );
+    const written: PublicFileWrite[] = [];
+    try {
+      for (const document of plan.documents) {
+        requireCondition(
+          (await readPublic(
+            document.file,
+            this.options.maxSourceBytes ?? 8 * 1024 * 1024,
+          )) === document.before,
+          "maintenance_precondition_changed",
+          "A fixed public source changed while managed storage was being reserved.",
+        );
+        await replacePublic(document.file, document.after!);
+        written.push(document);
+      }
+      requireCondition(
+        (await readPublic(plan.file)) === plan.before,
+        "maintenance_precondition_changed",
+        "The public configuration changed before its fixed sources were published.",
+      );
+      if (plan.after === null) {
+        if (plan.before !== null) await rm(plan.file);
+      } else await replacePublic(plan.file, plan.after);
+      return plan;
+    } catch (cause) {
+      let rollbackFailure: unknown;
+      for (const document of written.reverse()) {
+        try {
+          await this.#restorePublicFile(document);
+        } catch (failure) {
+          rollbackFailure ??= failure;
+        }
+      }
+      if (rollbackFailure) throw rollbackFailure;
+      throw cause;
+    }
+  }
+  /** The exact text used both for capacity admission and public persistence. */
+  #publicText(
+    snapshot: ConfigurationSnapshot,
+    before: string | null,
+    remove: boolean,
+  ): string | null {
     if (snapshot.kind === "mcp") {
-      const file = this.#publicLocation("mcp", snapshot.name),
-        text = await readPublic(file),
-        root = text === null ? { mcpServers: {} } : JSON.parse(text);
+      const root = before === null ? { mcpServers: {} } : JSON.parse(before);
       requireCondition(
         object(root) &&
           object(root.mcpServers) &&
@@ -1872,42 +1956,20 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
       );
       if (remove) delete root.mcpServers[snapshot.name];
       else put(root.mcpServers, snapshot.name, snapshot.config);
-      const after = canonicalJson(root, 4 * 1024 * 1024);
-      await replacePublic(file, after);
-      return { file, before: text, after };
+      return canonicalJson(root, 4 * 1024 * 1024);
     }
-    const file = this.#publicLocation("api", snapshot.name);
-    if (remove) {
-      const prior = await readPublic(file);
-      if (prior !== null) await rm(file);
-      return { file, before: prior, after: null };
-    }
-    for (const document of snapshot.documents) {
-      const parts = document.file.split("/"),
-        target = publicFile(this.options.root, [
-          "api",
-          configurationDirectoryName(snapshot.name),
-          ...parts,
-        ]);
-      await replacePublic(
-        target,
-        Buffer.from(document.base64, "base64").toString("utf8"),
-      );
-    }
-    const before = await readPublic(file),
-      after = canonicalJson(
-        {
-          ...snapshot.config,
-          identity: {
-            name: snapshot.name,
-            directory: configurationDirectoryName(snapshot.name),
-          },
-          specification: this.#sourceIndex(snapshot),
+    if (remove) return null;
+    return canonicalJson(
+      {
+        ...snapshot.config,
+        identity: {
+          name: snapshot.name,
+          directory: configurationDirectoryName(snapshot.name),
         },
-        4 * 1024 * 1024,
-      );
-    await replacePublic(file, after);
-    return { file, before, after };
+        specification: this.#sourceIndex(snapshot),
+      },
+      4 * 1024 * 1024,
+    );
   }
   #sourceIndex(snapshot: ConfigurationSnapshot): JsonObject {
     return {
@@ -1919,13 +1981,24 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
       })),
     };
   }
-  async #restorePublic(write: PublicWrite): Promise<void> {
+  async #restorePublicFile(write: PublicFileWrite): Promise<void> {
     const current = await readPublic(write.file);
     // Preserve concurrent manual edits; their bytes remain an unapproved proposal.
     if (current !== write.after) return;
     if (write.before === null) {
       if (current !== null) await rm(write.file);
     } else await replacePublic(write.file, write.before);
+  }
+  async #restorePublic(write: PublicWrite): Promise<void> {
+    let failure: unknown;
+    for (const file of [write, ...[...write.documents].reverse()]) {
+      try {
+        await this.#restorePublicFile(file);
+      } catch (cause) {
+        failure ??= cause;
+      }
+    }
+    if (failure) throw failure;
   }
   #runtimeCredentials(snapshot: ConfigurationSnapshot): {
     provider: OpenApiCredentialProvider;
@@ -2147,30 +2220,49 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
       old = entry(state[snapshot.kind], snapshot.name),
       revision = hash({ snapshot: id, objectId: snapshot.objectId }),
       remove = intent.action === "remove";
-    const currentPublic = await readPublic(
-      this.#publicLocation(snapshot.kind, snapshot.name),
-    );
-    const documentBytes = snapshot.documents.reduce(
-      (total, document) =>
+    const publicPlan = await this.#publicWritePlan(snapshot, remove),
+      currentPublic = publicPlan.before,
+      nextState = json(state);
+    if (remove) delete nextState[snapshot.kind][snapshot.name];
+    else
+      put(nextState[snapshot.kind], snapshot.name, {
+        objectId: snapshot.objectId,
+        revision,
+        snapshot: id,
+        enabled: true,
+      });
+    const approvedBefore = canonicalJson(state, 64 * 1024 * 1024),
+      approvedAfter = canonicalJson(nextState, 64 * 1024 * 1024);
+    const publicBodies = [publicPlan, ...publicPlan.documents];
+    const publicBytes = publicBodies.reduce(
+      (total, file) =>
         total +
-        Buffer.byteLength(
-          Buffer.from(document.base64, "base64").toString("utf8"),
-        ),
+        Buffer.byteLength(file.before ?? "") +
+        Buffer.byteLength(file.after ?? ""),
       0,
     );
-    // Keep enough temporary replacement/rollback space across activation and
-    // settlement. Existing files remain counted by Core until their real rename.
+    // Admit all fixed public bytes, including identity/source-index locations,
+    // plus both approved/public rollback bodies and bounded filesystem metadata.
+    // Existing files remain counted by Core until their actual replacement.
     const reservation = await this.options.reserve?.(
-      documentBytes +
-        Buffer.byteLength(canonicalJson(snapshot.config, 4 * 1024 * 1024)) +
-        2 * Buffer.byteLength(canonicalJson(state, 64 * 1024 * 1024)) +
-        2 * Buffer.byteLength(currentPublic ?? "") +
-        8192,
+      publicBytes +
+        Buffer.byteLength(approvedAfter) +
+        Buffer.byteLength(approvedBefore) +
+        (publicBodies.length + 3) * 1024,
     );
     try {
       current(scope);
       await this.verify(intent, candidate, scope);
       current(scope);
+      requireCondition(
+        canonicalJson(await this.#approved(), 64 * 1024 * 1024) ===
+          approvedBefore &&
+          (await readPublic(
+            this.#publicLocation(snapshot.kind, snapshot.name),
+          )) === currentPublic,
+        "maintenance_precondition_changed",
+        "The approved or public configuration changed while its fixed write was being admitted.",
+      );
       if (remove) {
         requireCondition(
           old,
@@ -2187,14 +2279,13 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
           scope,
         );
         current(scope);
-        await this.#writePublic(snapshot, true);
-        delete state[snapshot.kind][snapshot.name];
+        await this.#writePublic(publicPlan);
         await privateMaintenanceWrite(
           this.options.root,
           ["configurations", "approved.json"],
-          state as unknown as JsonObject,
+          nextState as unknown as JsonObject,
         );
-        this.#state = state;
+        this.#state = nextState;
         return {
           changed: true,
           restartRequired: false,
@@ -2218,23 +2309,23 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
       try {
         current(scope);
         await this.verify(intent, candidate, scope);
-        publicWrite = await this.#writePublic(snapshot);
+        requireCondition(
+          canonicalJson(await this.#approved(), 64 * 1024 * 1024) ===
+            approvedBefore,
+          "maintenance_precondition_changed",
+          "The approved configuration changed before this fixed publication.",
+        );
+        publicWrite = await this.#writePublic(publicPlan);
         current(scope);
-        put(state[snapshot.kind], snapshot.name, {
-          objectId: snapshot.objectId,
-          revision,
-          snapshot: id,
-          enabled: true,
-        });
         await privateMaintenanceWrite(
           this.options.root,
           ["configurations", "approved.json"],
-          state as unknown as JsonObject,
+          nextState as unknown as JsonObject,
         );
         saved = true;
         current(scope);
         prepared.publish();
-        this.#state = state;
+        this.#state = nextState;
       } catch (cause) {
         try {
           if (saved)

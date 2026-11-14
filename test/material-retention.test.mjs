@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   Dir,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -183,6 +184,48 @@ test("material retention stays cold until real lifecycle work is requested", asy
   assert.equal(existsSync(path.join(f.root, "state")), false);
   assert.deepEqual(admissions, []);
   assert.deepEqual([...f.manager.activeDirectories()], []);
+});
+
+test("owner retention is fixed per material generation across restart; legacy markers keep seven days", async (t) => {
+  const f = fixture(t, { retentionMs: 100 }),
+    existing = f.catalog("existing-policy"),
+    legacy = f.catalog("legacy-policy");
+  for (const directory of [existing, legacy]) {
+    const hold = await f.manager.hold("catalog", directory);
+    hold.release();
+  }
+  const old = f.marker(legacy);
+  delete old.retentionMs;
+  const bytes = Buffer.alloc(4096, 32);
+  Buffer.from(JSON.stringify(old)).copy(bytes);
+  writeFileSync(f.markerFile(legacy), bytes);
+  await f.manager.sweep();
+  await f.manager.stop();
+
+  const restarted = new MaterialRetention(f.root, {
+    now: f.now,
+    liveSnapshotRefs: () => f.live,
+    retentionMs: 20,
+  });
+  t.after(() => restarted.stop());
+  const fresh = f.catalog("new-policy"),
+    hold = await restarted.hold("catalog", fresh);
+  hold.release();
+  await restarted.sweep();
+  assert.equal(f.marker(existing).retentionMs, 100);
+  assert.equal(f.marker(fresh).retentionMs, 20);
+  f.advance(20);
+  await restarted.sweep();
+  assert.equal(existsSync(fresh), false);
+  assert.equal(existsSync(existing), true);
+  assert.equal(existsSync(legacy), true);
+  f.advance(80);
+  await restarted.sweep();
+  assert.equal(existsSync(existing), false);
+  assert.equal(existsSync(legacy), true);
+  f.advance(grace - 100);
+  await restarted.sweep();
+  assert.equal(existsSync(legacy), false);
 });
 
 test("each new private marker reserves exactly 4096 bytes before allocation and reuses its original file", async (t) => {
@@ -471,24 +514,51 @@ test("an ancestor redirect after a native leaf read cannot mutate the unmanaged 
   const sweeping = f.manager.sweep();
   try {
     await enteredWithin(gate.entered);
-    renameSync(catalogRoot, savedRoot);
-    symlinkSync(outside, catalogRoot, "junction");
+    let nativeProtection = false;
+    try {
+      renameSync(catalogRoot, savedRoot);
+    } catch (cause) {
+      if (
+        process.platform !== "win32" ||
+        !["EPERM", "EBUSY"].includes(cause.code)
+      )
+        throw cause;
+      // Windows holds the ancestor in place while this actual Dir is open.
+      // Verify that native protection and real cleanup instead of skipping.
+      nativeProtection = true;
+      assert.equal(realpathSync.native(catalogRoot), catalogRoot);
+      assert.equal(existsSync(savedRoot), false);
+      assert.equal(
+        readFileSync(path.join(directory, "README.md"), "utf8"),
+        "fixed manual",
+      );
+    }
+    if (!nativeProtection) symlinkSync(outside, catalogRoot, "junction");
     gate.resume();
     const result = await sweeping;
-    assert.equal(result.removed, 0);
-    assert.equal(result.errors.length, 1);
+    assert.equal(result.removed, nativeProtection ? 1 : 0);
+    assert.equal(result.errors.length, nativeProtection ? 0 : 1);
     assert.ok(result.processed <= 100);
     assert.equal(
       readFileSync(path.join(outsideGeneration, "README.md"), "utf8"),
       "must survive queued I/O",
     );
-    assert.equal(
-      readFileSync(
-        path.join(savedRoot, path.basename(directory), "README.md"),
-        "utf8",
-      ),
-      "fixed manual",
-    );
+    if (nativeProtection) {
+      assert.equal(existsSync(directory), false);
+      assert.equal(existsSync(f.markerFile(directory)), false);
+      await f.manager.stop();
+      assert.throws(() => f.manager.sweep(), {
+        code: "material_retention_closed",
+      });
+    } else {
+      assert.equal(
+        readFileSync(
+          path.join(savedRoot, path.basename(directory), "README.md"),
+          "utf8",
+        ),
+        "fixed manual",
+      );
+    }
   } finally {
     gate.resume();
     try {
@@ -577,4 +647,143 @@ test("stop closes the lifecycle cursor and every pending generation directory ha
     filesystem.opendir = original;
     syncBuiltinESMExports();
   }
+});
+
+test("stop joins pending marker admission and refuses later lifecycle work without allocating its marker", async (t) => {
+  const entered = deferred(),
+    resume = deferred();
+  let released = 0;
+  const f = fixture(t, {
+    reserve: async () => {
+      entered.resolve();
+      await resume.promise;
+      return {
+        release() {
+          released++;
+        },
+      };
+    },
+  });
+  const directory = f.catalog(),
+    holding = f.manager.hold("catalog", directory);
+  const rejected = assert.rejects(holding, {
+    code: "material_retention_closed",
+  });
+  let stopped = false,
+    stopping;
+  try {
+    await enteredWithin(entered.promise);
+    stopping = f.manager.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(stopped, false);
+    await assert.rejects(f.manager.hold("catalog", directory), {
+      code: "material_retention_closed",
+    });
+    assert.throws(() => f.manager.setPublished("new", directory), {
+      code: "material_retention_closed",
+    });
+    assert.throws(() => f.manager.sweep(), {
+      code: "material_retention_closed",
+    });
+    resume.resolve();
+    await rejected;
+    await stopping;
+    assert.equal(stopped, true);
+    assert.equal(released, 1);
+    assert.equal(existsSync(f.markerFile(directory)), false);
+    assert.deepEqual([...f.manager.activeDirectories()], []);
+  } finally {
+    resume.resolve();
+    await rejected;
+    await stopping;
+  }
+});
+
+test("stop joins an accepted native marker write, fsync and close before confirming closure", async (t) => {
+  const f = fixture(t),
+    directory = f.catalog(),
+    entered = deferred(),
+    resume = deferred();
+  const original = filesystem.open;
+  let nativeClosed = false;
+  filesystem.open = async (...args) => {
+    const handle = await original(...args);
+    if (String(args[0]) === f.markerFile(directory) && args[1] & 1) {
+      const write = handle.writeFile.bind(handle),
+        close = handle.close.bind(handle);
+      handle.writeFile = async (...values) => {
+        entered.resolve();
+        await resume.promise;
+        return write(...values);
+      };
+      handle.close = async () => {
+        await close();
+        nativeClosed = true;
+      };
+    }
+    return handle;
+  };
+  syncBuiltinESMExports();
+  const holding = f.manager.hold("catalog", directory);
+  const rejected = assert.rejects(holding, {
+    code: "material_retention_closed",
+  });
+  let stopping,
+    stopped = false;
+  try {
+    await enteredWithin(entered.promise);
+    stopping = f.manager.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(stopped, false);
+    assert.equal(nativeClosed, false);
+    assert.equal(statSync(f.markerFile(directory)).size, 0);
+    resume.resolve();
+    await rejected;
+    await stopping;
+    assert.equal(nativeClosed, true);
+    assert.equal(statSync(f.markerFile(directory)).size, 4096);
+    assert.equal(stopped, true);
+    assert.deepEqual([...f.manager.activeDirectories()], []);
+  } finally {
+    resume.resolve();
+    try {
+      await rejected;
+      await stopping;
+    } finally {
+      filesystem.open = original;
+      syncBuiltinESMExports();
+    }
+  }
+});
+
+test("hard-linked private markers cannot mutate another profile's lifecycle facts or admit deletion", async (t) => {
+  const f = fixture(t),
+    directory = f.catalog();
+  await retired(f, "catalog", directory);
+  const outsideRoot = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-external-marker-")),
+  );
+  t.after(() => rmSync(outsideRoot, { recursive: true, force: true }));
+  const outside = path.join(outsideRoot, "other-profile-marker.json");
+  linkSync(f.markerFile(directory), outside);
+  const before = readFileSync(outside);
+  assert.throws(() => f.manager.setPublished("catalog", directory), {
+    code: "invalid_material_marker",
+  });
+  await assert.rejects(f.manager.hold("catalog", directory), {
+    code: "invalid_material_marker",
+  });
+  const result = await f.manager.sweep(100);
+  assert.equal(result.removed, 0);
+  assert.deepEqual(
+    result.errors.map((error) => error.code),
+    ["invalid_material_marker"],
+  );
+  assert.deepEqual(readFileSync(outside), before);
+  assert.equal(existsSync(directory), true);
+  assert.equal(existsSync(f.markerFile(directory)), true);
 });

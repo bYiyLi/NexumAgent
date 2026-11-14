@@ -295,6 +295,39 @@ test("accepted native execution saves snapshots/results and keeps observation ti
   assert.deepEqual((await finish(first.run.runId)).result, completed.result);
 });
 
+test("a VM run flushes its latest 50MiB log before success and returns only a bounded preview with the retained range", async (t) => {
+  const { start, engine, root } = await fixture(t);
+  const accepted = await start({
+    script:
+      'console.log("OLD_DISCARDED_RECORD");const line="x".repeat(1024*1024);for(let i=0;i<52;i++)console.log(line);console.log("FINAL_RETAINED_RECORD");return 42;',
+    waitMs: 0,
+  });
+  const deadline = Date.now() + 10000;
+  let detail;
+  do {
+    detail = await engine.get(caller, {
+      agentId: "a",
+      runId: accepted.run.runId,
+      waitMs: 1000,
+    });
+  } while (detail.run.endedAt === null && Date.now() < deadline);
+  assert.equal(detail.run.status, "succeeded");
+  const log = detail.snapshots.logs;
+  assert.equal(log.status, "available");
+  assert.equal(log.truncated, true);
+  assert.ok(log.bytes <= 50 * 1024 * 1024);
+  assert.ok(log.startOffset > 0);
+  assert.ok(Buffer.byteLength(log.value) <= 4096);
+  assert.equal(log.value.includes("OLD_DISCARDED_RECORD"), false);
+  assert.equal(log.nextOffset, log.dataOffset + Buffer.byteLength(log.value));
+  assert.ok(
+    readFileSync(path.join(root, detail.run.logsRef))
+      .subarray(-64)
+      .toString()
+      .endsWith("FINAL_RETAINED_RECORD\n"),
+  );
+});
+
 test("enrollment precedes input validation; syntax/preparation failures never count as an actual start", async (t) => {
   const { start, store, scripts } = await fixture(t);
   const prepared = await start({ script: named(), input: { value: "wrong" } });

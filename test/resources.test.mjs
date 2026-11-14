@@ -509,7 +509,10 @@ test("v2 migration preserves state/resource history and restart readers cannot r
   store.close();
   let db = new DatabaseSync(filename);
   db.exec(
-    "DROP TABLE task_artifacts; DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; PRAGMA user_version=2",
+    "DROP TABLE project_closures; DROP TABLE task_artifacts; DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; " +
+      "ALTER TABLE runs DROP COLUMN retention_history_ms; ALTER TABLE runs DROP COLUMN retention_logs_ms; ALTER TABLE runs DROP COLUMN retention_inputs_ms; " +
+      "ALTER TABLE operations DROP COLUMN retention_history_ms; ALTER TABLE managed_resources DROP COLUMN retention_history_ms; " +
+      "ALTER TABLE managed_resources DROP COLUMN retention_logs_ms; ALTER TABLE transfers DROP COLUMN retention_history_ms; PRAGMA user_version=2",
   );
   db.close();
   assert.throws(

@@ -245,6 +245,27 @@ try {
   console.error(
     JSON.stringify({ stage: "native-failed", message: error.message, status }),
   );
+  if (plan && process.platform === "win32") {
+    // Read only this fixture's actual Task Scheduler settings and timestamps.
+    // A failed candidate remains failed; no new trigger or restart is injected.
+    const name = "'" + plan.label.replaceAll("'", "''") + "'";
+    const diagnostic = run(
+      path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32/WindowsPowerShell/v1.0/powershell.exe",
+      ),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName ${name};$i=Get-ScheduledTaskInfo -TaskName ${name};@{stage='native-task-settings';state=[string]$t.State;lastResult=$i.LastTaskResult;lastRun=$i.LastRunTime.ToString('o');nextRun=$i.NextRunTime.ToString('o');missedRuns=$i.NumberOfMissedRuns;restartCount=$t.Settings.RestartCount;restartInterval=[string]$t.Settings.RestartInterval;allowDemandStart=$t.Settings.AllowDemandStart;unifiedEngine=$t.Settings.UseUnifiedSchedulingEngine;triggerTypes=@($t.Triggers|ForEach-Object{$_.CimClass.CimClassName})}|ConvertTo-Json -Compress`,
+      ],
+      true,
+    );
+    console.error(diagnostic.stdout);
+    console.error(diagnostic.stderr);
+  }
   if (plan && process.platform === "linux") {
     // This runner-only fixture owns its unique unit and never receives private
     // configuration. Keep its native failure evidence in CI, not product logs.

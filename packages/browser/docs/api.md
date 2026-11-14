@@ -369,6 +369,8 @@ export type BrowserTarget = {
   generation: number;
   bootId: string;
   browserSessionId: string;
+  /** Fixed native control identity; obtaining a new Tab never refreshes an older facade. */
+  controlEpoch?: string;
   pageVersion?: number;
 };
 

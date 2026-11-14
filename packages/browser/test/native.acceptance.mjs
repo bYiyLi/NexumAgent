@@ -3,6 +3,30 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { crc32, deflateSync } from "node:zlib";
 import { nativeFixture, select } from "./helpers/native.mjs";
+test("native closing an attached tab preserves the same run's other tab for both close entry points", async (t) => {
+  const f = await nativeFixture(t);
+  const result = await f.run(
+    select +
+      `
+    const observed=[];
+    for (const method of ['tab','management']) {
+      const doomed=await selected.tabs.new(context.input.base+'?close='+method,{active:false});
+      await doomed.playwright.waitForURL(context.input.base+'?close='+method);
+      await doomed.evaluate('document.title');
+      await tab.playwright.getByRole('textbox',{name:'Name'}).fill('before '+method);
+      if(method==='tab')await doomed.close();else await selected.management.tabs.close(doomed.id);
+      await tab.playwright.getByRole('textbox',{name:'Name'}).fill('survived '+method);
+      observed.push({method,value:await tab.evaluate("document.querySelector('#name').value"),tabs:(await selected.tabs.list()).map(item=>item.id),closedId:doomed.id});
+    }
+    return {observed};`,
+    { base: f.base },
+  );
+  assert.equal(result.result.data.observed.length, 2);
+  for (const entry of result.result.data.observed) {
+    assert.equal(entry.value, "survived " + entry.method);
+    assert.equal(entry.tabs.includes(entry.closedId), false);
+  }
+});
 test("native MV3 uses the public SDK through actual Core for page interaction, MCP JPEG and completed download", async (t) => {
   const f = await nativeFixture(t);
   const result = await f.run(
@@ -109,10 +133,11 @@ test("native explicit input continuation issues a new tab epoch, rejects old han
     state = await f.observe(state.run.runId);
   }
   const held = await f.run(
-    'const {createBrowserClient}=await import("nexum-browser");const selected=await createBrowserClient(browser).browsers.getDefault();const other=await selected.tabs.get(context.input.otherId);try{await other.title();return {unexpected:true};}catch(error){return {code:error.code};}',
+    'const {createBrowserClient}=await import("nexum-browser");const selected=await createBrowserClient(browser).browsers.getDefault();const other=await selected.tabs.get(context.input.otherId);let code,contextCode;try{await other.title();}catch(error){code=error.code;}try{await selected.user.getTabContext(context.input.otherId);}catch(error){contextCode=error.code;}return {code,contextCode};',
     { otherId },
   );
   assert.equal(held.result.data.code, "TAB_ALREADY_CLAIMED");
+  assert.equal(held.result.data.contextCode, "TAB_ALREADY_CLAIMED");
   const user = await f.run(
     select +
       'await tab.playwright.getByRole("textbox",{name:"Name"}).fill("User completed");return {value:await tab.evaluate("document.querySelector(\'#name\').value")};',
@@ -173,7 +198,7 @@ test("native declined, cancelled, expired and revoked continuations never renew 
   let denied = await wait(
     await f.start(
       select +
-        "let refusal;try{await tab.requestUserTakeover();}catch(error){refusal=error.code;}let after;try{await tab.title();}catch(error){after=error.code;}return {refusal,after};",
+        "let refusal;try{await tab.requestUserTakeover();}catch(error){refusal=error.code;}let after,contextAfter;try{await tab.title();}catch(error){after=error.code;}try{await selected.user.getTabContext();}catch(error){contextAfter=error.code;}return {refusal,after,contextAfter};",
       { base: f.base },
     ),
   );
@@ -183,6 +208,7 @@ test("native declined, cancelled, expired and revoked continuations never renew 
   assert.deepEqual(denied.result.data, {
     refusal: "USER_TAKEOVER",
     after: "USER_TAKEOVER",
+    contextAfter: "USER_TAKEOVER",
   });
   let cancelled = await wait(
     await f.start(

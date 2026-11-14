@@ -146,6 +146,7 @@ test("owner settings reject unknown keys, malformed numbers and impossible expir
     { storage: { max_managed_bytes: Number.MAX_SAFE_INTEGER + 1 } },
     { storage: { untracked_limit: 1000 } },
     { retention: [] },
+    { retention: { artifact_ms: 1_000_000_000_000_000 } },
     { retention: { artifact_ms: 9_000_000_000_000_000 } },
     { retention: { run_logs_ms: -1 } },
     { retention: { work_idle_ms: 0.5 } },
