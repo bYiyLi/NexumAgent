@@ -73,6 +73,9 @@ for (const signal of ["SIGTERM", "SIGINT"])
   );
 let failure,
   sequence = 0;
+// Exercise an ordinary valid lease, leaving headroom below the protocol's 30s
+// maximum for two independent native processes observing the system clock.
+const policyLeaseMs = 20_000;
 const peers = [],
   responses = new Map(),
   connections = new Set(),
@@ -127,7 +130,9 @@ server.on("upgrade", (request, socket, head) => {
                   output: {
                     authorization: {
                       ...message.context.authorization,
-                      expiresAt: new Date(Date.now() + 30000).toISOString(),
+                      expiresAt: new Date(
+                        Date.now() + policyLeaseMs,
+                      ).toISOString(),
                     },
                   },
                 }),
@@ -232,6 +237,9 @@ async function leader() {
 }
 async function invoke(peer, operation, input) {
   const id = `inv_native_service_${++sequence}`;
+  const issuedAt = Date.now(),
+    started = performance.now();
+  const expiresAt = new Date(issuedAt + policyLeaseMs).toISOString();
   peer.socket.send(
     JSON.stringify({
       type: "invoke",
@@ -250,7 +258,7 @@ async function invoke(peer, operation, input) {
           allowedRoots: [home],
           budgets: {},
           revision: "one",
-          expiresAt: new Date(Date.now() + 30000).toISOString(),
+          expiresAt,
         },
       },
     }),
@@ -261,7 +269,18 @@ async function invoke(peer, operation, input) {
   );
   const response = responses.get(id);
   responses.delete(id);
-  assert.equal(response.type, "result", JSON.stringify(response));
+  assert.equal(
+    response.type,
+    "result",
+    JSON.stringify({
+      response,
+      operation,
+      issuedAt,
+      expiresAt,
+      receivedAt: Date.now(),
+      elapsedMs: performance.now() - started,
+    }),
+  );
   return response.output;
 }
 let installed = false;

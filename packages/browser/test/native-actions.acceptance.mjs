@@ -8,6 +8,41 @@ const interactive = `<!doctype html><html><head><title>Native action families</t
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
 
+test("native navigation follows actual HTTP redirects for commit, DOMContentLoaded and load without repeating the request", async (t) => {
+  const requests = [];
+  const f = await nativeFixture(t, {
+    html: '<!doctype html><title>Native redirect destination</title><h1 id="arrived">Actual redirect destination</h1>',
+    handleRequest(req, res) {
+      const url = new URL(req.url, "http://localhost");
+      if (url.pathname !== "/redirect") return false;
+      requests.push(url.searchParams.get("state"));
+      res.writeHead(302, { location: "/landing" + url.search });
+      res.end();
+      return true;
+    },
+  });
+  const result = await f.run(
+    select +
+      `
+    const values=[];for(const waitUntil of ['commit','domcontentloaded','load']){
+      await tab.navigate(context.input.base+'redirect?state='+waitUntil,{waitUntil,timeoutMs:3000});
+      await tab.playwright.locator('#arrived').waitFor({state:'visible',timeoutMs:3000});
+      values.push({waitUntil,url:await tab.url(),text:await tab.playwright.locator('#arrived').innerText()});
+    }let strict=null;try{await tab.playwright.waitForURL(context.input.base+'redirect?state=load',{timeoutMs:250});}catch(error){strict=error.code;}return {values,strict};`,
+    { base: f.base },
+  );
+  assert.deepEqual(
+    result.result.data.values,
+    ["commit", "domcontentloaded", "load"].map((waitUntil) => ({
+      waitUntil,
+      url: f.base + "landing?state=" + waitUntil,
+      text: "Actual redirect destination",
+    })),
+  );
+  assert.equal(result.result.data.strict, "TIMEOUT");
+  assert.deepEqual(requests, ["commit", "domcontentloaded", "load"]);
+});
+
 test(
   "native clicks wait for unobstructed input, time out behind persistent overlays and never dispatch after cancellation",
   { timeout: 60000 },

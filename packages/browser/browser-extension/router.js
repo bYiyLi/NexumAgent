@@ -4478,7 +4478,8 @@ export function createBrowserRouter(
         event: "navigation",
         waitUntil: input.waitUntil ?? "load",
         timeoutMs: Math.min(input.timeoutMs ?? ctx.budgetMs, ctx.budgetMs),
-        ...(url ? { url } : {}),
+        // A native navigation may commit at a different URL after a legitimate
+        // redirect. Explicit URL waiters still retain their exact URL filter.
       });
       try {
         ctx.signal?.throwIfAborted();

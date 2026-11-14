@@ -23,6 +23,8 @@ return output.image({ data: image, mimeType: "image/jpeg" });
 
 `expectNavigation(action)` 的 action 留在 Node，先确认等待已就绪再操作。`const pending = tab.playwright.waitForEvent("download"); await link.click(); await pending;` 的后续动作只等 arm-ready，不会排在整个下载等待后面。下载开始事件不等于文件已经完整保存。
 
+`tab.navigate(url,{waitUntil})` 等待实际顶层导航的指定阶段，允许站点正常重定向；完成后用 `await tab.url()` 观察最终地址。`waitForURL` 或显式带 `url` 的导航等待仍按指定地址精确匹配；它们不会因某个不同地址已经加载而返回成功。
+
 当前 MV3 传输能保留目标绑定的原始下载事件和 `tab.downloads()` 状态，但 Chrome 公开接口没有提供该 GUID 与本机文件的可靠对应。因此 `download.path()`、`tab.saveDownload()` 明确返回 `CAPABILITY_NOT_ALLOWED`；本包不按 URL、时间或文件名猜测文件，不重发原请求。它们的正向文件取回仍未完成验收。下面的页面媒体、资产下载与导出按实际来源生成自己的产物，不受这项原生下载文件身份限制影响。
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。

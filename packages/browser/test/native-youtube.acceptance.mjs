@@ -32,25 +32,45 @@ test(
       videoId,
     );
     const id = opened.result.data.id;
+    const facts = `(()=>{const player=document.querySelector('#movie_player')?.getPlayerResponse?.()??globalThis.ytInitialPlayerResponse;return {videoId:document.querySelector('ytd-watch-flexy')?.getAttribute('video-id')??null,playerVideoId:player?.videoDetails?.videoId??null,urlVideoId:new URL(location.href).searchParams.get('v'),readyState:document.readyState,metadata:document.querySelectorAll('ytd-watch-metadata').length,expands:Array.from(document.querySelectorAll('ytd-watch-metadata #description-inline-expander #expand')).map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return {visible:s.display!=='none'&&s.visibility!=='hidden'&&r.width>0&&r.height>0};}),segments:document.querySelectorAll('transcript-segment-view-model,ytd-transcript-segment-renderer').length};})()`;
     const observed = await f.run(
       `
     const {createBrowserClient}=await import('nexum-browser');
     const selected=await createBrowserClient(browser).browsers.getDefault(),tab=await selected.tabs.get(context.input.id);
+    let stage='metadata';
+    try {
     const metadata=tab.playwright.locator('ytd-watch-metadata');
     await metadata.waitFor({state:'visible',timeoutMs:20000});
+    stage='expand visible';
     const expand=metadata.locator('#description-inline-expander #expand');
     await expand.waitFor({state:'visible',timeoutMs:15000});
+    stage='expand click';
     await expand.click();
+    stage='transcript visible';
     const transcript=metadata.locator('ytd-video-description-transcript-section-renderer').getByRole('button');
     await transcript.waitFor({state:'visible',timeoutMs:15000});
+    stage='transcript click';
     await transcript.click();
+    stage='rendered cues';
     await tab.playwright.locator('transcript-segment-view-model,ytd-transcript-segment-renderer').first().waitFor({state:'visible',timeoutMs:15000});
-    return await tab.evaluate("(()=>{const modern=Array.from(document.querySelectorAll('transcript-segment-view-model')),nodes=modern.length?modern:Array.from(document.querySelectorAll('ytd-transcript-segment-renderer'));return {videoId:document.querySelector('#movie_player')?.getPlayerResponse?.()?.videoDetails?.videoId??null,cues:nodes.map(e=>({stamp:e.querySelector(modern.length?'.ytwTranscriptSegmentViewModelTimestamp':'.segment-timestamp')?.textContent.trim()??'',body:e.querySelector(modern.length?'.ytAttributedStringHost[role=text]':'.segment-text')?.textContent.trim()??''})).filter(cue=>cue.body)};})()");
+    const identity=await tab.evaluate(${JSON.stringify(facts)});
+    const cues=await tab.evaluate("(()=>{const modern=Array.from(document.querySelectorAll('transcript-segment-view-model')),nodes=modern.length?modern:Array.from(document.querySelectorAll('ytd-transcript-segment-renderer'));return nodes.map(e=>({stamp:e.querySelector(modern.length?'.ytwTranscriptSegmentViewModelTimestamp':'.segment-timestamp')?.textContent.trim()??'',body:e.querySelector(modern.length?'.ytAttributedStringHost[role=text]':'.segment-text')?.textContent.trim()??''})).filter(cue=>cue.body);})()");
+    return {identity,cues};
+    } catch(error) {
+      let identity;try{identity=await tab.evaluate(${JSON.stringify(facts)});}catch(cause){identity={unavailable:true,code:cause.code??null};}
+      return {failure:{stage,code:error.code??null,message:String(error.message).slice(0,250)},identity};
+    }
   `,
       { id },
     );
     const data = observed.result.data;
-    assert.equal(data.videoId, videoId);
+    assert.equal(data.failure, undefined, JSON.stringify(data));
+    // The actual watch document carries identity even when the site's optional
+    // player method is absent. Never substitute the test input for an observed ID.
+    assert.equal(data.identity.videoId, videoId, JSON.stringify(data.identity));
+    assert.equal(data.identity.urlVideoId, videoId);
+    if (data.identity.playerVideoId !== null)
+      assert.equal(data.identity.playerVideoId, videoId);
     assert.ok(
       data.cues.length >= 10,
       "The actual page did not render a complete usable transcript.",
