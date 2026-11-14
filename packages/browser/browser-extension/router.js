@@ -2381,6 +2381,19 @@ export function createBrowserRouter(
           } catch (cause) {
             tempErrors.push(cause);
           }
+        // A native resource load can outlive its action signal. Release its own
+        // input state and detach before waiting for the native promise to reject.
+        // Ownership remains reserved until all pending work and cleanup finish.
+        for (const tabId of new Set(
+          [...lease.pending.values()]
+            .map((info) => info.nativeNetworkTabId)
+            .filter((id) => id !== undefined),
+        ))
+          try {
+            await releaseControl(lease, tabId);
+          } catch (cause) {
+            tempErrors.push(cause);
+          }
         await Promise.allSettled([...lease.pending.keys()]);
         const errors = [...tempErrors];
         for (const [token, stage] of lease.clipboardStages ?? []) {
@@ -3258,7 +3271,15 @@ export function createBrowserRouter(
         ctx.signal?.throwIfAborted();
       }
       ctx.dispatched();
-      const result = await chrome.debugger.sendCommand(source, method, params);
+      if (method === "Network.loadNetworkResource")
+        ctx.pendingInfo.nativeNetworkTabId = tabId;
+      let result;
+      try {
+        result = await chrome.debugger.sendCommand(source, method, params);
+      } finally {
+        if (method === "Network.loadNetworkResource")
+          delete ctx.pendingInfo.nativeNetworkTabId;
+      }
       if (
         (params.type === "keyUp" || params.type === "mouseReleased") &&
         inputMap
@@ -4280,6 +4301,12 @@ export function createBrowserRouter(
             ),
           );
       await Promise.resolve();
+      if (
+        [...lease.pending.values()].some(
+          (info) => info.nativeNetworkTabId === id,
+        )
+      )
+        await releaseControl(lease, id);
       await Promise.allSettled(
         [...lease.pending]
           .filter(

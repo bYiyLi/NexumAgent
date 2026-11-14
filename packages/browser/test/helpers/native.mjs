@@ -334,7 +334,7 @@ export async function nativeFixture(t, options = {}) {
     while (result.run.endedAt === null) {
       assert.ok(
         Date.now() < until,
-        `native run failed to settle: ${JSON.stringify(result.run)}; stderr=${stderr.slice(-4096)}`,
+        `native run failed to settle: ${JSON.stringify({ run: result.run, operations: result.operations })}; stderr=${stderr.slice(-4096)}`,
       );
       result = await engine.observe(caller, result.run.runId, 50);
     }

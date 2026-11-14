@@ -154,6 +154,7 @@ function fixture(t, url) {
           const response = responses.get(params.url);
           if (!response)
             return { resource: { success: false, httpStatusCode: 404 } };
+          if (response.nativeResult) return { resource: response.nativeResult };
           if (response.beforeLoad) await response.beforeLoad();
           const handle = `native-site-stream-${++streamSequence}`;
           streams.set(handle, { response, offset: 0 });
@@ -411,6 +412,49 @@ test("native Google exports stream multiple chunks and close error or cancelled 
   await rejected;
   assert.equal(f.streams.size, 0);
   assert.equal(f.fetches.length, 0);
+});
+
+test("native Google failures retain only bounded HTTP and network categories without exposing response metadata", async (t) => {
+  const f = fixture(
+    t,
+    "https://docs.google.com/spreadsheets/d/native_error_document/edit",
+  );
+  const plan = await f.call("content.plan", {
+    method: "content.exportGsuite",
+    type: "xlsx",
+  });
+  for (const [nativeResult, wanted] of [
+    [
+      {
+        success: false,
+        httpStatusCode: 429,
+        netErrorName: "https://example.invalid/untrusted-detail",
+        headers: { Location: "untrusted-detail" },
+      },
+      "HTTP 429",
+    ],
+    [
+      { success: false, netErrorName: "net::ERR_PROXY_CONNECTION_FAILED" },
+      "net::ERR_PROXY_CONNECTION_FAILED",
+    ],
+  ]) {
+    f.responses.set(plan.urls[0], { nativeResult });
+    await assert.rejects(
+      f.call("content.exportGsuite", { planId: plan.id, type: "xlsx" }),
+      (error) => {
+        assert.equal(error.code, "FILE_UNAVAILABLE");
+        assert.ok(error.message.includes(wanted));
+        assert.equal(error.message.includes("untrusted-detail"), false);
+        assert.equal(error.message.includes("example.invalid"), false);
+        return true;
+      },
+    );
+  }
+  assert.equal(f.streams.size, 0);
+  assert.equal(
+    f.commands.some((c) => c.method === "IO.read"),
+    false,
+  );
 });
 
 test("Google Markdown accepts the actual text/x-markdown response while still rejecting an HTML sign-in document", async (t) => {

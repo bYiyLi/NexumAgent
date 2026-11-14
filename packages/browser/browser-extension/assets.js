@@ -185,12 +185,25 @@ async function fetchGoogleDocument(ctx, source, plan) {
     options: { disableCache: false, includeCredentials: true },
   });
   const resource = response.resource;
+  const diagnostics = [];
+  if (
+    Number.isInteger(resource?.httpStatusCode) &&
+    resource.httpStatusCode >= 100 &&
+    resource.httpStatusCode <= 599
+  )
+    diagnostics.push(`HTTP ${resource.httpStatusCode}`);
+  if (
+    typeof resource?.netErrorName === "string" &&
+    /^net::ERR_[A-Z0-9_]{1,64}$/.test(resource.netErrorName)
+  )
+    diagnostics.push(resource.netErrorName);
+  const outcome = diagnostics.length ? ` (${diagnostics.join(", ")})` : "";
   requireValue(
     resource &&
       typeof resource.stream === "string" &&
       resource.stream.length > 0,
     "FILE_UNAVAILABLE",
-    "The browser could not open the Google Workspace document response.",
+    `The browser could not open the Google Workspace document response${outcome}.`,
   );
   text(resource.stream, 1024);
   try {
@@ -200,7 +213,7 @@ async function fetchGoogleDocument(ctx, source, plan) {
         resource.httpStatusCode >= 200 &&
         resource.httpStatusCode < 300,
       "FILE_UNAVAILABLE",
-      "The browser could not read the Google Workspace document response.",
+      `The browser could not read the Google Workspace document response${outcome}.`,
     );
     const header = Object.entries(resource.headers ?? {}).find(
       ([name]) => name.toLowerCase() === "content-type",

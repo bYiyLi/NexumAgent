@@ -596,6 +596,114 @@ test("an attached native control stays owned until actual detach confirms cleanu
   );
 });
 
+test("ending or handing off a held native network call releases input before detach and keeps the target owned until actual cleanup", async (t) => {
+  for (const mode of ["end", "handoff"])
+    await t.test(mode, async (t) => {
+      const f = fixture(t);
+      f.router.start();
+      f.router.bind(binding);
+      f.open("lease");
+      f.open("other", "2");
+      await f.call(
+        "cdp.send",
+        { method: "Runtime.enable" },
+        { leaseId: "other", id: "2" },
+      );
+      await f.call("tab.keyboardDown", { key: "Shift" });
+      await f.call("cdp.send", {
+        method: "Input.dispatchMouseEvent",
+        params: { type: "mousePressed", button: "left", x: 10, y: 20 },
+      });
+      const entered = Promise.withResolvers(),
+        network = Promise.withResolvers(),
+        detachEntered = Promise.withResolvers(),
+        detachGate = Promise.withResolvers();
+      const send = f.chrome.debugger.sendCommand,
+        detach = f.chrome.debugger.detach;
+      f.chrome.debugger.sendCommand = async (source, method, params) => {
+        const value = await send(source, method, params);
+        if (method !== "Network.loadNetworkResource") return value;
+        entered.resolve();
+        return network.promise;
+      };
+      f.chrome.debugger.detach = async (source) => {
+        if (source.tabId === 1) {
+          detachEntered.resolve();
+          await detachGate.promise;
+        }
+        await detach(source);
+        if (source.tabId === 1)
+          network.reject(Error("Native debugger detached"));
+      };
+      const pending = f.call("cdp.send", {
+        method: "Network.loadNetworkResource",
+        params: {},
+      });
+      const rejected = assert.rejects(pending, /Native debugger detached/);
+      let closing;
+      try {
+        await entered.promise;
+        let closed = false;
+        closing = (
+          mode === "end"
+            ? f.router.endLease("lease")
+            : f.call("tab.markHandoff")
+        ).then((value) => {
+          closed = true;
+          return value;
+        });
+        await Promise.race([
+          detachEntered.promise,
+          delay(500).then(() => {
+            throw Error(
+              "Native detach was blocked behind the request it must stop.",
+            );
+          }),
+        ]);
+        assert.equal(closed, false);
+        assert.throws(() => f.open("replacement"), {
+          code: "TAB_ALREADY_CLAIMED",
+        });
+        assert.ok(
+          f.calls.some(
+            (value) =>
+              value[0] === "debugger.sendCommand" &&
+              value[2] === "Input.dispatchKeyEvent" &&
+              value[3].type === "keyUp" &&
+              value[3].key === "Shift",
+          ),
+        );
+        assert.ok(
+          f.calls.some(
+            (value) =>
+              value[0] === "debugger.sendCommand" &&
+              value[2] === "Input.dispatchMouseEvent" &&
+              value[3].type === "mouseReleased",
+          ),
+        );
+        detachGate.resolve();
+        await closing;
+        await rejected;
+        assert.equal(f.attached.has(1), false);
+        assert.equal(f.attached.has(2), true);
+        f.open("replacement");
+        assert.equal(
+          f.emitted.some((value) => value.event === "user_takeover"),
+          false,
+        );
+        assert.equal(
+          f.calls.some((value) => value[0] === "tabs.remove"),
+          false,
+        );
+      } finally {
+        detachGate.resolve();
+        network.reject(Error("Owned fixture cleanup"));
+        await rejected;
+        await closing?.catch(() => {});
+      }
+    });
+});
+
 test("both ordinary close entries confirm native input/stream/viewport cleanup, close only their target and keep another attached tab usable", async (t) => {
   for (const method of ["tab.close", "management.tabs.close"])
     await t.test(method, async (t) => {

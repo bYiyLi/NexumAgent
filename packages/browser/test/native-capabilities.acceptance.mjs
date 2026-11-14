@@ -10,6 +10,92 @@ const html = `<!doctype html><html><head><title>Nexum native capabilities</title
 const dimensions = `() => ({width:innerWidth,height:innerHeight})`;
 
 test(
+  "native run cancellation and expiry close a held browser network request before releasing its lease",
+  { timeout: 60000 },
+  async (t) => {
+    for (const mode of ["cancel", "deadline"])
+      await t.test(mode, async (t) => {
+        const ready = Promise.withResolvers();
+        let response,
+          clientClosed = false;
+        const f = await nativeFixture(t, {
+          html: '<!doctype html><title>Held native request</title><script>window.released=[];addEventListener("keyup",event=>released.push(event.key));</script>',
+          handleRequest(req, res) {
+            if (req.url !== "/held-native") return false;
+            response = res;
+            res.on("close", () => {
+              clientClosed = true;
+            });
+            ready.resolve();
+            return true;
+          },
+        });
+        let state;
+        try {
+          state = await f.start(
+            select +
+              `await tab.cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16});const tree=await tab.cdp.send('Page.getFrameTree');return await tab.cdp.send('Network.loadNetworkResource',{frameId:tree.frameTree.frame.id,url:context.input.base+'held-native',options:{disableCache:true,includeCredentials:true}});`,
+            { base: f.base },
+            { timeoutMs: mode === "deadline" ? 4000 : 15000 },
+          );
+          await Promise.race([
+            ready.promise,
+            delay(3000).then(() => {
+              throw Error(
+                "The owned native request never reached its actual server.",
+              );
+            }),
+          ]);
+          if (mode === "cancel") f.cancel(state.run.runId);
+          const until = performance.now() + (mode === "deadline" ? 7000 : 4000);
+          do {
+            state = await f.observe(state.run.runId, 50);
+            if (state.run.endedAt !== null) break;
+            await delay(20);
+          } while (performance.now() < until);
+          assert.notEqual(
+            state.run.endedAt,
+            null,
+            JSON.stringify({ run: state.run, operations: state.operations }),
+          );
+          assert.equal(
+            clientClosed,
+            true,
+            "Native cleanup must close the held client before the server supplies its response.",
+          );
+          assert.equal(
+            state.run.status,
+            mode === "deadline" ? "failed" : "cancelled",
+          );
+          assert.equal(state.run.stop.kind, mode);
+          assert.deepEqual(state.run.cleanup.unconfirmed, []);
+          const next = await f.run(
+            select +
+              `return {title:await tab.title(),released:await tab.playwright.evaluate('() => window.released')};`,
+            { base: f.base },
+          );
+          assert.equal(next.result.data.title, "Held native request");
+          assert.deepEqual(next.result.data.released, ["Shift"]);
+        } finally {
+          if (response && !response.destroyed) {
+            response.writeHead(200, { "content-type": "text/plain" });
+            response.end("owned server completion");
+          }
+          if (state) {
+            f.cancel(state.run.runId);
+            const until = performance.now() + 5000;
+            do {
+              state = await f.observe(state.run.runId, 50);
+              if (state.run.endedAt !== null) break;
+              await delay(20);
+            } while (performance.now() < until);
+          }
+        }
+      });
+  },
+);
+
+test(
   "native capability revisions, browser identity, tab metadata and packaged documentation describe the actual peer",
   { timeout: 120000 },
   async (t) => {
