@@ -221,9 +221,11 @@ test("a fixed control script still uses headroom in an ordinary free slot, while
 
 test("quota during input continuation keeps the original wait retryable and does not write an oversized reply", async (t) => {
   const f = await fixture(t, { quotaExtra: 1408 * 1024 });
-  const run = await f.start(
+  const started = await f.start(
     "const r=await runtime.requestInput({message:'Value',inputSchema:{type:'string'}}); return r.input.length;",
+    { waitMs: 0 },
   );
+  const run = await f.engine.observe(caller, started.run.runId, 3000);
   assert.equal(run.run.status, "waiting_input");
   const waitId = run.wait.waitId;
   const rejected = await f.engine.input(caller, {
@@ -231,7 +233,7 @@ test("quota during input continuation keeps the original wait retryable and does
     runId: run.run.runId,
     waitId,
     input: "x".repeat(768 * 1024),
-    waitMs: 100,
+    waitMs: 3000,
   });
   assert.equal(rejected.submission.deliveryState, "failed");
   assert.equal(rejected.run.status, "waiting_input");
@@ -254,7 +256,7 @@ test("quota during input continuation keeps the original wait retryable and does
     runId: run.run.runId,
     waitId,
     input: "ok",
-    waitMs: 100,
+    waitMs: 3000,
   });
   const ended = await f.finish(run.run.runId);
   assert.equal(ended.run.status, "succeeded");

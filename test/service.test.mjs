@@ -76,7 +76,7 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
     if (platform === "linux") {
       assert.match(plan.content, /Restart=on-failure/);
       assert.match(plan.content, /User 空格 & \$\$ %%/);
-      assert.match(plan.content, /WorkingDirectory="\/tmp\/User 空格 & \$ %%/);
+      assert.match(plan.content, /WorkingDirectory=\/tmp\/User 空格 & \$ %%/);
       assert.match(plan.content, /UnsetEnvironment=NODE_OPTIONS NODE_PATH/);
     }
     if (platform === "win32") {

@@ -32,7 +32,7 @@ for (const signal of ["SIGTERM", "SIGINT"])
     interrupted.abort(new Error("Native CI interrupted.")),
   );
 const base = await realpath(process.env.RUNNER_TEMP);
-const home = await mkdtemp(path.join(base, "nexum-native-service-"));
+const home = await mkdtemp(path.join(base, "nexum-native-service 空格 & $ %-"));
 let plan, originalManagerState;
 const run = (file, args, allowFailure = false) => {
   const result = spawnSync(file, args, {

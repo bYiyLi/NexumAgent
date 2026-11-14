@@ -38,6 +38,7 @@ jobs:
             pnpm-lock.yaml
             packages/browser/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: node scripts/build-extension-api.mjs
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - run: pnpm --dir packages/browser check

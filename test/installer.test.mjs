@@ -152,8 +152,32 @@ test(
           !/(?:^app\/(?:docs|state|test|archive)|private\.pem)/.test(f.path),
       ),
     );
-    const opts = optionsFor(first, keys, home),
+    const opts = optionsFor(first, keys, home);
+    let installed;
+    try {
       installed = await installAgent(opts);
+    } catch (error) {
+      if (process.platform === "win32") {
+        // This archive and destination are disposable fixtures, so native tar
+        // diagnostics contain no user configuration or credentials.
+        const probeRoot = path.join(home, "extraction-probe");
+        await mkdir(probeRoot);
+        const result = spawnSync(
+          path.join(process.env.SystemRoot, "System32", "tar.exe"),
+          ["-xzf", first.archive, "-C", probeRoot],
+          { encoding: "utf8" },
+        );
+        t.diagnostic(
+          JSON.stringify({
+            stage: "fixture-extraction-failed",
+            status: result.status,
+            code: result.error?.code,
+            stderr: result.stderr,
+          }),
+        );
+      }
+      throw error;
+    }
     assert.equal(installed.serviceRegistered, false);
     assert.equal(installed.startRequested, false);
     assert.equal(

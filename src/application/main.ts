@@ -1,15 +1,15 @@
-import { appendFileSync } from "node:fs";
-import path from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import vm from "node:vm";
 import { AgentError, isAgentError } from "../contracts/errors.js";
 import { newId } from "../contracts/json.js";
 import type { Profile } from "../contracts/types.js";
-import { privateDirectory } from "../runtime/paths.js";
-import { loadProfileConfig } from "./config.js";
+import { loadProfileConfig, profileRoot } from "./config.js";
 import { reconnectControl } from "./connection.js";
 import { AgentRuntime, type AgentRuntimeOptions } from "./runtime.js";
 import { maintenanceRuntimeOptions } from "./maintenance.js";
 import { WorkGitSchedule } from "./work-git.js";
+import { appendDiagnostic } from "./diagnostics.js";
 
 export interface AgentProgramOptions {
   readonly version: string;
@@ -34,13 +34,12 @@ export async function runAgent(
   const lifetime = new AbortController();
   const signal = lifetime.signal;
   let failure: unknown;
-  let log: string | undefined;
+  let diagnosticRoot: string | undefined;
   const diagnose = (code: string, retry: boolean) => {
     // Never serialize native/plugin errors, request data, configuration or credentials.
-    const entry = { time: new Date().toISOString(), profile, code, retry };
-    if (log) {
+    if (diagnosticRoot) {
       try {
-        appendFileSync(log, JSON.stringify(entry) + "\n", { mode: 0o600 });
+        appendDiagnostic(diagnosticRoot, profile, code, retry);
       } catch {
         process.stderr.write("agent_log_unavailable\n");
       }
@@ -77,12 +76,28 @@ export async function runAgent(
   options.signal?.addEventListener("abort", stop, { once: true });
   try {
     if (options.signal?.aborted) return 0;
+    // An existing profile can retain a fixed launch/configuration error without
+    // parsing credentials or creating a new profile as a side effect.
+    try {
+      const candidate = profileRoot(
+        profile,
+        realpathSync.native(options.home ?? homedir()),
+      );
+      const directory = lstatSync(candidate, { throwIfNoEntry: false });
+      if (
+        directory?.isDirectory() &&
+        realpathSync.native(candidate) === candidate
+      )
+        diagnosticRoot = candidate;
+    } catch {
+      /* A missing home/profile cannot provide a private diagnostic location. */
+    }
     if (typeof vm.SourceTextModule !== "function") {
       diagnose("vm_modules_required", false);
       return 0; // Permanent local launch configuration; a supervisor must not spin.
     }
     const config = loadProfileConfig(profile, options.home);
-    log = path.join(privateDirectory(config.root, "logs"), "agent.log");
+    diagnosticRoot = config.root;
     const bootId = newId("boot");
     const defaults = maintenanceRuntimeOptions(config);
     const configure =

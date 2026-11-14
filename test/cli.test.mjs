@@ -7,6 +7,7 @@ import {
   writeFileSync,
   rmSync,
   realpathSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,10 +24,18 @@ const { version } = JSON.parse(
 );
 
 function invoke(...args) {
-  return spawnSync(process.execPath, [cli, ...args], {
-    encoding: "utf8",
-    timeout: 10_000,
-  });
+  const home = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-cli-command-")),
+  );
+  try {
+    return spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 test("CLI documents explicit profile selection and actual native startup", () => {
@@ -214,13 +223,42 @@ test(
     }
     const opened = await invokeNative("agent.open", { agentId: "cli-agent" });
     assert.equal(opened.pwd, path.join(root, "work"));
-    const run = await invokeNative("agent.run.start", {
+    let run = await invokeNative("agent.run.start", {
       contextId: opened.contextId,
       script: "return {answer: 6 * 7};",
-      waitMs: 1000,
+      waitMs: 0,
     });
+    const terminal = new Set([
+      "succeeded",
+      "failed",
+      "cancelled",
+      "timed_out",
+      "interrupted",
+    ]);
+    const deadline = Date.now() + 15000;
+    while (!terminal.has(run.run.status)) {
+      assert.ok(Date.now() < deadline, "The original CLI Run did not settle.");
+      run = await invokeNative("agent.run.get", {
+        agentId: "cli-agent",
+        runId: run.run.runId,
+        waitMs: 1000,
+      });
+    }
     assert.equal(run.run.status, "succeeded");
     assert.deepEqual(run.result.data, { answer: 42 });
+    // Startup owns the daily Git check; the test never invokes the scheduler or
+    // constructs a separate WorkGitMaintenance instance on the CLI's behalf.
+    const gitState = path.join(root, "state", "work-git.json");
+    await until(() => existsSync(gitState));
+    const saved = JSON.parse(readFileSync(gitState, "utf8"));
+    assert.equal(saved.schemaVersion, 1);
+    const snapshot = saved.result;
+    if (snapshot.status === "committed")
+      assert.match(snapshot.commit, /^[0-9a-f]{40,64}$/);
+    else {
+      assert.equal(snapshot.status, "unavailable", JSON.stringify(snapshot));
+      assert.equal(snapshot.reason, "git_unavailable");
+    }
     child.kill("SIGTERM");
     const exit = await exited.promise;
     assert.deepEqual(exit, { code: 0, signal: null }, stderr);
