@@ -10,6 +10,7 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { SqliteStore } from "../dist/storage/sqlite.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
@@ -794,4 +795,420 @@ test("source script leases cover asynchronous input preparation and execution de
     () => f.registry.lease(f.scripts.resolve("demo/flow.js").origin),
     { code: "extension_unavailable" },
   );
+});
+
+test("SDK byte snapshots preserve native types and exact subview ranges while stripping source metadata", async (t) => {
+  const constructors = [
+    Int8Array,
+    Uint8Array,
+    Uint8ClampedArray,
+    Int16Array,
+    Uint16Array,
+    Int32Array,
+    Uint32Array,
+    Float16Array,
+    Float32Array,
+    Float64Array,
+    BigInt64Array,
+    BigUint64Array,
+  ];
+  const backing = new ArrayBuffer(96);
+  const bytes = new Uint8Array(backing);
+  for (let index = 0; index < bytes.length; index++) bytes[index] = index;
+  const shared = new SharedArrayBuffer(48);
+  new Uint8Array(shared).set(bytes.subarray(0, 48));
+  const originals = [
+    Buffer.from(backing, 16, 24),
+    ...constructors.map((constructor) => new constructor(backing, 16, 2)),
+    new DataView(backing, 17, 11),
+    backing,
+    shared,
+    new Uint16Array(shared, 8, 3),
+    new DataView(shared, 9, 7),
+  ];
+  const expected = originals.map((value) => {
+    const view = ArrayBuffer.isView(value);
+    const data = view
+      ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      : new Uint8Array(value);
+    return {
+      name: value.constructor.name,
+      bytes: [...data],
+      shared: (view ? value.buffer : value) instanceof SharedArrayBuffer,
+    };
+  });
+  let executions = 0,
+    getterCalls = 0;
+  const f = await fixture(t),
+    handle = await f.registry.prepare(source, () => ({
+      methods: {
+        bytes: method((_input, call) => {
+          executions++;
+          for (const value of originals) {
+            Object.defineProperties(value, {
+              hidden: { value: call },
+              constructor: {
+                get() {
+                  getterCalls++;
+                  throw new Error("constructor getter");
+                },
+              },
+              byteOffset: {
+                get() {
+                  getterCalls++;
+                  throw new Error("offset getter");
+                },
+              },
+              byteLength: {
+                get() {
+                  getterCalls++;
+                  throw new Error("length getter");
+                },
+              },
+              buffer: {
+                get() {
+                  getterCalls++;
+                  throw new Error("buffer getter");
+                },
+              },
+              toJSON: {
+                get() {
+                  getterCalls++;
+                  throw new Error("toJSON getter");
+                },
+              },
+              [Symbol.iterator]: {
+                get() {
+                  getterCalls++;
+                  throw new Error("iterator getter");
+                },
+              },
+              [Symbol.toStringTag]: {
+                get() {
+                  getterCalls++;
+                  throw new Error("tag getter");
+                },
+              },
+            });
+          }
+          const error = new Error("with bytes", { cause: originals[0] });
+          return {
+            values: originals,
+            same: originals[0],
+            map: new Map([["bytes", originals[1]]]),
+            set: new Set([originals[2]]),
+            error,
+            intent: call.output.result({
+              content: [call.output.image({ data: originals[0] })],
+              structuredContent: { typed: originals[3] },
+            }),
+          };
+        }),
+      },
+    }));
+  f.registry.publish(handle);
+  const result = await f.start({
+    script: `
+    const result=demo.bytes();
+    function describe(value) {
+      const view=ArrayBuffer.isView(value);
+      const data=view?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):new Uint8Array(value);
+      return {name:value.constructor.name,bytes:Array.from(data),shared:(view?value.buffer:value).constructor.name==="SharedArrayBuffer"};
+    }
+    const descriptions=result.values.map(describe);result.same[0]=255;
+    return {values:descriptions,
+      metadata:result.values.some(value=>Object.hasOwn(value,"hidden")||Object.hasOwn(value,"constructor")||Object.hasOwn(value,Symbol.iterator)),
+      exact:result.values.filter(ArrayBuffer.isView).every(value=>value.byteOffset===0&&value.buffer.byteLength===value.byteLength),
+      aliases:result.same===result.values[0]&&result.error.cause===result.same,
+      map:result.map.get("bytes")===result.values[1],set:[...result.set][0]===result.values[2],
+      image:result.intent.value.content[0].value.data===result.values[0],
+      typed:result.intent.value.structuredContent.typed===result.values[3]};
+  `,
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data.values, expected);
+  assert.equal(result.result.data.metadata, false);
+  for (const key of ["exact", "aliases", "map", "set", "image", "typed"])
+    assert.equal(result.result.data[key], true, key);
+  assert.equal(executions, 1);
+  assert.equal(getterCalls, 0);
+  assert.equal(bytes[16], 16);
+  // The copied SDK result cannot observe writes into the old backing memory.
+  new Uint8Array(backing).fill(0);
+  await f.registry.disable(handle);
+});
+
+test("SDK byte snapshots reject detached and out-of-bounds views instead of returning empty success", async (t) => {
+  const detached = new ArrayBuffer(16),
+    typed = new Uint16Array(detached),
+    data = new DataView(detached);
+  structuredClone(detached, { transfer: [detached] });
+  const resized = new ArrayBuffer(32, { maxByteLength: 64 });
+  const outOfBounds = new Uint32Array(resized, 16, 2);
+  const outOfBoundsData = new DataView(resized, 16, 8);
+  resized.resize(4);
+  const values = [detached, typed, data, outOfBounds, outOfBoundsData];
+  const f = await fixture(t),
+    handle = await f.registry.prepare(source, () => ({
+      methods: {
+        bytes: method(({ index }) => values[index]),
+      },
+    }));
+  f.registry.publish(handle);
+  const result = await f.start({
+    script:
+      'const codes=[];for(let index=0;index<5;index++){try{demo.bytes({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data, Array(5).fill("invalid_sdk_result"));
+  await f.registry.disable(handle);
+});
+
+test("VM-created native views retain their typed semantics through SDK echo", async (t) => {
+  let original;
+  const f = await fixture(t),
+    handle = await f.registry.prepare(source, () => ({
+      methods: {
+        echo: method(
+          (input) => {
+            original = input;
+            return input;
+          },
+          { inputSchema: true },
+        ),
+      },
+    }));
+  f.registry.publish(handle);
+  const result = await f.start({
+    script: `
+    const constructors=[Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,
+      Int32Array,Uint32Array,Float16Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array];
+    const values=constructors.map(Constructor=>new Constructor(new ArrayBuffer(64),16,2));
+    values.push(new DataView(new ArrayBuffer(32),3,7));
+    const copied=demo.echo(values);
+    return {names:copied.map(value=>value.constructor.name),
+      copied:copied.every((value,index)=>value!==values[index]&&value.buffer!==values[index].buffer),
+      exact:copied.every(value=>value.byteOffset===0&&value.buffer.byteLength===value.byteLength)};
+  `,
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data.names, [
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Uint16Array",
+    "Int32Array",
+    "Uint32Array",
+    "Float16Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "DataView",
+  ]);
+  assert.equal(result.result.data.copied, true);
+  assert.equal(result.result.data.exact, true);
+  assert.equal(original.length, 13);
+  await f.registry.disable(handle);
+});
+
+test("byte snapshots sanitize thrown values without weakening private-control rejection", async (t) => {
+  const original = Buffer.from([3, 4, 5]);
+  const f = await fixture(t),
+    handle = await f.registry.prepare(source, () => ({
+      methods: {
+        bytes: method((_input, call) => {
+          Object.defineProperty(original, "hidden", { value: call });
+          throw new Error("bytes", { cause: original });
+        }),
+        private: method((_input, call) => {
+          throw new Error("private", { cause: call });
+        }),
+      },
+    }));
+  f.registry.publish(handle);
+  const result = await f.start({
+    script:
+      'let bytes,hidden,privateCode;try{demo.bytes();}catch(e){bytes=Array.from(e.cause);hidden=Object.hasOwn(e.cause,"hidden");}try{demo.private();}catch(e){privateCode=e.code;}return {bytes,hidden,privateCode};',
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data, {
+    bytes: [3, 4, 5],
+    hidden: false,
+    privateCode: "invalid_sdk_result",
+  });
+  await f.registry.disable(handle);
+});
+
+test("result graph copying preserves Blob/File data and never reuses an internal handle as public data", async (t) => {
+  const f = await fixture(t),
+    handle = await f.registry.prepare(source, () => ({
+      methods: {
+        file: method(
+          () =>
+            new File(["body"], "report.txt", {
+              type: "text/plain",
+              lastModified: 1234,
+            }),
+        ),
+        slice: method(() =>
+          new Blob(["sliced"], { type: "text/plain" }).slice(
+            1,
+            5,
+            "text/plain",
+          ),
+        ),
+        echo: method((input) => input, { inputSchema: true }),
+        leak: method(() => {
+          const blob = new Blob(["body"]);
+          const key = Reflect.ownKeys(blob).find((item) =>
+            String(item).includes("kHandle"),
+          );
+          return { blob, handle: blob[key] };
+        }),
+        many: method(({ kind }) =>
+          kind === "array"
+            ? Array(100001).fill(1)
+            : kind === "map"
+              ? new Map(Array.from({ length: 50001 }, (_, index) => [index, 1]))
+              : new Set(Array.from({ length: 100001 }, (_, index) => index)),
+        ),
+      },
+    }));
+  f.registry.publish(handle);
+  const result = await f.start({
+    script: `
+    const file=demo.file();const body=await file.text();const slice=demo.echo(demo.slice());const sliced=await slice.text();let leak;
+    try{demo.leak();}catch(e){leak=e.code;}
+    const budgets=[];for(const kind of ["array","map","set"]){try{demo.many({kind});}catch(e){budgets.push(e.code);}}
+    return {name:file.name,type:file.type,lastModified:file.lastModified,size:file.size,body,sliced,leak,budgets};
+  `,
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data, {
+    name: "report.txt",
+    type: "text/plain",
+    lastModified: 1234,
+    size: 4,
+    body: "body",
+    sliced: "lice",
+    leak: "invalid_sdk_result",
+    budgets: Array(3).fill("data_too_large"),
+  });
+  await f.registry.disable(handle);
+});
+
+test("Registry Blob snapshots reject forged Symbol slots and native handles without source callbacks", async (t) => {
+  const reference = new Blob(["body"], { type: "text/plain" });
+  const symbols = Object.getOwnPropertySymbols(reference);
+  const handleKey = symbols.find((key) => key.description === "kHandle");
+  const handle = Object.getOwnPropertyDescriptor(reference, handleKey).value;
+  let callbacks = 0;
+  const fakeSymbols = Object.create(Blob.prototype);
+  for (const key of symbols)
+    Object.defineProperty(fakeSymbols, key, {
+      get() {
+        callbacks++;
+        throw new Error("Blob symbol callback");
+      },
+    });
+  const fakeHandle = Object.create(Blob.prototype);
+  for (const key of symbols)
+    Object.defineProperty(fakeHandle, key, {
+      value:
+        key === handleKey
+          ? Object.create(Object.getPrototypeOf(handle))
+          : Object.getOwnPropertyDescriptor(reference, key).value,
+    });
+  const alteredHandle = Object.create(Object.getPrototypeOf(handle));
+  Object.defineProperty(alteredHandle, "slice", {
+    get() {
+      callbacks++;
+      throw new Error("handle callback");
+    },
+  });
+  const hookedHandle = Object.create(Blob.prototype);
+  for (const key of symbols)
+    Object.defineProperty(hookedHandle, key, {
+      value:
+        key === handleKey
+          ? alteredHandle
+          : Object.getOwnPropertyDescriptor(reference, key).value,
+    });
+  const values = [fakeSymbols, fakeHandle, hookedHandle];
+  const f = await fixture(t),
+    registered = await f.registry.prepare(source, () => ({
+      methods: {
+        blob: method(({ index }) => values[index]),
+      },
+    }));
+  f.registry.publish(registered);
+  const result = await f.start({
+    script:
+      'const codes=[];for(let index=0;index<3;index++){try{demo.blob({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
+  });
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(
+    result.result.data,
+    Array(3).fill("invalid_artifact_source"),
+  );
+  assert.equal(callbacks, 0);
+  await f.registry.disable(registered);
+});
+
+test("10 MiB image and 32 MiB audio SDK buffers complete in a heap that cannot hold their numeric property lists", () => {
+  // Isolate the memory bound and native Promise process listeners from the test
+  // runner. This checks the SDK boundary, not media codec validation/encoding.
+  const base = new URL("../dist/", import.meta.url).href;
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--max-old-space-size=96",
+      "--experimental-vm-modules",
+      "--input-type=module",
+      "-e",
+      `
+    import assert from "node:assert/strict";
+    import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
+    import {tmpdir} from "node:os";import path from "node:path";
+    import {SqliteStore} from ${JSON.stringify(base + "storage/sqlite.js")};
+    import {ResourceManager} from ${JSON.stringify(base + "extensions/resources.js")};
+    import {ExtensionRegistry} from ${JSON.stringify(base + "extensions/registry.js")};
+    import {ScriptCatalog} from ${JSON.stringify(base + "runtime/scripts.js")};
+    import {ModuleLoader} from ${JSON.stringify(base + "runtime/modules.js")};
+    import {RunEngine,callerKey} from ${JSON.stringify(base + "runtime/engine.js")};
+    const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),"nexum-large-byte-result-")));
+    const work=path.join(root,"work");mkdirSync(work);writeFileSync(path.join(work,"package.json"),'{"type":"module"}');
+    const store=new SqliteStore(root,{agentId:"agent",profile:"development",cloudEnvironment:"test"});
+    const caller={principalId:"user",clientId:"client",host:"memory-test"};
+    const manager=new ResourceManager(store,{cleanupTimeoutMs:20});
+    const registry=new ExtensionRegistry(manager,{permissions:new Set(),authorize(){},log(){},progress(){}});
+    const scripts=new ScriptCatalog(work,"agent");
+    const loader=await ModuleLoader.create(work,store.bootId,{builtins:()=>[],approvedPackages:()=>new Map()});
+    const context=store.openWork({callerKey:callerKey(caller),pwd:work,snapshotRef:"work/snapshot.json"});
+    let getters=0;const originals=[];
+    try {
+      const handle=await registry.prepare({apiVersion:1,origin:${JSON.stringify(origin)},permissions:[]},()=>({methods:{media:{
+        description:"large native bytes",permissions:[],inputSchema:{},schemaDialect:"draft7",
+        handle(_input,call){
+          const values=[Buffer.alloc(10*1024*1024,37),Buffer.alloc(32*1024*1024,73)];
+          for(const value of values){Object.defineProperties(value,{hidden:{value:call},constructor:{get(){getters++;throw new Error("getter");}}});originals.push(value);}
+          return call.output.result({content:[call.output.image({data:values[0]}),call.output.audio({data:values[1]})]});
+        }
+      }}}));registry.publish(handle);
+      const engine=new RunEngine(store,loader,scripts,{resources:manager,authorize(){},loadWork:()=>({}),
+        bindings:services=>registry.bindings(services),encodeResult:async value=>({content:[],data:value})});
+      const result=await engine.start(caller,{contextId:context.contextId,script:
+        'const result=demo.media();const bytes=result.value.content.map(item=>item.value.data);return {sizes:bytes.map(item=>item.byteLength),range:bytes.every(item=>item.byteOffset===0&&item.buffer.byteLength===item.byteLength),hidden:bytes.some(item=>Object.hasOwn(item,"hidden")||Object.hasOwn(item,"constructor")),first:bytes.map(item=>item[0])};',waitMs:3000});
+      assert.equal(result.run.status,"succeeded");assert.deepEqual(result.result.data,{sizes:[10*1024*1024,32*1024*1024],range:true,hidden:false,first:[37,73]});
+      assert.equal(getters,0);assert.equal((await registry.disable(handle)).status,"disabled");
+      console.log("bounded-byte-snapshots-ok");
+    } finally {store.close();rmSync(root,{recursive:true,force:true});}
+  `,
+    ],
+    { encoding: "utf8", timeout: 15000, maxBuffer: 1024 * 1024 },
+  );
+  assert.equal(child.status, 0, `${child.error ?? ""}\n${child.stderr}`);
+  assert.match(child.stdout, /bounded-byte-snapshots-ok/);
 });

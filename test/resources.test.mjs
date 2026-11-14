@@ -100,6 +100,42 @@ function control(dispose) {
   return { value, closed, stops: () => stops };
 }
 
+test("resource facts follow the registered lifetime without granting ownership or completion authority", async (t) => {
+  const f = fixture(t),
+    r = f.run(),
+    c = control();
+  const ref = await r.resources.register({ kind: "process", value: c.value });
+  ref.report({ pid: 123, outputComplete: false });
+  assert.deepEqual(f.store.getResource(ref.id).diagnostic.details, {
+    pid: 123,
+    outputComplete: false,
+  });
+  await r.resources.handoff(ref.id);
+  r.controller.abort();
+  ref.report({ pid: 123, exitCode: 0, status: "closed", ownerRunId: "fake" });
+  const row = f.store.getResource(ref.id);
+  assert.equal(row.lifetime, "background");
+  assert.equal(row.ownerRunId, null);
+  assert.equal(row.closedAt, null);
+  assert.equal(row.status, "registered");
+  let called = false;
+  const data = Object.defineProperty({}, "bad", {
+    enumerable: true,
+    get() {
+      called = true;
+      return 1;
+    },
+  });
+  assert.throws(() => ref.report(data));
+  assert.equal(called, false);
+  c.closed.resolve();
+  await delay(5);
+  assert.notEqual(f.store.getResource(ref.id).closedAt, null);
+  assert.throws(() => ref.report({ pid: 123 }), {
+    code: "resource_unavailable",
+  });
+});
+
 test("registration fixes identity before start; duplicates keep the original id and require current authority", async (t) => {
   const f = fixture(t),
     r = f.run(),

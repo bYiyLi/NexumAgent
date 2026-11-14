@@ -119,6 +119,26 @@ export function outputIntent(value: unknown): OutputIntent | null {
     : null;
 }
 
+/** Core-only: preserve an issued intent's brand after its data graph is snapshotted. */
+export function rebuildOutputIntent(
+  original: OutputIntent,
+  value: unknown,
+  options: Readonly<OutputOptions>,
+): OutputIntent {
+  requireCondition(
+    outputIntent(original),
+    "invalid_output",
+    "Only an issued output intent can be rebuilt.",
+  );
+  const result: OutputIntent = Object.freeze({
+    kind: original.kind,
+    value,
+    options,
+  });
+  intents.add(result);
+  return result;
+}
+
 function record(
   value: unknown,
   fields: ReadonlySet<string> | null,

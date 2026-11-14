@@ -18,6 +18,8 @@ import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine, callerKey } from "../dist/runtime/engine.js";
 import { canonicalJson, newRequestId } from "../dist/contracts/json.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
+import { AgentError } from "../dist/contracts/errors.js";
+import { safeErrorData } from "../dist/contracts/error-data.js";
 
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
 
@@ -169,6 +171,106 @@ function named(body = "return context.input;", extra = {}) {
     body
   );
 }
+
+test("mutated SDK errors remain bounded terminal failures without executing guest toJSON", async (t) => {
+  let calls = 0;
+  const f = await fixture(t, {
+    bindings: () => ({
+      sdk: {
+        fail() {
+          throw new AgentError("known_sdk_error", "Known SDK failure.", {
+            retained: true,
+          });
+        },
+        touch() {
+          calls++;
+        },
+      },
+    }),
+  });
+  for (const [mutation, expectedDetails] of [
+    ["", { retained: true }],
+    [
+      'e.details={value:"x".repeat(2*1024*1024)};',
+      { omitted: true, reason: "error_details_too_large" },
+    ],
+    [
+      'e.toJSON=()=>{sdk.touch();throw new Error("must-not-call");};',
+      { retained: true },
+    ],
+    [
+      'Object.defineProperty(e,"toJSON",{get(){sdk.touch();throw new Error("must-not-get");}});',
+      { retained: true },
+    ],
+  ]) {
+    const done = await f.start({
+      script: `try{sdk.fail()}catch(e){${mutation}throw e;}`,
+      waitMs: 3000,
+    });
+    assert.equal(done.run.status, "failed");
+    assert.notEqual(done.run.endedAt, null);
+    assert.deepEqual(done.run.error, {
+      code: "known_sdk_error",
+      message: "Known SDK failure.",
+      details: expectedDetails,
+      phase: "execute",
+    });
+    assert(Buffer.byteLength(JSON.stringify(done.run.error)) < 9 * 1024);
+  }
+  assert.equal(calls, 0);
+});
+
+test("safe error data reads only branded own data, bounds messages and omits invalid details", () => {
+  const fallback = { code: "safe_fallback", message: "Safe failure." };
+  let calls = 0;
+  const error = new AgentError("known", "m".repeat(5000), { kept: 1 });
+  const normal = safeErrorData(error, fallback);
+  assert.equal(normal.code, "known");
+  assert.equal(normal.message.length, 1024);
+  assert.match(normal.message, /\[truncated\]$/);
+  error.details.kept = 2;
+  assert.deepEqual(normal.details, { kept: 1 });
+  assert.deepEqual(
+    safeErrorData(new AgentError("c".repeat(257), "Failure."), fallback),
+    { ...fallback, message: "Failure." },
+  );
+  for (const key of ["code", "message", "details", "toJSON"])
+    Object.defineProperty(error, key, {
+      configurable: true,
+      get() {
+        calls++;
+        throw new Error("must-not-read-accessor");
+      },
+    });
+  assert.deepEqual(safeErrorData(error, fallback), {
+    ...fallback,
+    details: { omitted: true, reason: "invalid_error_details" },
+  });
+  const proxy = new Proxy(error, {
+    get() {
+      calls++;
+      throw new Error("must-not-read-proxy");
+    },
+    getPrototypeOf() {
+      calls++;
+      throw new Error("must-not-inspect-proxy");
+    },
+  });
+  assert.deepEqual(safeErrorData(proxy, fallback), fallback);
+  const forged = Object.create(AgentError.prototype, {
+    code: { value: "forged" },
+    message: { value: "must-not-trust" },
+  });
+  assert.deepEqual(safeErrorData(forged, fallback), fallback);
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.deepEqual(
+    safeErrorData(new AgentError("known", "Failure.", cyclic), fallback)
+      .details,
+    { omitted: true, reason: "invalid_error_details" },
+  );
+  assert.equal(calls, 0);
+});
 
 test("accepted native execution saves snapshots/results and keeps observation timeouts independent", async (t) => {
   const { start, finish, engine, store, root } = await fixture(t);
@@ -349,9 +451,16 @@ test("local input timeout is catchable; an abandoned input wait fails rather tha
     script:
       'runtime.requestInput({message:"ignored",inputSchema:{}});return "done";',
   });
-  // An observation may first see the newly exposed wait; query after root settlement.
-  await delay(1);
-  const failed = await finish(abandoned.run.runId);
+  // An observation may first see the newly exposed wait; wait for actual root settlement.
+  let failed = await finish(abandoned.run.runId);
+  for (
+    let attempt = 0;
+    failed.run.status === "waiting_input" && attempt < 100;
+    attempt++
+  ) {
+    await delay(10);
+    failed = await finish(abandoned.run.runId);
+  }
   assert.equal(failed.run.status, "failed");
   assert.equal(failed.run.error.code, "input_not_awaited");
   assert.equal(failed.wait, null);
@@ -605,11 +714,17 @@ test("run completion waits for actual managed closure, persists unconfirmed fact
     waitMs: 0,
   });
   const [id] = await registered;
+  f.controls.get(id).ref.report({ pid: 123, outputComplete: false });
   const closing = await f.engine.observe(caller, started.run.runId, 150);
   assert.equal(closing.run.status, "running");
   assert.equal(closing.run.cleanup.phase, "cleanup");
   assert.equal(closing.run.cleanup.unconfirmed[0].id, id);
   assert.equal(closing.result, null);
+  assert.equal(closing.resources.items[0].resourceId, id);
+  assert.deepEqual(closing.resources.items[0].details, {
+    pid: 123,
+    outputComplete: false,
+  });
   assert.equal(f.controls.get(id).stops, 1);
   const cancelled = f.engine.cancel(caller, started.run.runId);
   assert.equal(cancelled.run.status, "cancelling");

@@ -23,6 +23,7 @@ import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine, callerKey } from "../dist/runtime/engine.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { canonicalJson } from "../dist/contracts/json.js";
+import { AgentError } from "../dist/contracts/errors.js";
 
 const caller = { principalId: "user", clientId: "client" };
 const origin = {
@@ -328,6 +329,57 @@ test("an operation settlement write failure preserves the unknown run and operat
   });
   assert.equal(f.store.getRun(started.run.runId).endedAt, null);
   assert.equal(f.store.operationsForRun(started.run.runId)[0].endedAt, null);
+});
+
+test("mutated error data cannot turn actual SDK settlement into an unknown operation or run", async (t) => {
+  let calls = 0;
+  const f = await fixture(t, (_services, method) => ({
+    fail: method("fail", () => {
+      throw new AgentError("known_sdk_error", "Known SDK failure.", {
+        retained: true,
+      });
+    }),
+    again: method("again", (_id, error) => {
+      throw error;
+    }),
+    touch() {
+      calls++;
+    },
+  }));
+  for (const mutation of [
+    'e.details={value:"x".repeat(2*1024*1024)};',
+    'Object.defineProperty(e,"details",{get(){sdk.touch();throw new Error("must-not-get-details");}});',
+  ]) {
+    const done = await f.start({
+      script: `try{sdk.fail()}catch(e){${mutation}Object.defineProperty(e,"toJSON",{get(){sdk.touch();throw new Error("must-not-get-toJSON");}});sdk.again(e);}`,
+      waitMs: 3000,
+    });
+    assert.equal(done.run.status, "failed");
+    assert.notEqual(done.run.endedAt, null);
+    assert.equal(done.run.error.code, "known_sdk_error");
+    assert.equal(done.run.error.details.omitted, true);
+    const records = f.store.operationsForRun(done.run.runId);
+    assert.equal(records.length, 2);
+    assert(
+      records.every(
+        (record) => record.status === "failed" && record.endedAt !== null,
+      ),
+    );
+    const first = records.find((record) => record.method === "fail");
+    const second = records.find((record) => record.method === "again");
+    assert.deepEqual(first.error, {
+      code: "known_sdk_error",
+      message: "Known SDK failure.",
+      details: { retained: true },
+    });
+    assert.equal(second.error.details.omitted, true);
+    assert(
+      records.every(
+        (record) => Buffer.byteLength(JSON.stringify(record.error)) < 9 * 1024,
+      ),
+    );
+  }
+  assert.equal(calls, 0);
 });
 
 test("caught, ignored, propagated and detached SDK rejections follow native Promise handling in an isolated runtime", () => {

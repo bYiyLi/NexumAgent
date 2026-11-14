@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { SqliteStore } from "../dist/storage/sqlite.js";
+import { schemaVersion, migration1 } from "../dist/storage/schema.js";
 import { newRequestId, digest } from "../dist/contracts/json.js";
 
 const binding = {
@@ -101,15 +102,21 @@ test("initialization creates a bound WAL database; future and mismatched stores 
     db.prepare("SELECT status FROM runs WHERE run_id=?").get(run.runId).status,
     "running",
   );
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 1);
+  assert.equal(
+    db.prepare("PRAGMA user_version").get().user_version,
+    schemaVersion,
+  );
   assert.equal(db.prepare("PRAGMA journal_mode").get().journal_mode, "wal");
-  db.exec("PRAGMA user_version=2");
+  db.exec(`PRAGMA user_version=${schemaVersion + 1}`);
   db.close();
   assert.throws(() => new SqliteStore(root, binding), {
     code: "storage_future_version",
   });
   const check = new DatabaseSync(path.join(root, "state/runtime.sqlite"));
-  assert.equal(check.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(
+    check.prepare("PRAGMA user_version").get().user_version,
+    schemaVersion + 1,
+  );
   assert.equal(check.prepare("SELECT count(*) n FROM runs").get().n, 1);
   check.close();
 });
@@ -564,6 +571,61 @@ test("ordinary SDK operations guard run completion, preserve terminal outcomes a
       () => reopened.finishOperation(pending.operationId, "succeeded"),
       { code: "operation_state_conflict" },
     );
+  } finally {
+    reopened.close();
+  }
+});
+
+test("shared deletion retains a revision tombstone and migration preserves old values", (t) => {
+  const root = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-state-migrate-")),
+  );
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(root, "state"));
+  const filename = path.join(root, "state", "runtime.sqlite");
+  const old = new DatabaseSync(filename);
+  old.exec(migration1);
+  old.exec("PRAGMA user_version=1");
+  old
+    .prepare("INSERT INTO runtime_meta VALUES(1,?,?,?,?)")
+    .run(
+      binding.agentId,
+      binding.profile,
+      binding.cloudEnvironment,
+      "old-boot",
+    );
+  old
+    .prepare("INSERT INTO agent_state VALUES(?,?,?,?)")
+    .run("retained", '{"count":1}', 11, 100);
+  old.close();
+  const store = new SqliteStore(root, binding);
+  try {
+    assert.deepEqual(store.getState("retained"), {
+      value: { count: 1 },
+      version: 11,
+      updatedAt: 100,
+    });
+    const deleted = store.deleteState("retained", 11);
+    assert.equal(deleted.version, 12);
+    assert.equal(store.getState("retained"), null);
+    assert.throws(() => store.deleteState("retained", 11), {
+      code: "state_version_conflict",
+    });
+    const recreated = store.setState("retained", null, null);
+    assert.equal(recreated.version, 13);
+    assert.equal(recreated.value, null);
+    assert.throws(() => store.setState("retained", "stale", 11), {
+      code: "state_version_conflict",
+    });
+    assert.throws(() => store.deleteState("retained", 12), {
+      code: "state_version_conflict",
+    });
+  } finally {
+    store.close();
+  }
+  const reopened = new SqliteStore(root, binding);
+  try {
+    assert.equal(reopened.getState("retained").version, 13);
   } finally {
     reopened.close();
   }

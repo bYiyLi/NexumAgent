@@ -1,5 +1,5 @@
 // Schema version 1. Runtime migrations own the executable DDL.
-export const schemaVersion = 1;
+export const schemaVersion = 2;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -187,4 +187,10 @@ CREATE TABLE close_receipts (
   expires_at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX close_expiry ON close_receipts(expires_at);
+`;
+
+// Retain a key's last revision across deletion so an old reader cannot update
+// a newly-created value using a recycled version.
+export const migration2 = `
+ALTER TABLE agent_state ADD COLUMN deleted_at INTEGER;
 `;

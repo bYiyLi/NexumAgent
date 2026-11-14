@@ -24,7 +24,7 @@ import {
   type WaitRecord,
   type WorkRecord,
 } from "../contracts/types.js";
-import { migration1, schemaVersion } from "./schema.js";
+import { migration1, migration2, schemaVersion } from "./schema.js";
 
 const terminalSql = "'succeeded','failed','cancelled','interrupted'";
 const transitions: Record<RunStatus, readonly RunStatus[]> = {
@@ -149,8 +149,9 @@ export class SqliteStore {
       this.#transaction(() => {
         if (version === 0) {
           this.#db.exec(migration1);
-          this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         }
+        if (version < 2) this.#db.exec(migration2);
+        this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
           .get();
@@ -1163,12 +1164,20 @@ export class SqliteStore {
     });
   }
 
-  resourcesForRun(runId: string): ResourceRecord[] {
+  resourcesForRun(runId: string, limit?: number): ResourceRecord[] {
+    requireCondition(
+      limit === undefined ||
+        (Number.isSafeInteger(limit) && limit > 0 && limit <= 1000),
+      "invalid_limit",
+      "A resource summary needs a bounded limit.",
+    );
     return this.#db
       .prepare(
-        "SELECT * FROM managed_resources WHERE origin_run_id=? ORDER BY created_at,resource_id",
+        limit === undefined
+          ? "SELECT * FROM managed_resources WHERE origin_run_id=? ORDER BY created_at,resource_id"
+          : "SELECT * FROM managed_resources WHERE origin_run_id=? ORDER BY created_at DESC,resource_id DESC LIMIT ?",
       )
-      .all(runId)
+      .all(...(limit === undefined ? [runId] : [runId, limit]))
       .map((row) => decode<ResourceRecord>(row));
   }
 
@@ -1197,7 +1206,7 @@ export class SqliteStore {
     key: string,
   ): { value: JsonValue; version: number; updatedAt: number } | null {
     const row = this.#db
-      .prepare("SELECT * FROM agent_state WHERE key=?")
+      .prepare("SELECT * FROM agent_state WHERE key=? AND deleted_at IS NULL")
       .get(key);
     return row
       ? {
@@ -1221,23 +1230,81 @@ export class SqliteStore {
     );
     const encoded = canonicalJson(value);
     return this.#transaction(() => {
-      const previous = this.getState(key);
+      const previous = this.#db
+        .prepare("SELECT * FROM agent_state WHERE key=?")
+        .get(key);
+      const currentVersion =
+        previous && previous.deleted_at === null
+          ? (previous.version as number)
+          : null;
       requireCondition(
-        (previous?.version ?? null) === expectedVersion,
+        currentVersion === expectedVersion,
         "state_version_conflict",
         "The shared value changed concurrently.",
       );
-      if (previous)
+      requireCondition(
+        !previous || Number(previous.version) < Number.MAX_SAFE_INTEGER,
+        "state_version_exhausted",
+        "The shared key's revision cannot advance safely.",
+      );
+      if (previous) {
+        const changed = this.#db
+          .prepare(
+            "UPDATE agent_state SET value_json=?,version=version+1,updated_at=?,deleted_at=NULL WHERE key=? AND version=?",
+          )
+          .run(encoded, now, key, previous.version as number);
+        requireCondition(
+          changed.changes === 1,
+          "state_version_conflict",
+          "The shared value changed concurrently.",
+        );
+      } else
         this.#db
           .prepare(
-            "UPDATE agent_state SET value_json=?,version=version+1,updated_at=? WHERE key=? AND version=?",
+            "INSERT INTO agent_state(key,value_json,version,updated_at) VALUES(?,?,1,?)",
           )
-          .run(encoded, now, key, expectedVersion);
-      else
-        this.#db
-          .prepare("INSERT INTO agent_state VALUES(?,?,1,?)")
           .run(key, encoded, now);
       return this.getState(key)!;
+    });
+  }
+
+  deleteState(
+    key: string,
+    expectedVersion: number,
+    now = Date.now(),
+  ): { deleted: true; version: number; updatedAt: number } {
+    requireCondition(
+      typeof key === "string" &&
+        key.length > 0 &&
+        key.length <= 256 &&
+        Number.isSafeInteger(expectedVersion) &&
+        expectedVersion > 0,
+      "invalid_state_delete",
+      "Deleting a shared value requires its actual key and positive revision.",
+    );
+    return this.#transaction(() => {
+      const current = this.getState(key);
+      requireCondition(
+        current?.version === expectedVersion,
+        "state_version_conflict",
+        "The shared value changed concurrently.",
+      );
+      requireCondition(
+        expectedVersion < Number.MAX_SAFE_INTEGER,
+        "state_version_exhausted",
+        "The shared key's revision cannot advance safely.",
+      );
+      const changed = this.#db
+        .prepare(
+          "UPDATE agent_state SET value_json='null',version=version+1,updated_at=?,deleted_at=? WHERE key=? AND version=? AND deleted_at IS NULL",
+        )
+        .run(now, now, key, expectedVersion);
+      requireCondition(
+        changed.changes === 1,
+        "state_version_conflict",
+        "The shared value changed concurrently.",
+      );
+      return { deleted: true, version: expectedVersion + 1, updatedAt: now };
     });
   }
 

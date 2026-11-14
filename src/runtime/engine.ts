@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { AgentError, requireCondition } from "../contracts/errors.js";
+import { safeErrorData } from "../contracts/error-data.js";
 import { canonicalJson, digest } from "../contracts/json.js";
 import type {
   JsonObject,
@@ -98,6 +99,7 @@ export interface RunView {
   result: JsonObject | null;
   unavailable?: JsonObject;
   operations: { items: JsonObject[]; complete: boolean };
+  resources: { items: JsonObject[]; complete: boolean };
 }
 interface PendingWait {
   record: WaitRecord;
@@ -126,14 +128,15 @@ interface Scope {
 
 function failure(error: unknown, phase: string): JsonObject {
   // Exceptions never cross the control plane with host stack, cause or configuration.
-  if (error instanceof AgentError) return { ...error.toJSON(), phase };
   return {
-    code:
-      phase === "compile" ? "script_syntax_error" : "script_execution_failed",
-    message:
-      phase === "compile"
-        ? "The JavaScript body could not be compiled."
-        : "The script or its result processing failed; inspect the local run log.",
+    ...safeErrorData(error, {
+      code:
+        phase === "compile" ? "script_syntax_error" : "script_execution_failed",
+      message:
+        phase === "compile"
+          ? "The JavaScript body could not be compiled."
+          : "The script or its result processing failed; inspect the local run log.",
+    }),
     phase,
   };
 }
@@ -1096,10 +1099,33 @@ export class RunEngine extends EventEmitter {
       }
     }
     const operations = this.store.operationsForRun(runId, 65);
+    const resources = this.store.resourcesForRun(runId, 65);
+    let resourceDetailBytes = 0;
     return {
       run,
       wait: this.store.activeWait(runId),
       result,
+      resources: {
+        items: resources.slice(0, 64).map((resource) => {
+          const details = resource.diagnostic.details ?? {};
+          const bytes = Buffer.byteLength(canonicalJson(details, 16384));
+          const included =
+            bytes <= 4096 && resourceDetailBytes + bytes <= 16384;
+          if (included) resourceDetailBytes += bytes;
+          return {
+            resourceId: resource.resourceId,
+            kind: resource.kind,
+            status: resource.status,
+            lifetime: resource.lifetime,
+            createdAt: resource.createdAt,
+            handedOffAt: resource.handedOffAt,
+            closedAt: resource.closedAt,
+            details: included ? details : {},
+            ...(included ? {} : { detailsTruncated: true }),
+          };
+        }),
+        complete: resources.length <= 64,
+      },
       operations: {
         items: operations.slice(0, 64).map((operation) => ({
           operationId: operation.operationId,

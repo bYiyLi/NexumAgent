@@ -2,7 +2,11 @@ import path from "node:path";
 import { once } from "node:events";
 import { types } from "node:util";
 import { Blob, File } from "node:buffer";
-import { AgentError, requireCondition } from "../contracts/errors.js";
+import {
+  AgentError,
+  isAgentError,
+  requireCondition,
+} from "../contracts/errors.js";
 import { authorizeCall } from "../contracts/caller.js";
 import {
   canonicalJson,
@@ -19,7 +23,14 @@ import { compileMethodSchema } from "../contracts/validation.js";
 import type { RunServices } from "../runtime/engine.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
-import { createOutput, outputIntent } from "../sdk/output.js";
+import {
+  createOutput,
+  outputIntent,
+  rebuildOutputIntent,
+  type OutputOptions,
+} from "../sdk/output.js";
+import { unavailableState, type StateService } from "./state.js";
+import { snapshotBlob } from "../results/artifacts.js";
 import {
   ResourceManager,
   type ResourceInstance,
@@ -63,6 +74,12 @@ export interface RegistryPolicy {
 export interface RegistryOptions {
   cleanupTimeoutMs?: number;
   permissions: ReadonlySet<string>;
+  state?(binding: {
+    readonly context: Readonly<JsonObject>;
+    readonly signal: AbortSignal;
+    assertCurrent(): void;
+    authorize(target: AccessTarget): void;
+  }): StateService;
   authorize(policy: RegistryPolicy): void;
   log(
     origin: ContributionOrigin,
@@ -127,6 +144,7 @@ const json = <T>(value: T): T => frozen(JSON.parse(canonicalJson(value)) as T);
 // extension getter. It must remain usable without evaluating arbitrary getters.
 const nativeStack = Object.getOwnPropertyDescriptor(new Error(), "stack");
 const blobInternals = new Set(Reflect.ownKeys(new Blob([])));
+const fileInternals = new Set(Reflect.ownKeys(new File([], "snapshot")));
 const dataConstructors = [
   Object,
   Array,
@@ -169,11 +187,82 @@ const dataPrototypes = new Set<object>([
   File.prototype,
   AgentError.prototype,
 ]);
-for (const key of blobInternals) {
-  const value = Reflect.get(new Blob([]), key);
-  if (value && typeof value === "object")
-    dataPrototypes.add(Object.getPrototypeOf(value));
+for (const sample of [new Blob([]), new File([], "snapshot")]) {
+  for (const key of Reflect.ownKeys(sample)) {
+    const value = Reflect.get(sample, key);
+    if (value && typeof value === "object")
+      dataPrototypes.add(Object.getPrototypeOf(value));
+  }
 }
+type ViewConstructor = {
+  new (
+    buffer: ArrayBufferLike,
+    byteOffset?: number,
+    length?: number,
+  ): ArrayBufferView;
+  readonly BYTES_PER_ELEMENT: number;
+};
+const byteViews = new Map<string, ViewConstructor>([
+  ["Int8Array", Int8Array],
+  ["Uint8Array", Uint8Array],
+  ["Uint8ClampedArray", Uint8ClampedArray],
+  ["Int16Array", Int16Array],
+  ["Uint16Array", Uint16Array],
+  ["Int32Array", Int32Array],
+  ["Uint32Array", Uint32Array],
+  ["Float32Array", Float32Array],
+  ["Float64Array", Float64Array],
+  ["BigInt64Array", BigInt64Array],
+  ["BigUint64Array", BigUint64Array],
+]);
+const float16 = Reflect.get(globalThis, "Float16Array");
+if (typeof float16 === "function") {
+  byteViews.set("Float16Array", float16 as ViewConstructor);
+  dataPrototypes.add(float16.prototype);
+  nativeDataConstructors.add(Function.prototype.toString.call(float16));
+}
+const typedPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
+nativeDataConstructors.add(
+  Function.prototype.toString.call(
+    Object.getOwnPropertyDescriptor(typedPrototype, "constructor")!.value,
+  ),
+);
+const intrinsicGet = (prototype: object, key: PropertyKey) =>
+  Object.getOwnPropertyDescriptor(prototype, key)!.get!;
+const typedBuffer = intrinsicGet(typedPrototype, "buffer");
+const typedOffset = intrinsicGet(typedPrototype, "byteOffset");
+const typedLength = intrinsicGet(typedPrototype, "byteLength");
+const typedName = intrinsicGet(typedPrototype, Symbol.toStringTag);
+const typedValues = Uint8Array.prototype.values;
+const typedSet = Uint8Array.prototype.set;
+const viewBuffer = intrinsicGet(DataView.prototype, "buffer");
+const viewOffset = intrinsicGet(DataView.prototype, "byteOffset");
+const viewLength = intrinsicGet(DataView.prototype, "byteLength");
+const bufferLength = intrinsicGet(ArrayBuffer.prototype, "byteLength");
+const sharedLength = intrinsicGet(SharedArrayBuffer.prototype, "byteLength");
+const urlHref = intrinsicGet(URL.prototype, "href");
+const regexpSource = intrinsicGet(RegExp.prototype, "source");
+const regexpFlags = [
+  ["hasIndices", "d"],
+  ["global", "g"],
+  ["ignoreCase", "i"],
+  ["multiline", "m"],
+  ["dotAll", "s"],
+  ["unicode", "u"],
+  ["unicodeSets", "v"],
+  ["sticky", "y"],
+].map(
+  ([name, flag]) => [intrinsicGet(RegExp.prototype, name!), flag!] as const,
+);
+interface ResultSnapshot {
+  copies: Map<object, object>;
+  internalOnly: Set<object>;
+  bytes: number;
+  nodes: number;
+}
+// Match the largest supported inline byte budget; transport/encoder still
+// applies the configured media limits and counts repeated delivery occurrences.
+const snapshotByteLimit = 128 * 1024 * 1024;
 const segment = (value: unknown): value is string =>
   typeof value === "string" &&
   value.length > 0 &&
@@ -401,6 +490,7 @@ export class ExtensionRegistry {
           work: path.join(root, "work"),
           docs: path.join(root, "work", "docs"),
           resources: path.join(root, "work", "resources"),
+          logs: path.join(root, "logs"),
         },
       }),
       config: json(entry.source.config ?? {}),
@@ -732,6 +822,44 @@ export class ExtensionRegistry {
                 }),
             }),
           );
+          const authorize = (target: AccessTarget) => {
+            current();
+            requireCondition(
+              target &&
+                [
+                  "path",
+                  "url",
+                  "resource",
+                  "connection",
+                  "agent-state",
+                  "user-state",
+                ].includes(target.type) &&
+                segment(target.value) &&
+                segment(target.access),
+              "invalid_access_target",
+              "An access check needs a bounded target and action.",
+            );
+            if (target.type === "agent-state" || target.type === "user-state") {
+              const permission = `state.${target.type === "agent-state" ? "agent" : "user"}.${target.access}`;
+              requireCondition(
+                ["read", "write"].includes(target.access) &&
+                  method.permissions.includes(permission),
+                "undeclared_permission",
+                "A method must declare the shared-state capability it uses.",
+              );
+            }
+            this.#authorize({ ...policy, target: json(target) });
+          };
+          const state =
+            this.#options.state?.({
+              context: services.context,
+              signal: services.signal,
+              assertCurrent: current,
+              authorize,
+            }) ?? unavailableState(current);
+          entry.protected.add(state);
+          entry.protected.add(state.agent);
+          entry.protected.add(state.user);
           const call: Invocation = Object.freeze({
             context: services.context,
             operationId,
@@ -739,6 +867,7 @@ export class ExtensionRegistry {
             deadline: services.deadlineAt,
             resources,
             output: createOutput(services.context.pwd as string, current),
+            state,
             log: (value: LogEntry) => {
               current();
               this.#log(entry, value, services.runId, operationId);
@@ -754,25 +883,7 @@ export class ExtensionRegistry {
                 data,
               );
             },
-            authorize: (target: AccessTarget) => {
-              current();
-              requireCondition(
-                target &&
-                  [
-                    "path",
-                    "url",
-                    "resource",
-                    "connection",
-                    "agent-state",
-                    "user-state",
-                  ].includes(target.type) &&
-                  segment(target.value) &&
-                  segment(target.access),
-                "invalid_access_target",
-                "An access check needs a bounded target and action.",
-              );
-              this.#authorize({ ...policy, target: json(target) });
-            },
+            authorize,
             requestInput: (
               request: Parameters<Invocation["requestInput"]>[0],
             ) => {
@@ -786,7 +897,7 @@ export class ExtensionRegistry {
         },
         {
           complete: (value) => {
-            this.#result(entry, value);
+            value = this.#result(entry, value);
             if (method.output) {
               const result = outputIntent(value);
               if (result?.kind === "result") {
@@ -837,8 +948,7 @@ export class ExtensionRegistry {
   }
   #failure(entry: Entry, cause: unknown): unknown {
     try {
-      this.#result(entry, cause);
-      return cause;
+      return this.#result(entry, cause);
     } catch {
       return new AgentError(
         "invalid_sdk_result",
@@ -846,17 +956,91 @@ export class ExtensionRegistry {
       );
     }
   }
+  #bytes(value: object, snapshot: ResultSnapshot, bufferView: boolean): object {
+    try {
+      let backing: ArrayBufferLike,
+        offset = 0,
+        length: number;
+      const dataView = types.isDataView(value);
+      const typed = types.isTypedArray(value);
+      if (typed) {
+        // Validation is O(1). Intrinsic length alone reports zero for detached
+        // or out-of-bounds resizable views, which must not become empty success.
+        Reflect.apply(typedValues, value, []);
+        backing = Reflect.apply(typedBuffer, value, []) as ArrayBufferLike;
+        offset = Reflect.apply(typedOffset, value, []) as number;
+        length = Reflect.apply(typedLength, value, []) as number;
+      } else if (dataView) {
+        backing = Reflect.apply(viewBuffer, value, []) as ArrayBufferLike;
+        offset = Reflect.apply(viewOffset, value, []) as number;
+        length = Reflect.apply(viewLength, value, []) as number;
+      } else {
+        backing = value as ArrayBufferLike;
+        length = Reflect.apply(
+          types.isSharedArrayBuffer(value) ? sharedLength : bufferLength,
+          value,
+          [],
+        ) as number;
+      }
+      requireCondition(
+        Number.isSafeInteger(length) &&
+          length >= 0 &&
+          length <= snapshotByteLimit - snapshot.bytes,
+        "data_too_large",
+        "SDK byte snapshots exceed the supported result budget.",
+      );
+      snapshot.bytes += length;
+      const copy = types.isSharedArrayBuffer(backing)
+        ? new SharedArrayBuffer(length)
+        : new ArrayBuffer(length);
+      // Both views are core-created. No iterator, constructor, species, getter,
+      // or metadata on the source view participates in reading its byte range.
+      Reflect.apply(typedSet, new Uint8Array(copy), [
+        new Uint8Array(backing, offset, length),
+      ]);
+      if (!typed && !dataView) return copy;
+      if (dataView) return new DataView(copy);
+      if (bufferView) return Buffer.from(copy, 0, length);
+      const name = Reflect.apply(typedName, value, []) as string;
+      const constructor = byteViews.get(name);
+      requireCondition(
+        constructor,
+        "invalid_sdk_result",
+        "The native byte view type is unsupported.",
+      );
+      return new constructor(copy, 0, length / constructor.BYTES_PER_ELEMENT);
+    } catch (cause) {
+      if (cause instanceof AgentError) throw cause;
+      throw new AgentError(
+        "invalid_sdk_result",
+        "The native byte source is detached, out of bounds, or unavailable.",
+        undefined,
+        { cause },
+      );
+    }
+  }
   #result(
     entry: Entry,
     value: unknown,
-    seen = new Set<object>(),
+    snapshot: ResultSnapshot = {
+      copies: new Map(),
+      internalOnly: new Set(),
+      bytes: 0,
+      nodes: 0,
+    },
     internal = false,
-  ): void {
+    depth = 0,
+  ): unknown {
+    requireCondition(
+      ++snapshot.nodes <= 100000 && depth <= 64,
+      "data_too_large",
+      "The SDK result exceeds its item or depth budget.",
+    );
     if (
       value === null ||
       (typeof value !== "object" && typeof value !== "function")
     )
-      return;
+      return value;
     requireCondition(
       !entry.protected.has(value) &&
         typeof value !== "function" &&
@@ -864,18 +1048,25 @@ export class ExtensionRegistry {
       "invalid_sdk_result",
       "A method cannot return its host, invocation, handler or raw resource controls.",
     );
-    if (seen.has(value)) return;
-    seen.add(value);
     requireCondition(
-      seen.size <= 100000,
+      internal || !snapshot.internalOnly.has(value),
+      "invalid_sdk_result",
+      "Native implementation handles cannot become public SDK data.",
+    );
+    const existing = snapshot.copies.get(value);
+    if (existing) return existing;
+    requireCondition(
+      snapshot.copies.size < 100000,
       "data_too_large",
-      "The SDK result exceeds its object budget.",
+      "The SDK result exceeds its object or depth budget.",
     );
     let prototype = Object.getPrototypeOf(value),
-      depth = 0;
+      prototypeDepth = 0,
+      bufferView = false,
+      file = false;
     while (prototype) {
       requireCondition(
-        ++depth <= 64 &&
+        ++prototypeDepth <= 64 &&
           !types.isProxy(prototype) &&
           !entry.protected.has(prototype),
         "invalid_sdk_result",
@@ -900,31 +1091,145 @@ export class ExtensionRegistry {
         "invalid_sdk_result",
         "SDK data must retain its ordinary built-in prototype, not a custom control prototype.",
       );
+      if (prototype === Buffer.prototype) bufferView = true;
+      if (prototype === File.prototype) file = true;
       prototype = Object.getPrototypeOf(prototype);
     }
-    const blob = value instanceof Blob;
-    const error = types.isNativeError(value);
+    if (types.isArrayBufferView(value) || types.isAnyArrayBuffer(value)) {
+      const copy = this.#bytes(value, snapshot, bufferView);
+      snapshot.copies.set(value, copy);
+      return copy;
+    }
+    const intent = outputIntent(value);
+    const array = Array.isArray(value),
+      plain = isPlainRecord(value),
+      map = types.isMap(value),
+      set = types.isSet(value);
+    const date = types.isDate(value),
+      regexp = types.isRegExp(value),
+      error = types.isNativeError(value);
+    const blob = value instanceof Blob,
+      url = value instanceof URL;
     requireCondition(
       internal ||
-        Array.isArray(value) ||
-        isPlainRecord(value) ||
-        outputIntent(value) ||
-        types.isArrayBufferView(value) ||
-        types.isAnyArrayBuffer(value) ||
-        types.isMap(value) ||
-        types.isSet(value) ||
-        types.isDate(value) ||
-        types.isRegExp(value) ||
+        array ||
+        plain ||
+        intent ||
+        map ||
+        set ||
+        date ||
+        regexp ||
         error ||
-        value instanceof URL ||
+        url ||
         blob,
       "invalid_sdk_result",
       "An SDK result contains an unsupported class or control object.",
     );
-    // Check non-enumerable values too: scripts receive this value before MCP
-    // encoding and could otherwise read e.g. Error.cause or a hidden controller.
-    for (const key of Reflect.ownKeys(value)) {
+    const remaining = 100000 - snapshot.nodes;
+    if (array)
+      requireCondition(
+        Object.getOwnPropertyDescriptor(value, "length")!.value <= remaining,
+        "data_too_large",
+        "The SDK array exceeds its remaining item budget.",
+      );
+    if (map)
+      requireCondition(
+        Reflect.apply(intrinsicGet(Map.prototype, "size"), value, []) * 2 <=
+          remaining,
+        "data_too_large",
+        "The SDK map exceeds its remaining item budget.",
+      );
+    if (set)
+      requireCondition(
+        Reflect.apply(intrinsicGet(Set.prototype, "size"), value, []) <=
+          remaining,
+        "data_too_large",
+        "The SDK set exceeds its remaining item budget.",
+      );
+    if (intent) {
+      // Intents are issued and frozen by core. Rebuild only through that module
+      // so copied payloads retain their brand without accepting forged shapes.
+      const copy = rebuildOutputIntent(
+        intent,
+        this.#result(entry, intent.value, snapshot, false, depth + 1),
+        this.#result(
+          entry,
+          intent.options,
+          snapshot,
+          false,
+          depth + 1,
+        ) as Readonly<OutputOptions>,
+      );
+      snapshot.copies.set(value, copy);
+      return copy;
+    }
+    let copy: object;
+    if (array) copy = [];
+    else if (plain)
+      copy = Object.create(
+        Object.getPrototypeOf(value) === null ? null : Object.prototype,
+      ) as object;
+    else if (map) copy = new Map();
+    else if (set) copy = new Set();
+    else if (date)
+      copy = new Date(
+        Reflect.apply(Date.prototype.getTime, value, []) as number,
+      );
+    else if (regexp)
+      copy = new RegExp(
+        Reflect.apply(regexpSource, value, []) as string,
+        regexpFlags
+          .filter(([getter]) => Reflect.apply(getter, value, []))
+          .map(([, flag]) => flag)
+          .join(""),
+      );
+    else if (error) {
+      copy = isAgentError(value)
+        ? new AgentError("sdk_operation_failed", "The SDK operation failed.")
+        : new Error();
+      Object.setPrototypeOf(copy, Object.getPrototypeOf(value));
+    } else if (url) copy = new URL(Reflect.apply(urlHref, value, []) as string);
+    else if (blob) {
+      // Node's public Blob/File intrinsics read forgeable Symbol fields. Only
+      // the shared descriptor/receiver-checked helper may reach those internals.
+      const fixed = snapshotBlob(value, snapshotByteLimit - snapshot.bytes);
+      requireCondition(
+        fixed,
+        "invalid_sdk_result",
+        "The Blob result has no valid native source.",
+      );
+      snapshot.bytes += fixed.size;
+      copy = file
+        ? new File([fixed.blob], fixed.name!, {
+            type: fixed.mimeType,
+            lastModified: fixed.lastModified,
+          })
+        : fixed.blob;
+    } else {
+      // Keep this internal-only cache distinct from a publishable data copy.
+      // A later ordinary field must not return the original Blob handle merely
+      // because an earlier Blob validated the same implementation object.
+      copy = value;
+      snapshot.internalOnly.add(value);
+    }
+    snapshot.copies.set(value, copy);
+    const keys = Reflect.ownKeys(value);
+    requireCondition(
+      keys.length <= 100000 - snapshot.nodes,
+      "data_too_large",
+      "The SDK object exceeds its remaining property budget.",
+    );
+    for (const key of keys) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+      // Node's createBlob/slice adds this own intrinsic constructor. It is
+      // implementation metadata, not user-provided behavior or public data.
+      if (
+        blob &&
+        key === "constructor" &&
+        "value" in descriptor &&
+        descriptor.value === Blob
+      )
+        continue;
       if (
         error &&
         key === "stack" &&
@@ -933,23 +1238,40 @@ export class ExtensionRegistry {
         !descriptor.enumerable
       )
         continue;
-      const nativeBlobField = blob && blobInternals.has(key);
+      const nativeBlobField =
+        blob && (file ? fileInternals : blobInternals).has(key);
       requireCondition(
         (typeof key === "string" || nativeBlobField) && "value" in descriptor,
         "invalid_sdk_result",
         "SDK result data cannot hide controls behind accessors or Symbol keys.",
       );
-      this.#result(entry, descriptor.value, seen, nativeBlobField);
-    }
-    if (types.isMap(value))
-      Map.prototype.forEach.call(value, (item: unknown, key: unknown) => {
-        this.#result(entry, key, seen);
-        this.#result(entry, item, seen);
-      });
-    else if (types.isSet(value))
-      Set.prototype.forEach.call(value, (item: unknown) =>
-        this.#result(entry, item, seen),
+      if (nativeBlobField) continue;
+      const child = this.#result(
+        entry,
+        descriptor.value,
+        snapshot,
+        internal,
+        depth + 1,
       );
+      if (copy !== value)
+        Object.defineProperty(copy, key, { ...descriptor, value: child });
+    }
+    if (map)
+      Map.prototype.forEach.call(value, (item: unknown, key: unknown) => {
+        Map.prototype.set.call(
+          copy,
+          this.#result(entry, key, snapshot, false, depth + 1),
+          this.#result(entry, item, snapshot, false, depth + 1),
+        );
+      });
+    else if (set)
+      Set.prototype.forEach.call(value, (item: unknown) => {
+        Set.prototype.add.call(
+          copy,
+          this.#result(entry, item, snapshot, false, depth + 1),
+        );
+      });
+    return copy;
   }
   #log(
     entry: Entry,

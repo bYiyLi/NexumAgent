@@ -1,5 +1,6 @@
 import { types } from "node:util";
 import { AgentError } from "../contracts/errors.js";
+import { safeErrorData } from "../contracts/error-data.js";
 import type { ContributionOrigin, JsonObject } from "../contracts/types.js";
 import { SqliteStore } from "../storage/sqlite.js";
 import { NativePromiseAudit } from "./promises.js";
@@ -130,13 +131,11 @@ export class RunOperations {
       const error: JsonObject | undefined =
         status === "succeeded"
           ? undefined
-          : cause instanceof AgentError
-            ? cause.toJSON()
-            : {
-                code: "sdk_operation_failed",
-                message:
-                  "The SDK operation failed; its source and run are retained locally.",
-              };
+          : safeErrorData(cause, {
+              code: "sdk_operation_failed",
+              message:
+                "The SDK operation failed; its source and run are retained locally.",
+            });
       this.store.finishOperation(id, status, error);
       this.changed();
     } catch (error) {

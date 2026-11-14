@@ -20,6 +20,8 @@ export interface ResourceRef<T extends ManagedResource = ManagedResource> {
   readonly kind: string;
   readonly signal: AbortSignal;
   readonly value: T;
+  /** Publish bounded resource facts for its actual lifetime; does not change ownership or closure. */
+  report(details: JsonObject): void;
 }
 export interface ResourceService {
   register<T extends ManagedResource>(input: {
@@ -253,11 +255,43 @@ export class ResourceManager extends EventEmitter {
         const controller = new AbortController();
         const confirmation = Promise.withResolvers<void>();
         void confirmation.promise.catch(() => {});
-        const ref = Object.freeze({
+        const ref: ResourceRef<T> = Object.freeze({
           id: row.resourceId,
           kind,
           signal: controller.signal,
           value,
+          report: (details: JsonObject) => {
+            const data = JSON.parse(
+              canonicalJson(details, 16384),
+            ) as JsonObject;
+            requireCondition(
+              data && typeof data === "object" && !Array.isArray(data),
+              "invalid_resource_report",
+              "Resource facts must be a bounded data object.",
+            );
+            const current = this.#record(owner, row.resourceId);
+            requireCondition(
+              this.#owners.has(owner) &&
+                this.#entries.get(row.resourceId)?.ref === ref &&
+                current.closedAt === null,
+              "resource_unavailable",
+              "The original live resource cannot publish new facts.",
+            );
+            try {
+              this.store.resourceDiagnostic(row.resourceId, current.status, {
+                ...current.diagnostic,
+                details: data,
+              });
+              this.emit("change", row.resourceId);
+            } catch (cause) {
+              const entry = this.#entries.get(row.resourceId);
+              if (entry) this.#persistenceFailure(entry, cause);
+              throw new AgentError(
+                "resource_persistence_failed",
+                "The resource facts could not be saved; actual work may still be active.",
+              );
+            }
+          },
         });
         // Observe closed before returning identity to the extension. No start is allowed before this point.
         const entry = {

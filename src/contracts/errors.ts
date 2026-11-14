@@ -1,5 +1,7 @@
 import type { JsonObject } from "./types.js";
 
+const agentErrors = new WeakSet<object>();
+
 export class AgentError extends Error {
   constructor(
     readonly code: string,
@@ -9,6 +11,7 @@ export class AgentError extends Error {
   ) {
     super(message, options);
     this.name = "AgentError";
+    agentErrors.add(this);
   }
 
   toJSON(): JsonObject {
@@ -18,6 +21,11 @@ export class AgentError extends Error {
       ...(this.details ? { details: this.details } : {}),
     };
   }
+}
+
+/** A private construction brand, independent of guest prototypes and Proxy hooks. */
+export function isAgentError(value: unknown): value is AgentError {
+  return typeof value === "object" && value !== null && agentErrors.has(value);
 }
 
 export function requireCondition(

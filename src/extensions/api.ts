@@ -3,6 +3,7 @@ import type { SchemaDialect } from "../contracts/validation.js";
 import type { InputRequest } from "../runtime/engine.js";
 import type { OutputAPI } from "../sdk/output.js";
 import type { ResourceService } from "./resources.js";
+import type { StateService } from "./state.js";
 
 export interface AccessTarget {
   type:
@@ -29,6 +30,7 @@ export interface Invocation {
   readonly deadline: number;
   readonly resources: ResourceService;
   readonly output: OutputAPI;
+  readonly state: StateService;
   log(entry: LogEntry): void;
   progress(value: JsonObject): void;
   authorize(target: AccessTarget): void;
