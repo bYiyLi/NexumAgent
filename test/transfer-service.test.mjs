@@ -12,6 +12,7 @@ import {
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
@@ -192,6 +193,10 @@ async function fixture(t, options = {}) {
     ...(options.activeTimeoutMs
       ? { activeTimeoutMs: options.activeTimeoutMs }
       : {}),
+    ...(options.reservationTimeoutMs
+      ? { reservationTimeoutMs: options.reservationTimeoutMs }
+      : {}),
+    ...(options.now ? { now: options.now } : {}),
   });
   service.on("fault", (event) => faults.push(event));
   const run = (identity = caller) => {
@@ -447,6 +452,113 @@ test("active timeout aborts real input and releases its permit only after I/O cl
   assert.equal(done.error.code, "transfer_timeout");
   assert.equal(done.file, undefined);
   assert.equal(f.streams.active, 0);
+});
+
+test("a wall-clock rollback cannot extend pending expiry or admit a late claim before timers resume", async (t) => {
+  let wall = Date.now();
+  const f = await fixture(t, { now: () => wall, claimTimeoutMs: 120 }),
+    owner = f.run();
+  const offer = await owner.api.createUpload({ path: "rollback-pending.bin" });
+  wall -= 60 * 60_000;
+  // Real dense synchronous checks also exercise fractional elapsed time: no
+  // timer can run during this turn, so admission itself must detect expiry.
+  const end = performance.now() + 160;
+  while (performance.now() < end) {
+    try {
+      const reservation = f.service.reserveClaim(
+        offer.transferId,
+        f.freshClaim(),
+      );
+      f.service.releaseReservation(reservation);
+    } catch (cause) {
+      assert.equal(cause.code, "transfer_not_claimable");
+    }
+  }
+  assert.throws(
+    () => f.service.reserveClaim(offer.transferId, f.freshClaim()),
+    { code: "transfer_not_claimable" },
+  );
+  assert.equal(f.streams.active, 0);
+  assert.equal(f.channels.get(offer.transferId).used, false);
+  const done = await until(async () => {
+    const value = await owner.api.get(offer.transferId);
+    return value.status === "expired" && value;
+  });
+  assert.equal(done.expiresAt, offer.expiresAt);
+  assert.equal(done.startedAt, null);
+  assert.equal(Date.parse(done.finishedAt) >= Date.parse(done.expiresAt), true);
+  assert.equal(wall < Date.parse(done.expiresAt), true);
+  assert.deepEqual(f.faults, []);
+});
+
+test("an unstarted claim reservation releases its real permit after rollback without consuming the URL", async (t) => {
+  let wall = Date.now();
+  const f = await fixture(t, {
+      now: () => wall,
+      claimTimeoutMs: 2000,
+      reservationTimeoutMs: 60,
+    }),
+    owner = f.run();
+  const offer = await owner.api.createUpload({
+    path: "rollback-reservation.bin",
+  });
+  const reservation = f.service.reserveClaim(offer.transferId, f.freshClaim());
+  assert.equal(f.streams.active, 1);
+  wall -= 60 * 60_000;
+  await until(() => f.streams.active === 0);
+  assert.equal((await owner.api.get(offer.transferId)).status, "pending");
+  assert.equal(f.channels.get(offer.transferId).used, false);
+  await assert.rejects(f.service.commitClaim(reservation, {}), {
+    code: "invalid_transfer_reservation",
+  });
+  const next = f.service.reserveClaim(offer.transferId, f.freshClaim());
+  f.service.releaseReservation(next);
+  assert.equal(f.streams.active, 0);
+  assert.deepEqual(f.faults, []);
+});
+
+test("a real active upload expires by elapsed time after an observed forward jump and rollback", async (t) => {
+  const initial = Date.now();
+  let wall = initial;
+  const f = await fixture(t, {
+      now: () => wall,
+      claimTimeoutMs: 2000,
+      activeTimeoutMs: 80,
+    }),
+    owner = f.run();
+  wall += 60_000;
+  const offer = await owner.api.createUpload({ path: "rollback-active.bin" });
+  assert.equal(Date.parse(offer.createdAt) >= initial + 60_000, true);
+  wall = initial - 60 * 60_000;
+  const request = http.request(offer.request.url, { method: "PUT" });
+  request.on("error", () => {});
+  request.write("partial");
+  const active = await until(async () => {
+    const value = await owner.api.get(offer.transferId);
+    return value.status === "transferring" && value;
+  });
+  assert.equal(
+    Date.parse(active.startedAt) >= Date.parse(offer.createdAt),
+    true,
+  );
+  assert.equal(
+    Date.parse(active.deadlineAt) - Date.parse(active.startedAt),
+    80,
+  );
+  const done = await until(async () => {
+    const value = await owner.api.get(offer.transferId);
+    return value.status === "failed" && value;
+  });
+  assert.equal(done.error.code, "transfer_timeout");
+  assert.equal(done.deadlineAt, active.deadlineAt);
+  assert.equal(
+    Date.parse(done.finishedAt) >= Date.parse(done.deadlineAt),
+    true,
+  );
+  assert.equal(wall < Date.parse(done.deadlineAt), true);
+  assert.equal(done.file, undefined);
+  assert.equal(f.streams.active, 0);
+  assert.deepEqual(f.faults, []);
 });
 
 test("fresh caller/Grant/boot and target authority are required before taking any claim slot", async (t) => {

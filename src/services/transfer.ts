@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { MIMEType } from "node:util";
@@ -150,7 +151,7 @@ interface Reservation {
   readonly entry: Entry;
   readonly scope: TransferClaimScope;
   readonly permit: StreamPermit;
-  readonly timer: NodeJS.Timeout;
+  timer: NodeJS.Timeout;
   consumed: boolean;
   released: boolean;
 }
@@ -295,7 +296,19 @@ export class TransferServices extends EventEmitter {
         "invalid_transfer_options",
         "Transfer budgets and deadlines must be bounded trusted Agent configuration.",
       );
-    this.#now = options.now ?? Date.now;
+    const wallNow = options.now ?? Date.now;
+    let monotonicAt = performance.now();
+    let logicalAt = wallNow();
+    this.#now = () => {
+      const monotonicNow = performance.now();
+      // Like RunEngine, elapsed monotonic time is a lower bound when the
+      // wall clock moves backwards. Retain fractions internally so frequent
+      // progress/checks cannot discard elapsed time, and retain observed
+      // forward jumps when the wall clock subsequently returns.
+      logicalAt = Math.max(wallNow(), logicalAt + monotonicNow - monotonicAt);
+      monotonicAt = monotonicNow;
+      return Math.floor(logicalAt);
+    };
     this.streams = options.streams ?? new TransferStreamSlots();
     this.#instance = resources.instance(this.#origin, {
       signal: this.#instanceController.signal,
@@ -507,13 +520,17 @@ export class TransferServices extends EventEmitter {
       },
     };
   }
-  #timer(callback: () => void, at: number): NodeJS.Timeout {
+  #timer(
+    callback: () => void,
+    at: number,
+    replace: (timer: NodeJS.Timeout) => void,
+  ): NodeJS.Timeout {
     const timer = setTimeout(
       () => {
-        // Date.now can move backwards. Never commit a deadline stop before the
-        // authority's stored timestamp; retain a cancellable native timer.
+        // A native timer can wake slightly early. Wait only the remaining
+        // duration and keep the owner's clearTimeout handle current.
         if (this.#now() < at) {
-          timer.refresh();
+          replace(this.#timer(callback, at, replace));
           return;
         }
         callback();
@@ -797,6 +814,9 @@ export class TransferServices extends EventEmitter {
       () =>
         this.#requestStop(entry, { kind: "expired", code: "transfer_expired" }),
       claimDeadlineAt,
+      (timer) => {
+        entry.claimTimer = timer;
+      },
     );
     this.#changed(entry);
   }
@@ -1217,6 +1237,9 @@ export class TransferServices extends EventEmitter {
           entry.record.claimDeadlineAt!,
           this.#now() + this.#reservationMs,
         ),
+        (timer) => {
+          reservation.timer = timer;
+        },
       ),
     });
     this.#reservations.set(identity, reservation);
@@ -1272,6 +1295,9 @@ export class TransferServices extends EventEmitter {
       () =>
         this.#requestStop(entry, { kind: "timeout", code: "transfer_timeout" }),
       entry.record.transferDeadlineAt!,
+      (timer) => {
+        entry.activeTimer = timer;
+      },
     );
     const signal = AbortSignal.any([
       scope.signal,

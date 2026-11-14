@@ -466,6 +466,30 @@ test("a log finish failure releases a physically closed process only after actua
 test("a failed output append never publishes a false complete history after the process physically closes", async (t) => {
   const f = await fixture(t),
     append = ProcessOutputLog.prototype.append;
+  const module = await import(
+    new URL(
+      `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pipes"}.js`,
+      import.meta.url,
+    ).href
+  );
+  const Backend =
+    process.platform === "win32"
+      ? module.WindowsProcessBackend
+      : module.PipeProcessBackend;
+  const facts = Backend.prototype.facts;
+  let observedBackend,
+    sawKnownIncomplete = false;
+  Backend.prototype.facts = function () {
+    observedBackend = this;
+    const actual = facts.call(this);
+    if (actual.closed && this.failure !== undefined) {
+      // Windows correctly retains incomplete output after a consumer rejection.
+      // Exercise that same contract on every platform while using real OS I/O.
+      sawKnownIncomplete = true;
+      return { ...actual, outputComplete: false };
+    }
+    return actual;
+  };
   ProcessOutputLog.prototype.append = async function () {
     throw new AgentError("output_write_failed", "injected append failure");
   };
@@ -484,12 +508,70 @@ test("a failed output append never publishes a false complete history after the 
     );
     assert.equal(result.run.status, "failed");
     row = f.store.resourcesForRun(result.run.runId)[0];
+    assert.ok(sawKnownIncomplete);
+    await observedBackend.closed;
+    assert.equal(facts.call(observedBackend).closed, true);
+    assert.equal(facts.call(observedBackend).treeStopped, true);
     assert.notEqual(row.closedAt, null);
     assert.equal(row.diagnostic.details.outputComplete, false);
+    assert.equal(row.diagnostic.details.failure.code, "output_write_failed");
   } finally {
     ProcessOutputLog.prototype.append = append;
+    Backend.prototype.facts = facts;
   }
   assert.equal(data(await f.get(row.resourceId)).outputComplete, false);
+});
+
+test("unknown incomplete backend output remains unconfirmed despite native closure until an explicit retry has complete evidence", async (t) => {
+  const f = await fixture(t);
+  const module = await import(
+    new URL(
+      `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pipes"}.js`,
+      import.meta.url,
+    ).href
+  );
+  const Backend =
+    process.platform === "win32"
+      ? module.WindowsProcessBackend
+      : module.PipeProcessBackend;
+  const facts = Backend.prototype.facts;
+  let observedBackend, row, accepted;
+  Backend.prototype.facts = function () {
+    observedBackend = this;
+    const actual = facts.call(this);
+    return actual.closed ? { ...actual, outputComplete: false } : actual;
+  };
+  try {
+    accepted = await f.start("return await sh.exec(context.input);", {
+      input: command(
+        'process.stdin.resume();process.stdin.on("end",()=>process.stdout.write("retained"));',
+      ),
+      waitMs: 0,
+    });
+    row = await until(
+      () => f.store.resourcesForRun(accepted.run.runId)[0],
+      (value) =>
+        value?.diagnostic.details?.failure?.code ===
+        "process_cleanup_unconfirmed",
+    );
+    await observedBackend.closed;
+    assert.equal(facts.call(observedBackend).closed, true);
+    assert.equal(facts.call(observedBackend).treeStopped, true);
+    assert.equal(observedBackend.failure, undefined);
+    assert.equal(row.closedAt, null);
+    assert.equal(f.store.getRun(accepted.run.runId).endedAt, null);
+  } finally {
+    Backend.prototype.facts = facts;
+  }
+  const retry = data(
+    await f.start(
+      "return await sh.stop({processId:context.input,graceMs:20,forceMs:1000});",
+      { input: row.resourceId },
+    ),
+  );
+  assert.equal(retry.confirmed, true);
+  assert.notEqual(f.store.getResource(row.resourceId).closedAt, null);
+  assert.equal((await f.finish(accepted.run.runId)).run.status, "failed");
 });
 
 test("unconfirmed log handle close keeps the original resource pending and explicit retry can confirm it", async (t) => {
@@ -672,11 +754,12 @@ test("default empty EOF accepts confirmed input closure while explicit input and
       ? module.WindowsProcessBackend
       : module.PipeProcessBackend;
   const write = Backend.prototype.write,
+    stop = Backend.prototype.stop,
     start = ManagedProcess.prototype.start;
+  const unknownFailures = [];
   let mode = "closed",
     calls = 0,
-    observed,
-    originalFailure;
+    observed;
   ManagedProcess.prototype.start = async function (...args) {
     observed = this;
     return await start.apply(this, args);
@@ -696,13 +779,14 @@ test("default empty EOF accepts confirmed input closure while explicit input and
       Object.defineProperty(native, Symbol("host-private"), {
         value: { callback() {} },
       });
-      originalFailure = new AgentError(
+      const failure = new AgentError(
         "process_input_failed",
         "The native input failed.",
         undefined,
         { cause: native },
       );
-      throw originalFailure;
+      unknownFailures.push(failure);
+      throw failure;
     }
     await write.call(this, bytes, eof, signal);
     throw new AgentError(
@@ -721,6 +805,18 @@ test("default empty EOF accepts confirmed input closure while explicit input and
               ),
       },
     );
+  };
+  Backend.prototype.stop = async function (...args) {
+    if (mode === "unknown") {
+      // Windows graceful stop itself writes EOF. Reproduce that subsequent
+      // cleanup failure on every platform without replacing the business error.
+      await this.write(
+        new Uint8Array(),
+        true,
+        new AbortController().signal,
+      ).catch(() => {});
+    }
+    return await stop.apply(this, args);
   };
   try {
     const input = command(
@@ -744,6 +840,7 @@ test("default empty EOF accepts confirmed input closure while explicit input and
     assert.equal(explicit.code, "process_input_closed");
     assert.match(explicit.processId, /^res_/);
     assert.equal(explicit.cause, false);
+    assert.notEqual(f.store.getResource(explicit.processId).closedAt, null);
     mode = "unknown";
     const failure = data(
       await f.start(
@@ -755,10 +852,20 @@ test("default empty EOF accepts confirmed input closure while explicit input and
     assert.equal(failure.causeCode, "EIO");
     assert.equal(failure.cause, false);
     assert.match(failure.processId, /^res_/);
-    assert.equal(observed.failure, originalFailure);
+    assert.ok(unknownFailures.length >= 2);
+    assert.notEqual(unknownFailures[0], unknownFailures[1]);
+    assert.equal(observed.failure, unknownFailures[0]);
+    const originalCause = Object.getOwnPropertyDescriptor(
+      unknownFailures[0],
+      "cause",
+    ).value;
+    const privateSymbols = Object.getOwnPropertySymbols(originalCause);
+    assert.equal(privateSymbols.length, 1);
+    assert.equal(typeof originalCause[privateSymbols[0]].callback, "function");
     assert.notEqual(f.store.getResource(failure.processId).closedAt, null);
   } finally {
     Backend.prototype.write = write;
+    Backend.prototype.stop = stop;
     ManagedProcess.prototype.start = start;
   }
 });

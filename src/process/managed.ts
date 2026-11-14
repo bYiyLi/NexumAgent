@@ -380,12 +380,17 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
       const facts = this.#backend?.facts() ?? initialFacts;
       if (
         this.#backend &&
-        (!facts.closed || !facts.outputComplete || !facts.treeStopped)
+        (!facts.closed ||
+          !facts.treeStopped ||
+          (!facts.outputComplete && !this.#outputFailed))
       )
         throw new AgentError(
           "process_cleanup_unconfirmed",
           "The process backend has not confirmed actual tree and output closure.",
         );
+      // A known output-consumer failure keeps the outcome incomplete, but must
+      // not retain a physically closed process after its log handle also closes.
+      // Unknown incomplete output still cannot establish resource closure.
       if (this.#preparationUnconfirmed) {
         await this.#log?.close();
         throw new AgentError(

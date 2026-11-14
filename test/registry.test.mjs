@@ -1030,10 +1030,13 @@ test("byte snapshots sanitize thrown values without weakening private-control re
       },
     }));
   f.registry.publish(handle);
-  const result = await f.start({
+  const accepted = await f.start({
     script:
       'let bytes,hidden,privateCode;try{demo.bytes();}catch(e){bytes=Array.from(e.cause);hidden=Object.hasOwn(e.cause,"hidden");}try{demo.private();}catch(e){privateCode=e.code;}return {bytes,hidden,privateCode};',
+    waitMs: 0,
   });
+  // The submission snapshot may still be preparing under CI load; wait for the real outcome.
+  const result = await f.engine.observe(caller, accepted.run.runId, 30000);
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data, {
     bytes: [3, 4, 5],
