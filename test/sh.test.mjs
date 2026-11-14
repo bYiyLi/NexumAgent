@@ -118,13 +118,19 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
             },
     },
   );
-  const start = (script, more = {}) =>
-    engine.start(caller, {
+  const start = (script, more = {}) => {
+    const pending = engine.start(caller, {
       contextId: context.contextId,
       script,
       waitMs: 3000,
       ...more,
     });
+    // Tests using an explicit observation window retain that partial view.
+    // Ordinary result checks join the accepted Run, including native cleanup.
+    return more.waitMs === undefined
+      ? observeSameRun({ engine }, pending)
+      : pending;
+  };
   t.after(async () => {
     const runs = store.listRuns({}, "cleanup", 100).runs;
     for (const run of runs)
@@ -182,9 +188,12 @@ function data(result) {
 async function observeSameRun(f, pending) {
   const initial = await pending;
   let result = initial;
-  const deadline = Date.now() + 30000;
+  const deadline = performance.now() + 30000;
   while (result.run.endedAt === null) {
-    assert.ok(Date.now() < deadline, "The same accepted Run did not finish.");
+    assert.ok(
+      performance.now() < deadline,
+      "The same accepted Run did not finish.",
+    );
     result = await f.engine.observe(caller, initial.run.runId, 1000);
     assert.equal(result.run.runId, initial.run.runId);
   }
