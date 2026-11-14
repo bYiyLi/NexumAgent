@@ -20,6 +20,7 @@ import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
+import { observeRunTerminal } from "./helpers/run-observation.mjs";
 
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
 const origin = {
@@ -202,7 +203,11 @@ test("concurrent prepare initializes once, keeps host scope private and publishe
   assert.throws(() => f.registry.publish(handle), { code: "forbidden" });
   f.grant();
   f.registry.publish(handle);
-  const result = await f.start({ script: "return demo.echo({ value: 4 });" });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({ script: "return demo.echo({ value: 4 });" }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.equal(result.result.data.input.value, 4);
   assert.deepEqual(result.result.data.caller, caller);
@@ -272,7 +277,11 @@ test("normalization, schema and method authority precede handler; metadata is an
   assert.equal(forbidden.result.data, "forbidden");
   assert.equal(calls, 0);
   denied = false;
-  const ok = await f.start({ script: "return demo.add(2);" });
+  const ok = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({ script: "return demo.add(2);" }),
+  );
   assert.equal(ok.run.status, "succeeded");
   assert.equal(ok.result.data.n, 3);
   assert.equal(calls, 1);
@@ -315,10 +324,14 @@ test("native inputs remain native, schemas retain dialect/ref ownership, and nam
   }));
   common.properties.value.type = "string";
   f.registry.publish(handle);
-  const result = await f.start({
-    script:
-      'return [demo.bytes(bytes), demo["search-code"]({value:2}), demo.Search(), demo.search(), demo.group.query()];',
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script:
+        'return [demo.bytes(bytes), demo["search-code"]({value:2}), demo.Search(), demo.search(), demo.group.query()];',
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.equal(got, buffer);
   assert.deepEqual(result.result.data, [
@@ -387,9 +400,13 @@ test("a caught native rejection remains a failed operation without failing the r
     },
   }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script: "try { await demo.fail(); } catch {} return 1;",
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script: "try { await demo.fail(); } catch {} return 1;",
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.equal(f.store.operationsForRun(result.run.runId)[0].status, "failed");
   await f.registry.disable(handle);
@@ -426,10 +443,14 @@ test("output schemas validate business data while media and explicit business er
     },
   }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script:
-      'const kinds=["image","array","content","error","json","structured"];const values=kinds.map(kind=>demo.result({kind}));let invalid,malformed;try{demo.result({kind:"bad"});}catch(e){invalid=e.code;}try{demo.result({kind:"malformed"});}catch(e){malformed=e.code;}return {kinds:values.map(value=>value.kind ?? value[0].type),invalid,malformed};',
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script:
+        'const kinds=["image","array","content","error","json","structured"];const values=kinds.map(kind=>demo.result({kind}));let invalid,malformed;try{demo.result({kind:"bad"});}catch(e){invalid=e.code;}try{demo.result({kind:"malformed"});}catch(e){malformed=e.code;}return {kinds:values.map(value=>value.kind ?? value[0].type),invalid,malformed};',
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data.kinds, [
     "image",
@@ -538,9 +559,13 @@ test("resource registration protects a raw controller before its first asynchron
     },
   }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script: "try{demo.leak();}catch(e){return e.code;}",
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script: "try{demo.leak();}catch(e){return e.code;}",
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.equal(result.result.data, "invalid_sdk_result");
   assert.equal(f.store.resourcesForRun(result.run.runId)[0].status, "closed");
@@ -711,13 +736,21 @@ test("background resource identities block disable and remain usable by new call
     },
   }));
   f.registry.publish(handle);
-  const opened = await f.start({ script: "return demo.open();" });
+  const opened = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({ script: "return demo.open();" }),
+  );
   assert.equal(opened.run.status, "succeeded");
   assert.throws(() => f.registry.disable(handle), { code: "extension_busy" });
-  const closed = await f.start({
-    script: "return demo.close(context.input);",
-    input: opened.result.data,
-  });
+  const closed = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script: "return demo.close(context.input);",
+      input: opened.result.data,
+    }),
+  );
   assert.equal(closed.run.status, "succeeded");
   assert.equal(managed.stops(), 1);
   assert.equal(f.store.getResource(opened.result.data.id).status, "closed");
@@ -909,8 +942,11 @@ test("SDK byte snapshots preserve native types and exact subview ranges while st
       },
     }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script: `
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script: `
     const result=demo.bytes();
     function describe(value) {
       const view=ArrayBuffer.isView(value);
@@ -926,7 +962,8 @@ test("SDK byte snapshots preserve native types and exact subview ranges while st
       image:result.intent.value.content[0].value.data===result.values[0],
       typed:result.intent.value.structuredContent.typed===result.values[3]};
   `,
-  });
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data.values, expected);
   assert.equal(result.result.data.metadata, false);
@@ -957,10 +994,14 @@ test("SDK byte snapshots reject detached and out-of-bounds views instead of retu
       },
     }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script:
-      'const codes=[];for(let index=0;index<5;index++){try{demo.bytes({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script:
+        'const codes=[];for(let index=0;index<5;index++){try{demo.bytes({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data, Array(5).fill("invalid_sdk_result"));
   await f.registry.disable(handle);
@@ -981,8 +1022,11 @@ test("VM-created native views retain their typed semantics through SDK echo", as
       },
     }));
   f.registry.publish(handle);
-  const result = await f.start({
-    script: `
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script: `
     const constructors=[Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,
       Int32Array,Uint32Array,Float16Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array];
     const values=constructors.map(Constructor=>new Constructor(new ArrayBuffer(64),16,2));
@@ -992,7 +1036,8 @@ test("VM-created native views retain their typed semantics through SDK echo", as
       copied:copied.every((value,index)=>value!==values[index]&&value.buffer!==values[index].buffer),
       exact:copied.every(value=>value.byteOffset===0&&value.buffer.byteLength===value.byteLength)};
   `,
-  });
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data.names, [
     "Int8Array",
@@ -1082,14 +1127,16 @@ test("result graph copying preserves Blob/File data and never reuses an internal
       },
     }));
   f.registry.publish(handle);
-  const result = await f.start({
+  const accepted = await f.start({
     script: `
     const file=demo.file();const body=await file.text();const slice=demo.echo(demo.slice());const sliced=await slice.text();let leak;
     try{demo.leak();}catch(e){leak=e.code;}
     const budgets=[];for(const kind of ["array","map","set"]){try{demo.many({kind});}catch(e){budgets.push(e.code);}}
     return {name:file.name,type:file.type,lastModified:file.lastModified,size:file.size,body,sliced,leak,budgets};
   `,
+    waitMs: 0,
   });
+  const result = await observeRunTerminal(f.engine, caller, accepted);
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data, {
     name: "report.txt",
@@ -1149,10 +1196,14 @@ test("Registry Blob snapshots reject forged Symbol slots and native handles with
       },
     }));
   f.registry.publish(registered);
-  const result = await f.start({
-    script:
-      'const codes=[];for(let index=0;index<3;index++){try{demo.blob({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
-  });
+  const result = await observeRunTerminal(
+    f.engine,
+    caller,
+    await f.start({
+      script:
+        'const codes=[];for(let index=0;index<3;index++){try{demo.blob({index});codes.push("escaped");}catch(e){codes.push(e.code);}}return codes;',
+    }),
+  );
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(
     result.result.data,
