@@ -1,7 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
+import { setTimeout as delay } from "node:timers/promises";
 import { createBrowserRouter } from "../browser-extension/router.js";
+
+function event() {
+  const listeners = new Set();
+  return {
+    addListener(listener) {
+      listeners.add(listener);
+    },
+    removeListener(listener) {
+      listeners.delete(listener);
+    },
+    emit(...args) {
+      for (const listener of listeners) listener(...args);
+    },
+  };
+}
 
 function officeZip(names) {
   const central = [],
@@ -42,7 +58,11 @@ function fixture(t, url) {
     responses = new Map(),
     fetches = [],
     nativeCalls = [],
+    commands = [],
+    streams = new Map(),
+    attached = new Set(),
     segments = [];
+  let streamSequence = 0;
   const document = {
     title: "Actual document",
     baseURI: url,
@@ -98,12 +118,72 @@ function fixture(t, url) {
       },
     });
   const chrome = {
+    webNavigation: { onCommitted: event() },
     tabs: {
       async get() {
         return { id: 1, url: location.href, title: document.title };
       },
       async query() {
         return [{ id: 1 }];
+      },
+    },
+    debugger: {
+      onEvent: event(),
+      onDetach: event(),
+      async attach({ tabId }) {
+        attached.add(tabId);
+      },
+      async detach({ tabId }) {
+        attached.delete(tabId);
+      },
+      async getTargets() {
+        return [...attached].map((tabId) => ({ tabId, attached: true }));
+      },
+      async sendCommand(source, method, params) {
+        commands.push({ source, method, params });
+        if (method === "Page.getFrameTree")
+          return {
+            frameTree: {
+              frame: { id: "current-main-frame", url: location.href },
+            },
+          };
+        if (method === "Network.loadNetworkResource") {
+          const response = responses.get(params.url);
+          if (!response)
+            return { resource: { success: false, httpStatusCode: 404 } };
+          if (response.beforeLoad) await response.beforeLoad();
+          const handle = `native-site-stream-${++streamSequence}`;
+          streams.set(handle, { response, offset: 0 });
+          return {
+            resource: {
+              success: response.success ?? true,
+              httpStatusCode: response.status ?? 200,
+              stream: handle,
+              headers: { "Content-Type": response.mimeType },
+            },
+          };
+        }
+        if (method === "IO.read") {
+          const stream = streams.get(params.handle);
+          assert.ok(
+            stream,
+            "Only the original live native response stream is readable.",
+          );
+          if (stream.response.beforeRead) await stream.response.beforeRead();
+          const bytes = Buffer.from(stream.response.data),
+            chunk = bytes.subarray(stream.offset, stream.offset + params.size);
+          stream.offset += chunk.length;
+          return {
+            base64Encoded: true,
+            data: chunk.toString("base64"),
+            eof: stream.offset === bytes.length,
+          };
+        }
+        if (method === "IO.close") {
+          assert.equal(streams.delete(params.handle), true);
+          return {};
+        }
+        return {};
       },
     },
     scripting: {
@@ -137,18 +217,21 @@ function fixture(t, url) {
     operationId: "open",
   });
   t.after(() => router.dispose());
-  const call = (method, args = {}) =>
-    router.dispatch({
-      ...binding,
-      target,
-      leaseId: "lease",
-      runId: "run",
-      actionId: crypto.randomUUID(),
-      operationId: crypto.randomUUID(),
-      method,
-      args: { target, ...args },
-      budgetMs: 1000,
-    });
+  const call = (method, args = {}, signal) =>
+    router.dispatch(
+      {
+        ...binding,
+        target,
+        leaseId: "lease",
+        runId: "run",
+        actionId: crypto.randomUUID(),
+        operationId: crypto.randomUUID(),
+        method,
+        args: { target, ...args },
+        budgetMs: 1000,
+      },
+      signal,
+    );
   return {
     call,
     main,
@@ -159,6 +242,9 @@ function fixture(t, url) {
     responses,
     fetches,
     nativeCalls,
+    commands,
+    streams,
+    chrome,
     target,
   };
 }
@@ -187,8 +273,18 @@ test("Google Workspace plans are network-free and format/source-bound; only actu
   assert.equal(new TextDecoder().decode(file.data), "one,two\n1,2\n");
   assert.equal(file.mimeType, "text/csv");
   assert.ok(file.name.endsWith(".csv"));
-  assert.equal(f.fetches[0].options.credentials, "include");
-  assert.equal(f.fetches[0].options.redirect, "error");
+  assert.equal(f.fetches.length, 0);
+  assert.deepEqual(
+    f.commands.find(
+      (command) => command.method === "Network.loadNetworkResource",
+    ).params,
+    {
+      frameId: "current-main-frame",
+      url: plan.urls[0],
+      options: { disableCache: false, includeCredentials: true },
+    },
+  );
+  assert.equal(f.streams.size, 0);
   await assert.rejects(
     f.call("content.plan", { method: "content.exportGsuite", type: "docx" }),
     { code: "FILE_UNAVAILABLE" },
@@ -235,6 +331,108 @@ test("Google Workspace plans are network-free and format/source-bound; only actu
     ).name.endsWith(".docx"),
     true,
   );
+  assert.equal(f.streams.size, 0);
+});
+
+test("native Google exports stream multiple chunks and close error or cancelled responses without returning partial documents", async (t) => {
+  const f = fixture(
+      t,
+      "https://docs.google.com/spreadsheets/d/streamed_document/edit",
+    ),
+    plan = await f.call("content.plan", {
+      method: "content.exportGsuite",
+      type: "csv",
+    }),
+    text = "column\n" + "native-value\n".repeat(15000);
+  f.responses.set(plan.urls[0], { data: text, mimeType: "text/csv" });
+  const result = await f.call("content.exportGsuite", {
+    planId: plan.id,
+    type: "csv",
+  });
+  assert.equal(new TextDecoder().decode(result.data), text);
+  assert.ok(
+    f.commands.filter((command) => command.method === "IO.read").length >= 3,
+  );
+  assert.equal(f.streams.size, 0);
+  f.responses.set(plan.urls[0], {
+    data: "sign in",
+    mimeType: "text/html",
+    status: 403,
+  });
+  const before = f.commands.filter(
+    (command) => command.method === "IO.read",
+  ).length;
+  await assert.rejects(
+    f.call("content.exportGsuite", { planId: plan.id, type: "csv" }),
+    { code: "FILE_UNAVAILABLE" },
+  );
+  assert.equal(
+    f.commands.filter((command) => command.method === "IO.read").length,
+    before,
+  );
+  assert.equal(f.streams.size, 0);
+  const gate = Promise.withResolvers(),
+    stop = new AbortController();
+  f.responses.set(plan.urls[0], {
+    data: text,
+    mimeType: "text/csv",
+    beforeLoad: () => gate.promise,
+  });
+  const pending = f.call(
+    "content.exportGsuite",
+    { planId: plan.id, type: "csv" },
+    stop.signal,
+  );
+  const rejected = assert.rejects(
+    pending,
+    /controlled native export cancellation/,
+  );
+  const until = performance.now() + 5000;
+  try {
+    while (
+      f.commands.filter(
+        (command) => command.method === "Network.loadNetworkResource",
+      ).length < 3
+    ) {
+      assert.ok(
+        performance.now() < until,
+        "The native export never began its original response load.",
+      );
+      await delay(1);
+    }
+    stop.abort(new Error("controlled native export cancellation"));
+  } finally {
+    gate.resolve();
+  }
+  await rejected;
+  assert.equal(f.streams.size, 0);
+  assert.equal(f.fetches.length, 0);
+});
+
+test("a Google document navigation during a native response read invalidates the result and closes its stream", async (t) => {
+  const f = fixture(t, "https://docs.google.com/document/d/original/edit"),
+    plan = await f.call("content.plan", {
+      method: "content.exportGsuite",
+      type: "md",
+    });
+  f.responses.set(plan.urls[0], {
+    data: "Original content",
+    mimeType: "text/markdown",
+    beforeRead() {
+      f.location.href = "https://docs.google.com/document/d/other/edit";
+      f.chrome.webNavigation.onCommitted.emit({
+        tabId: 1,
+        frameId: 0,
+        documentId: "replacement-document",
+        url: f.location.href,
+      });
+    },
+  });
+  await assert.rejects(
+    f.call("content.exportGsuite", { planId: plan.id, type: "md" }),
+    { code: "STALE_REF" },
+  );
+  assert.equal(f.streams.size, 0);
 });
 
 test("YouTube exports an actually rendered transcript or the fixed observed track, never invented captions or another video's response", async (t) => {

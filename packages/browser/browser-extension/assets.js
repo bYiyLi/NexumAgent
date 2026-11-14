@@ -134,6 +134,88 @@ async function fetchFile(ctx, url, token, limit = maximum, name) {
     data: await readPageBytes(ctx, token, metadata),
   };
 }
+
+async function readNativeContent(ctx, handle, plan) {
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    ctx.signal?.throwIfAborted();
+    current(ctx, plan);
+    const value = await ctx.router.send(ctx, "IO.read", {
+      handle,
+      size: 65536,
+    });
+    current(ctx, plan);
+    requireValue(
+      typeof value.data === "string" && value.data.length <= 90000,
+      "OUTPUT_TOO_LARGE",
+      "The native document stream chunk exceeds its byte budget.",
+    );
+    const bytes = value.base64Encoded
+      ? Uint8Array.from(atob(value.data), (character) =>
+          character.charCodeAt(0),
+        )
+      : new TextEncoder().encode(value.data);
+    total += bytes.byteLength;
+    requireValue(
+      bytes.byteLength <= 65536 && total <= maximum,
+      "OUTPUT_TOO_LARGE",
+      "The native document exceeds its export byte budget.",
+    );
+    chunks.push(bytes);
+    if (value.eof) break;
+  }
+  ctx.signal?.throwIfAborted();
+  const data = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return data;
+}
+
+async function fetchGoogleDocument(ctx, source, plan) {
+  const tree = await ctx.router.send(ctx, "Page.getFrameTree", {});
+  text(tree.frameTree?.frame?.id, 1024);
+  current(ctx, plan);
+  const response = await ctx.router.send(ctx, "Network.loadNetworkResource", {
+    frameId: tree.frameTree.frame.id,
+    url: source.url,
+    options: { disableCache: false, includeCredentials: true },
+  });
+  const resource = response.resource;
+  requireValue(
+    resource &&
+      typeof resource.stream === "string" &&
+      resource.stream.length > 0,
+    "FILE_UNAVAILABLE",
+    "The browser could not open the Google Workspace document response.",
+  );
+  text(resource.stream, 1024);
+  try {
+    await ctx.router.trackNativeStream(ctx, resource.stream);
+    requireValue(
+      resource.success === true &&
+        resource.httpStatusCode >= 200 &&
+        resource.httpStatusCode < 300,
+      "FILE_UNAVAILABLE",
+      "The browser could not read the Google Workspace document response.",
+    );
+    const header = Object.entries(resource.headers ?? {}).find(
+      ([name]) => name.toLowerCase() === "content-type",
+    )?.[1];
+    return {
+      data: await readNativeContent(ctx, resource.stream, plan),
+      mimeType:
+        typeof header === "string"
+          ? header.slice(0, 256)
+          : "application/octet-stream",
+    };
+  } finally {
+    await ctx.router.closeNativeStream(ctx, resource.stream);
+  }
+}
 export async function listAssets(ctx) {
   const inventories = (ctx.lease.assetInventories ??= new Map());
   const previous = [...inventories].filter(
@@ -448,7 +530,10 @@ export async function exportContent(ctx, args) {
     }
     const token = crypto.randomUUID();
     try {
-      const file = await fetchFile(ctx, source.url, token);
+      const file =
+        source.kind === "gsuite"
+          ? await fetchGoogleDocument(ctx, source, plan)
+          : await fetchFile(ctx, source.url, token);
       if (source.kind === "transcript-track") {
         const converted = await ctx.router.dataPage(ctx, {
           command: "transcript",
@@ -508,42 +593,12 @@ export async function exportContent(ctx, args) {
       transferMode: "ReturnAsStream",
     });
     text(response.stream, 1024);
-    const chunks = [];
-    let total = 0;
+    let data;
     try {
       await ctx.router.trackNativeStream(ctx, response.stream);
-      while (true) {
-        ctx.signal?.throwIfAborted();
-        const value = await ctx.router.send(ctx, "IO.read", {
-          handle: response.stream,
-          size: 65536,
-        });
-        requireValue(
-          typeof value.data === "string" && value.data.length <= 90000,
-          "OUTPUT_TOO_LARGE",
-          "The native PDF stream chunk exceeds its byte budget.",
-        );
-        const raw = value.base64Encoded ? atob(value.data) : value.data;
-        const bytes = value.base64Encoded
-          ? Uint8Array.from(raw, (character) => character.charCodeAt(0))
-          : new TextEncoder().encode(raw);
-        total += bytes.byteLength;
-        requireValue(
-          total <= maximum,
-          "OUTPUT_TOO_LARGE",
-          "The native PDF exceeds its export byte budget.",
-        );
-        chunks.push(bytes);
-        if (value.eof) break;
-      }
+      data = await readNativeContent(ctx, response.stream, plan);
     } finally {
       await ctx.router.closeNativeStream(ctx, response.stream);
-    }
-    const data = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      data.set(chunk, offset);
-      offset += chunk.length;
     }
     requireValue(
       data.length >= 5 &&

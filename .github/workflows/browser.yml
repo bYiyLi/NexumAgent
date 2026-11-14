@@ -60,6 +60,12 @@ jobs:
         env:
           NEXUM_BROWSER_WEBMCP_TESTING: "1"
         run: node --experimental-vm-modules --test --test-name-pattern="native WebMCP" packages/browser/test/native-capabilities.acceptance.mjs
+      - name: Exercise anonymous public Google Docs export through the actual browser
+        env:
+          # Public Chromium design: https://issues.chromium.org/issues/376084060
+          NEXUM_BROWSER_PUBLIC_DOC_URL: https://docs.google.com/document/d/1RVbtvklXUg9QCNvMT0r-1qDwJNeQFGoTCOD1Ur9mDa4/edit
+          NEXUM_BROWSER_PUBLIC_DOC_TEXT: Guest View MPArch Migration
+        run: node --experimental-vm-modules --test packages/browser/test/native-sites.acceptance.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
