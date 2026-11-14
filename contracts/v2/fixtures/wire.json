@@ -1,0 +1,5505 @@
+[
+  {
+    "name": "complete authenticated invoke",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "grant is mandatory",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "profile is mandatory",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "boot is mandatory",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "wrong agent policy",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "other",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown budget",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760,
+            "unbounded": 10
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "host requires real capabilities",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "no raw Host attachment URL",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "file_id": "file_a",
+            "download_url": "https://example.com/secret"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "submission requires timestamp binding",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 0
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "no operation payload confusion",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "no unknown top field",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "token": "secret"
+    }
+  },
+  {
+    "name": "resolve canonical path request",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.resolve",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "path": "/tmp/work"
+      }
+    }
+  },
+  {
+    "name": "resolve result",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "result",
+      "id": "rpc_a",
+      "operation": "agent.project.resolve",
+      "output": {
+        "root": "/tmp/work",
+        "name": "work"
+      }
+    }
+  },
+  {
+    "name": "result names its operation",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "result",
+      "id": "rpc_a",
+      "output": {}
+    }
+  },
+  {
+    "name": "reply payload must match operation",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "result",
+      "id": "rpc_a",
+      "operation": "agent.project.resolve",
+      "output": {
+        "runId": "run_a"
+      }
+    }
+  },
+  {
+    "name": "source selector is exclusive",
+    "contract": "wire.input:agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "script": "return 1",
+      "scriptName": "a.js"
+    }
+  },
+  {
+    "name": "wire requestId needs explicit admission window",
+    "contract": "wire.input:agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "script": "return 1",
+      "requestId": "req_1794614400000_11111111111111111111111111111111"
+    }
+  },
+  {
+    "name": "public requestId remains Host friendly",
+    "contract": "agent.run.start",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "script": "return 1",
+      "requestId": "req_1794614400000_11111111111111111111111111111111"
+    }
+  },
+  {
+    "name": "resource binary uses fixed independent stream",
+    "contract": "wire.output:agent.resources.read",
+    "valid": true,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mimeType": "image/png",
+          "stream": {
+            "streamId": "stream_a",
+            "purpose": "resource",
+            "direction": "agent-to-cloud",
+            "expiresAt": "2026-11-14T00:00:00.000Z",
+            "maxBytes": 100,
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "resources never inline base64",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mimeType": "image/png",
+          "blob": "YWJj"
+        }
+      ]
+    }
+  },
+  {
+    "name": "stream size budget",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mimeType": "image/png",
+          "stream": {
+            "streamId": "stream_a",
+            "purpose": "resource",
+            "direction": "agent-to-cloud",
+            "expiresAt": "2026-11-14T00:00:00.000Z",
+            "maxBytes": 100,
+            "mimeType": "image/png",
+            "size": 101,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "resource direction",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mimeType": "image/png",
+          "stream": {
+            "streamId": "stream_a",
+            "purpose": "resource",
+            "direction": "cloud-to-agent",
+            "expiresAt": "2026-11-14T00:00:00.000Z",
+            "maxBytes": 100,
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "resource listing has no bytes",
+    "contract": "wire.output:agent.resources.list",
+    "valid": true,
+    "value": {
+      "resources": [
+        {
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "image.png",
+          "mimeType": "image/png",
+          "size": 3
+        }
+      ],
+      "nextCursor": null
+    }
+  },
+  {
+    "name": "stream HTTP handshake",
+    "contract": "wire.stream",
+    "valid": true,
+    "value": {
+      "agentId": "agent_a",
+      "profile": "development",
+      "bootId": "boot_a",
+      "cloudEnvironment": "development",
+      "connectionId": "conn_a",
+      "streamId": "stream_a",
+      "purpose": "resource",
+      "direction": "agent-to-cloud"
+    }
+  },
+  {
+    "name": "stream no separate bearer token",
+    "contract": "wire.stream",
+    "valid": false,
+    "value": {
+      "agentId": "agent_a",
+      "profile": "development",
+      "bootId": "boot_a",
+      "cloudEnvironment": "development",
+      "connectionId": "conn_a",
+      "streamId": "stream_a",
+      "purpose": "resource",
+      "direction": "agent-to-cloud",
+      "token": "secret"
+    }
+  },
+  {
+    "name": "transfer stream reservation association",
+    "contract": "wire.stream",
+    "valid": true,
+    "value": {
+      "agentId": "agent_a",
+      "profile": "development",
+      "bootId": "boot_a",
+      "cloudEnvironment": "development",
+      "connectionId": "conn_a",
+      "streamId": "stream_a",
+      "purpose": "transfer",
+      "direction": "cloud-to-agent",
+      "transferId": "transfer_a",
+      "reservationId": "reservation_a"
+    }
+  },
+  {
+    "name": "reservation association is paired",
+    "contract": "wire.stream",
+    "valid": false,
+    "value": {
+      "agentId": "agent_a",
+      "profile": "development",
+      "bootId": "boot_a",
+      "cloudEnvironment": "development",
+      "connectionId": "conn_a",
+      "streamId": "stream_a",
+      "purpose": "transfer",
+      "direction": "cloud-to-agent",
+      "transferId": "transfer_a"
+    }
+  },
+  {
+    "name": "reverse stream registration",
+    "contract": "wire.input:stream.prepare",
+    "valid": true,
+    "value": {
+      "originInvocationId": "original_a",
+      "purpose": "resource",
+      "direction": "agent-to-cloud",
+      "expiresAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "mimeType": "image/png",
+      "size": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resourceUri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "stream registration needs original invoke",
+    "contract": "wire.input:stream.prepare",
+    "valid": false,
+    "value": {
+      "purpose": "resource",
+      "direction": "agent-to-cloud",
+      "expiresAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "mimeType": "image/png",
+      "size": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resourceUri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "stream revocation acknowledges physical close",
+    "contract": "wire.output:stream.revoke",
+    "valid": true,
+    "value": {
+      "streamId": "stream_a",
+      "closed": true
+    }
+  },
+  {
+    "name": "image is a resource descriptor",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [
+        {
+          "type": "image",
+          "resource": {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "image.png",
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          },
+          "mimeType": "image/png"
+        }
+      ]
+    }
+  },
+  {
+    "name": "media bytes forbidden in control result",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [
+        {
+          "type": "image",
+          "data": "YWJj",
+          "mimeType": "image/png"
+        }
+      ]
+    }
+  },
+  {
+    "name": "embedded data uses resource descriptor",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [
+        {
+          "type": "resource",
+          "resource": {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "image.png",
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          },
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "encoding": "blob"
+        }
+      ]
+    }
+  },
+  {
+    "name": "all five content kinds",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [
+        {
+          "type": "text",
+          "text": ""
+        },
+        {
+          "type": "image",
+          "resource": {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "image.png",
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          },
+          "mimeType": "image/png"
+        },
+        {
+          "type": "audio",
+          "resource": {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "image.png",
+            "mimeType": "audio/wav",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          },
+          "mimeType": "audio/wav"
+        },
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "image.png"
+        },
+        {
+          "type": "resource",
+          "resource": {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "image.png",
+            "mimeType": "image/png",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          },
+          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "encoding": "blob"
+        }
+      ]
+    }
+  },
+  {
+    "name": "host meta inline discriminated wrapper",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [],
+      "protocolMeta": {
+        "value": {
+          "streamId": "business-key",
+          "purpose": "business-value"
+        }
+      }
+    }
+  },
+  {
+    "name": "host meta cannot confuse stream with value",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [],
+      "protocolMeta": {
+        "streamId": "business-key"
+      }
+    }
+  },
+  {
+    "name": "no transient URL in durable delivery",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [],
+      "delivery": {
+        "complete": false,
+        "reason": "context_budget",
+        "request": {
+          "url": "https://example.com/secret"
+        }
+      }
+    }
+  },
+  {
+    "name": "MCP group metadata preserved",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [],
+      "mcpResults": [
+        {
+          "structuredContent": {
+            "v": 1
+          }
+        }
+      ],
+      "resultType": "complete"
+    }
+  },
+  {
+    "name": "host protocol request uses separate fixed JSON stream",
+    "contract": "wire.input:host.request",
+    "valid": true,
+    "value": {
+      "runId": "run_a",
+      "originInvocationId": "rpc_a",
+      "hostRef": "host_a",
+      "action": "sampling",
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "host-request",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "host body must not use control inline JSON",
+    "contract": "wire.input:host.request",
+    "valid": false,
+    "value": {
+      "runId": "run_a",
+      "originInvocationId": "rpc_a",
+      "hostRef": "host_a",
+      "action": "sampling",
+      "body": {
+        "messages": []
+      }
+    }
+  },
+  {
+    "name": "host response requires reverse direction",
+    "contract": "wire.output:host.request",
+    "valid": true,
+    "value": {
+      "action": "sampling",
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "host-response",
+        "direction": "cloud-to-agent",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "host wrong response direction",
+    "contract": "wire.output:host.request",
+    "valid": false,
+    "value": {
+      "action": "sampling",
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "host-response",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "upload preparation",
+    "contract": "wire.input:transfer.prepare",
+    "valid": true,
+    "value": {
+      "transferId": "transfer_a",
+      "resourceId": "resource_a",
+      "runId": "run_a",
+      "contextId": "context_a",
+      "projectId": null,
+      "direction": "upload",
+      "claimDeadlineAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "target": {
+        "path": "/tmp/work/a.png"
+      }
+    }
+  },
+  {
+    "name": "download requires fixed resource",
+    "contract": "wire.input:transfer.prepare",
+    "valid": true,
+    "value": {
+      "transferId": "transfer_a",
+      "resourceId": "resource_a",
+      "runId": "run_a",
+      "contextId": "context_a",
+      "projectId": null,
+      "direction": "download",
+      "claimDeadlineAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "target": {
+        "resourceUri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mimeType": "image/png"
+      }
+    }
+  },
+  {
+    "name": "download cannot use unfixed local path",
+    "contract": "wire.input:transfer.prepare",
+    "valid": false,
+    "value": {
+      "transferId": "transfer_a",
+      "resourceId": "resource_a",
+      "runId": "run_a",
+      "contextId": "context_a",
+      "projectId": null,
+      "direction": "download",
+      "claimDeadlineAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "target": {
+        "path": "/tmp/work/a.png"
+      }
+    }
+  },
+  {
+    "name": "upload byte expectation cannot exceed cap",
+    "contract": "wire.input:transfer.prepare",
+    "valid": false,
+    "value": {
+      "transferId": "transfer_a",
+      "resourceId": "resource_a",
+      "runId": "run_a",
+      "contextId": "context_a",
+      "projectId": null,
+      "direction": "upload",
+      "claimDeadlineAt": "2026-11-14T00:00:00.000Z",
+      "maxBytes": 100,
+      "target": {
+        "path": "/tmp/work/a.png",
+        "expectedSize": 101
+      }
+    }
+  },
+  {
+    "name": "policy revocation is an event not a fake run stop",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "event",
+      "name": "agent.authorization.changed",
+      "connection": {
+        "agentId": "agent_a",
+        "profile": "development",
+        "bootId": "boot_a",
+        "cloudEnvironment": "development",
+        "connectionId": "conn_a"
+      },
+      "data": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": null
+      }
+    }
+  },
+  {
+    "name": "catalog sync authenticated machine event",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "event",
+      "name": "agent.catalog.sync",
+      "connection": {
+        "agentId": "agent_a",
+        "profile": "development",
+        "bootId": "boot_a",
+        "cloudEnvironment": "development",
+        "connectionId": "conn_a"
+      },
+      "data": {
+        "generation": "catalog_a",
+        "page": 0,
+        "complete": true,
+        "projects": [
+          {
+            "projectId": "project_a",
+            "root": "/tmp/work",
+            "name": "work",
+            "projectContextVisibility": {
+              "disabledItems": []
+            }
+          }
+        ],
+        "allowedRoots": ["/tmp/work"]
+      }
+    }
+  },
+  {
+    "name": "catalog README missing is explicit",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "event",
+      "name": "agent.catalog.changed",
+      "connection": {
+        "agentId": "agent_a",
+        "profile": "development",
+        "bootId": "boot_a",
+        "cloudEnvironment": "development",
+        "connectionId": "conn_a"
+      },
+      "data": {
+        "sequence": 1,
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "projects": [
+          {
+            "projectId": "project_a",
+            "root": "/tmp/work",
+            "status": "missing"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "event connection is required",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "event",
+      "name": "agent.run.changed",
+      "data": {
+        "runId": "run_a",
+        "revision": 1,
+        "status": "running",
+        "observedAt": "2026-11-14T00:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "public structured error",
+    "contract": "agent.open.output",
+    "valid": true,
+    "value": {
+      "error": {
+        "code": "permission_denied",
+        "message": "Denied",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "name": "public close is actual close receipt",
+    "contract": "agent.close.output",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "projectId": null,
+      "closed": true,
+      "agentConfirmed": true
+    }
+  },
+  {
+    "name": "public close cannot say success when false",
+    "contract": "agent.close.output",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "projectId": null,
+      "closed": false,
+      "agentConfirmed": true
+    }
+  },
+  {
+    "name": "public list small real catalog",
+    "contract": "agent.list.output",
+    "valid": true,
+    "value": {
+      "agents": [
+        {
+          "agentId": "agent_a",
+          "name": "Agent",
+          "platform": "darwin",
+          "arch": "arm64",
+          "status": "online",
+          "blockedReason": null,
+          "projects": [
+            {
+              "projectId": "project_a",
+              "name": "work",
+              "root": "/tmp/work",
+              "description": "README summary",
+              "descriptionSyncStatus": "ok",
+              "descriptionSyncedAt": "2026-11-14T00:00:00.000Z",
+              "descriptionSyncErrorCode": null
+            }
+          ],
+          "projectsNextCursor": null,
+          "description": null
+        }
+      ],
+      "nextCursor": null,
+      "observedAt": "2026-11-14T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "unknown operation",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.execute",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {}
+    }
+  },
+  {
+    "name": "invalid date owned field",
+    "contract": "wire.input:stream.prepare",
+    "valid": false,
+    "value": {
+      "originInvocationId": "original_a",
+      "purpose": "resource",
+      "direction": "agent-to-cloud",
+      "expiresAt": "2026-99-99T00:00:00Z",
+      "maxBytes": 100,
+      "mimeType": "image/png",
+      "size": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resourceUri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "resources cannot cross Agent scope",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.resources.read",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "uri": "nexum://agents/other/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maxBytes": 100
+      }
+    }
+  },
+  {
+    "name": "Host association cannot be substituted",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "host.request",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "runId": "run_a",
+        "originInvocationId": "rpc_a",
+        "hostRef": "host_other",
+        "action": "sampling",
+        "body": {
+          "streamId": "stream_a",
+          "purpose": "host-request",
+          "direction": "agent-to-cloud",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "maxBytes": 100,
+          "mimeType": "application/json",
+          "size": 3,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    }
+  },
+  {
+    "name": "opening project needs trusted policy scope",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.open",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "agentId": "agent_a",
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "maintenance authority create redacted candidate",
+    "contract": "wire.input:maintenance.request.create",
+    "value": {
+      "requestKey": "request_a",
+      "originRunId": "run_a",
+      "target": "api",
+      "action": "import",
+      "name": "crm",
+      "objectId": null,
+      "baseRevision": null,
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": {
+        "title": "api.import: crm",
+        "changeKinds": ["api", "authentication"],
+        "permissions": [],
+        "version": null,
+        "namespace": null,
+        "restartMayBeRequired": false
+      },
+      "authStatus": "required"
+    },
+    "valid": true
+  },
+  {
+    "name": "maintenance authority forbids config secrets",
+    "contract": "wire.input:maintenance.request.create",
+    "value": {
+      "requestKey": "request_a",
+      "originRunId": "run_a",
+      "target": "api",
+      "action": "import",
+      "name": "crm",
+      "objectId": null,
+      "baseRevision": null,
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": {
+        "title": "api.import: crm",
+        "changeKinds": ["api", "authentication"],
+        "permissions": [],
+        "version": null,
+        "namespace": null,
+        "restartMayBeRequired": false
+      },
+      "authStatus": "required",
+      "config": {
+        "token": "secret"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "maintenance authority precise redacted view",
+    "contract": "wire.output:maintenance.request.create",
+    "value": {
+      "requestId": "maint_req_a",
+      "agentId": "agent_a",
+      "profile": "development",
+      "target": "api",
+      "action": "import",
+      "name": "crm",
+      "objectId": null,
+      "baseRevision": null,
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": {
+        "title": "api.import: crm",
+        "changeKinds": ["api", "authentication"],
+        "permissions": [],
+        "version": null,
+        "namespace": null,
+        "restartMayBeRequired": false
+      },
+      "authStatus": "required",
+      "status": "pending",
+      "revision": 1,
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-14T00:00:00.000Z"
+    },
+    "valid": true
+  },
+  {
+    "name": "maintenance user decision is not a model input",
+    "contract": "wire.input:maintenance.request.decision",
+    "value": {
+      "requestId": "maint_req_a",
+      "approved": true
+    },
+    "valid": false
+  },
+  {
+    "name": "maintenance begin exact approved revision",
+    "contract": "wire.input:maintenance.request.beginExecution",
+    "value": {
+      "requestId": "maint_req_a",
+      "approvedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decisionRevision": 1,
+      "operationId": "operation_a"
+    },
+    "valid": true
+  },
+  {
+    "name": "draft edit uses independent fixed body",
+    "contract": "wire.input:agent.maintenance.draft.prepare",
+    "value": {
+      "requestId": "maint_req_a",
+      "revision": 1,
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "maintenance",
+        "direction": "cloud-to-agent",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "draft config cannot leak through WSS",
+    "contract": "wire.input:agent.maintenance.draft.prepare",
+    "value": {
+      "requestId": "maint_req_a",
+      "revision": 1,
+      "config": {
+        "secret": "value"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "draft body stream direction is explicit",
+    "contract": "wire.input:agent.maintenance.draft.prepare",
+    "value": {
+      "requestId": "maint_req_a",
+      "revision": 1,
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "maintenance",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "draft body itself has exact edit shape",
+    "contract": "wire.body:MaintenanceDraftInput",
+    "value": {
+      "revision": 1,
+      "config": {
+        "baseUrl": "https://example.com"
+      },
+      "credentials": [
+        {
+          "key": "token",
+          "operation": "replace",
+          "value": "secret"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "keep credential cannot smuggle replacement",
+    "contract": "wire.body:MaintenanceDraftInput",
+    "value": {
+      "revision": 1,
+      "credentials": [
+        {
+          "key": "token",
+          "operation": "keep",
+          "value": "secret"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "replace credential requires new value",
+    "contract": "wire.body:MaintenanceDraftInput",
+    "value": {
+      "revision": 1,
+      "credentials": [
+        {
+          "key": "token",
+          "operation": "replace"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "OAuth complete body excludes private DB attempt",
+    "contract": "wire.body:MaintenanceOAuthComplete",
+    "value": {
+      "schemeId": "oauth",
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "callback": {
+        "state": "state_a",
+        "code": "secret-code"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "OAuth complete body refuses Cloud owner identity",
+    "contract": "wire.body:MaintenanceOAuthComplete",
+    "value": {
+      "schemeId": "oauth",
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "callback": {
+        "state": "state_a"
+      },
+      "OwnerID": "owner_a"
+    },
+    "valid": false
+  },
+  {
+    "name": "maintenance notification is real receipt only",
+    "contract": "wire.output:agent.maintenance.draft.notify",
+    "value": {
+      "requestId": "maint_req_a",
+      "notified": true
+    },
+    "valid": true
+  },
+  {
+    "name": "run association event preserves original RPC",
+    "contract": "wire",
+    "value": {
+      "type": "event",
+      "name": "agent.run.changed",
+      "connection": {
+        "agentId": "agent_a",
+        "profile": "development",
+        "bootId": "boot_a",
+        "cloudEnvironment": "development",
+        "connectionId": "conn_a"
+      },
+      "data": {
+        "runId": "run_a",
+        "revision": 1,
+        "status": "accepted",
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "originInvocationId": "rpc_a"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "Agent default context close requires real Agent acknowledgment",
+    "contract": "agent.close.output",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "projectId": null,
+      "closed": true,
+      "agentConfirmed": false
+    }
+  },
+  {
+    "name": "policy event cannot cross Agent binding",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "event",
+      "name": "agent.authorization.changed",
+      "connection": {
+        "agentId": "agent_a",
+        "profile": "development",
+        "bootId": "boot_a",
+        "cloudEnvironment": "development",
+        "connectionId": "conn_a"
+      },
+      "data": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "other",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        }
+      }
+    }
+  },
+  {
+    "name": "draft current config remains opaque business JSON",
+    "contract": "wire.body:MaintenanceDraftRead",
+    "valid": true,
+    "value": {
+      "draft": {
+        "currentConfig": {
+          "expiresAt": "business-not-date"
+        },
+        "config": {},
+        "authentication": [],
+        "security": [],
+        "diagnostics": []
+      }
+    }
+  },
+  {
+    "name": "MCP public delivery can contain fresh offer separately from durable result",
+    "contract": "wire.type:MCPDelivery",
+    "valid": true,
+    "value": {
+      "transfers": [
+        {
+          "transferId": "transfer_a",
+          "available": true,
+          "request": {
+            "method": "PUT",
+            "url": "https://example.com/upload/opaque",
+            "headers": {},
+            "expiresAt": "2026-11-14T00:00:00.000Z"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "context budget requires paired reason in public delivery",
+    "contract": "wire.type:MCPDelivery",
+    "valid": false,
+    "value": {
+      "complete": false
+    }
+  },
+  {
+    "name": "Host attachment uses stable source identity distinct from Agent transfer",
+    "contract": "wire.input:agent.run.start",
+    "value": {
+      "contextId": "context_a",
+      "script": "return input",
+      "attachments": [
+        {
+          "sourceId": "att_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "attachment source open binds original invocation",
+    "contract": "wire.input:attachment.open",
+    "value": {
+      "sourceId": "att_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "originInvocationId": "rpc_a"
+    },
+    "valid": true
+  },
+  {
+    "name": "attachment unknown length does not pretend fixed hash",
+    "contract": "wire.output:attachment.open",
+    "value": {
+      "stream": {
+        "streamId": "stream_a",
+        "purpose": "attachment",
+        "direction": "cloud-to-agent",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100
+      },
+      "name": "image.png",
+      "mimeType": "image/png"
+    },
+    "valid": true
+  },
+  {
+    "name": "attachment source malformed identity rejected",
+    "contract": "wire.input:attachment.open",
+    "value": {
+      "sourceId": "att_not-hmac",
+      "originInvocationId": "rpc_a"
+    },
+    "valid": false
+  },
+  {
+    "name": "attachment known constraint remains within budget",
+    "contract": "wire.output:attachment.open",
+    "value": {
+      "stream": {
+        "streamId": "stream_a",
+        "purpose": "attachment",
+        "direction": "cloud-to-agent",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100
+      },
+      "name": "image.png",
+      "mimeType": "image/png",
+      "size": 101
+    },
+    "valid": false
+  },
+  {
+    "name": "ResourceLink keeps all standard public metadata",
+    "contract": "wire.type:Result",
+    "valid": true,
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "https://example.com/icon.png",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "resource listing preserves standard metadata",
+    "contract": "wire.output:agent.resources.list",
+    "valid": true,
+    "value": {
+      "resources": [
+        {
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "https://example.com/icon.png",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ],
+      "nextCursor": null
+    }
+  },
+  {
+    "name": "annotations standard priority is bounded",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "https://example.com/icon.png",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "priority": 2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "Host-only content meta must stay in sidecar",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "https://example.com/icon.png",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          },
+          "_meta": {
+            "secret": "host-only"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "inline icons cannot hide base64 media in WSS",
+    "contract": "wire.type:Result",
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "data:image/png;base64,YWJj",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "full descriptor body retains data icons",
+    "contract": "wire.body:Result",
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "data:image/png;base64,YWJj",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "descriptor body cannot recursively wrap itself",
+    "contract": "wire.body:Result",
+    "value": {
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "Host metadata remains independent of model descriptor body",
+    "contract": "wire.body:Result",
+    "value": {
+      "content": [],
+      "protocolMeta": {
+        "value": {
+          "secret": "host-only"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "resource listing can use fixed metadata body",
+    "contract": "wire.output:agent.resources.list",
+    "value": {
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "resource list body retains full standard icons",
+    "contract": "wire.body:ResourcesList",
+    "value": {
+      "resources": [
+        {
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": "data:image/png;base64,YWJj",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ],
+      "nextCursor": null
+    },
+    "valid": true
+  },
+  {
+    "name": "result wrapper keeps Host sidecar outside model body",
+    "contract": "wire.type:ResultBody",
+    "value": {
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "protocolMeta": {
+        "value": {
+          "hostOnly": "yes"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "resource list wrapper cannot mix inline entries",
+    "contract": "wire.output:agent.resources.list",
+    "value": {
+      "body": {
+        "streamId": "stream_a",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "maxBytes": 100,
+        "mimeType": "application/json",
+        "size": 3,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "resources": [],
+      "nextCursor": null
+    },
+    "valid": false
+  },
+  {
+    "name": "Run output can deliver fixed model descriptor with independent Host sidecar",
+    "contract": "wire.output:agent.run.get",
+    "valid": true,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "wait": null,
+      "result": {
+        "body": {
+          "streamId": "stream_a",
+          "purpose": "result-meta",
+          "direction": "agent-to-cloud",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "maxBytes": 100,
+          "mimeType": "application/json",
+          "size": 3,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "protocolMeta": {
+          "value": {
+            "hostOnly": "secret"
+          }
+        }
+      },
+      "observedAt": "2026-11-14T00:00:00.000Z",
+      "operations": {
+        "items": [],
+        "complete": true
+      },
+      "resources": {
+        "items": [],
+        "complete": true
+      }
+    }
+  },
+  {
+    "name": "Run descriptor cannot substitute a Host request channel",
+    "contract": "wire.output:agent.run.get",
+    "valid": false,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "wait": null,
+      "result": {
+        "body": {
+          "streamId": "stream_a",
+          "purpose": "host-request",
+          "direction": "agent-to-cloud",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "maxBytes": 100,
+          "mimeType": "application/json",
+          "size": 3,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "protocolMeta": {
+          "value": {
+            "hostOnly": "secret"
+          }
+        }
+      },
+      "observedAt": "2026-11-14T00:00:00.000Z",
+      "operations": {
+        "items": [],
+        "complete": true
+      },
+      "resources": {
+        "items": [],
+        "complete": true
+      }
+    }
+  },
+  {
+    "name": "public run success keeps normalized data plus fresh delivery",
+    "contract": "agent.run.get.output",
+    "valid": true,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "data": {
+        "transferId": "transfer_a"
+      },
+      "delivery": {
+        "transfers": [
+          {
+            "transferId": "transfer_a",
+            "available": true,
+            "request": {
+              "method": "PUT",
+              "url": "https://example.com/upload/opaque",
+              "headers": {},
+              "expiresAt": "2026-11-14T00:00:00.000Z"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "URL-normalized data icons also stay off WSS",
+    "contract": "wire.type:Result",
+    "valid": false,
+    "value": {
+      "content": [
+        {
+          "type": "resource_link",
+          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "title": "Display title",
+          "description": "A remote resource",
+          "mimeType": "text/plain",
+          "size": 42,
+          "icons": [
+            {
+              "src": " \tDa\nta:image/png;base64,YWJj",
+              "mimeType": "image/png",
+              "sizes": ["48x48"],
+              "theme": "dark"
+            }
+          ],
+          "annotations": {
+            "audience": ["user", "assistant"],
+            "priority": 0.5,
+            "lastModified": "2026-11-14T08:00:00+08:00",
+            "custom": {
+              "expiresAt": "business-value"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "run history preserves existing script summary metadata",
+    "contract": "agent.run.get.output",
+    "valid": true,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        },
+        "scriptDesc": "Generate image report",
+        "descriptionTruncated": true
+      },
+      "data": {
+        "transferId": "transfer_a"
+      },
+      "delivery": {
+        "transfers": [
+          {
+            "transferId": "transfer_a",
+            "available": true,
+            "request": {
+              "method": "PUT",
+              "url": "https://example.com/upload/opaque",
+              "headers": {},
+              "expiresAt": "2026-11-14T00:00:00.000Z"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "maintenance preserves legitimate permission names and safe failure facts",
+    "contract": "wire.output:maintenance.request.get",
+    "valid": true,
+    "value": {
+      "requestId": "maint_req_a",
+      "agentId": "agent_a",
+      "profile": "development",
+      "target": "api",
+      "action": "import",
+      "name": "crm",
+      "objectId": null,
+      "baseRevision": null,
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": {
+        "title": "api.import: crm",
+        "changeKinds": ["api", "authentication"],
+        "permissions": ["custom/permission", "插件:读"],
+        "version": null,
+        "namespace": null,
+        "restartMayBeRequired": false
+      },
+      "authStatus": "required",
+      "status": "pending",
+      "revision": 1,
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-14T00:00:00.000Z",
+      "execution": {
+        "operationId": "operation_a",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "error": {
+          "code": "provider.failed",
+          "message": "The approved operation failed.\nNo private provider output is included."
+        }
+      }
+    }
+  },
+  {
+    "name": "maintenance failure refuses raw cause",
+    "contract": "wire.output:maintenance.request.get",
+    "valid": false,
+    "value": {
+      "requestId": "maint_req_a",
+      "agentId": "agent_a",
+      "profile": "development",
+      "target": "api",
+      "action": "import",
+      "name": "crm",
+      "objectId": null,
+      "baseRevision": null,
+      "candidateRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": {
+        "title": "api.import: crm",
+        "changeKinds": ["api", "authentication"],
+        "permissions": ["custom/permission", "插件:读"],
+        "version": null,
+        "namespace": null,
+        "restartMayBeRequired": false
+      },
+      "authStatus": "required",
+      "status": "pending",
+      "revision": 1,
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-14T00:00:00.000Z",
+      "execution": {
+        "operationId": "operation_a",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "error": {
+          "code": "provider.failed",
+          "message": "The approved operation failed.\nNo private provider output is included.",
+          "cause": "private"
+        }
+      }
+    }
+  },
+  {
+    "name": "public Host input cannot advertise reuse of private source ID",
+    "contract": "agent.run.start",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "script": "return 1",
+      "attachments": [
+        {
+          "sourceId": "att_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "name": "lease refresh runId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": true,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "runId": "run_original"
+    }
+  },
+  {
+    "name": "lease refresh maintenanceRequestId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": true,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "maintenanceRequestId": "maint_req_original"
+    }
+  },
+  {
+    "name": "lease refresh transferId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": true,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "lease refresh streamId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": true,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "streamId": "stream_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed runId maintenanceRequestId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "runId": "run_original",
+      "maintenanceRequestId": "maint_req_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed runId transferId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "runId": "run_original",
+      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed runId streamId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "runId": "run_original",
+      "streamId": "stream_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed maintenanceRequestId transferId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "maintenanceRequestId": "maint_req_original",
+      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed maintenanceRequestId streamId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "maintenanceRequestId": "maint_req_original",
+      "streamId": "stream_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects mixed transferId streamId",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "streamId": "stream_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects missing source",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original"
+    }
+  },
+  {
+    "name": "lease refresh requires original invocation",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "maintenanceRequestId": "maint_req_original"
+    }
+  },
+  {
+    "name": "lease refresh rejects malformed maintenance identity",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "maintenanceRequestId": "run_fake"
+    }
+  },
+  {
+    "name": "lease refresh rejects nonregistered transfer syntax",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "transferId": "tr_not-a-live-id"
+    }
+  },
+  {
+    "name": "lease refresh rejects caller identity in arguments",
+    "contract": "wire.input:authorization.refresh",
+    "valid": false,
+    "value": {
+      "originInvocationId": "rpc_original",
+      "runId": "run_original",
+      "userId": "injected"
+    }
+  },
+  {
+    "name": "resource read independent complete body",
+    "contract": "wire.output:agent.resources.read",
+    "valid": true,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217728,
+        "mimeType": "application/json",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "resource read rejects wrong body purpose",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "resource",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217728,
+        "mimeType": "application/json",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "resource read rejects wrong body direction",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "result-meta",
+        "direction": "cloud-to-agent",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217728,
+        "mimeType": "application/json",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "resource read rejects wrong body mimeType",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217728,
+        "mimeType": "text/plain",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "resource read rejects wrong body maxBytes",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217729,
+        "mimeType": "application/json",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "name": "resource read rejects mixed inline and body",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "body": {
+        "streamId": "stream_complete_resource",
+        "purpose": "result-meta",
+        "direction": "agent-to-cloud",
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "maxBytes": 134217728,
+        "mimeType": "application/json",
+        "size": 89478600,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "contents": []
+    }
+  },
+  {
+    "name": "resource read control rejects inline media",
+    "contract": "wire.output:agent.resources.read",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent/resources/media",
+          "mimeType": "image/png",
+          "blob": "AA=="
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body preserves text blob and metadata",
+    "contract": "wire.body:ResourcesRead",
+    "valid": true,
+    "value": {
+      "contents": [
+        {
+          "uri": "nexum://agents/agent/resources/text",
+          "mimeType": "text/plain",
+          "text": "",
+          "_meta": {
+            "private": {
+              "expiresAt": "ordinary metadata"
+            }
+          },
+          "icons": [
+            {
+              "src": "data:image/png;base64,AA=="
+            }
+          ],
+          "metadata": {
+            "sequence": 9007199254740991
+          },
+          "title": ""
+        },
+        {
+          "uri": "nexum://agents/agent/resources/blob",
+          "mimeType": "application/octet-stream",
+          "blob": "AA==",
+          "_meta": {
+            "nested": {
+              "token": "synthetic-fixture-only"
+            }
+          }
+        }
+      ],
+      "_meta": {
+        "issuer": "ordinary metadata",
+        "expiresAt": "ordinary metadata"
+      },
+      "icons": [],
+      "metadata": {
+        "complete": true
+      },
+      "resultType": "complete",
+      "ttlMs": 0,
+      "cacheScope": "private"
+    }
+  },
+  {
+    "name": "complete MCP resource body permits empty binary",
+    "contract": "wire.body:ResourcesRead",
+    "valid": true,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://empty",
+          "blob": ""
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects competing bodies",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad",
+          "text": "",
+          "blob": ""
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects missing body",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad"
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects bad base64 length",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad",
+          "blob": "A"
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects bad base64 padding",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad",
+          "blob": "AA="
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects bad base64 alphabet",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad",
+          "blob": "####"
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete MCP resource body rejects nested stream",
+    "contract": "wire.body:ResourcesRead",
+    "valid": false,
+    "value": {
+      "contents": [
+        {
+          "uri": "fixture://bad",
+          "stream": {
+            "streamId": "stream_complete_resource",
+            "purpose": "result-meta",
+            "direction": "agent-to-cloud",
+            "expiresAt": "2026-11-14T00:00:00Z",
+            "maxBytes": 134217728,
+            "mimeType": "application/json",
+            "size": 89478600,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "Cloud user state get input",
+    "contract": "wire.input:state.user.get",
+    "valid": true,
+    "value": {
+      "namespace": "default",
+      "key": "preferences"
+    }
+  },
+  {
+    "name": "Cloud user state get rejects identity injection",
+    "contract": "wire.input:state.user.get",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "userId": "injected"
+    }
+  },
+  {
+    "name": "Cloud user state get rejects another namespace",
+    "contract": "wire.input:state.user.get",
+    "valid": false,
+    "value": {
+      "namespace": "other",
+      "key": "preferences"
+    }
+  },
+  {
+    "name": "Cloud user state get rejects NUL key",
+    "contract": "wire.input:state.user.get",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "bad\u0000key"
+    }
+  },
+  {
+    "name": "Cloud user state set input",
+    "contract": "wire.input:state.user.set",
+    "valid": true,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "value": {
+        "language": "zh-CN"
+      },
+      "expectedVersion": null
+    }
+  },
+  {
+    "name": "Cloud user state set rejects identity injection",
+    "contract": "wire.input:state.user.set",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "value": {
+        "language": "zh-CN"
+      },
+      "expectedVersion": null,
+      "userId": "injected"
+    }
+  },
+  {
+    "name": "Cloud user state set rejects another namespace",
+    "contract": "wire.input:state.user.set",
+    "valid": false,
+    "value": {
+      "namespace": "other",
+      "key": "preferences",
+      "value": {
+        "language": "zh-CN"
+      },
+      "expectedVersion": null
+    }
+  },
+  {
+    "name": "Cloud user state set rejects NUL key",
+    "contract": "wire.input:state.user.set",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "bad\u0000key",
+      "value": {
+        "language": "zh-CN"
+      },
+      "expectedVersion": null
+    }
+  },
+  {
+    "name": "Cloud user state delete input",
+    "contract": "wire.input:state.user.delete",
+    "valid": true,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "expectedVersion": 2
+    }
+  },
+  {
+    "name": "Cloud user state delete rejects identity injection",
+    "contract": "wire.input:state.user.delete",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "expectedVersion": 2,
+      "userId": "injected"
+    }
+  },
+  {
+    "name": "Cloud user state delete rejects another namespace",
+    "contract": "wire.input:state.user.delete",
+    "valid": false,
+    "value": {
+      "namespace": "other",
+      "key": "preferences",
+      "expectedVersion": 2
+    }
+  },
+  {
+    "name": "Cloud user state delete rejects NUL key",
+    "contract": "wire.input:state.user.delete",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "bad\u0000key",
+      "expectedVersion": 2
+    }
+  },
+  {
+    "name": "Cloud user state UTF8 key exact boundary",
+    "contract": "wire.input:state.user.get",
+    "valid": true,
+    "value": {
+      "namespace": "default",
+      "key": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界a"
+    }
+  },
+  {
+    "name": "Cloud user state rejects oversized UTF8 key",
+    "contract": "wire.input:state.user.get",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+    }
+  },
+  {
+    "name": "Cloud user state get missing",
+    "contract": "wire.output:state.user.get",
+    "valid": true,
+    "value": {
+      "state": null
+    }
+  },
+  {
+    "name": "Cloud user state get receipt",
+    "contract": "wire.output:state.user.get",
+    "valid": true,
+    "value": {
+      "state": {
+        "value": {
+          "expiresAt": "business data"
+        },
+        "version": 1,
+        "updatedAt": 1794614400000
+      }
+    }
+  },
+  {
+    "name": "Cloud user state set receipt",
+    "contract": "wire.output:state.user.set",
+    "valid": true,
+    "value": {
+      "value": {
+        "expiresAt": "business data"
+      },
+      "version": 1,
+      "updatedAt": 1794614400000
+    }
+  },
+  {
+    "name": "Cloud user state delete receipt",
+    "contract": "wire.output:state.user.delete",
+    "valid": true,
+    "value": {
+      "deleted": true,
+      "version": 2,
+      "updatedAt": 1794614400001
+    }
+  },
+  {
+    "name": "Cloud user state set requires expected version",
+    "contract": "wire.input:state.user.set",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "value": null
+    }
+  },
+  {
+    "name": "Cloud user state delete cannot create",
+    "contract": "wire.input:state.user.delete",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "expectedVersion": null
+    }
+  },
+  {
+    "name": "Cloud user state rejects zero version",
+    "contract": "wire.output:state.user.set",
+    "valid": false,
+    "value": {
+      "value": {
+        "expiresAt": "business data"
+      },
+      "version": 0,
+      "updatedAt": 1794614400000
+    }
+  },
+  {
+    "name": "Cloud user state rejects negative updatedAt",
+    "contract": "wire.output:state.user.set",
+    "valid": false,
+    "value": {
+      "value": {
+        "expiresAt": "business data"
+      },
+      "version": 1,
+      "updatedAt": -1
+    }
+  },
+  {
+    "name": "Cloud user state rejects string updatedAt",
+    "contract": "wire.output:state.user.set",
+    "valid": false,
+    "value": {
+      "value": {
+        "expiresAt": "business data"
+      },
+      "version": 1,
+      "updatedAt": "2026-11-14T00:00:00Z"
+    }
+  },
+  {
+    "name": "Cloud user state rejects unknown identity",
+    "contract": "wire.output:state.user.set",
+    "valid": false,
+    "value": {
+      "value": {
+        "expiresAt": "business data"
+      },
+      "version": 1,
+      "updatedAt": 1794614400000,
+      "userId": "injected"
+    }
+  },
+  {
+    "name": "Cloud user state get authenticated reverse invoke",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_state_get",
+      "operation": "state.user.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "namespace": "default",
+        "key": "preferences"
+      }
+    }
+  },
+  {
+    "name": "Cloud user state set authenticated reverse invoke",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_state_set",
+      "operation": "state.user.set",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "namespace": "default",
+        "key": "preferences",
+        "value": {
+          "language": "zh-CN"
+        },
+        "expectedVersion": null
+      }
+    }
+  },
+  {
+    "name": "Cloud user state delete authenticated reverse invoke",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_state_delete",
+      "operation": "state.user.delete",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "namespace": "default",
+        "key": "preferences",
+        "expectedVersion": 2
+      }
+    }
+  },
+  {
+    "name": "Host features retain negotiated standard capability objects",
+    "contract": "wire.type:Caller",
+    "valid": true,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "grantId": "grant_a",
+      "hostRef": "host_a",
+      "hostCapabilities": {
+        "sampling": true,
+        "elicitation": false,
+        "roots": true
+      },
+      "hostFeatures": {
+        "sampling": {
+          "context": {},
+          "tools": {
+            "issuer": "ordinary capability metadata"
+          }
+        },
+        "elicitation": {
+          "form": {
+            "applyDefaults": true
+          },
+          "url": {}
+        },
+        "roots": {
+          "listChanged": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Host features official empty object is preserved",
+    "contract": "wire.type:HostFeatures",
+    "valid": true,
+    "value": {}
+  },
+  {
+    "name": "Host features opaque branch metadata is not authorization",
+    "contract": "wire.type:HostFeatures",
+    "valid": true,
+    "value": {
+      "sampling": {
+        "context": {},
+        "tools": {
+          "issuer": "ordinary capability metadata"
+        }
+      },
+      "elicitation": {
+        "form": {
+          "applyDefaults": true
+        },
+        "url": {}
+      },
+      "roots": {
+        "listChanged": true
+      }
+    }
+  },
+  {
+    "name": "Host features reject boolean capability",
+    "contract": "wire.type:HostFeatures",
+    "valid": false,
+    "value": {
+      "sampling": true
+    }
+  },
+  {
+    "name": "Host features reject unknown top control",
+    "contract": "wire.type:HostFeatures",
+    "valid": false,
+    "value": {
+      "extensions": {}
+    }
+  },
+  {
+    "name": "Host features reject unknown nested control",
+    "contract": "wire.type:HostFeatures",
+    "valid": false,
+    "value": {
+      "roots": {
+        "callerId": "injected"
+      }
+    }
+  },
+  {
+    "name": "Host features reject invalid form defaults",
+    "contract": "wire.type:HostFeatures",
+    "valid": false,
+    "value": {
+      "elicitation": {
+        "form": {
+          "applyDefaults": "yes"
+        }
+      }
+    }
+  },
+  {
+    "name": "Host features reject invalid tools type",
+    "contract": "wire.type:HostFeatures",
+    "valid": false,
+    "value": {
+      "sampling": {
+        "tools": []
+      }
+    }
+  },
+  {
+    "name": "Host features require original association and action gates",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "grantId": "grant_a",
+      "hostFeatures": {
+        "sampling": {
+          "context": {},
+          "tools": {
+            "issuer": "ordinary capability metadata"
+          }
+        },
+        "elicitation": {
+          "form": {
+            "applyDefaults": true
+          },
+          "url": {}
+        },
+        "roots": {
+          "listChanged": true
+        }
+      }
+    }
+  },
+  {
+    "name": "negotiated Host features travel only in trusted invocation context",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_host_features",
+      "operation": "state.user.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          },
+          "hostFeatures": {
+            "sampling": {
+              "context": {},
+              "tools": {
+                "issuer": "ordinary capability metadata"
+              }
+            },
+            "elicitation": {
+              "form": {
+                "applyDefaults": true
+              },
+              "url": {}
+            },
+            "roots": {
+              "listChanged": true
+            }
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "namespace": "default",
+        "key": "preferences"
+      }
+    }
+  },
+  {
+    "name": "ordinary input cannot inject Host feature controls",
+    "contract": "wire.input:state.user.get",
+    "valid": false,
+    "value": {
+      "namespace": "default",
+      "key": "preferences",
+      "hostFeatures": {
+        "sampling": {
+          "context": {},
+          "tools": {
+            "issuer": "ordinary capability metadata"
+          }
+        },
+        "elicitation": {
+          "form": {
+            "applyDefaults": true
+          },
+          "url": {}
+        },
+        "roots": {
+          "listChanged": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Tasks create binds an existing run with fixed TTL",
+    "contract": "wire.input:agent.tasks.create",
+    "valid": true,
+    "value": {
+      "runId": "run_a",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Tasks create permits server default TTL",
+    "contract": "wire.input:agent.tasks.create",
+    "valid": true,
+    "value": {
+      "runId": "run_a"
+    }
+  },
+  {
+    "name": "Tasks create rejects nonpositive TTL",
+    "contract": "wire.input:agent.tasks.create",
+    "valid": false,
+    "value": {
+      "runId": "run_a",
+      "ttlMs": 0
+    }
+  },
+  {
+    "name": "Tasks create cannot inject caller authority",
+    "contract": "wire.input:agent.tasks.create",
+    "valid": false,
+    "value": {
+      "runId": "run_a",
+      "userId": "user_a"
+    }
+  },
+  {
+    "name": "Task binding has canonical Agent route",
+    "contract": "wire.output:agent.tasks.create",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "working",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task get input uses routed identity",
+    "contract": "wire.input:agent.tasks.get",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+    }
+  },
+  {
+    "name": "Task get returns original normalized run view",
+    "contract": "wire.output:agent.tasks.get",
+    "valid": true,
+    "value": {
+      "task": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_a",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      },
+      "view": {
+        "run": {
+          "runId": "run_a",
+          "contextId": "context_a",
+          "projectId": null,
+          "revision": 1,
+          "status": "succeeded",
+          "scriptName": null,
+          "source": "inline",
+          "origin": null,
+          "replayOfRunId": null,
+          "acceptedAt": "2026-11-14T00:00:00.000Z",
+          "startedAt": "2026-11-14T00:00:00.000Z",
+          "finishedAt": "2026-11-14T00:00:00.000Z",
+          "deadlineAt": "2026-11-14T00:00:00.000Z",
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "error": null,
+          "stop": null,
+          "cleanup": {},
+          "availability": {
+            "code": true,
+            "input": false,
+            "result": true,
+            "logs": true
+          }
+        },
+        "wait": null,
+        "result": null,
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "operations": {
+          "items": [],
+          "complete": true
+        },
+        "resources": {
+          "items": [],
+          "complete": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Task update accepts normalized stable attachment",
+    "contract": "wire.input:agent.tasks.update",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "waitId": "wait_a",
+      "input": null,
+      "attachments": [
+        {
+          "sourceId": "att_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Task update cannot consume raw Host URL",
+    "contract": "wire.input:agent.tasks.update",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "waitId": "wait_a",
+      "input": {},
+      "attachments": [
+        {
+          "file_id": "file_a",
+          "download_url": "https://example.invalid/a"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Task update requires explicit input including null",
+    "contract": "wire.input:agent.tasks.update",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "waitId": "wait_a"
+    }
+  },
+  {
+    "name": "Task update returns binding and run view",
+    "contract": "wire.output:agent.tasks.update",
+    "valid": true,
+    "value": {
+      "task": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_a",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      },
+      "view": {
+        "run": {
+          "runId": "run_a",
+          "contextId": "context_a",
+          "projectId": null,
+          "revision": 1,
+          "status": "succeeded",
+          "scriptName": null,
+          "source": "inline",
+          "origin": null,
+          "replayOfRunId": null,
+          "acceptedAt": "2026-11-14T00:00:00.000Z",
+          "startedAt": "2026-11-14T00:00:00.000Z",
+          "finishedAt": "2026-11-14T00:00:00.000Z",
+          "deadlineAt": "2026-11-14T00:00:00.000Z",
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "error": null,
+          "stop": null,
+          "cleanup": {},
+          "availability": {
+            "code": true,
+            "input": false,
+            "result": true,
+            "logs": true
+          }
+        },
+        "wait": null,
+        "result": null,
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "operations": {
+          "items": [],
+          "complete": true
+        },
+        "resources": {
+          "items": [],
+          "complete": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Task cancel returns accepted beside same binding",
+    "contract": "wire.output:agent.tasks.cancel",
+    "valid": true,
+    "value": {
+      "task": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_a",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      },
+      "view": {
+        "run": {
+          "runId": "run_a",
+          "contextId": "context_a",
+          "projectId": null,
+          "revision": 1,
+          "status": "succeeded",
+          "scriptName": null,
+          "source": "inline",
+          "origin": null,
+          "replayOfRunId": null,
+          "acceptedAt": "2026-11-14T00:00:00.000Z",
+          "startedAt": "2026-11-14T00:00:00.000Z",
+          "finishedAt": "2026-11-14T00:00:00.000Z",
+          "deadlineAt": "2026-11-14T00:00:00.000Z",
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "error": null,
+          "stop": null,
+          "cleanup": {},
+          "availability": {
+            "code": true,
+            "input": false,
+            "result": true,
+            "logs": true
+          }
+        },
+        "wait": null,
+        "result": null,
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "operations": {
+          "items": [],
+          "complete": true
+        },
+        "resources": {
+          "items": [],
+          "complete": true
+        }
+      },
+      "accepted": false
+    }
+  },
+  {
+    "name": "Task cancel input is strict",
+    "contract": "wire.input:agent.tasks.cancel",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+    }
+  },
+  {
+    "name": "Task status working has no protocol failure",
+    "contract": "wire.type:TaskBinding",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "working",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task status input_required has no protocol failure",
+    "contract": "wire.type:TaskBinding",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "input_required",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task status completed has no protocol failure",
+    "contract": "wire.type:TaskBinding",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "completed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task status cancelled has no protocol failure",
+    "contract": "wire.type:TaskBinding",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "cancelled",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task protocol failure retains numeric error",
+    "contract": "wire.type:TaskBinding",
+    "valid": true,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "failed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000,
+      "error": {
+        "code": -32000,
+        "message": "Task transport unavailable",
+        "data": {
+          "issuer": "ordinary error data"
+        }
+      }
+    }
+  },
+  {
+    "name": "Task failure requires protocol error",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "failed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Completed Task cannot claim protocol failure",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "completed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000,
+      "error": {
+        "code": -32000,
+        "message": "Task transport unavailable",
+        "data": {
+          "issuer": "ordinary error data"
+        }
+      }
+    }
+  },
+  {
+    "name": "Task protocol code must be a safe integer",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "failed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000,
+      "error": {
+        "code": 9007199254740992,
+        "message": "bad"
+      }
+    }
+  },
+  {
+    "name": "Task error message obeys UTF8 budget",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "failed",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000,
+      "error": {
+        "code": -32000,
+        "message": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+      }
+    }
+  },
+  {
+    "name": "Task timestamp is a real date",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_a",
+      "runId": "run_a",
+      "status": "working",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-02-30T00:00:00Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task binding cannot route another Agent",
+    "contract": "wire.type:TaskBinding",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+      "agentId": "agent_other",
+      "runId": "run_a",
+      "status": "working",
+      "createdAt": "2026-11-14T00:00:00.000Z",
+      "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+      "expiresAt": "2026-11-15T00:00:00.000Z",
+      "ttlMs": 86400000
+    }
+  },
+  {
+    "name": "Task view cannot substitute another run",
+    "contract": "wire.type:TaskView",
+    "valid": false,
+    "value": {
+      "task": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_other",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      },
+      "view": {
+        "run": {
+          "runId": "run_a",
+          "contextId": "context_a",
+          "projectId": null,
+          "revision": 1,
+          "status": "succeeded",
+          "scriptName": null,
+          "source": "inline",
+          "origin": null,
+          "replayOfRunId": null,
+          "acceptedAt": "2026-11-14T00:00:00.000Z",
+          "startedAt": "2026-11-14T00:00:00.000Z",
+          "finishedAt": "2026-11-14T00:00:00.000Z",
+          "deadlineAt": "2026-11-14T00:00:00.000Z",
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "error": null,
+          "stop": null,
+          "cleanup": {},
+          "availability": {
+            "code": true,
+            "input": false,
+            "result": true,
+            "logs": true
+          }
+        },
+        "wait": null,
+        "result": null,
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "operations": {
+          "items": [],
+          "complete": true
+        },
+        "resources": {
+          "items": [],
+          "complete": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Task route rejects wrong UUID version",
+    "contract": "wire.input:agent.tasks.get",
+    "valid": false,
+    "value": {
+      "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi01MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+    }
+  },
+  {
+    "name": "Task route rejects uppercase UUID",
+    "contract": "wire.type:TaskId",
+    "valid": false,
+    "value": "nx_task_WyJhZ2VudF9hIiwiQUFBQUFBQUEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+  },
+  {
+    "name": "Task route rejects padding alias",
+    "contract": "wire.type:TaskId",
+    "valid": false,
+    "value": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0="
+  },
+  {
+    "name": "Task route rejects noncanonical base64url trailing bits",
+    "contract": "wire.type:TaskId",
+    "valid": false,
+    "value": "nx_task_Zh"
+  },
+  {
+    "name": "Task route rejects extra JSON fields",
+    "contract": "wire.type:TaskId",
+    "valid": false,
+    "value": "nx_task_WyJhZ2VudF9hIiwgIjExMTExMTExLTIyMjItNDMzMy04NDQ0LTU1NTU1NTU1NTU1NSIsICJleHRyYSJd"
+  },
+  {
+    "name": "Task route retains existing Unicode Agent identity",
+    "contract": "wire.type:TaskId",
+    "valid": true,
+    "value": "nx_task_WyJhZ2VudF_nlYwiLCIxMTExMTExMS0yMjIyLTQzMzMtODQ0NC01NTU1NTU1NTU1NTUiXQ"
+  },
+  {
+    "name": "Task invoke uses trusted original Agent connection",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_tasks",
+      "operation": "agent.tasks.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+      }
+    }
+  },
+  {
+    "name": "Task invoke rejects cross Agent route",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_tasks",
+      "operation": "agent.tasks.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "taskId": "nx_task_WyJhZ2VudF9vdGhlciIsIjExMTExMTExLTIyMjItNDMzMy04NDQ0LTU1NTU1NTU1NTU1NSJd"
+      }
+    }
+  },
+  {
+    "name": "Task result has registered envelope output",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "result",
+      "id": "rpc_tasks",
+      "operation": "agent.tasks.create",
+      "output": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_a",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      }
+    }
+  },
+  {
+    "name": "Task view cannot substitute Host response body",
+    "contract": "wire.type:TaskView",
+    "valid": false,
+    "value": {
+      "task": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0",
+        "agentId": "agent_a",
+        "runId": "run_a",
+        "status": "working",
+        "createdAt": "2026-11-14T00:00:00.000Z",
+        "lastUpdatedAt": "2026-11-14T00:00:00.000Z",
+        "expiresAt": "2026-11-15T00:00:00.000Z",
+        "ttlMs": 86400000
+      },
+      "view": {
+        "run": {
+          "runId": "run_a",
+          "contextId": "context_a",
+          "projectId": null,
+          "revision": 1,
+          "status": "succeeded",
+          "scriptName": null,
+          "source": "inline",
+          "origin": null,
+          "replayOfRunId": null,
+          "acceptedAt": "2026-11-14T00:00:00.000Z",
+          "startedAt": "2026-11-14T00:00:00.000Z",
+          "finishedAt": "2026-11-14T00:00:00.000Z",
+          "deadlineAt": "2026-11-14T00:00:00.000Z",
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "error": null,
+          "stop": null,
+          "cleanup": {},
+          "availability": {
+            "code": true,
+            "input": false,
+            "result": true,
+            "logs": true
+          }
+        },
+        "wait": null,
+        "result": {
+          "body": {
+            "streamId": "stream_a",
+            "purpose": "host-response",
+            "direction": "cloud-to-agent",
+            "expiresAt": "2026-11-14T00:00:00.000Z",
+            "maxBytes": 100,
+            "mimeType": "application/json",
+            "size": 3,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "observedAt": "2026-11-14T00:00:00.000Z",
+        "operations": {
+          "items": [],
+          "complete": true
+        },
+        "resources": {
+          "items": [],
+          "complete": true
+        }
+      }
+    }
+  },
+  {
+    "name": "Owner session is a distinct verified Caller",
+    "contract": "wire.type:Caller",
+    "valid": true,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "MCP Caller may identify explicit source",
+    "contract": "wire.type:Caller",
+    "valid": true,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "grantId": "grant_a",
+      "hostRef": "host_a",
+      "hostCapabilities": {
+        "sampling": true,
+        "elicitation": false,
+        "roots": true
+      },
+      "source": "mcp"
+    }
+  },
+  {
+    "name": "MCP Caller still requires Grant",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "source": "mcp"
+    }
+  },
+  {
+    "name": "Owner session cannot mix grantId",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "grantId": "grant_a"
+    }
+  },
+  {
+    "name": "Owner session cannot mix host",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "host": "host_a"
+    }
+  },
+  {
+    "name": "Owner session cannot mix hostRef",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hostRef": "host_a"
+    }
+  },
+  {
+    "name": "Owner session cannot mix model",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model": "model_a"
+    }
+  },
+  {
+    "name": "Owner session cannot mix hostCapabilities",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hostCapabilities": {
+        "sampling": false,
+        "elicitation": false,
+        "roots": false
+      }
+    }
+  },
+  {
+    "name": "Owner session cannot mix hostFeatures",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hostFeatures": {}
+    }
+  },
+  {
+    "name": "Owner session requires original sessionRef",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "owner_session"
+    }
+  },
+  {
+    "name": "Owner session must retain Console client association",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "nexum-console:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": "owner_session",
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "MCP Caller cannot claim a Session",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "grantId": "grant_a",
+      "hostRef": "host_a",
+      "hostCapabilities": {
+        "sampling": true,
+        "elicitation": false,
+        "roots": true
+      },
+      "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "Caller rejects invented identity source",
+    "contract": "wire.type:Caller",
+    "valid": false,
+    "value": {
+      "principalId": "user_a",
+      "clientId": "client_a",
+      "grantId": "grant_a",
+      "hostRef": "host_a",
+      "hostCapabilities": {
+        "sampling": true,
+        "elicitation": false,
+        "roots": true
+      },
+      "source": "host"
+    }
+  },
+  {
+    "name": "Owner session may invoke agent.project.resolve",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.resolve",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "path": "/tmp/work"
+      }
+    }
+  },
+  {
+    "name": "Owner session may invoke agent.project.inspect",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.project.inspect",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "projectId": "project_a",
+          "projectRoot": "/tmp/work",
+          "projectName": "Work"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "Owner session may invoke agent.context.read",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.context.read",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "revision": 1,
+        "itemId": "readme",
+        "maxBytes": 1024
+      }
+    }
+  },
+  {
+    "name": "Owner session cannot submit a script",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.start",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "contextId": "context_a",
+        "script": "return 1;",
+        "requestId": "req_1794614400000_11111111111111111111111111111111",
+        "submission": {
+          "issuedAt": 1794614400000,
+          "expiresAt": 1794700800000
+        },
+        "attachments": [
+          {
+            "transferId": "transfer_a"
+          },
+          {
+            "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "Owner session cannot invoke agent.open",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.open",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "projectId": "project_a"
+      }
+    }
+  },
+  {
+    "name": "Owner session cannot invoke state.user.get",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "state.user.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "namespace": "default",
+        "key": "pref"
+      }
+    }
+  },
+  {
+    "name": "Owner session cannot invoke agent.tasks.get",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.tasks.get",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "taskId": "nx_task_WyJhZ2VudF9hIiwiMTExMTExMTEtMjIyMi00MzMzLTg0NDQtNTU1NTU1NTU1NTU1Il0"
+      }
+    }
+  },
+  {
+    "name": "Internal project inspection input remains strict",
+    "contract": "wire.input:agent.project.inspect",
+    "valid": false,
+    "value": {
+      "projectId": "project_a",
+      "userId": "user_a"
+    }
+  },
+  {
+    "name": "Material subtree read retains fixed material identity",
+    "contract": "wire.input:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "reference/guide.md",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material root listing may request empty relative path",
+    "contract": "wire.input:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material entries expose only relative readonly metadata",
+    "contract": "wire.output:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "guide",
+      "complete": true,
+      "nextCursor": null,
+      "entries": [
+        {
+          "displayPath": "reference",
+          "kind": "directory"
+        },
+        {
+          "displayPath": "reference/guide.md",
+          "kind": "file"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Material subtree rejects escape '/private/file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "/private/file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'C:/private/file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "C:/private/file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape '../file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "../file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'reference/../secret'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "reference/../secret",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'reference\\\\file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "reference\\file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'reference/./file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "reference/./file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'reference//file'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "reference//file",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material subtree rejects escape 'file\\x00'",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 4096,
+      "relativePath": "file\u0000",
+      "includeEntries": true
+    }
+  },
+  {
+    "name": "Material listing cannot reveal absolute paths",
+    "contract": "wire.output:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "guide",
+      "complete": true,
+      "nextCursor": null,
+      "entries": [
+        {
+          "displayPath": "/private/file",
+          "kind": "file"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Material listing cannot add arbitrary filesystem fields",
+    "contract": "wire.output:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "guide",
+      "complete": true,
+      "nextCursor": null,
+      "entries": [
+        {
+          "displayPath": "file",
+          "kind": "file",
+          "absolutePath": "/private/file"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Project inspect can refresh its existing context",
+    "contract": "wire.input:agent.project.inspect",
+    "valid": true,
+    "value": {
+      "projectId": "project_a",
+      "contextId": "context_a"
+    }
+  },
+  {
+    "name": "Owner session may inspect retained Run facts",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.inspect",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "runId": "run_a"
+      }
+    }
+  },
+  {
+    "name": "MCP Caller cannot use internal retained Run inspection",
+    "contract": "wire",
+    "valid": false,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.inspect",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "client_a",
+          "grantId": "grant_a",
+          "hostRef": "host_a",
+          "hostCapabilities": {
+            "sampling": true,
+            "elicitation": false,
+            "roots": true
+          }
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": ["/tmp/work"],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1",
+          "expiresAt": "2026-11-14T00:00:00.000Z"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "runId": "run_a"
+      }
+    }
+  },
+  {
+    "name": "Retained Run inspection accepts only existing run identity",
+    "contract": "wire.input:agent.run.inspect",
+    "valid": false,
+    "value": {
+      "runId": "run_a",
+      "script": "return 1"
+    }
+  },
+  {
+    "name": "Retained Run inspection returns the bounded original Run view",
+    "contract": "wire.output:agent.run.inspect",
+    "valid": true,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "wait": null,
+      "result": null,
+      "observedAt": "2026-11-14T00:00:00.000Z",
+      "operations": {
+        "items": [],
+        "complete": true
+      },
+      "resources": {
+        "items": [],
+        "complete": true
+      }
+    }
+  },
+  {
+    "name": "Retained Run inspection cannot allocate model or Host streams",
+    "contract": "wire.output:agent.run.inspect",
+    "valid": false,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "wait": null,
+      "result": {
+        "body": {
+          "streamId": "stream_a",
+          "purpose": "result-meta",
+          "direction": "agent-to-cloud",
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "maxBytes": 100,
+          "mimeType": "application/json",
+          "size": 3,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "protocolMeta": {
+          "value": {
+            "hostOnly": "secret"
+          }
+        }
+      },
+      "observedAt": "2026-11-14T00:00:00.000Z",
+      "operations": {
+        "items": [],
+        "complete": true
+      },
+      "resources": {
+        "items": [],
+        "complete": true
+      }
+    }
+  },
+  {
+    "name": "Retained Run inspection cannot expose transient transfer delivery",
+    "contract": "wire.output:agent.run.inspect",
+    "valid": false,
+    "value": {
+      "run": {
+        "runId": "run_a",
+        "contextId": "context_a",
+        "projectId": null,
+        "revision": 1,
+        "status": "succeeded",
+        "scriptName": null,
+        "source": "inline",
+        "origin": null,
+        "replayOfRunId": null,
+        "acceptedAt": "2026-11-14T00:00:00.000Z",
+        "startedAt": "2026-11-14T00:00:00.000Z",
+        "finishedAt": "2026-11-14T00:00:00.000Z",
+        "deadlineAt": "2026-11-14T00:00:00.000Z",
+        "updatedAt": "2026-11-14T00:00:00.000Z",
+        "error": null,
+        "stop": null,
+        "cleanup": {},
+        "availability": {
+          "code": true,
+          "input": false,
+          "result": true,
+          "logs": true
+        }
+      },
+      "wait": null,
+      "result": null,
+      "observedAt": "2026-11-14T00:00:00.000Z",
+      "operations": {
+        "items": [],
+        "complete": true
+      },
+      "resources": {
+        "items": [],
+        "complete": true
+      },
+      "transient": {
+        "transfers": []
+      }
+    }
+  },
+  {
+    "name": "Material line reader requests bounded authoritative source lines",
+    "contract": "wire.input:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 25,
+      "maxLines": 1000
+    }
+  },
+  {
+    "name": "Material line reader rejects cursor position replacement",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 25,
+      "maxLines": 1000,
+      "cursor": "opaque_cursor"
+    }
+  },
+  {
+    "name": "Material line reader rejects startLine=0",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 0,
+      "maxLines": 1000
+    }
+  },
+  {
+    "name": "Material line reader rejects startLine=1.5",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 1.5,
+      "maxLines": 1000
+    }
+  },
+  {
+    "name": "Material line reader rejects maxLines=0",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 25,
+      "maxLines": 0
+    }
+  },
+  {
+    "name": "Material line reader rejects maxLines=1001",
+    "contract": "wire.input:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "startLine": 25,
+      "maxLines": 1001
+    }
+  },
+  {
+    "name": "Material line cursor may retain bounded page length",
+    "contract": "wire.input:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "maxBytes": 65536,
+      "maxLines": 1000,
+      "cursor": "opaque_cursor"
+    }
+  },
+  {
+    "name": "Material line page reports real positions and split boundaries",
+    "contract": "wire.output:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "first\nsecond",
+      "complete": false,
+      "nextCursor": "opaque_cursor",
+      "startLine": 25,
+      "endLine": 26,
+      "startsMidLine": false,
+      "endsMidLine": true
+    }
+  },
+  {
+    "name": "Material line positions remain ordered",
+    "contract": "wire.output:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "first\nsecond",
+      "complete": false,
+      "nextCursor": "opaque_cursor",
+      "startLine": 25,
+      "endLine": 24,
+      "startsMidLine": false,
+      "endsMidLine": true
+    }
+  },
+  {
+    "name": "Material line page cannot omit split-boundary metadata",
+    "contract": "wire.output:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "first\nsecond",
+      "complete": false,
+      "nextCursor": "opaque_cursor",
+      "startLine": 25,
+      "endLine": 26,
+      "startsMidLine": false
+    }
+  },
+  {
+    "name": "Material tree response can omit irrelevant line positions",
+    "contract": "wire.output:agent.context.read",
+    "valid": true,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "",
+      "complete": true,
+      "nextCursor": null,
+      "entries": [],
+      "treeTruncated": false
+    }
+  },
+  {
+    "name": "Material tree truncation marker must be boolean",
+    "contract": "wire.output:agent.context.read",
+    "valid": false,
+    "value": {
+      "contextId": "context_a",
+      "revision": 1,
+      "itemId": "skill_a",
+      "contentRevision": "rev_a",
+      "text": "first\nsecond",
+      "complete": false,
+      "nextCursor": "opaque_cursor",
+      "startLine": 25,
+      "endLine": 26,
+      "startsMidLine": false,
+      "endsMidLine": true,
+      "treeTruncated": "false"
+    }
+  }
+]

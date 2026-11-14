@@ -59,10 +59,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "code",
-        "message"
-      ],
+      "required": ["code", "message"],
       "additionalProperties": false
     },
     "hostAttachment": {
@@ -89,10 +86,7 @@
               "maxLength": 256
             }
           },
-          "required": [
-            "file_id",
-            "download_url"
-          ],
+          "required": ["file_id", "download_url"],
           "additionalProperties": false
         },
         {
@@ -104,9 +98,7 @@
               "maxLength": 4096
             }
           },
-          "required": [
-            "uri"
-          ],
+          "required": ["uri"],
           "additionalProperties": false
         },
         {
@@ -118,9 +110,7 @@
               "maxLength": 256
             }
           },
-          "required": [
-            "transferId"
-          ],
+          "required": ["transferId"],
           "additionalProperties": false
         }
       ]
@@ -133,31 +123,139 @@
       }
     },
     "caller": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "clientId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "host": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "model": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "hostRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "hostCapabilities": {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/hostCapabilities"
+            },
+            "hostFeatures": {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/hostFeatures"
+            },
+            "source": {
+              "const": "mcp"
+            },
+            "grantId": {
+              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+            }
+          },
+          "required": ["principalId", "clientId"],
+          "additionalProperties": false,
+          "dependentRequired": {
+            "hostRef": ["hostCapabilities"],
+            "hostCapabilities": ["hostRef"],
+            "hostFeatures": ["hostRef", "hostCapabilities"]
+          }
+        },
+        {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/ownerSessionCaller"
+        }
+      ]
+    },
+    "hostFeatures": {
+      "type": "object",
+      "properties": {
+        "sampling": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "type": "object"
+            },
+            "tools": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "elicitation": {
+          "type": "object",
+          "properties": {
+            "form": {
+              "type": "object",
+              "properties": {
+                "applyDefaults": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            "url": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "roots": {
+          "type": "object",
+          "properties": {
+            "listChanged": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "hostCapabilities": {
+      "type": "object",
+      "properties": {
+        "sampling": {
+          "type": "boolean"
+        },
+        "elicitation": {
+          "type": "boolean"
+        },
+        "roots": {
+          "type": "boolean"
+        }
+      },
+      "required": ["sampling", "elicitation", "roots"],
+      "additionalProperties": false
+    },
+    "ownerSessionCaller": {
       "type": "object",
       "properties": {
         "principalId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
         },
         "clientId": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "pattern": "^nexum-console:[0-9a-f]{64}$"
         },
-        "host": {
-          "type": "string",
-          "maxLength": 256
+        "source": {
+          "const": "owner_session"
         },
-        "model": {
+        "sessionRef": {
           "type": "string",
-          "maxLength": 256
+          "pattern": "^[0-9a-f]{64}$"
         }
       },
-      "required": [
-        "principalId",
-        "clientId"
-      ],
+      "required": ["principalId", "clientId", "source", "sessionRef"],
       "additionalProperties": false
     }
   }

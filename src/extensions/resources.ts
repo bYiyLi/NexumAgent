@@ -164,6 +164,8 @@ export class ResourceManager extends EventEmitter {
   #owners = new Set<Owner>();
   #timeout: number;
   #capacity: number;
+  #stopping = false;
+  #shutdownAttempt?: Promise<CleanupReport>;
   constructor(
     store: SqliteStore,
     options: { cleanupTimeoutMs?: number; capacity?: number } = {},
@@ -187,6 +189,11 @@ export class ResourceManager extends EventEmitter {
     origin: ContributionOrigin,
     binding: Omit<ResourceBinding, "runId">,
   ): ResourceInstance {
+    requireCondition(
+      !this.#stopping,
+      "agent_stopping",
+      "The Agent is no longer admitting resource instances.",
+    );
     authorizeCall(() => binding.assertActive());
     binding.signal.throwIfAborted();
     const owner: Owner = {
@@ -251,6 +258,11 @@ export class ResourceManager extends EventEmitter {
     action: ResourceAction,
     id?: string,
   ): void {
+    requireCondition(
+      !this.#stopping || action !== "register",
+      "agent_stopping",
+      "The Agent is no longer admitting new managed resources.",
+    );
     requireCondition(
       this.#owners.has(owner) && !owner.stopping,
       "extension_unavailable",
@@ -817,6 +829,28 @@ export class ResourceManager extends EventEmitter {
       }),
     );
     return this.#report(ids);
+  }
+  /** Core-only Agent shutdown; only actual controllers registered on this boot are stopped. */
+  shutdown(reason?: unknown): Promise<CleanupReport> {
+    if (this.#shutdownAttempt) return this.#shutdownAttempt;
+    this.#stopping = true;
+    const entries = [...this.#entries.values()];
+    const attempt = (async () => {
+      const outcomes = await Promise.allSettled(
+        entries.map((entry) => this.#dispose(entry, reason)),
+      );
+      const failure = outcomes.find((outcome) => outcome.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+      return this.#report(entries.map((entry) => entry.ref.id));
+    })();
+    this.#shutdownAttempt = attempt;
+    void attempt
+      .finally(() => {
+        if (this.#shutdownAttempt === attempt)
+          this.#shutdownAttempt = undefined;
+      })
+      .catch(() => {});
+    return attempt;
   }
   async waitForRunClosure(runId: string): Promise<void> {
     const rows = this.store

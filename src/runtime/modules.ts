@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import { executionGlobals } from "./globals.js";
@@ -73,6 +74,9 @@ interface AuthorizedModule {
 // Node's canonical-URL cache survives loader/bridge recreation within this process.
 // Share only evaluation evidence by profile; actual namespaces remain exclusively in Node.
 const evaluatedByWork = new Map<string, Map<string, EvaluatedModule>>();
+const packageChangeOwners = new AsyncLocalStorage<symbol>();
+const packageChangesByWork = new Map<string, symbol>();
+const packageRestartRequired = new Set<string>();
 
 const bridgeSource = [
   "export const fromWork = (specifier, options) => import(specifier, options);",
@@ -183,6 +187,17 @@ export class ModuleLoader {
       !specifier.startsWith("node:"),
       "module_missing",
       "This Node module does not exist.",
+    );
+    requireCondition(
+      !packageRestartRequired.has(this.work),
+      "module_restart_required",
+      "The work dependency graph changed after native npm evaluation; restart is required.",
+    );
+    const packageChange = packageChangesByWork.get(this.work);
+    requireCondition(
+      !packageChange || packageChangeOwners.getStore() === packageChange,
+      "module_busy",
+      "The work dependency environment is being changed by approved maintenance.",
     );
     const file =
       specifier.startsWith("file:") ||
@@ -312,6 +327,56 @@ export class ModuleLoader {
   /** Native import-conditions resolution without evaluation or a loaded-version claim. */
   resolveImport(specifier: string): string {
     return this.#entry(this.#authorize(specifier), "import");
+  }
+
+  /** Actual native npm evaluation evidence; inspection never claims a package was loaded. */
+  loadedPackages(): readonly Readonly<{
+    name: string;
+    version: string;
+    root: string;
+    revision?: string;
+  }>[] {
+    return Object.freeze(
+      [...this.#loaded.entries()]
+        .filter(
+          ([name, value]) =>
+            value.root !== undefined && !name.startsWith("file:"),
+        )
+        .map(([name, value]) =>
+          Object.freeze({
+            name,
+            version: value.version,
+            root: value.root!,
+            ...(value.revision === undefined
+              ? {}
+              : { revision: value.revision }),
+          }),
+        ),
+    );
+  }
+
+  /** One approved native package mutation per work; unrelated imports cannot enter mid-change. */
+  async withPackageChanges<T>(action: () => Promise<T>): Promise<T> {
+    const active = packageChangesByWork.get(this.work);
+    if (active && packageChangeOwners.getStore() === active) return action();
+    requireCondition(
+      !active,
+      "module_busy",
+      "Another approved package change is using this work environment.",
+    );
+    const token = Symbol("package-change");
+    packageChangesByWork.set(this.work, token);
+    try {
+      return await packageChangeOwners.run(token, action);
+    } finally {
+      if (packageChangesByWork.get(this.work) === token)
+        packageChangesByWork.delete(this.work);
+    }
+  }
+
+  /** Native transitive-module caches cannot be replaced safely in this process. */
+  markPackageRestartRequired(): void {
+    packageRestartRequired.add(this.work);
   }
 
   #remember(

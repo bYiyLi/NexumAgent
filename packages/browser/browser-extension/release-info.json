@@ -1,0 +1,21 @@
+{
+  "packageVersion": "0.1.0-development.0",
+  "extensionVersion": "0.1.0",
+  "protocolVersion": 1,
+  "profiles": {
+    "production": {
+      "profile": "production",
+      "port": 43831,
+      "extensionId": "cpbcdiihflnhkocdlgfimhbdfjcdoncg",
+      "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp/TY/BToqqO0ffPCJMqzl7pq3uw42ysfz/kWyY3Jw4MVsiNrHEPZJ403p7N/3lTgALqO+/oHEPsfnbdXB1woDfuwyBPxSthfNaEDj1S0koYMa5Ocb6tUMTBzuZOLqXr7s97is0rpgb3oEy7uGmwJUvtf8Klgh1JgzL5D0lGYws97NfLAxS1lFXcRmxmQ0RrnVwkeUAjKeYnEemqRIX7yAbKvjq63I1GDTZMngg6cxbFhFOPz+7q3mwdy4nbBgCzsVf1pk8itNMbFzCngakRoV1wruLNlQLBFhDxtRrbwB9xaEnkXBXI1j3Pl9E7Z1W8yGTkzSxxNTXeOUg277UluHwIDAQAB",
+      "directory": "dist/production"
+    },
+    "development": {
+      "profile": "development",
+      "port": 43832,
+      "extensionId": "jefnkdpjllmodpfhhjbegddododpiahf",
+      "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtjImAZgqOH69mQAmDly9MLjCACeZs7MmPAegDja+g/LJ71H+NmGSIz6AOEMXT2bzxPtZMnoCIg8HuLgN3pIZlxtUD8p7JqLZFkjY2H9mKRf3zFnkYYuxXMiuGucXzatsyY2cnIZsmzvbU3/5pN8I6qW9gA2gVS7vZyN6IksCMtfivoVu6uFxeHenWAWtm4/CbI7jLX4a/6kW4wnEP5JBzpjXUfQrTlepU6kHQFIiMufVMmuj7/2SlF41ToXw5PyrJOR3jnusf1tKZc6EDkTJM3ueO1DwQnvWyd0b0C9ulVzssSQtY2KK8HZmiG/nXJMQ6OflXP1gmASgfPcE6BMcIQIDAQAB",
+      "directory": "dist/development"
+    }
+  }
+}

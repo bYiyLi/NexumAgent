@@ -367,6 +367,32 @@ export class ScriptCatalog {
     }
   }
 
+  /** Core's asynchronous quota boundary around the existing synchronous publication. */
+  async enrollManaged(
+    code: string,
+    options: {
+      readonly reserve?: (bytes: number) => Promise<{ release(): void }>;
+      readonly assertCurrent?: () => void;
+    } = {},
+  ): Promise<{ snapshot: ScriptSnapshot; saved: boolean }> {
+    const metadata = scriptHeader(code);
+    if (!metadata || !options.reserve) {
+      options.assertCurrent?.();
+      return this.enroll(code);
+    }
+    // refreshIndex already enforces this exact eight-MiB ceiling. Reserving its
+    // complete rewrite also covers the old file coexisting with its atomic temp.
+    const ticket = await options.reserve(
+      Buffer.byteLength(code) + 8 * 1024 * 1024 + 2048,
+    );
+    try {
+      options.assertCurrent?.();
+      return this.enroll(code);
+    } finally {
+      ticket.release();
+    }
+  }
+
   discover(
     canUse: (origin: ScriptOrigin) => boolean = () => true,
   ): ScriptDiscovery {

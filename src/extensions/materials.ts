@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { rmSync } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -17,6 +18,10 @@ import type { ContributionOrigin } from "../contracts/types.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { contains, privateDirectory } from "../runtime/paths.js";
 import type { ScriptSource } from "../runtime/scripts.js";
+import type {
+  ManagedReserve,
+  MaterialRetention,
+} from "../runtime/material-retention.js";
 import { boundedFile } from "../work/discovery.js";
 import type { PublishedMaterials } from "../work/service.js";
 import type { ExtensionHandle } from "./registry.js";
@@ -118,14 +123,26 @@ export class ExtensionMaterials {
     docs: [],
   });
   #sources: readonly ScriptSource[] = Object.freeze([]);
+  #reserve?: ManagedReserve;
+  #retention?: MaterialRetention;
+  #holds = new Map<string, { release(): void }>();
+  #directories = new Map<string, string>();
+  #stages = new Set<string>();
   constructor(
     work: string,
-    limits: { maxFiles?: number; maxBytes?: number } = {},
+    limits: {
+      maxFiles?: number;
+      maxBytes?: number;
+      reserve?: ManagedReserve;
+      materialRetention?: MaterialRetention;
+    } = {},
   ) {
     // No directory creation or package evaluation during construction.
     this.work = work;
     this.#maxFiles = limits.maxFiles ?? 10000;
     this.#maxBytes = limits.maxBytes ?? 256 * 1024 * 1024;
+    this.#reserve = limits.reserve;
+    this.#retention = limits.materialRetention;
     requireCondition(
       path.isAbsolute(work) &&
         [this.#maxFiles, this.#maxBytes].every(
@@ -506,7 +523,17 @@ export class ExtensionMaterials {
       "extension_path_escape",
       "A reading parent must not redirect before staging.",
     );
-    const temporary = await mkdtemp(path.join(parent, ".prepare-"));
+    const hold = await this.#retention?.hold("extension", directory);
+    let transferred = false;
+    let temporary: string;
+    try {
+      temporary = await mkdtemp(path.join(parent, ".prepare-"));
+    } catch (cause) {
+      hold?.release();
+      throw cause;
+    }
+    this.#stages.add(temporary);
+    let unprotect: (() => void) | undefined;
     let totalBytes = 0;
     const saved: SavedFile[] = [];
     const save = async (
@@ -553,7 +580,21 @@ export class ExtensionMaterials {
         "extension_path_escape",
         "A generated reading directory escaped its private staging area.",
       );
-      await writeFile(target, bytes, { flag: "wx", mode: 0o600 });
+      const reservation = bytes.length
+        ? await this.#reserve?.(bytes.length)
+        : undefined;
+      try {
+        signal?.throwIfAborted();
+        requireCondition(
+          (await realpath(temporary)) === temporary &&
+            (await realpath(path.dirname(target))) === path.dirname(target),
+          "extension_path_escape",
+          "The reading stage changed during storage admission.",
+        );
+        await writeFile(target, bytes, { flag: "wx", mode: 0o600 });
+      } finally {
+        reservation?.release();
+      }
       totalBytes += bytes.length;
       saved.push({
         path: filename,
@@ -565,6 +606,7 @@ export class ExtensionMaterials {
       });
     };
     try {
+      unprotect = this.#retention?.protectPending(temporary);
       let instructionContent: string | undefined;
       for (const item of plan) {
         let bytes = await readSource(item.source, item.boundary);
@@ -693,10 +735,21 @@ export class ExtensionMaterials {
         "extension_material_too_large",
         "The complete reading manifest exceeds its snapshot budget.",
       );
-      await writeFile(path.join(temporary, "manifest.json"), manifest, {
-        flag: "wx",
-        mode: 0o600,
-      });
+      const reservation = await this.#reserve?.(manifest.length);
+      try {
+        signal?.throwIfAborted();
+        requireCondition(
+          (await realpath(temporary)) === temporary,
+          "extension_path_escape",
+          "The reading stage changed during manifest storage admission.",
+        );
+        await writeFile(path.join(temporary, "manifest.json"), manifest, {
+          flag: "wx",
+          mode: 0o600,
+        });
+      } finally {
+        reservation?.release();
+      }
       const verifyExisting = async () => {
         requireCondition(
           (await lstat(directory)).isDirectory() &&
@@ -858,9 +911,34 @@ export class ExtensionMaterials {
       });
       canonicalJson(prepared.materials, 4 * 1024 * 1024);
       this.#prepared.add(prepared);
+      this.#holds.get(handle.id)?.release();
+      if (hold) this.#holds.set(handle.id, hold);
+      this.#directories.set(handle.id, directory);
+      transferred = true;
       return prepared;
     } finally {
-      await rm(temporary, { recursive: true, force: true });
+      try {
+        const info = await lstat(temporary).catch(
+          (cause: NodeJS.ErrnoException) => {
+            if (cause.code === "ENOENT") return null;
+            throw cause;
+          },
+        );
+        if (info) {
+          requireCondition(
+            info.isDirectory() &&
+              !info.isSymbolicLink() &&
+              (await realpath(temporary)) === temporary,
+            "extension_path_escape",
+            "A failed reading stage cannot redirect its cleanup.",
+          );
+          rmSync(temporary, { recursive: true, force: true });
+        }
+      } finally {
+        unprotect?.();
+        this.#stages.delete(temporary);
+        if (!transferred) hold?.release();
+      }
     }
   }
 
@@ -896,6 +974,10 @@ export class ExtensionMaterials {
       .concat(prepared)
       .sort((a, b) => compare(a.origin.namespace!, b.origin.namespace!));
     const index = this.#index(items);
+    this.#retention?.setPublished(
+      `extension:${prepared.origin.namespace}`,
+      prepared.directory,
+    );
     // All validation precedes this synchronous commit; no user callback or await follows it.
     this.#active.set(key, prepared);
     this.#published = index.published;
@@ -905,18 +987,33 @@ export class ExtensionMaterials {
     const previous = [...this.#active.values()].find(
       (item) => item.handleId === handleId,
     );
-    if (!previous) return;
+    if (!previous) {
+      this.#holds.get(handleId)?.release();
+      this.#holds.delete(handleId);
+      this.#directories.delete(handleId);
+      return;
+    }
     const index = this.#index(
       [...this.#active.values()].filter((item) => item !== previous),
+    );
+    this.#retention?.setPublished(
+      `extension:${previous.origin.namespace}`,
+      null,
     );
     this.#active.delete(portable(previous.origin.namespace!));
     this.#published = index.published;
     this.#sources = index.sources;
+    this.#holds.get(handleId)?.release();
+    this.#holds.delete(handleId);
+    this.#directories.delete(handleId);
   }
   published(): PublishedMaterials {
     return this.#published;
   }
   scriptSources(): readonly ScriptSource[] {
     return this.#sources;
+  }
+  activeDirectories(): ReadonlySet<string> {
+    return new Set([...this.#directories.values(), ...this.#stages]);
   }
 }

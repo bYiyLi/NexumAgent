@@ -7,7 +7,7 @@ import {
   isAgentError,
   requireCondition,
 } from "../contracts/errors.js";
-import { authorizeCall } from "../contracts/caller.js";
+import { authorizeCall, type Caller } from "../contracts/caller.js";
 import {
   canonicalJson,
   digest,
@@ -21,6 +21,16 @@ import type {
 } from "../contracts/types.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import type { RunServices } from "../runtime/engine.js";
+import {
+  bindHostRequests,
+  type HostRequestBinding,
+  type HostRequestServices,
+} from "./host-requests.js";
+import {
+  unavailableMaintenance,
+  type MaintenanceScope,
+  type MaintenanceService,
+} from "../maintenance/requests.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
 import {
@@ -61,6 +71,8 @@ import type {
   Invocation,
   LogEntry,
   MethodDefinition,
+  StorageReservation,
+  StorageService,
 } from "./api.js";
 
 export interface ExtensionSource {
@@ -76,6 +88,11 @@ export interface ExtensionHandle {
   readonly origin: ContributionOrigin;
   readonly methods: readonly JsonObject[];
 }
+/** Core-only proof of one prepared successor; never passed to an extension host. */
+export interface ExtensionReplacement {
+  readonly previous: ExtensionHandle;
+  readonly candidate: ExtensionHandle;
+}
 export interface RegistryPolicy {
   origin: ContributionOrigin;
   action: "prepare" | "publish" | "invoke" | "resource" | "disable";
@@ -90,6 +107,10 @@ export interface RegistryPolicy {
 export interface RegistryOptions {
   cleanupTimeoutMs?: number;
   permissions: ReadonlySet<string>;
+  /** Core's profile retention service. Only the narrow facade enters SDK code. */
+  storage?: StorageService;
+  hostRequests?(binding: HostRequestBinding): HostRequestServices | undefined;
+  maintenance?(binding: MaintenanceScope): MaintenanceService;
   state?(binding: {
     readonly context: Readonly<JsonObject>;
     readonly signal: AbortSignal;
@@ -137,6 +158,9 @@ interface Entry {
   controller: AbortController;
   resources: ResourceInstance;
   protected: WeakSet<object>;
+  storage: Set<() => void>;
+  storagePending: Set<Promise<unknown>>;
+  storageDone?: AbortController;
   methods: Method[];
   state:
     "preparing" | "ready" | "published" | "stopping" | "failed" | "disabled";
@@ -155,6 +179,15 @@ interface Entry {
   resourceDone?: AbortController;
   resourceReport?: JsonObject;
   resourceFailed?: boolean;
+  replaces?: Entry;
+  replacement?: Entry;
+  replacementPreparation?: Promise<ExtensionReplacement>;
+}
+interface Replacement {
+  previous: Entry;
+  candidate: Entry;
+  state: "prepared" | "retiring" | "retired" | "published";
+  retirement?: Promise<JsonObject>;
 }
 function frozen<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -309,6 +342,8 @@ export class ExtensionRegistry {
   #entries = new Set<Entry>();
   #handles = new WeakMap<ExtensionHandle, Entry>();
   #preparationFailures = new WeakMap<object, ExtensionHandle>();
+  #packageMaintenance = new Set<Entry>();
+  #replacements = new WeakMap<ExtensionReplacement, Replacement>();
   constructor(resources: ResourceManager, options: RegistryOptions) {
     this.resources = resources;
     this.#options = { ...options, permissions: new Set(options.permissions) };
@@ -326,6 +361,54 @@ export class ExtensionRegistry {
   prepare(
     value: ExtensionSource,
     factory: ExtensionFactory,
+  ): Promise<ExtensionHandle> {
+    return this.#prepare(value, factory);
+  }
+  /** Prepare exactly one hidden successor while its published predecessor keeps serving. */
+  prepareReplacement(
+    previousHandle: ExtensionHandle,
+    value: ExtensionSource,
+    factory: ExtensionFactory,
+  ): Promise<ExtensionReplacement> {
+    const previous = this.#entry(previousHandle);
+    this.#instance(previous);
+    requireCondition(
+      previous.state === "published",
+      "extension_not_ready",
+      "A replacement must name this Registry's published source instance.",
+    );
+    if (previous.replacement) {
+      const candidate = previous.replacement;
+      requireCondition(
+        candidate.key === digest(json(value)) && candidate.factory === factory,
+        "extension_busy",
+        "Another successor already reserves this source instance.",
+      );
+      return candidate.replacementPreparation!;
+    }
+    const prepared = this.#prepare(value, factory, previous);
+    const preparation = prepared.then((handle) => {
+      const candidate = this.#entry(handle);
+      const token: ExtensionReplacement = Object.freeze({
+        previous: previous.handle,
+        candidate: handle,
+      });
+      this.#replacements.set(token, {
+        previous,
+        candidate,
+        state: "prepared",
+      });
+      return token;
+    });
+    const candidate = previous.replacement as Entry | undefined;
+    if (candidate) candidate.replacementPreparation = preparation;
+    void preparation.catch(() => {});
+    return preparation;
+  }
+  #prepare(
+    value: ExtensionSource,
+    factory: ExtensionFactory,
+    replaces?: Entry,
   ): Promise<ExtensionHandle> {
     const source = json(value);
     requireCondition(
@@ -385,8 +468,19 @@ export class ExtensionRegistry {
       permissions: source.permissions,
     });
     const key = digest(source);
+    if (replaces)
+      requireCondition(
+        same(replaces.root, root) &&
+          replaces.source.origin.type === source.origin.type &&
+          replaces.source.origin.owner === source.origin.owner &&
+          replaces.source.origin.namespace === source.origin.namespace,
+        "extension_replacement_mismatch",
+        "A successor must keep its exact source owner and SDK root.",
+      );
     const previous = [...this.#entries].find(
-      (entry) => prefix(entry.root, root) || prefix(root, entry.root),
+      (entry) =>
+        entry !== replaces &&
+        (prefix(entry.root, root) || prefix(root, entry.root)),
     );
     if (previous) {
       requireCondition(
@@ -410,7 +504,7 @@ export class ExtensionRegistry {
               this.#preparationFailures.set(failure, previous.handle);
               throw failure;
             }
-            this.#entries.delete(previous);
+            this.#forget(previous);
             return this.prepare(source, factory);
           });
           previous.recovery = recovery;
@@ -443,12 +537,16 @@ export class ExtensionRegistry {
       scripts: 0,
       methods: [],
       protected: new WeakSet(),
+      storage: new Set(),
+      storagePending: new Set(),
       preparation: preparation.promise,
       handle,
       resources: undefined!,
+      ...(replaces ? { replaces } : {}),
     };
     this.#entries.add(entry);
     this.#handles.set(handle, entry);
+    if (replaces) replaces.replacement = entry;
     try {
       entry.resources = this.resources.instance(source.origin, {
         signal: controller.signal,
@@ -461,7 +559,7 @@ export class ExtensionRegistry {
           }),
       });
     } catch (error) {
-      this.#entries.delete(entry);
+      this.#forget(entry);
       this.#handles.delete(handle);
       preparation.reject(error);
       return preparation.promise;
@@ -472,7 +570,19 @@ export class ExtensionRegistry {
       .then(preparation.resolve, preparation.reject);
     return entry.preparation;
   }
+  #forget(entry: Entry): void {
+    this.#entries.delete(entry);
+    if (entry.replaces?.replacement === entry)
+      entry.replaces.replacement = undefined;
+    entry.replaces = undefined;
+    entry.replacementPreparation = undefined;
+  }
   #instance(entry: Entry): void {
+    requireCondition(
+      !this.#packageMaintenance.has(entry),
+      "extension_busy",
+      "The package is reserved for an approved dependency change.",
+    );
     requireCondition(
       this.#entries.has(entry) &&
         ["preparing", "ready", "published"].includes(entry.state) &&
@@ -510,6 +620,208 @@ export class ExtensionRegistry {
     });
     entry.protected.add(api);
     return api;
+  }
+  #storage(
+    entry: Entry,
+    signal: AbortSignal,
+    assertAllowed: () => void,
+  ): StorageService {
+    const check = () => {
+      signal.throwIfAborted();
+      this.#instance(entry);
+      requireCondition(
+        entry.source.permissions.includes("storage.reserve"),
+        "undeclared_permission",
+        "The source must declare storage.reserve before reserving managed space.",
+      );
+      assertAllowed();
+      signal.throwIfAborted();
+      this.#instance(entry);
+    };
+    const api: StorageService = Object.freeze({
+      reserve: async (bytes: number) => {
+        check();
+        requireCondition(
+          Number.isSafeInteger(bytes) && bytes > 0,
+          "invalid_storage_reservation",
+          "Reserve a positive safe byte count before managed allocation.",
+        );
+        const provider = this.#options.storage;
+        requireCondition(
+          provider,
+          "storage_unavailable",
+          "No profile storage reservation provider is configured.",
+        );
+        requireCondition(
+          typeof provider === "object" &&
+            !types.isProxy(provider) &&
+            !types.isPromise(provider),
+          "storage_configuration",
+          "Storage must use the trusted synchronous service facade.",
+        );
+        let owner: object | null = provider,
+          descriptor: PropertyDescriptor | undefined;
+        while (owner && !descriptor) {
+          requireCondition(
+            !types.isProxy(owner),
+            "storage_configuration",
+            "Storage service prototypes cannot be proxies.",
+          );
+          descriptor = Object.getOwnPropertyDescriptor(owner, "reserve");
+          owner = Object.getPrototypeOf(owner);
+        }
+        requireCondition(
+          descriptor &&
+            "value" in descriptor &&
+            typeof descriptor.value === "function" &&
+            !types.isProxy(descriptor.value),
+          "storage_configuration",
+          "Storage must expose its ordinary reserve method.",
+        );
+        const reserve = descriptor.value as StorageService["reserve"];
+        entry.protected.add(provider);
+        entry.protected.add(reserve);
+        const pending = (async () => {
+          const ticket: unknown = await Reflect.apply(reserve, provider, [
+            bytes,
+          ]);
+          requireCondition(
+            ticket &&
+              typeof ticket === "object" &&
+              !types.isProxy(ticket) &&
+              !types.isPromise(ticket),
+            "storage_configuration",
+            "Storage must return its narrow reservation ticket.",
+          );
+          entry.protected.add(ticket);
+          let owner: object | null = ticket,
+            releaseDescriptor: PropertyDescriptor | undefined;
+          while (owner && !releaseDescriptor) {
+            requireCondition(
+              !types.isProxy(owner),
+              "storage_configuration",
+              "Storage ticket prototypes cannot be proxies.",
+            );
+            releaseDescriptor = Object.getOwnPropertyDescriptor(
+              owner,
+              "release",
+            );
+            owner = Object.getPrototypeOf(owner);
+          }
+          requireCondition(
+            releaseDescriptor &&
+              "value" in releaseDescriptor &&
+              typeof releaseDescriptor.value === "function" &&
+              !types.isProxy(releaseDescriptor.value),
+            "storage_configuration",
+            "Storage tickets must expose their ordinary synchronous release method.",
+          );
+          const innerRelease =
+            releaseDescriptor.value as StorageReservation["release"];
+          entry.protected.add(innerRelease);
+          let released = false;
+          const release = () => {
+            if (released) return;
+            released = true;
+            entry.storage.delete(release);
+            // Cleanup intentionally does not consult the ended invocation or
+            // revoked authority. The Core ticket itself owns the one refund.
+            authorizeCall(() => Reflect.apply(innerRelease, ticket, []));
+          };
+          const facade = Object.freeze({ release });
+          entry.protected.add(facade);
+          entry.protected.add(release);
+          entry.storage.add(release);
+          try {
+            check();
+            return facade;
+          } catch (cause) {
+            release();
+            throw cause;
+          }
+        })();
+        if (!entry.storagePending.size)
+          entry.storageDone = new AbortController();
+        entry.storagePending.add(pending);
+        entry.calls++;
+        try {
+          return await pending;
+        } finally {
+          entry.calls--;
+          entry.storagePending.delete(pending);
+          if (!entry.storagePending.size) entry.storageDone?.abort();
+        }
+      },
+    });
+    entry.protected.add(api);
+    entry.protected.add(api.reserve);
+    return api;
+  }
+  #protectMaintenance(
+    entry: Entry,
+    inner: MaintenanceService,
+    assertAllowed: (access: string) => void,
+  ): MaintenanceService {
+    if (types.isPromise(inner))
+      void Promise.prototype.then.call(inner, undefined, () => {});
+    requireCondition(
+      isPlainRecord(inner),
+      "maintenance_configuration",
+      "A maintenance provider must synchronously return the public service.",
+    );
+    const api: Record<string, unknown> = {};
+    entry.protected.add(inner);
+    const method = (
+      owner: Record<string, unknown>,
+      name: string,
+      access: string,
+    ) => {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, name);
+      requireCondition(
+        descriptor &&
+          "value" in descriptor &&
+          typeof descriptor.value === "function" &&
+          !types.isProxy(descriptor.value),
+        "maintenance_configuration",
+        "A maintenance provider must expose the documented ordinary methods.",
+      );
+      const handler = descriptor.value as (...args: unknown[]) => unknown;
+      entry.protected.add(handler);
+      const wrapper = (...args: unknown[]) => {
+        assertAllowed(access);
+        return Reflect.apply(handler, owner, args);
+      };
+      entry.protected.add(wrapper);
+      return wrapper;
+    };
+    for (const [group, names] of Object.entries({
+      packages: ["install", "update", "remove"],
+      extensions: ["enable", "disable"],
+      mcp: ["add", "update", "remove"],
+      api: ["import", "update", "remove"],
+    })) {
+      const descriptor = Object.getOwnPropertyDescriptor(inner, group);
+      requireCondition(
+        descriptor && "value" in descriptor && isPlainRecord(descriptor.value),
+        "maintenance_configuration",
+        "The maintenance provider is missing a public method group.",
+      );
+      const owner = descriptor.value as Record<string, unknown>;
+      entry.protected.add(owner);
+      const groupApi: Record<string, unknown> = {};
+      for (const name of names)
+        groupApi[name] = method(owner, name, `${group}.${name}`);
+      api[group] = Object.freeze(groupApi);
+      entry.protected.add(groupApi);
+    }
+    for (const name of ["get", "list", "cancel"])
+      api[name] = method(
+        inner as unknown as Record<string, unknown>,
+        name,
+        name,
+      );
+    entry.protected.add(api);
+    return Object.freeze(api) as unknown as MaintenanceService;
   }
   #protectTransfer(
     entry: Entry,
@@ -570,6 +882,13 @@ export class ExtensionRegistry {
       config: json(entry.source.config ?? {}),
       signal: entry.controller.signal,
       resources: this.#protectResources(entry, entry.resources.resources),
+      storage: this.#storage(entry, entry.controller.signal, () =>
+        this.#authorize({
+          origin: entry.source.origin,
+          action: "resource",
+          permissions: ["storage.reserve"],
+        }),
+      ),
       authorize: (target: AccessTarget) => {
         this.#instance(entry);
         const fixed = json(target) as unknown as AccessTarget;
@@ -761,7 +1080,7 @@ export class ExtensionRegistry {
         ),
       );
       const cleanup = await this.#cleanup(entry).catch(() => null);
-      if (cleanup?.status === "disabled") this.#entries.delete(entry);
+      if (cleanup?.status === "disabled") this.#forget(entry);
       const failure = new AgentError(
         "extension_initialization_failed",
         "The extension's factory or declared method table could not be prepared.",
@@ -939,6 +1258,11 @@ export class ExtensionRegistry {
   publish(handle: ExtensionHandle, commitContributions?: () => void): void {
     const entry = this.#entry(handle);
     this.#instance(entry);
+    requireCondition(
+      !entry.replaces,
+      "extension_replacement_required",
+      "A prepared successor must retire its exact predecessor before publication.",
+    );
     this.#authorize({
       origin: entry.source.origin,
       action: "publish",
@@ -953,6 +1277,102 @@ export class ExtensionRegistry {
     // no await or extension callback between it and the SDK visibility change.
     this.#commitContributions(commitContributions);
     entry.state = "published";
+  }
+  #replacement(token: ExtensionReplacement): Replacement {
+    const replacement = this.#replacements.get(token);
+    requireCondition(
+      replacement,
+      "extension_replacement_unavailable",
+      "This is not a replacement prepared by this Agent/profile Registry.",
+    );
+    return replacement;
+  }
+  /** Fence new business calls synchronously, then observe the old instance's real cleanup. */
+  retireReplacement(token: ExtensionReplacement): Promise<JsonObject> {
+    const replacement = this.#replacement(token);
+    const { previous, candidate } = replacement;
+    this.#instance(candidate);
+    requireCondition(
+      candidate.state === "ready" && candidate.replaces === previous,
+      "extension_not_ready",
+      "The prepared successor is no longer available for this cutover.",
+    );
+    if (replacement.state === "retired")
+      return Promise.resolve({ status: "disabled" });
+    requireCondition(
+      replacement.state !== "published",
+      "extension_replacement_committed",
+      "This successor has already been published.",
+    );
+    if (replacement.retirement) return replacement.retirement;
+    requireCondition(
+      !this.#packageMaintenance.has(previous),
+      "extension_busy",
+      "An approved package change already reserves the old instance.",
+    );
+    requireCondition(
+      ["published", "stopping", "disabled"].includes(previous.state),
+      "extension_unavailable",
+      "The original source instance cannot be retired for this successor.",
+    );
+    // No await occurs between these checks and disable's state transition.
+    // Instance-owned shared connections are not business occupancy; their real
+    // closure is joined by disable, without interrupting them during prepare.
+    this.assertIdle(candidate.handle);
+    this.assertIdle(previous.handle);
+    const work = this.disable(previous.handle);
+    replacement.state = "retiring";
+    const retirement = work.then((report) => {
+      if (report.status === "disabled") replacement.state = "retired";
+      return report;
+    });
+    replacement.retirement = retirement;
+    void retirement
+      .finally(() => {
+        if (replacement.retirement === retirement)
+          replacement.retirement = undefined;
+      })
+      .catch(() => {});
+    return retirement;
+  }
+  /** Publish already-prepared discovery and SDK bindings only after confirmed old closure. */
+  publishReplacement(
+    token: ExtensionReplacement,
+    commitContributions?: () => void,
+  ): void {
+    const replacement = this.#replacement(token);
+    const { previous, candidate } = replacement;
+    this.#instance(candidate);
+    if (replacement.state === "published") {
+      requireCondition(
+        candidate.state === "published",
+        "extension_unavailable",
+        "The published successor is no longer available.",
+      );
+      return;
+    }
+    requireCondition(
+      replacement.state === "retired" &&
+        previous.state === "disabled" &&
+        !this.#entries.has(previous) &&
+        candidate.state === "ready" &&
+        candidate.replaces === previous,
+      "extension_replacement_not_retired",
+      "The old instance must finish actual disposal and resource closure before publication.",
+    );
+    this.#authorize({
+      origin: candidate.source.origin,
+      action: "publish",
+      permissions: candidate.source.permissions,
+    });
+    // The caller has already prepared these indexes and committed its approved
+    // configuration. There is no extension callback or await during visibility.
+    this.#commitContributions(commitContributions);
+    candidate.replaces = undefined;
+    candidate.replacementPreparation = undefined;
+    previous.replacement = undefined;
+    candidate.state = "published";
+    replacement.state = "published";
   }
   bindings(services: RunServices): Readonly<Record<string, unknown>> {
     const result = Object.create(null) as Record<string, unknown>;
@@ -1087,6 +1507,7 @@ export class ExtensionRegistry {
                   "agent-state",
                   "user-state",
                   "transfer",
+                  "maintenance",
                 ].includes(target.type) &&
                 segment(target.value) &&
                 segment(target.access),
@@ -1114,6 +1535,13 @@ export class ExtensionRegistry {
                   method.permissions.includes(`transfer.${target.access}`),
                 "undeclared_permission",
                 "A method must declare the transfer capability it uses.",
+              );
+            }
+            if (target.type === "maintenance") {
+              requireCondition(
+                method.permissions.includes(`maintenance.${target.access}`),
+                "undeclared_permission",
+                "A method must declare the maintenance capability it uses.",
               );
             }
             this.#authorize({ ...policy, target: json(target) });
@@ -1147,12 +1575,63 @@ export class ExtensionRegistry {
               );
             },
           );
+          const maintenance = this.#protectMaintenance(
+            entry,
+            this.#options.maintenance?.({
+              caller: services.context.caller as unknown as Caller,
+              pwd: services.context.pwd as string,
+              operationId,
+              runId: services.runId,
+              signal: services.signal,
+              assertCurrent: current,
+              authorize,
+            }) ?? unavailableMaintenance(current),
+            (access) => {
+              current();
+              requireCondition(
+                method.permissions.includes(`maintenance.${access}`),
+                "undeclared_permission",
+                "A method must declare the maintenance capability it uses.",
+              );
+            },
+          );
+          const hostBinding: HostRequestBinding = {
+            context: services.context,
+            runId: services.runId,
+            signal: services.signal,
+            deadline: services.deadlineAt,
+            assertCurrent: current,
+          };
+          const hostProvider = this.#options.hostRequests?.(hostBinding);
+          const hostRequests = hostProvider
+            ? bindHostRequests(hostProvider, hostBinding)
+            : undefined;
+          if (hostProvider) entry.protected.add(hostProvider);
+          if (hostRequests) {
+            entry.protected.add(hostRequests);
+            for (const value of Object.values(hostRequests))
+              if (typeof value === "function") entry.protected.add(value);
+          }
           const call: Invocation = Object.freeze({
             context: services.context,
             operationId,
             signal: services.signal,
             deadline: services.deadlineAt,
             resources,
+            storage: this.#storage(entry, services.signal, () => {
+              current();
+              requireCondition(
+                method.permissions.includes("storage.reserve"),
+                "undeclared_permission",
+                "The method must declare storage.reserve before reserving managed space.",
+              );
+              this.#authorize({
+                ...policy,
+                action: "resource",
+                permissions: ["storage.reserve"],
+              });
+              current();
+            }),
             output: createOutput(services.context.pwd as string, current, {
               agentId: this.resources.store.binding.agentId,
               profileRoot: this.resources.store.root,
@@ -1161,6 +1640,8 @@ export class ExtensionRegistry {
             }),
             state,
             transfer,
+            maintenance,
+            ...(hostRequests ? { hostRequests } : {}),
             log: (value: LogEntry) => {
               current();
               this.#log(entry, value, services.runId, operationId);
@@ -1627,15 +2108,17 @@ export class ExtensionRegistry {
     this.#options.log(entry.source.origin, data, runId, operationId);
   }
   lease(origin: ContributionOrigin): () => void {
-    const entries = [...this.#entries].filter((item) =>
-      same(
-        [
-          item.source.origin.owner,
-          item.source.origin.namespace!,
-          item.source.origin.version!,
-        ],
-        [origin.owner, origin.namespace!, origin.version!],
-      ),
+    const entries = [...this.#entries].filter(
+      (item) =>
+        item.state === "published" &&
+        same(
+          [
+            item.source.origin.owner,
+            item.source.origin.namespace!,
+            item.source.origin.version!,
+          ],
+          [origin.owner, origin.namespace!, origin.version!],
+        ),
     );
     const entry = entries.length === 1 ? entries[0] : undefined;
     requireCondition(
@@ -1659,6 +2142,37 @@ export class ExtensionRegistry {
       }
     };
   }
+  /** Synchronous preflight; does not stop an instance or withdraw its contributions. */
+  assertIdle(handle: ExtensionHandle): void {
+    const entry = this.#entry(handle);
+    requireCondition(
+      entry.state !== "preparing" &&
+        entry.calls === 0 &&
+        entry.scripts === 0 &&
+        !entry.resources.busy(),
+      "extension_busy",
+      "Calls, active source scripts or independent business resources still use this version.",
+    );
+  }
+  /** Reserve all affected idle instances before the first asynchronous package mutation. */
+  reservePackageChanges(handles: readonly ExtensionHandle[]): () => void {
+    const entries = [...new Set(handles.map((handle) => this.#entry(handle)))];
+    for (const entry of entries) {
+      requireCondition(
+        !this.#packageMaintenance.has(entry),
+        "extension_busy",
+        "Another approved package change already holds this instance.",
+      );
+      this.assertIdle(entry.handle);
+    }
+    for (const entry of entries) this.#packageMaintenance.add(entry);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      for (const entry of entries) this.#packageMaintenance.delete(entry);
+    };
+  }
   /** Core-only withdrawal occurs before abort/dispose can invoke extension callbacks. */
   disable(
     handle: ExtensionHandle,
@@ -1674,14 +2188,7 @@ export class ExtensionRegistry {
       this.#commitContributions(withdrawContributions);
       return Promise.resolve({ status: "disabled" });
     }
-    requireCondition(
-      entry.state !== "preparing" &&
-        entry.calls === 0 &&
-        entry.scripts === 0 &&
-        !entry.resources.busy(),
-      "extension_busy",
-      "Calls, active source scripts or independent business resources still use this version.",
-    );
+    this.assertIdle(handle);
     if (entry.disposal) return entry.disposal;
     this.#commitContributions(withdrawContributions);
     entry.state = "stopping";
@@ -1694,7 +2201,7 @@ export class ExtensionRegistry {
     const work = this.#cleanup(entry).then((report) => {
       if (report.status === "disabled") {
         entry.state = "disabled";
-        this.#entries.delete(entry);
+        this.#forget(entry);
       }
       return report;
     });
@@ -1753,7 +2260,7 @@ export class ExtensionRegistry {
       this.#options.cleanupTimeoutMs ?? 5000,
     );
     try {
-      const waits = [entry.disposeDone, entry.resourceDone]
+      const waits = [entry.disposeDone, entry.resourceDone, entry.storageDone]
         .filter(
           (done): done is AbortController => !!done && !done.signal.aborted,
         )
@@ -1777,7 +2284,9 @@ export class ExtensionRegistry {
       !entry.disposeFailed &&
       !resourcePending &&
       !entry.resourceFailed &&
-      !unconfirmed;
+      !unconfirmed &&
+      entry.storagePending.size === 0;
+    if (complete) for (const release of [...entry.storage]) release();
     if (!resourcePending && (entry.resourceFailed || unconfirmed))
       entry.resourceTask = undefined;
     return {

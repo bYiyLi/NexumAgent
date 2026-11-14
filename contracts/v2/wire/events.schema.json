@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/events.schema.json",
+  "$defs": {
+    "agent.run.changed": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "preparing_inputs",
+            "running",
+            "waiting_input",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "originInvocationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["runId", "revision", "status", "observedAt"],
+      "additionalProperties": false
+    },
+    "agent.catalog.sync": {
+      "type": "object",
+      "properties": {
+        "generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "root": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "projectContextVisibility": {
+                "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Visibility"
+              }
+            },
+            "required": [
+              "projectId",
+              "name",
+              "root",
+              "projectContextVisibility"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 1000
+        },
+        "allowedRoots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "generation",
+        "page",
+        "complete",
+        "projects",
+        "allowedRoots"
+      ],
+      "additionalProperties": false
+    },
+    "agent.catalog.changed": {
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "root": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  },
+                  "status": {
+                    "const": "ok"
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1048576
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "root",
+                  "status",
+                  "description",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "root": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  },
+                  "status": {
+                    "const": "missing"
+                  }
+                },
+                "required": ["projectId", "root", "status"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "root": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  },
+                  "status": {
+                    "const": "unavailable"
+                  },
+                  "error": {
+                    "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+                  }
+                },
+                "required": ["projectId", "root", "status", "error"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": ["sequence", "observedAt", "projects"],
+      "additionalProperties": false
+    },
+    "agent.authorization.changed": {
+      "type": "object",
+      "properties": {
+        "caller": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Caller"
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["caller", "authorization"],
+      "additionalProperties": false
+    }
+  }
+}

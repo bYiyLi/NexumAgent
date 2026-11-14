@@ -20,6 +20,8 @@ export interface StateScope {
 export interface UserStateIdentity {
   readonly principalId: string;
   readonly clientId: string;
+  /** Preserved from the verified invocation; a real Cloud backend requires it. */
+  readonly grantId?: string;
   readonly agentId: string;
   readonly cloudEnvironment: string;
 }
@@ -47,12 +49,18 @@ export interface UserStateBackend {
 
 export class StateServices {
   #maxBytes: number;
+  #reserve?: (bytes: number) => Promise<{ release(): void }>;
   constructor(
     readonly store: SqliteStore,
     readonly user?: UserStateBackend,
-    options: { maxBytes?: number } = {},
+    options: {
+      maxBytes?: number;
+      /** Trusted Core admission; Cloud user state is not local managed storage. */
+      reserve?: (bytes: number) => Promise<{ release(): void }>;
+    } = {},
   ) {
     this.#maxBytes = options.maxBytes ?? 64 * 1024;
+    this.#reserve = options.reserve;
     requireCondition(
       Number.isSafeInteger(this.#maxBytes) &&
         this.#maxBytes > 0 &&
@@ -78,6 +86,9 @@ export class StateServices {
     const identity = Object.freeze({
       principalId: caller.principalId,
       clientId: caller.clientId,
+      ...(typeof caller.grantId === "string"
+        ? { grantId: caller.grantId }
+        : {}),
       agentId: this.store.binding.agentId,
       cloudEnvironment: this.store.binding.cloudEnvironment,
     });
@@ -163,19 +174,33 @@ export class StateServices {
             "invalid_state_version",
             "A shared write needs its read revision or null for create-only.",
           );
-          const data = copy(value);
+          const serialized = canonicalJson(value, this.#maxBytes);
+          const data = JSON.parse(serialized) as JsonValue;
           // No retry: a disconnected mutation may already have committed at its authority.
-          const changed =
-            kind === "agent"
-              ? this.store.setState(key, data, control.expectedVersion)
-              : await backend().set(
-                  identity,
-                  key,
-                  data,
-                  control.expectedVersion,
-                  scope.signal,
-                );
-          return stateValue(changed);
+          if (kind === "user")
+            return stateValue(
+              await backend().set(
+                identity,
+                key,
+                data,
+                control.expectedVersion,
+                scope.signal,
+              ),
+            );
+          // The fixed overhead accounts for the key, revision and local metadata;
+          // SQLite settlement/headroom is retained by the Core budget provider.
+          const reservation = await this.#reserve?.(
+            Buffer.byteLength(serialized) + Buffer.byteLength(key) + 1024,
+          );
+          try {
+            // Admission may wait for a native usage scan. It never freezes authority.
+            authorize(kind, key, "write");
+            return stateValue(
+              this.store.setState(key, data, control.expectedVersion),
+            );
+          } finally {
+            reservation?.release();
+          }
         },
         delete: async (key: string, options: { expectedVersion: number }) => {
           authorize(kind, key, "write");

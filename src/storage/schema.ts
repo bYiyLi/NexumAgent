@@ -1,5 +1,5 @@
 // Runtime migrations own the executable DDL.
-export const schemaVersion = 4;
+export const schemaVersion = 5;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -209,4 +209,15 @@ CREATE INDEX resources_history ON managed_resources(
 export const migration4 = `
 ALTER TABLE runs ADD COLUMN admission_class TEXT NOT NULL DEFAULT 'ordinary'
   CHECK (admission_class IN ('ordinary','control'));
+`;
+
+// A Task's fixed promise can outlive an artifact's normal seven-day retention.
+// This records references only; original content remains in the one catalog.
+export const migration5 = `
+CREATE TABLE task_artifacts (
+  task_id TEXT NOT NULL REFERENCES mcp_tasks(task_id) ON DELETE CASCADE,
+  resource_id TEXT NOT NULL,
+  PRIMARY KEY(task_id,resource_id)
+) STRICT;
+CREATE INDEX task_artifacts_resource ON task_artifacts(resource_id,task_id);
 `;

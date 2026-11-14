@@ -103,6 +103,70 @@ function control(dispose) {
   return { value, closed, stops: () => stops };
 }
 
+test("Agent shutdown stops registered run, background and instance controllers and closes admission", async (t) => {
+  const f = fixture(t),
+    run = f.run(),
+    background = f.run();
+  const controllers = [
+    control(({ resolve }) => resolve()),
+    control(({ resolve }) => resolve()),
+    control(({ resolve }) => resolve()),
+  ];
+  const active = await run.resources.register({
+    kind: "process",
+    value: controllers[0].value,
+  });
+  const handed = await background.resources.register({
+    kind: "process",
+    value: controllers[1].value,
+  });
+  await background.resources.handoff(handed.id);
+  const shared = await f.instance.resources.register({
+    kind: "connection",
+    value: controllers[2].value,
+  });
+  const first = f.manager.shutdown(new Error("explicit Agent stop"));
+  assert.equal(f.manager.shutdown(), first);
+  await assert.rejects(
+    run.resources.register({ kind: "process", value: control().value }),
+    { code: "agent_stopping" },
+  );
+  const result = await first;
+  assert.deepEqual(result, { closed: 3, unconfirmed: [] });
+  for (const current of [active, handed, shared])
+    assert.notEqual(f.store.getResource(current.id).closedAt, null);
+  controllers.forEach((controller) => assert.equal(controller.stops(), 1));
+  assert.throws(
+    () =>
+      f.manager.instance(origin, {
+        signal: new AbortController().signal,
+        assertActive() {},
+        authorize() {},
+      }),
+    { code: "agent_stopping" },
+  );
+});
+
+test("Agent shutdown retains unknown physical closure and only an explicit retry confirms later evidence", async (t) => {
+  const f = fixture(t),
+    run = f.run(),
+    pending = control();
+  const ref = await run.resources.register({
+    kind: "process",
+    value: pending.value,
+  });
+  await run.resources.handoff(ref.id);
+  const result = await f.manager.shutdown();
+  assert.equal(result.closed, 0);
+  assert.equal(result.unconfirmed.length, 1);
+  assert.equal(f.store.getResource(ref.id).closedAt, null);
+  assert.equal(pending.stops(), 1);
+  pending.closed.resolve();
+  await f.manager.shutdown();
+  assert.notEqual(f.store.getResource(ref.id).closedAt, null);
+  assert.equal(pending.stops(), 1);
+});
+
 async function resource(r, kind = "process", state = "running") {
   const c = control(({ resolve }) => resolve());
   const ref = await r.resources.register({ kind, value: c.value });
@@ -445,7 +509,7 @@ test("v2 migration preserves state/resource history and restart readers cannot r
   store.close();
   let db = new DatabaseSync(filename);
   db.exec(
-    "DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; PRAGMA user_version=2",
+    "DROP TABLE task_artifacts; DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; PRAGMA user_version=2",
   );
   db.close();
   assert.throws(
@@ -465,6 +529,14 @@ test("v2 migration preserves state/resource history and restart readers cannot r
     db
       .prepare(
         "SELECT count(*) n FROM sqlite_master WHERE name='resources_history'",
+      )
+      .get().n,
+    0,
+  );
+  assert.equal(
+    db
+      .prepare(
+        "SELECT count(*) n FROM sqlite_master WHERE name='task_artifacts'",
       )
       .get().n,
     0,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdtempSync,
   realpathSync,
   mkdirSync,
@@ -23,6 +24,8 @@ import { ManagedProcess } from "../dist/process/managed.js";
 import { normalizeLaunch } from "../dist/process/launch.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
+import { ProfileRetention } from "../dist/runtime/retention.js";
+import { ArtifactStore } from "../dist/results/artifacts.js";
 
 const caller = { principalId: "user", clientId: "client", host: "sh-test" };
 const origin = {
@@ -42,7 +45,7 @@ async function until(read, predicate, timeout = 5000) {
   } while (Date.now() - start < timeout);
   assert.fail(`Condition was not reached: ${JSON.stringify(value)}`);
 }
-async function fixture(t, authorize = () => {}) {
+async function fixture(t, authorize = () => {}, retentionOptions = {}) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-sh-")),
     ),
@@ -55,9 +58,20 @@ async function fixture(t, authorize = () => {}) {
     cloudEnvironment: "test",
   });
   const resources = new ResourceManager(store, { cleanupTimeoutMs: 50 }),
-    policies = [];
+    policies = [],
+    retention = new ProfileRetention(
+      store,
+      new ArtifactStore(root, "agent"),
+      retentionOptions,
+    );
   const registry = new ExtensionRegistry(resources, {
-    permissions: new Set(["sh.execute", "sh.read", "sh.control"]),
+    permissions: new Set([
+      "sh.execute",
+      "sh.read",
+      "sh.control",
+      "storage.reserve",
+    ]),
+    storage: { reserve: (bytes) => retention.reserve(bytes) },
     authorize(policy) {
       policies.push(policy);
       authorize(policy);
@@ -69,7 +83,7 @@ async function fixture(t, authorize = () => {}) {
     {
       apiVersion: 1,
       origin,
-      permissions: ["sh.execute", "sh.read", "sh.control"],
+      permissions: ["sh.execute", "sh.read", "sh.control", "storage.reserve"],
     },
     shExtension,
   );
@@ -131,6 +145,7 @@ async function fixture(t, authorize = () => {}) {
       if (store.getRun(run.runId).endedAt === null)
         await engine.observe(caller, run.runId, 3000).catch(() => {});
     await registry.disable(handle);
+    await retention.stop();
     store.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -140,6 +155,7 @@ async function fixture(t, authorize = () => {}) {
     store,
     resources,
     registry,
+    retention,
     handle,
     policies,
     engine,
@@ -163,6 +179,73 @@ function data(result) {
   );
   return result.result.data;
 }
+
+test("real managed storage refusal prevents process startup while control and native shutdown do not request new business space", async (t) => {
+  const f = await fixture(t, () => {}, { maxManagedBytes: 1024 });
+  const result = await f.start("return await sh.exec(context.input);", {
+    input: command('process.stdout.write("must not spawn");'),
+  });
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.error.code, "storage_quota_exceeded");
+  const row = f.store.resourcesForRun(result.run.runId)[0];
+  assert.ok(row);
+  assert.notEqual(row.closedAt, null);
+  assert.equal(row.diagnostic.details.pid, null);
+  assert.equal(row.diagnostic.details.treeStopped, true);
+  assert.equal(
+    existsSync(
+      path.join(f.root, "logs", "processes", row.resourceId + ".output"),
+    ),
+    false,
+  );
+  assert.equal(f.retention.reservedBytes, 0);
+  const history = data(await f.start("return await sh.list();"));
+  assert.ok(history.items.some((item) => item.processId === row.resourceId));
+});
+
+test("sh quota waiting rechecks the current invocation before opening output or spawning", async (t) => {
+  let denied = false;
+  const f = await fixture(t, (policy) => {
+    if (
+      denied &&
+      policy.method &&
+      policy.permissions.includes("storage.reserve")
+    )
+      throw new AgentError(
+        "forbidden",
+        "Current invocation no longer allows storage.",
+      );
+  });
+  const enter = Promise.withResolvers(),
+    proceed = Promise.withResolvers();
+  const reserve = f.retention.reserve.bind(f.retention);
+  f.retention.reserve = async (bytes) => {
+    enter.resolve();
+    await proceed.promise;
+    return await reserve(bytes);
+  };
+  const accepted = await f.start("return await sh.exec(context.input);", {
+    input: command('process.stdout.write("must not spawn");'),
+    waitMs: 0,
+  });
+  await enter.promise;
+  denied = true;
+  proceed.resolve();
+  const result = await f.finish(accepted.run.runId);
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.error.code, "forbidden");
+  const row = f.store.resourcesForRun(result.run.runId)[0];
+  assert.equal(row.diagnostic.details.pid, null);
+  assert.notEqual(row.closedAt, null);
+  assert.equal(
+    existsSync(
+      path.join(f.root, "logs", "processes", row.resourceId + ".output"),
+    ),
+    false,
+  );
+  assert.equal(f.retention.reservedBytes, 0);
+  denied = false;
+});
 function text(result) {
   return result.output.map((item) => item.data).join("");
 }
@@ -280,6 +363,7 @@ test("start is run-owned by default while explicit background supports new-call 
   assert.equal(f.store.getResource(processId).lifetime, "background");
   assert.equal(f.store.getResource(processId).ownerRunId, null);
   assert.equal(f.store.getResource(processId).closedAt, null);
+  assert.equal(f.retention.reservedBytes, 16 * 1024 * 1024 + 1024);
   const written = data(
     await f.start(
       'return await sh.write({processId:context.input,data:"shared-input",eof:true});',
@@ -293,6 +377,7 @@ test("start is run-owned by default while explicit background supports new-call 
   );
   assert.match(text(data(ended)), /shared-input/);
   assert.equal(data(ended).controlAvailable, false);
+  assert.equal(f.retention.reservedBytes, 0);
   const list = data(
     await f.start("return await sh.list({state:'exited',limit:100});"),
   );
@@ -371,17 +456,20 @@ test("which and shell execution use fresh user discovery while descriptor-safe i
     }),
   );
   assert.match(text(shell), /shell-ready/);
-  const checked = data(
-    await f.start(
-      `
+  const checkedRun = await f.start(
+    `
     let hooks=0;const invalid={get command(){hooks++;return "bad";}};let code;
     try{await sh.exec(invalid);}catch(e){code=e.code;}
     const bytes=new Uint8Array([0,1,255]);Object.defineProperty(bytes,"constructor",{get(){hooks++;throw Error("hook");}});
     const result=await sh.exec({command:context.input,args:["-e",'let a=[];process.stdin.on("data",d=>a.push(d));process.stdin.on("end",()=>process.stdout.write(Buffer.concat(a).toString("hex")));'],input:bytes});
     return {hooks,code,output:result.output};
   `,
-      { input: process.execPath },
-    ),
+    { input: process.execPath, waitMs: 0 },
+  );
+  // An observation window does not bound exec. Continue the accepted run rather
+  // than replaying its command when native user discovery is still in flight.
+  const checked = data(
+    await f.engine.observe(caller, checkedRun.run.runId, 10000),
   );
   assert.equal(checked.hooks, 0);
   assert.equal(checked.code, "invalid_process_arguments");
@@ -457,6 +545,7 @@ test("a log finish failure releases a physically closed process only after actua
     assert.notEqual(row.closedAt, null);
     assert.equal(row.diagnostic.details.outputComplete, false);
     assert.ok(closes > 0);
+    assert.equal(f.retention.reservedBytes, 0);
   } finally {
     ProcessOutputLog.prototype.finish = finish;
     ProcessOutputLog.prototype.close = close;
@@ -515,6 +604,7 @@ test("a failed output append never publishes a false complete history after the 
     assert.notEqual(row.closedAt, null);
     assert.equal(row.diagnostic.details.outputComplete, false);
     assert.equal(row.diagnostic.details.failure.code, "output_write_failed");
+    assert.equal(f.retention.reservedBytes, 0);
   } finally {
     ProcessOutputLog.prototype.append = append;
     Backend.prototype.facts = facts;

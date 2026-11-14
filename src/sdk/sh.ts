@@ -281,7 +281,15 @@ export const shExtension: ExtensionFactory = (host) => {
     call: Invocation,
     mode: "exec" | "start",
   ): Promise<JsonObject> {
-    const managed = new ManagedProcess(agentRoot, input, mode);
+    // Admission belongs to this current caller; the ticket's release remains
+    // valid after explicit background handoff and the creating call settles.
+    const storage = call.storage ?? host.storage;
+    const managed = new ManagedProcess(
+      agentRoot,
+      input,
+      mode,
+      storage ? { reserve: (bytes) => storage.reserve(bytes) } : {},
+    );
     const ref = await call.resources.register({ kind, value: managed });
     let handedOff = false;
     try {
@@ -322,13 +330,13 @@ export const shExtension: ExtensionFactory = (host) => {
   }
   const method = (
     description: string,
-    permission: string,
+    permission: string | readonly string[],
     inputSchema: unknown,
     normalize: MethodDefinition["normalize"],
     handle: MethodDefinition["handle"],
   ): MethodDefinition => ({
     description,
-    permissions: [permission],
+    permissions: typeof permission === "string" ? [permission] : permission,
     inputSchema,
     normalize,
     handle,
@@ -337,14 +345,14 @@ export const shExtension: ExtensionFactory = (host) => {
     methods: {
       exec: method(
         "执行命令并等待真实退出、受管后代及输出收尾。",
-        "sh.execute",
+        ["sh.execute", "storage.reserve"],
         { $schema: dialect, type: "object" },
         (args) => normalizeLaunch(args, "exec"),
         (input, call) => launch(input, call, "exec"),
       ),
       start: method(
         "登记并启动受管进程；仅显式background才交接到后台。",
-        "sh.execute",
+        ["sh.execute", "storage.reserve"],
         { $schema: dialect, type: "object" },
         (args) => normalizeLaunch(args, "start"),
         (input, call) => launch(input, call, "start"),

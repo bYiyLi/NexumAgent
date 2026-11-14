@@ -1,0 +1,2513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/types.schema.json",
+  "$defs": {
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    },
+    "HostCapabilities": {
+      "type": "object",
+      "properties": {
+        "sampling": {
+          "type": "boolean"
+        },
+        "elicitation": {
+          "type": "boolean"
+        },
+        "roots": {
+          "type": "boolean"
+        }
+      },
+      "required": ["sampling", "elicitation", "roots"],
+      "additionalProperties": false
+    },
+    "Caller": {
+      "oneOf": [
+        {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpCaller"
+        },
+        {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/ownerSessionCaller"
+        }
+      ]
+    },
+    "Connection": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "profile": {
+          "enum": ["development", "production"]
+        },
+        "bootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "cloudEnvironment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "agentId",
+        "profile",
+        "bootId",
+        "cloudEnvironment",
+        "connectionId"
+      ],
+      "additionalProperties": false
+    },
+    "Budgets": {
+      "type": "object",
+      "properties": {
+        "controlBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "textBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "imageBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "audioBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "inlineBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "responseBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "fileBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "attachmentBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "attachmentCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "resourcePageLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "Visibility": {
+      "type": "object",
+      "properties": {
+        "disabledItems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": ["instruction", "skill"]
+              },
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": ["kind", "key"],
+            "additionalProperties": false
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": ["disabledItems"],
+      "additionalProperties": false
+    },
+    "Authorization": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectRoot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "projectName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectDescription": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "projectContextVisibility": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Visibility"
+        },
+        "allowedRoots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
+          "maxItems": 1000
+        },
+        "budgets": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Budgets"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        }
+      },
+      "required": [
+        "agentId",
+        "allowedRoots",
+        "budgets",
+        "revision",
+        "expiresAt"
+      ],
+      "additionalProperties": false,
+      "dependentRequired": {
+        "projectId": ["projectRoot", "projectName"],
+        "projectRoot": ["projectId", "projectName"],
+        "projectName": ["projectId", "projectRoot"],
+        "projectDescription": ["projectId"],
+        "projectContextVisibility": ["projectId"]
+      }
+    },
+    "InvocationContext": {
+      "type": "object",
+      "properties": {
+        "caller": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Caller"
+        },
+        "authorization": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        }
+      },
+      "required": ["caller", "authorization", "connection"],
+      "additionalProperties": false
+    },
+    "Submission": {
+      "type": "object",
+      "properties": {
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["issuedAt", "expiresAt"],
+      "additionalProperties": false
+    },
+    "Attachment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "transferId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": ["transferId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+            }
+          },
+          "required": ["uri"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string",
+              "pattern": "^att_[0-9a-f]{64}$"
+            }
+          },
+          "required": ["sourceId"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Origin": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": ["local", "platform", "extension"]
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["type", "owner", "namespace", "version", "revision"],
+      "additionalProperties": false
+    },
+    "Run": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "preparing_inputs",
+            "running",
+            "waiting_input",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "scriptName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": ["inline", "named", "history"]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Origin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replayOfRunId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanup": {
+          "type": "object"
+        },
+        "availability": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "boolean"
+            },
+            "input": {
+              "type": "boolean"
+            },
+            "result": {
+              "type": "boolean"
+            },
+            "logs": {
+              "type": "boolean"
+            }
+          },
+          "required": ["code", "input", "result", "logs"],
+          "additionalProperties": false
+        },
+        "scriptDesc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "descriptionTruncated": {
+          "const": true
+        }
+      },
+      "required": [
+        "runId",
+        "contextId",
+        "projectId",
+        "revision",
+        "status",
+        "scriptName",
+        "source",
+        "origin",
+        "replayOfRunId",
+        "acceptedAt",
+        "startedAt",
+        "finishedAt",
+        "deadlineAt",
+        "updatedAt",
+        "error",
+        "stop",
+        "cleanup",
+        "availability"
+      ],
+      "additionalProperties": false
+    },
+    "Wait": {
+      "type": "object",
+      "properties": {
+        "waitId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "enum": ["waiting", "consumed", "expired", "cancelled"]
+        },
+        "deliveryState": {
+          "enum": ["none", "preparing", "failed", "consumed"]
+        },
+        "request": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "consumedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "waitId",
+        "revision",
+        "status",
+        "deliveryState",
+        "request",
+        "createdAt",
+        "deadlineAt",
+        "consumedAt",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "Artifact": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^nexum://agents/[^/?#]+/resources/res_[0-9a-f]{32}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        }
+      },
+      "required": ["uri", "name", "mimeType", "size", "sha256", "expiresAt"],
+      "additionalProperties": false
+    },
+    "ResourceEntry": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "icons": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Icon"
+          }
+        },
+        "annotations": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
+        }
+      },
+      "required": ["uri", "name"],
+      "additionalProperties": false
+    },
+    "Content": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 1048576
+            },
+            "annotations": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 1048576
+            }
+          },
+          "required": ["type", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": ["image", "audio"]
+            },
+            "resource": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+            },
+            "mimeType": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 256,
+              "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+            },
+            "annotations": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 1048576
+            }
+          },
+          "required": ["type", "resource", "mimeType"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resource_link"
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "mimeType": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 256,
+              "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+            },
+            "annotations": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 1048576
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 1048576
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "icons": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Icon"
+              }
+            }
+          },
+          "required": ["type", "uri", "name"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resource"
+            },
+            "resource": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+            },
+            "encoding": {
+              "enum": ["text", "blob"]
+            },
+            "annotations": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 1048576
+            }
+          },
+          "required": ["type", "resource", "uri", "encoding"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StreamRef": {
+      "type": "object",
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "purpose": {
+          "enum": [
+            "resource",
+            "attachment",
+            "transfer",
+            "host-request",
+            "host-response",
+            "result-meta",
+            "maintenance"
+          ]
+        },
+        "direction": {
+          "enum": ["agent-to-cloud", "cloud-to-agent"]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": ["streamId", "purpose", "direction", "expiresAt", "maxBytes"],
+      "additionalProperties": false
+    },
+    "FixedStreamRef": {
+      "type": "object",
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "purpose": {
+          "enum": [
+            "resource",
+            "attachment",
+            "transfer",
+            "host-request",
+            "host-response",
+            "result-meta",
+            "maintenance"
+          ]
+        },
+        "direction": {
+          "enum": ["agent-to-cloud", "cloud-to-agent"]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "streamId",
+        "purpose",
+        "direction",
+        "expiresAt",
+        "maxBytes",
+        "mimeType",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "ResultDelivery": {
+      "type": "object",
+      "properties": {
+        "complete": {
+          "const": false
+        },
+        "reason": {
+          "const": "context_budget"
+        },
+        "dataResource": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+        },
+        "textResource": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+        }
+      },
+      "required": ["complete", "reason"],
+      "additionalProperties": false
+    },
+    "ProtocolMeta": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "object"
+            }
+          },
+          "required": ["value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "stream": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+            }
+          },
+          "required": ["stream"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Result": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Content"
+          },
+          "maxItems": 1000
+        },
+        "data": {},
+        "isError": {
+          "type": "boolean"
+        },
+        "conversions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 1000
+        },
+        "delivery": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ResultDelivery"
+        },
+        "resultType": {
+          "const": "complete"
+        },
+        "mcpResults": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 1000
+        },
+        "protocolMeta": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ProtocolMeta"
+        }
+      },
+      "required": ["content"],
+      "additionalProperties": false
+    },
+    "TransferRequest": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": ["GET", "PUT"]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 100,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        }
+      },
+      "required": ["method", "url", "headers", "expiresAt"],
+      "additionalProperties": false
+    },
+    "TransferDelivery": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "transferId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "available": {
+              "const": true
+            },
+            "request": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferRequest"
+            }
+          },
+          "required": ["transferId", "available", "request"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "transferId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": ["transferId", "available", "reason"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TextPage": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["text", "complete", "nextCursor"],
+      "additionalProperties": false
+    },
+    "Items": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 1000
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": ["items", "complete"],
+      "additionalProperties": false
+    },
+    "RunView": {
+      "type": "object",
+      "properties": {
+        "run": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Run"
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Wait"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/DeliveredResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "operations": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Items"
+        },
+        "resources": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Items"
+        },
+        "unavailable": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+        },
+        "code": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TextPage"
+        },
+        "input": {},
+        "logs": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TextPage"
+        },
+        "transient": {
+          "type": "object",
+          "properties": {
+            "transfers": {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferDelivery"
+              },
+              "maxItems": 100
+            }
+          },
+          "required": ["transfers"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "run",
+        "wait",
+        "result",
+        "observedAt",
+        "operations",
+        "resources"
+      ],
+      "additionalProperties": false
+    },
+    "TransferTarget": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "resourceUri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^nexum://agents/[^/?#]+/resources/res_[0-9a-f]{32}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expectedSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "TransferStop": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": ["cancel", "expired", "timeout", "permission", "failure"]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["kind", "code"],
+      "additionalProperties": false
+    },
+    "TransferFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["path", "name", "size", "mimeType", "sha256", "revision"],
+      "additionalProperties": false
+    },
+    "TransferSnapshot": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "direction": {
+          "enum": ["upload", "download"]
+        },
+        "status": {
+          "enum": [
+            "preparing",
+            "pending",
+            "transferring",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "expired",
+            "interrupted"
+          ]
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contextId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "resource": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ResourceEntry"
+        },
+        "maxBytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "type": "object",
+          "properties": {
+            "bytesTransferred": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "totalBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["bytesTransferred", "totalBytes"],
+          "additionalProperties": false
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadlineAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferFile"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "transferId",
+        "direction",
+        "status",
+        "runId",
+        "contextId",
+        "projectId",
+        "progress",
+        "createdAt",
+        "expiresAt",
+        "startedAt",
+        "deadlineAt",
+        "finishedAt",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceSummary": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "changeKinds": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "package",
+              "dependency",
+              "lockfile",
+              "extension",
+              "capability",
+              "script",
+              "instruction",
+              "docs",
+              "skill",
+              "connection",
+              "authentication",
+              "api",
+              "permissions",
+              "configuration",
+              "remove"
+            ]
+          },
+          "maxItems": 32
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\x00\\r\\n]+$"
+          },
+          "maxItems": 256
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z_$][A-Za-z0-9_$]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restartMayBeRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "changeKinds",
+        "permissions",
+        "version",
+        "namespace",
+        "restartMayBeRequired"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceCandidate": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "enum": ["package", "extension", "mcp", "api"]
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "objectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "summary": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceSummary"
+        },
+        "authStatus": {
+          "enum": ["not_required", "required", "ready", "failed"]
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "name",
+        "objectId",
+        "baseRevision",
+        "candidateRevision",
+        "summary",
+        "authStatus"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceCreate": {
+      "type": "object",
+      "properties": {
+        "requestKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "originRunId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "target": {
+          "enum": ["package", "extension", "mcp", "api"]
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "objectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "summary": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceSummary"
+        },
+        "authStatus": {
+          "enum": ["not_required", "required", "ready", "failed"]
+        }
+      },
+      "required": [
+        "requestKey",
+        "originRunId",
+        "target",
+        "action",
+        "name",
+        "objectId",
+        "baseRevision",
+        "candidateRevision",
+        "summary",
+        "authStatus"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceDecision": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": ["approved", "denied"]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "decisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "status",
+        "revision",
+        "candidateRevision",
+        "decidedAt",
+        "decisionId"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceResult": {
+      "type": "object",
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "restartRequired": {
+          "type": "boolean"
+        },
+        "package": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "declared": {
+              "type": "boolean"
+            },
+            "installedVersion": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["name", "declared", "installedVersion"],
+          "additionalProperties": false
+        },
+        "extension": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "namespace": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "desiredEnabled": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "activeVersion": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "namespace",
+                "desiredEnabled",
+                "state",
+                "activeVersion"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "state": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "revision": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["name", "state", "revision"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "api": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "state": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "revision": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["name", "state", "revision"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["changed", "restartRequired"],
+      "additionalProperties": false
+    },
+    "MaintenanceExecution": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "result": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceResult"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\x00\\r\\n]+$"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 4096,
+              "pattern": "^[^\\x00]*$"
+            }
+          },
+          "required": ["code", "message"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["operationId", "startedAt"],
+      "additionalProperties": false
+    },
+    "MaintenanceView": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "profile": {
+          "enum": ["development", "production"]
+        },
+        "target": {
+          "enum": ["package", "extension", "mcp", "api"]
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "objectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "summary": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceSummary"
+        },
+        "authStatus": {
+          "enum": ["not_required", "required", "ready", "failed"]
+        },
+        "status": {
+          "enum": ["pending", "approved", "denied", "cancelled", "expired"]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "approvalUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "decision": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceDecision"
+        },
+        "execution": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceExecution"
+        },
+        "agentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "requestId",
+        "agentId",
+        "profile",
+        "target",
+        "action",
+        "name",
+        "objectId",
+        "baseRevision",
+        "candidateRevision",
+        "summary",
+        "authStatus",
+        "status",
+        "revision",
+        "createdAt",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "MaintenanceListOptions": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "enum": ["package", "extension", "mcp", "api"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "status": {
+          "enum": ["pending", "approved", "denied", "cancelled", "expired"]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "MaintenancePage": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["requests"],
+      "additionalProperties": false
+    },
+    "MaintenanceBeginExecution": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "approvedRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decisionRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "requestId",
+        "approvedRevision",
+        "decisionRevision",
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "MCPDelivery": {
+      "type": "object",
+      "properties": {
+        "complete": {
+          "const": false
+        },
+        "reason": {
+          "const": "context_budget"
+        },
+        "dataResource": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+        },
+        "textResource": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
+        },
+        "transfers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferDelivery"
+          }
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false,
+      "dependentRequired": {
+        "complete": ["reason"],
+        "reason": ["complete"],
+        "dataResource": ["complete"],
+        "textResource": ["complete"]
+      }
+    },
+    "Icon": {
+      "type": "object",
+      "properties": {
+        "src": {
+          "type": "string",
+          "maxLength": 1048576,
+          "not": {
+            "pattern": "^[\\x00-\\x20]*[Dd][\\t\\n\\r]*[Aa][\\t\\n\\r]*[Tt][\\t\\n\\r]*[Aa][\\t\\n\\r]*:"
+          }
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "sizes": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "theme": {
+          "enum": ["light", "dark"]
+        }
+      },
+      "required": ["src"],
+      "additionalProperties": false
+    },
+    "Annotations": {
+      "type": "object",
+      "properties": {
+        "audience": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "enum": ["user", "assistant"]
+          }
+        },
+        "priority": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "lastModified": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "ResultBody": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        },
+        "protocolMeta": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ProtocolMeta"
+        }
+      },
+      "required": ["body"],
+      "additionalProperties": false
+    },
+    "DeliveredResult": {
+      "oneOf": [
+        {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Result"
+        },
+        {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ResultBody"
+        }
+      ]
+    },
+    "StateValue": {
+      "type": "object",
+      "properties": {
+        "value": {},
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["value", "version", "updatedAt"],
+      "additionalProperties": false
+    },
+    "HostFeatures": {
+      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/hostFeatures"
+    },
+    "TaskId": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 1024,
+      "pattern": "^nx_task_[A-Za-z0-9_-]+$"
+    },
+    "TaskError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "data": {}
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    },
+    "TaskBinding": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskId"
+        },
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "working",
+            "input_required",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "lastUpdatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "ttlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "error": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskError"
+        }
+      },
+      "required": [
+        "taskId",
+        "agentId",
+        "runId",
+        "status",
+        "createdAt",
+        "lastUpdatedAt",
+        "expiresAt",
+        "ttlMs"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "error": {} },
+            "required": ["error"]
+          },
+          "else": {
+            "not": {
+              "properties": { "error": {} },
+              "required": ["error"]
+            }
+          }
+        }
+      ]
+    },
+    "TaskView": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskBinding"
+        },
+        "view": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+        }
+      },
+      "required": ["task", "view"],
+      "additionalProperties": false
+    },
+    "TaskCancelOutput": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskBinding"
+        },
+        "view": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+        },
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "required": ["task", "view", "accepted"],
+      "additionalProperties": false
+    },
+    "McpCaller": {
+      "type": "object",
+      "properties": {
+        "principalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "grantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "hostRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "hostCapabilities": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/HostCapabilities"
+        },
+        "hostFeatures": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/HostFeatures"
+        },
+        "source": {
+          "const": "mcp"
+        }
+      },
+      "required": ["principalId", "clientId", "grantId"],
+      "additionalProperties": false,
+      "dependentRequired": {
+        "hostRef": ["hostCapabilities"],
+        "hostCapabilities": ["hostRef"],
+        "hostFeatures": ["hostRef", "hostCapabilities"]
+      }
+    },
+    "McpInvocationContext": {
+      "type": "object",
+      "properties": {
+        "caller": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpCaller"
+        },
+        "authorization": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        }
+      },
+      "required": ["caller", "authorization", "connection"],
+      "additionalProperties": false
+    },
+    "OwnerSessionInvocationContext": {
+      "type": "object",
+      "properties": {
+        "caller": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/ownerSessionCaller"
+        },
+        "authorization": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        }
+      },
+      "required": ["caller", "authorization", "connection"],
+      "additionalProperties": false
+    }
+  }
+}

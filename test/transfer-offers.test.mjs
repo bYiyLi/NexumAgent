@@ -461,6 +461,39 @@ test("Offer-safe logs replace only authentic Offers and never invoke arbitrary h
   assert.throws(() => transferSafeJSON({ text: "A".repeat(20000) }));
 });
 
+test("read-only result descriptions never sign retained Offers or allocate fallback resources", async (t) => {
+  const f = await fixture(t);
+  const offer = f.issue();
+  const saved = await f.encoder.encode(
+    { value: "x".repeat(8000), offer },
+    f.scope(),
+  );
+  const before = JSON.stringify(saved);
+  const filesBefore = files(f.root).sort();
+  t.mock.method(f.delivery, "deliver", () =>
+    assert.fail("read-only inspection must not sign an Offer"),
+  );
+  t.mock.method(f.artifacts, "register", () =>
+    assert.fail("read-only inspection must not create a fallback artifact"),
+  );
+  const result = await f.encoder.describe(saved, f.scope(), {
+    readOnly: true,
+    textBytes: 1024,
+  });
+  assert.equal(result.result.data.value.length, 8000);
+  assert.deepEqual(result.transfers, [
+    {
+      transferId: offer.transferId,
+      available: false,
+      reason: "read_only_view",
+    },
+  ]);
+  assert.equal(result.hostMeta, undefined);
+  assertSafe(result);
+  assert.equal(JSON.stringify(saved), before);
+  assert.deepEqual(files(f.root).sort(), filesBefore);
+});
+
 test("one normalizer walk preserves nested structure, pure data and explicit mixed content without persisting requests", async (t) => {
   const f = await fixture(t),
     offer = f.issue();

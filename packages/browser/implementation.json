@@ -1,0 +1,1678 @@
+{
+  "package": "nexum-browser",
+  "packageVersion": "0.1.0-development.0",
+  "status": "in_progress",
+  "published": false,
+  "browserInstallation": "not_performed",
+  "nativeBrowserAcceptance": "not_run",
+  "baseline": {
+    "interfaces": 22,
+    "members": 148,
+    "extraMembers": 102
+  },
+  "interpretation": "公开签名、受管路由和fixture证据分开记录。下列250项均未完成真实Chrome/Edge逐项验收，不因方法存在或返回capability=true而视为完成。",
+  "registeredNativeRoutes": [
+    "tabs.list",
+    "tabs.get",
+    "tabs.new",
+    "tabs.selected",
+    "tabs.select",
+    "tab.title",
+    "tab.url",
+    "tab.close",
+    "tab.goBack",
+    "tab.forward",
+    "tab.reload",
+    "tab.navigate",
+    "user.openTabs",
+    "user.claimTab",
+    "browsers.history",
+    "browsers.nameSession",
+    "visibility.get",
+    "visibility.set",
+    "management.windows.list",
+    "management.windows.getAll",
+    "management.windows.create",
+    "management.windows.update",
+    "management.tabs.query",
+    "management.tabs.get",
+    "management.tabs.move",
+    "management.tabs.update",
+    "management.tabs.group",
+    "management.tabs.ungroup",
+    "management.tabs.close",
+    "management.tabGroups.query",
+    "management.tabGroups.get",
+    "management.tabGroups.update",
+    "management.tabGroups.move",
+    "management.bookmarks.search",
+    "management.bookmarks.getTree",
+    "management.bookmarks.create",
+    "management.bookmarks.update",
+    "management.bookmarks.move",
+    "management.bookmarks.remove",
+    "management.getAuditTrail",
+    "locator.count",
+    "locator.allTextContents",
+    "locator.textContent",
+    "locator.innerText",
+    "locator.isVisible",
+    "locator.isEnabled",
+    "locator.getAttribute",
+    "locator.all",
+    "locator.fill",
+    "locator.selectOption",
+    "playwright.domSnapshot",
+    "dom.getVisibleTree",
+    "tab.snapshot",
+    "frame.snapshot",
+    "playwright.elementInfo",
+    "dom.fill",
+    "tab.fill",
+    "frame.fill",
+    "tab.focus",
+    "tab.selectOption",
+    "clipboard.readText",
+    "clipboard.writeText",
+    "tab.contentExport",
+    "user.getTabContext",
+    "playwright.waitForTimeout",
+    "locator.waitFor",
+    "playwright.waitForURL",
+    "playwright.waitForLoadState",
+    "tab.evaluate",
+    "playwright.evaluate",
+    "cdp.send",
+    "cdp.cursor",
+    "cdp.events",
+    "cdp.readEvents",
+    "tab.screenshot",
+    "playwright.elementScreenshot",
+    "viewport.set",
+    "viewport.reset",
+    "tab.setViewport",
+    "tab.resetViewport",
+    "cua.click",
+    "cua.doubleClick",
+    "cua.move",
+    "cua.scroll",
+    "cua.type",
+    "dom.type",
+    "cua.keypress",
+    "dom.keypress",
+    "tab.keyboardDown",
+    "tab.keyboardUp",
+    "tab.press",
+    "locator.press",
+    "locator.type",
+    "locator.pressSequentially",
+    "cua.drag",
+    "locator.click",
+    "locator.dblclick",
+    "tab.click",
+    "frame.click",
+    "dom.click",
+    "dom.doubleClick",
+    "tab.hover",
+    "locator.check",
+    "locator.uncheck",
+    "locator.setChecked",
+    "tab.markHandoff",
+    "tab.getJsDialog",
+    "dialogs.accept",
+    "dialogs.dismiss",
+    "dev.logs",
+    "waiters.arm",
+    "waiters.get",
+    "waiters.cancel",
+    "tab.downloads",
+    "downloads.path",
+    "ax.snapshot",
+    "ax.get",
+    "ax.click",
+    "ax.drag",
+    "ax.scroll",
+    "ax.pressKey",
+    "ax.typeText",
+    "ax.setValue",
+    "ax.selectText",
+    "webmcp.listTools",
+    "webmcp.fetchTools",
+    "webmcp.invokeTool",
+    "tab.setFiles",
+    "fileChoosers.setFiles"
+  ],
+  "publicMembers": [
+    {
+      "id": "B001",
+      "target": "client.browsers",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B002",
+      "target": "client.documentation",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B003",
+      "target": "client.browsers.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B004",
+      "target": "client.browsers.getDefault",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B005",
+      "target": "client.browsers.getForUrl",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B006",
+      "target": "client.browsers.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B007",
+      "target": "selectedBrowser.browserId",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B008",
+      "target": "selectedBrowser.capabilities",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B009",
+      "target": "selectedBrowser.tabs",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B010",
+      "target": "selectedBrowser.user",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B011",
+      "target": "selectedBrowser.documentation",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B012",
+      "target": "selectedBrowser.history",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B013",
+      "target": "selectedBrowser.nameSession",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B014",
+      "target": "selectedBrowser.user.claimTab",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B015",
+      "target": "selectedBrowser.user.getTabContext",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B016",
+      "target": "selectedBrowser.user.openTabs",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B017",
+      "target": "selectedBrowser.tabs.content",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B018",
+      "target": "selectedBrowser.tabs.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B019",
+      "target": "selectedBrowser.tabs.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B020",
+      "target": "selectedBrowser.tabs.new",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B021",
+      "target": "selectedBrowser.tabs.selected",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B022",
+      "target": "tab.ax",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B023",
+      "target": "tab.capabilities",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B024",
+      "target": "tab.clipboard",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B025",
+      "target": "tab.content",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B026",
+      "target": "tab.cua",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B027",
+      "target": "tab.dev",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B028",
+      "target": "tab.dom",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B029",
+      "target": "tab.id",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B030",
+      "target": "tab.playwright",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B031",
+      "target": "tab.goBack",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B032",
+      "target": "tab.close",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B033",
+      "target": "tab.forward",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B034",
+      "target": "tab.getJsDialog",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B035",
+      "target": "tab.navigate",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B036",
+      "target": "tab.markDeliverable",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B037",
+      "target": "tab.markHandoff",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B038",
+      "target": "tab.reload",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B039",
+      "target": "tab.requestUserTakeover",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B040",
+      "target": "tab.requestUserTakeover",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B041",
+      "target": "tab.screenshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B042",
+      "target": "tab.title",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B043",
+      "target": "tab.url",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B044",
+      "target": "tab.ax.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B045",
+      "target": "tab.ax.drag",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B046",
+      "target": "tab.ax.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B047",
+      "target": "tab.ax.paste",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B048",
+      "target": "tab.ax.performSecondaryAction",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B049",
+      "target": "tab.ax.pressKey",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B050",
+      "target": "tab.ax.scroll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B051",
+      "target": "tab.ax.selectText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B052",
+      "target": "tab.ax.setValue",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B053",
+      "target": "tab.ax.typeText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B054",
+      "target": "tab.ax.write",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B055",
+      "target": "tab.content.export",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B056",
+      "target": "tab.content.exportGsuite",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B057",
+      "target": "tab.content.exportYouTubeTranscript",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B058",
+      "target": "tab.cua.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B059",
+      "target": "tab.cua.doubleClick",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B060",
+      "target": "tab.cua.downloadMedia",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B061",
+      "target": "tab.cua.drag",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B062",
+      "target": "tab.cua.keypress",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B063",
+      "target": "tab.cua.move",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B064",
+      "target": "tab.cua.scroll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B065",
+      "target": "tab.cua.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B066",
+      "target": "tab.dom.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B067",
+      "target": "tab.dom.doubleClick",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B068",
+      "target": "tab.dom.downloadMedia",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B069",
+      "target": "tab.dom.getVisibleTree",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B070",
+      "target": "tab.dom.keypress",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B071",
+      "target": "tab.dom.scroll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B072",
+      "target": "tab.dom.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B073",
+      "target": "tab.playwright.domSnapshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B074",
+      "target": "tab.playwright.elementInfo",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B075",
+      "target": "tab.playwright.elementScreenshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B076",
+      "target": "tab.playwright.evaluate",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B077",
+      "target": "tab.playwright.expectNavigation",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B078",
+      "target": "tab.playwright.frameLocator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B079",
+      "target": "tab.playwright.getByLabel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B080",
+      "target": "tab.playwright.getByPlaceholder",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B081",
+      "target": "tab.playwright.getByRole",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B082",
+      "target": "tab.playwright.getByTestId",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B083",
+      "target": "tab.playwright.getByText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B084",
+      "target": "tab.playwright.locator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B085",
+      "target": "tab.playwright.waitForEvent",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B086",
+      "target": "tab.playwright.waitForLoadState",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B087",
+      "target": "tab.playwright.waitForTimeout",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B088",
+      "target": "tab.playwright.waitForURL",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B089",
+      "target": "frame.frameLocator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B090",
+      "target": "frame.getByLabel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B091",
+      "target": "frame.getByPlaceholder",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B092",
+      "target": "frame.getByRole",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B093",
+      "target": "frame.getByTestId",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B094",
+      "target": "frame.getByText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B095",
+      "target": "frame.locator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B096",
+      "target": "locator.all",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B097",
+      "target": "locator.allTextContents",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B098",
+      "target": "locator.and",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B099",
+      "target": "locator.check",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B100",
+      "target": "locator.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B101",
+      "target": "locator.count",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B102",
+      "target": "locator.dblclick",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B103",
+      "target": "locator.downloadMedia",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B104",
+      "target": "locator.evaluate",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B105",
+      "target": "locator.evaluateAll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B106",
+      "target": "locator.fill",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B107",
+      "target": "locator.filter",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B108",
+      "target": "locator.first",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B109",
+      "target": "locator.getAttribute",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B110",
+      "target": "locator.getByLabel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B111",
+      "target": "locator.getByPlaceholder",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B112",
+      "target": "locator.getByRole",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B113",
+      "target": "locator.getByTestId",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B114",
+      "target": "locator.getByText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B115",
+      "target": "locator.innerText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B116",
+      "target": "locator.isEnabled",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B117",
+      "target": "locator.isVisible",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B118",
+      "target": "locator.last",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B119",
+      "target": "locator.locator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B120",
+      "target": "locator.nth",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B121",
+      "target": "locator.or",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B122",
+      "target": "locator.press",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B123",
+      "target": "locator.pressSequentially",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B124",
+      "target": "locator.selectOption",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B125",
+      "target": "locator.setChecked",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B126",
+      "target": "locator.textContent",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B127",
+      "target": "locator.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B128",
+      "target": "locator.uncheck",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B129",
+      "target": "locator.waitFor",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B130",
+      "target": "download.path",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B131",
+      "target": "fileChooser.isMultiple",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B132",
+      "target": "fileChooser.setFiles",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B133",
+      "target": "tab.clipboard.read",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B134",
+      "target": "tab.clipboard.readText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B135",
+      "target": "tab.clipboard.write",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B136",
+      "target": "tab.clipboard.writeText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B137",
+      "target": "tab.dev.logs",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B138",
+      "target": "dialog.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B139",
+      "target": "dialog.dismiss",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B140",
+      "target": "dialog.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B141",
+      "target": "dialog.dismiss",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B142",
+      "target": "dialog.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B143",
+      "target": "dialog.accept",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B144",
+      "target": "dialog.dismiss",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B145",
+      "target": "client.documentation.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B146",
+      "target": "dialog.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B147",
+      "target": "dialog.accept",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "B148",
+      "target": "dialog.dismiss",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X001",
+      "target": "tab.snapshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X002",
+      "target": "tab.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X003",
+      "target": "tab.fill",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X004",
+      "target": "tab.press",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X005",
+      "target": "tab.selectOption",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X006",
+      "target": "tab.scroll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X007",
+      "target": "tab.hover",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X008",
+      "target": "tab.focus",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X009",
+      "target": "tab.waitFor",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X010",
+      "target": "tab.locator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X011",
+      "target": "tab.setFiles",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X012",
+      "target": "tab.downloads",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X013",
+      "target": "tab.saveDownload",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X014",
+      "target": "tab.setViewport",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X015",
+      "target": "tab.resetViewport",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X016",
+      "target": "selectedBrowser.windows.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X017",
+      "target": "selectedBrowser.windows.getAll",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X018",
+      "target": "selectedBrowser.windows.create",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X019",
+      "target": "selectedBrowser.windows.update",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X020",
+      "target": "selectedBrowser.tabs.query",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X021",
+      "target": "selectedBrowser.tabs.move",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X022",
+      "target": "selectedBrowser.tabs.update",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X023",
+      "target": "selectedBrowser.tabs.group",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X024",
+      "target": "selectedBrowser.tabs.ungroup",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X025",
+      "target": "selectedBrowser.tabs.close",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X026",
+      "target": "selectedBrowser.tabGroups.query",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X027",
+      "target": "selectedBrowser.tabGroups.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X028",
+      "target": "selectedBrowser.tabGroups.update",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X029",
+      "target": "selectedBrowser.tabGroups.move",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X030",
+      "target": "selectedBrowser.bookmarks.search",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X031",
+      "target": "selectedBrowser.bookmarks.getTree",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X032",
+      "target": "selectedBrowser.bookmarks.create",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X033",
+      "target": "selectedBrowser.bookmarks.update",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X034",
+      "target": "selectedBrowser.bookmarks.move",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X035",
+      "target": "selectedBrowser.bookmarks.remove",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X036",
+      "target": "selectedBrowser.management.getAuditTrail",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X037",
+      "target": "tab.assets.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X038",
+      "target": "tab.assets.download",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X039",
+      "target": "tab.assets.bundle",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X040",
+      "target": "tab.exportFile",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X041",
+      "target": "tab.webmcp.listTools",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X042",
+      "target": "tab.webmcp.invokeTool",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X043",
+      "target": "tab.webmcp.fetchTools",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X044",
+      "target": "tab.cdp.send",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X045",
+      "target": "tab.cdp.events",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X046",
+      "target": "tab.cdp.cursor",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X047",
+      "target": "tab.cdp.readEvents",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X048",
+      "target": "selectedBrowser.visibility.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X049",
+      "target": "selectedBrowser.visibility.set",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X050",
+      "target": "tab.ax.snapshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X051",
+      "target": "tab.dom.fill",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X052",
+      "target": "virtualCursor",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X053",
+      "target": "taskTabGroup",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X054",
+      "target": "faviconActiveAndResult",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X055",
+      "target": "nativeDebuggerCancel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X056",
+      "target": "followSessionTab",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X057",
+      "target": "tab.devLogs",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X058",
+      "target": "tab.evaluate",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X059",
+      "target": "tab.keyboardDown",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X060",
+      "target": "tab.keyboardUp",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X061",
+      "target": "tab.frame",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X062",
+      "target": "tab.dialogAccept",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X063",
+      "target": "tab.dialogDismiss",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X064",
+      "target": "tab.contentExport",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X065",
+      "target": "tab.exportGsuite",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X066",
+      "target": "tab.exportYouTubeTranscript",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X067",
+      "target": "tab.clipboardReadText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X068",
+      "target": "tab.clipboardWriteText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X069",
+      "target": "tab.clipboardRead",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X070",
+      "target": "tab.clipboardWrite",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X071",
+      "target": "tab.playwright.waitForDownload",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X072",
+      "target": "tab.playwright.waitForFileChooser",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X073",
+      "target": "frame.snapshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X074",
+      "target": "frame.click",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X075",
+      "target": "frame.fill",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X076",
+      "target": "frame.locator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X077",
+      "target": "frame.frameLocator",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X078",
+      "target": "frame.getByLabel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X079",
+      "target": "frame.getByPlaceholder",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X080",
+      "target": "frame.getByRole",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X081",
+      "target": "frame.getByTestId",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X082",
+      "target": "frame.getByText",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X083",
+      "target": "frame.waitFor",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X084",
+      "target": "selectedBrowser.viewport.set",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X085",
+      "target": "selectedBrowser.viewport.reset",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X086",
+      "target": "webMcpTools.invokeTool",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X087",
+      "target": "browser.waiters.arm",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X088",
+      "target": "browser.waiters.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X089",
+      "target": "browser.waiters.cancel",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X090",
+      "target": "selectedBrowser.capabilities.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X091",
+      "target": "selectedBrowser.capabilities.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X092",
+      "target": "tab.capabilities.list",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X093",
+      "target": "tab.capabilities.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X094",
+      "target": "selectedBrowser.name",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X095",
+      "target": "selectedBrowser.type",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X096",
+      "target": "selectedBrowser.profileName",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X097",
+      "target": "selectedBrowser.tabs.select",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X098",
+      "target": "AlertDialog.message",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X099",
+      "target": "BeforeUnloadDialog.message",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X100",
+      "target": "ConfirmDialog.message",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X101",
+      "target": "PromptDialog.message",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    },
+    {
+      "id": "X102",
+      "target": "selectedBrowser.management.tabs.get",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run"
+    }
+  ],
+  "componentEvidence": {
+    "client": {
+      "test": "test/client.test.mjs",
+      "scope": "客户端目标绑定、Locator/Frame/等待器/WebMCP描述与输入安全；不代表原生浏览器实现"
+    },
+    "loopback": {
+      "test": ["test/protocol.test.mjs", "test/service.test.mjs"],
+      "scope": "真实Node WebSocket握手、profile/generation、分片/hash/迟到结果与持久身份"
+    },
+    "core": {
+      "test": "test/runtime.test.mjs",
+      "scope": "实际Core PackageLoader/Registry/SQLite/RunEngine五类贡献、运行资源、争用、取消、真实native-fixture detach、AX混合MCP图片、38次等待器、固定下载与排队期限",
+      "fixtureCases": 8
+    },
+    "mv3": {
+      "test": ["test/mv3-router.test.mjs", "test/mv3-connection.test.mjs"],
+      "scope": "真实MV3路由代码、替代Chrome API fixture；非Chrome/Edge实装证据",
+      "fixtureCases": 28
+    },
+    "files": {
+      "test": "test/files.test.mjs",
+      "scope": "真实本机文件与原生bytes/Blob的权限、固定快照、完整性、no-replace和取消屏障",
+      "fixtureCases": 15
+    }
+  },
+  "remaining": [
+    "真实Chrome与Edge、macOS/Linux/Windows插件加载和用户环境接入",
+    "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
+    "高阶资产、导出、用户接管、可视化等尚未接线的受管方法",
+    "正式公共协议包、npm/browser制品发行与端到端Host媒体交付"
+  ]
+}

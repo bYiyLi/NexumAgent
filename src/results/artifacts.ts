@@ -54,6 +54,8 @@ export interface ArtifactScope {
   readonly ownerKey: string;
   readonly runId?: string;
   readonly signal?: AbortSignal;
+  /** Trusted Core control-source verdict; never parsed from a script result. */
+  readonly controlStorage?: boolean;
   assertCurrent(): void;
   authorize(target: ArtifactAccess): void;
 }
@@ -62,6 +64,16 @@ export interface ArtifactOptions {
   readonly maxReadBytes?: number;
   readonly retentionMs?: number;
   readonly now?: () => number;
+  /** Core retention facts, never a guest callback or a substitute for current read permission. */
+  readonly retentionUntil?: (
+    resourceId: string,
+    originRunId: string | null,
+    originalExpiresAt: number,
+  ) => number;
+  readonly reserve?: (
+    bytes: number,
+    options?: { readonly control?: boolean },
+  ) => Promise<{ release(): void }>;
 }
 export interface ArtifactPage {
   readonly resources: readonly ArtifactRecord[];
@@ -451,6 +463,10 @@ export class ArtifactStore {
   readonly maxReadBytes: number;
   readonly retentionMs: number;
   #now: () => number;
+  #retentionUntil?: ArtifactOptions["retentionUntil"];
+  #reserve?: ArtifactOptions["reserve"];
+  #active = new Map<string, number>();
+  #pending = new Set<string>();
   constructor(root: string, agentId: string, options: ArtifactOptions = {}) {
     this.root = realpathSync.native(root);
     requireCondition(
@@ -465,6 +481,8 @@ export class ArtifactStore {
     this.maxReadBytes = options.maxReadBytes ?? 64 * 1024 * 1024;
     this.retentionMs = options.retentionMs ?? 7 * 86400000;
     this.#now = options.now ?? Date.now;
+    this.#retentionUntil = options.retentionUntil;
+    this.#reserve = options.reserve;
     requireCondition(
       boundedInteger(this.maxFileBytes, 20 * 1024 ** 3) &&
         this.maxFileBytes > 0 &&
@@ -475,6 +493,26 @@ export class ArtifactStore {
       "invalid_artifact_options",
       "Resource size, read and retention policies must be positive bounded Agent configuration.",
     );
+  }
+  activeSnapshot(): {
+    readonly resourceIds: ReadonlySet<string>;
+    readonly pendingPaths: ReadonlySet<string>;
+  } {
+    return Object.freeze({
+      resourceIds: new Set(this.#active.keys()),
+      pendingPaths: new Set(this.#pending),
+    });
+  }
+  #pin(id: string): () => void {
+    this.#active.set(id, (this.#active.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = (this.#active.get(id) ?? 1) - 1;
+      if (count) this.#active.set(id, count);
+      else this.#active.delete(id);
+    };
   }
   #assert(scope: ArtifactScope): void {
     scope.signal?.throwIfAborted();
@@ -657,8 +695,19 @@ export class ArtifactStore {
         uri,
         resource: Object.freeze(record),
       });
+      const promisedUntil =
+        this.#retentionUntil?.(
+          record.resourceId,
+          record.originRunId,
+          Date.parse(record.expiresAt),
+        ) ?? 0;
       requireCondition(
-        this.#now() < Date.parse(record.expiresAt),
+        Number.isSafeInteger(promisedUntil) && promisedUntil >= 0,
+        "invalid_retention",
+        "The trusted artifact retention deadline is invalid.",
+      );
+      requireCondition(
+        this.#now() < Math.max(Date.parse(record.expiresAt), promisedUntil),
         "resource_expired",
         "The registered resource has expired; it cannot be recreated from a source path.",
       );
@@ -825,6 +874,9 @@ export class ArtifactStore {
       output: FileHandle | undefined;
     let before: Stats | undefined;
     let prepared: Preparation | undefined;
+    let reservation: { release(): void } | undefined;
+    let pendingPath: string | undefined;
+    const release = this.#pin(id);
     try {
       if (sourcePath) {
         const canonical = await realpath(sourcePath);
@@ -849,7 +901,12 @@ export class ArtifactStore {
         ...(sourcePath ? { path: sourcePath } : {}),
       });
       this.#root();
+      reservation = await this.#reserve?.(size + metadataLimit + 1024, {
+        control: scope.controlStorage === true,
+      });
       temporary = await mkdtemp(path.join(this.directory, ".pending-"));
+      pendingPath = temporary;
+      this.#pending.add(temporary);
       await mkdir(path.join(temporary, "content"), { mode: 0o700 });
       prepared = await this.#stage(temporary);
       output = await open(path.join(temporary, "content", "data"), "wx", 0o600);
@@ -1025,24 +1082,40 @@ export class ArtifactStore {
         { cause },
       );
     } finally {
-      await input?.close();
-      await output?.close();
-      if (temporary) {
-        this.#root();
-        await rm(temporary, { recursive: true, force: true });
+      try {
+        await input?.close();
+        await output?.close();
+        if (temporary) {
+          this.#root();
+          await rm(temporary, { recursive: true, force: true });
+        }
+      } finally {
+        if (pendingPath) this.#pending.delete(pendingPath);
+        release();
+        reservation?.release();
       }
     }
   }
   async metadata(uri: string, scope: ArtifactScope): Promise<ArtifactRecord> {
-    const record = await this.#stored(uri, scope),
-      content = await this.#content(record);
-    await content.handle.close();
-    this.#check(scope, { action: "read", uri, resource: record });
-    return publicRecord(record);
+    const release = this.#pin(this.#id(uri));
+    try {
+      const record = await this.#stored(uri, scope),
+        content = await this.#content(record);
+      await content.handle.close();
+      this.#check(scope, { action: "read", uri, resource: record });
+      return publicRecord(record);
+    } finally {
+      release();
+    }
   }
   async list(
     scope: ArtifactScope,
-    options: { limit?: number; cursor?: string } = {},
+    options: {
+      limit?: number;
+      cursor?: string;
+      /** Trusted current page budget, counted before advancing its cursor. */
+      maxBytes?: number;
+    } = {},
   ): Promise<ArtifactPage> {
     this.#check(scope, { action: "list" });
     this.#root();
@@ -1052,6 +1125,17 @@ export class ArtifactStore {
       "invalid_limit",
       "A resource list needs a limit from 1 through 100.",
     );
+    const requestedMaximum = options.maxBytes;
+    requireCondition(
+      requestedMaximum === undefined ||
+        (Number.isSafeInteger(requestedMaximum) && requestedMaximum > 0),
+      "invalid_resource_budget",
+      "A resource page requires a positive trusted byte budget.",
+    );
+    const maximum =
+      requestedMaximum === undefined
+        ? undefined
+        : Math.min(requestedMaximum, 1024 * 1024);
     let after = "";
     if (options.cursor !== undefined) {
       requireCondition(
@@ -1118,22 +1202,76 @@ export class ArtifactStore {
       }
     }
     this.#check(scope, { action: "list" });
-    const more = resources.length > limit;
-    if (more) resources.pop();
-    return Object.freeze({
-      resources: Object.freeze(resources),
-      nextCursor: more
+    const cursorAt = (count: number): string | null =>
+      resources.length > count
         ? Buffer.from(
             canonicalJson({
               agentId: this.agentId,
               ownerKey: scope.ownerKey,
-              after: resources.at(-1)!.resourceId,
+              after: resources[count - 1]!.resourceId,
             }),
           ).toString("base64url")
-        : null,
+        : null;
+    let count = Math.min(limit, resources.length);
+    if (maximum !== undefined) {
+      let bytes = 0,
+        selected = -1;
+      if (count === 0) {
+        if (
+          Buffer.byteLength(
+            JSON.stringify({ resources: [], nextCursor: null }),
+          ) <= maximum
+        )
+          selected = 0;
+      } else {
+        for (let index = 0; index < count; index++) {
+          bytes += Buffer.byteLength(JSON.stringify(resources[index]));
+          // The empty array already includes its brackets; add entries and commas.
+          const size =
+            Buffer.byteLength(
+              JSON.stringify({
+                resources: [],
+                nextCursor: cursorAt(index + 1),
+              }),
+            ) +
+            bytes +
+            index;
+          if (size <= maximum) selected = index + 1;
+          // A final page can lose a long caller-bound cursor. Inspect all prefixes
+          // rather than treating an oversized earlier prefix as the final answer.
+        }
+      }
+      requireCondition(
+        selected >= 0,
+        "resource_list_too_large",
+        "The next resource page cannot fit the current metadata budget without skipping an entry.",
+      );
+      count = selected;
+    }
+    return Object.freeze({
+      resources: Object.freeze(resources.slice(0, count)),
+      nextCursor: cursorAt(count),
     });
   }
   async open(
+    uri: string,
+    scope: ArtifactScope,
+  ): Promise<{
+    resource: ArtifactRecord;
+    stream: Readable;
+    closed: Promise<void>;
+  }> {
+    const release = this.#pin(this.#id(uri));
+    try {
+      const result = await this.#open(uri, scope);
+      void result.closed.then(release, release);
+      return result;
+    } catch (cause) {
+      release();
+      throw cause;
+    }
+  }
+  async #open(
     uri: string,
     scope: ArtifactScope,
   ): Promise<{

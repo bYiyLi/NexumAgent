@@ -24,18 +24,25 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:candidate": "node scripts/build-agent.mjs",
+    "build:extension-api": "node scripts/build-extension-api.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --experimental-vm-modules --test",
+    "test": "pnpm build && node --experimental-vm-modules --test --test-concurrency=4 \"test/*.test.mjs\"",
     "check": "pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.4.0",
     "@types/node": "^24.0.0",
+    "@types/ws": "8.18.2",
+    "dts-bundle-generator": "10.0.0",
     "typescript": "6.0.3"
   },
   "dependencies": {
+    "@apidevtools/swagger-parser": "13.1.0",
     "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/ext-tasks": "0.2.3",
     "ajv": "^8.20.0",
+    "ajv-draft-04": "1.0.0",
     "ajv-formats": "^3.0.1",
     "file-type": "22.3.0",
     "ignore": "7.0.14",
@@ -43,6 +50,10 @@
     "koffi": "3.3.8",
     "music-metadata": "12.5.0",
     "node-pty": "1.2.0-beta.18",
+    "openid-client": "6.9.0",
+    "swagger-client": "3.39.0",
+    "undici": "7.30.2",
+    "ws": "8.23.0",
     "yaml": "2.9.1"
   }
 }

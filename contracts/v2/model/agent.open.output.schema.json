@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.open.output.schema.json",
+  "oneOf": [
+    {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.open.output"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object"
+            }
+          },
+          "required": ["code", "message", "retryable"],
+          "additionalProperties": false
+        },
+        "run": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Run"
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

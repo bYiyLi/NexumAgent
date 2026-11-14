@@ -4,6 +4,11 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import formatsModule from "ajv-formats";
 import { AgentError, requireCondition } from "./errors.js";
 import { canonicalJson } from "./json.js";
+import { validateWireSemantics } from "./wire-validation.js";
+import {
+  MAX_JSON_BODY_BYTES_V2,
+  MAX_RESOURCES_READ_BODY_BYTES_V2,
+} from "./wire.js";
 
 const base = new URL("../../contracts/v2/", import.meta.url);
 const prefix = "https://schemas.nexum.local/agent/v2/";
@@ -33,12 +38,65 @@ for (const directory of ["model", "wire"]) {
   }
 }
 
+// Core consumes the same public argument contract after Cloud has replaced Host
+// attachments by stable source identities. Keep this private view derived from
+// the public source instead of maintaining another copy of its fields.
+for (const operation of ["agent.run.start", "agent.run.input"]) {
+  const source = JSON.parse(
+    readFileSync(new URL(`model/${operation}.input.schema.json`, base), "utf8"),
+  );
+  const common = JSON.parse(
+    readFileSync(new URL("common.schema.json", base), "utf8"),
+  );
+  source.$id = prefix + `runtime/${operation}.input.schema.json`;
+  source.properties.attachments = {
+    ...common.$defs.attachments,
+    items: {
+      anyOf: [
+        common.$defs.hostAttachment,
+        { $ref: prefix + "wire/types.schema.json#/$defs/Attachment" },
+      ],
+    },
+  };
+  ajv.addSchema(source as AnySchema);
+}
+
 export function validateContract(contract: string, value: unknown): void {
-  canonicalJson(value);
-  const id =
-    contract === "wire"
+  canonicalJson(
+    value,
+    contract === "wire.body:ResourcesRead"
+      ? MAX_RESOURCES_READ_BODY_BYTES_V2
+      : contract.startsWith("wire.body:")
+        ? MAX_JSON_BODY_BYTES_V2
+        : 1024 * 1024,
+  );
+  const id = contract.startsWith("runtime:")
+    ? prefix + `runtime/${contract.slice(8)}.input.schema.json`
+    : contract === "wire"
       ? prefix + "wire/envelope.schema.json"
-      : prefix + `model/${contract}.input.schema.json`;
+      : contract === "wire.stream"
+        ? prefix + "wire/stream.schema.json"
+        : contract.startsWith("wire.input:")
+          ? prefix +
+            "wire/operations.schema.json#/$defs/" +
+            contract.slice(11) +
+            ".input"
+          : contract.startsWith("wire.output:")
+            ? prefix +
+              "wire/operations.schema.json#/$defs/" +
+              contract.slice(12) +
+              ".output"
+            : contract.startsWith("wire.body:")
+              ? prefix +
+                (contract.startsWith("wire.body:Maintenance")
+                  ? "wire/maintenance.schema.json#/$defs/"
+                  : "wire/bodies.schema.json#/$defs/") +
+                contract.slice(10)
+              : contract.startsWith("wire.type:")
+                ? prefix + "wire/types.schema.json#/$defs/" + contract.slice(10)
+                : contract.endsWith(".output")
+                  ? prefix + `model/${contract}.schema.json`
+                  : prefix + `model/${contract}.input.schema.json`;
   const validate = ajv.getSchema(id);
   requireCondition(
     validate,
@@ -46,6 +104,7 @@ export function validateContract(contract: string, value: unknown): void {
     "The requested contract is not registered.",
   );
   assertValid(validate, value);
+  validateWireSemantics(contract, value);
 }
 
 export function compileInputSchema(schema: unknown): (value: unknown) => void {

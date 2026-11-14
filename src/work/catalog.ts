@@ -5,6 +5,10 @@ import { createHash } from "node:crypto";
 import { requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { ModulePolicy } from "../runtime/modules.js";
+import type {
+  ManagedReserve,
+  MaterialRetention,
+} from "../runtime/material-retention.js";
 import { ScriptCatalog, type ScriptDiscovery } from "../runtime/scripts.js";
 import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
 import { boundedFile } from "./discovery.js";
@@ -33,7 +37,19 @@ const missing = (error: unknown) =>
 const label = (text: string) =>
   text.replace(/[\r\n]+/g, " ").replace(/[\[\]`]/g, " ");
 
-function writeGenerated(filename: string, text: string): void {
+interface DocumentCatalogOptions {
+  reserve?: ManagedReserve;
+  materialRetention?: MaterialRetention;
+}
+
+async function writeGenerated(
+  work: string,
+  filename: string,
+  text: string,
+  reserve?: DocumentCatalogOptions["reserve"],
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
   try {
     const info = lstatSync(filename);
     requireCondition(
@@ -49,14 +65,31 @@ function writeGenerated(filename: string, text: string): void {
   } catch (error) {
     if (!missing(error)) throw error;
   }
-  atomicText(filename, text);
+  const reservation = await reserve?.(Buffer.byteLength(text));
+  try {
+    signal?.throwIfAborted();
+    // Admission may await cleanup; re-check directories before publishing bytes.
+    privateDirectory(
+      work,
+      ...path.relative(work, path.dirname(filename)).split(path.sep),
+    );
+    atomicText(filename, text);
+  } finally {
+    reservation?.release();
+  }
 }
 
 export class DocumentCatalog {
   readonly work: string;
   readonly scripts: ScriptCatalog;
   readonly policy: ModulePolicy;
-  constructor(work: string, scripts: ScriptCatalog, policy: ModulePolicy) {
+  #activeDirectory?: string;
+  constructor(
+    work: string,
+    scripts: ScriptCatalog,
+    policy: ModulePolicy,
+    readonly options: DocumentCatalogOptions = {},
+  ) {
     this.work = realpathSync.native(work);
     this.scripts = scripts;
     this.policy = policy;
@@ -65,6 +98,10 @@ export class DocumentCatalog {
       "runtime_profile_mismatch",
       "The document catalog and script environment must use the same work directory.",
     );
+  }
+
+  activeDirectories(): ReadonlySet<string> {
+    return new Set(this.#activeDirectory ? [this.#activeDirectory] : []);
   }
 
   async refresh(
@@ -195,7 +232,13 @@ export class DocumentCatalog {
         )
         .join("\n\n") +
       "\n";
-    this.scripts.refreshIndex(scripts);
+    await writeGenerated(
+      this.work,
+      path.join(docs, "scripts.md"),
+      scriptText,
+      this.options.reserve,
+      signal,
+    );
     signal?.throwIfAborted();
     for (const link of links) {
       const actual = realpathSync.native(link.path);
@@ -230,14 +273,52 @@ export class DocumentCatalog {
       ),
     );
     const versioned = privateDirectory(docs, ".catalog", revision);
-    writeGenerated(path.join(versioned, "README.md"), immutableText);
-    writeGenerated(path.join(versioned, "packages.md"), packageText);
-    writeGenerated(path.join(versioned, "scripts.md"), scriptText);
-    writeGenerated(path.join(packagesDirectory, "README.md"), packageText);
-    writeGenerated(
-      path.join(docs, "README.md"),
-      navigation("packages/README.md", "scripts.md"),
+    const hold = await this.options.materialRetention?.hold(
+      "catalog",
+      versioned,
     );
+    try {
+      await writeGenerated(
+        this.work,
+        path.join(versioned, "README.md"),
+        immutableText,
+        this.options.reserve,
+        signal,
+      );
+      await writeGenerated(
+        this.work,
+        path.join(versioned, "packages.md"),
+        packageText,
+        this.options.reserve,
+        signal,
+      );
+      await writeGenerated(
+        this.work,
+        path.join(versioned, "scripts.md"),
+        scriptText,
+        this.options.reserve,
+        signal,
+      );
+      await writeGenerated(
+        this.work,
+        path.join(packagesDirectory, "README.md"),
+        packageText,
+        this.options.reserve,
+        signal,
+      );
+      await writeGenerated(
+        this.work,
+        path.join(docs, "README.md"),
+        navigation("packages/README.md", "scripts.md"),
+        this.options.reserve,
+        signal,
+      );
+      signal?.throwIfAborted();
+      this.options.materialRetention?.setPublished("catalog", versioned);
+      this.#activeDirectory = versioned;
+    } finally {
+      hold?.release();
+    }
     const lines = immutableText.split("\n");
     return {
       entry: path.join(versioned, "README.md"),

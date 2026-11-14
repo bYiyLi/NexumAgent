@@ -25,6 +25,8 @@ export interface ProcessOutputOptions {
   /** Total file bytes, including the fixed header and framing. */
   readonly maxBytes?: number;
   readonly maxPendingBytes?: number;
+  /** Trusted Core admission for this writer's complete bounded ring and marker. */
+  readonly reserve?: (bytes: number) => Promise<{ release(): void }>;
 }
 export interface ProcessOutputReadOptions {
   readonly cursor?: string;
@@ -156,6 +158,8 @@ export class ProcessOutputLog extends EventEmitter {
   #openPromise?: Promise<void>;
   #finishPromise?: Promise<void>;
   #closePromise?: Promise<void>;
+  #reserve?: ProcessOutputOptions["reserve"];
+  #reservation?: { release(): void };
 
   constructor(
     agentRoot: string,
@@ -173,6 +177,7 @@ export class ProcessOutputLog extends EventEmitter {
     );
     this.#maxBytes = options.maxBytes ?? 16 * 1024 * 1024;
     this.maxPendingBytes = options.maxPendingBytes ?? 4 * 1024 * 1024;
+    this.#reserve = options.reserve;
     requireCondition(
       integer(this.#maxBytes, 512, maximumFileBytes) &&
         integer(this.maxPendingBytes, 1, 16 * 1024 * 1024),
@@ -286,7 +291,16 @@ export class ProcessOutputLog extends EventEmitter {
     this.#readOnly = options.readOnly ?? false;
     this.#openPromise = this.#enqueue(0, async () => {
       check(options.signal);
+      let admitting = false;
       try {
+        if (!this.#readOnly) {
+          // Holding the ring's fixed budget through actual writer closure lets
+          // output drain and the completion marker settle without a new admission.
+          admitting = true;
+          this.#reservation = await this.#reserve?.(this.#maxBytes + 1024);
+          check(options.signal);
+          admitting = false;
+        }
         if (this.#readOnly) await this.#safePath();
         else privateDirectory(this.root, "logs", "processes");
         this.#handle = await open(
@@ -310,7 +324,10 @@ export class ProcessOutputLog extends EventEmitter {
       } catch (cause) {
         await this.#handle?.close();
         this.#handle = null;
+        this.#reservation?.release();
+        this.#reservation = undefined;
         if (options.signal?.aborted) throw cause;
+        if (admitting && cause instanceof AgentError) throw cause;
         throw unavailable(cause);
       }
     });
@@ -817,6 +834,8 @@ export class ProcessOutputLog extends EventEmitter {
           throw unavailable(cause);
         }
         this.emit("change");
+        this.#reservation?.release();
+        this.#reservation = undefined;
         check(options.signal);
       },
       true,
@@ -834,6 +853,8 @@ export class ProcessOutputLog extends EventEmitter {
         await this.#handle?.close();
         this.#handle = null;
         this.#closed = true;
+        this.#reservation?.release();
+        this.#reservation = undefined;
       },
       true,
     );

@@ -7,6 +7,8 @@ export type {
   Invocation,
   LogEntry,
   MethodDefinition,
+  StorageReservation,
+  StorageService,
 } from "./extensions/api.js";
 export type {
   ManagedResource,
@@ -26,6 +28,16 @@ export type {
   TransferListOptions,
 } from "./extensions/transfer.js";
 export type { StateService } from "./extensions/state.js";
+export type {
+  HostRequestServices,
+  HostRequestOptions,
+} from "./extensions/host-requests.js";
+export type {
+  MaintenanceService,
+  MaintenanceCreated,
+  MaintenanceRequestView,
+  MaintenanceListOptions,
+} from "./maintenance/requests.js";
 export type {
   OutputAPI,
   OutputIntent,

@@ -1,11 +1,18 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import {
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  rmSync,
+} from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { once } from "node:events";
 import path from "node:path";
 import * as os from "node:os";
 import { performance } from "node:perf_hooks";
+import { createHash } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
-import { canonicalJson, newId } from "../contracts/json.js";
+import { canonicalJson, digest, newId } from "../contracts/json.js";
 import { validateContract } from "../contracts/validation.js";
 import type {
   ContributionOrigin,
@@ -23,6 +30,10 @@ import {
 import { ScriptCatalog, type ScriptUsage } from "../runtime/scripts.js";
 import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
 import { DocumentCatalog, type DocLink } from "./catalog.js";
+import type {
+  ManagedReserve,
+  MaterialRetention,
+} from "../runtime/material-retention.js";
 import {
   boundedFile,
   discoverMaterials,
@@ -61,6 +72,8 @@ export interface OpenInput {
   contextId?: string;
 }
 export interface WorkOptions {
+  readonly reserve?: ManagedReserve;
+  readonly materialRetention?: MaterialRetention;
   home: string | null;
   agent: {
     name: string;
@@ -96,6 +109,7 @@ interface Bundle {
   view: JsonObject;
   discovered: DiscoveredMaterials;
   published: PublishedMaterials;
+  description?: { itemId: string; path: string; revision: string };
 }
 const json = (value: unknown, max = 16 * 1024 * 1024): JsonObject =>
   JSON.parse(canonicalJson(value, max)) as JsonObject;
@@ -199,6 +213,83 @@ export class WorkService {
     }
   }
 
+  /** Owner Console inspection retains disabled discovery without injecting it into model context. */
+  async inspect(
+    caller: Caller,
+    input: OpenInput,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
+    caller = fixedCaller(caller);
+    requireCondition(
+      caller.source === "owner_session",
+      "material_forbidden",
+      "Only a verified owner session may inspect management metadata.",
+    );
+    requireCondition(
+      typeof input.projectId === "string" &&
+        input.projectId.length > 0 &&
+        input.path === undefined,
+      "invalid_work_inspection",
+      "Project inspection needs a fixed project identity and cannot switch to a path.",
+    );
+    const opened = await this.open(caller, input, signal);
+    const work = this.#store.activeWork(
+      opened.contextId as string,
+      callerKey(caller),
+    );
+    requireCondition(
+      work.revision === opened.revision,
+      "context_revision_mismatch",
+      "The work changed before management metadata could be projected.",
+    );
+    this.#authorize(caller, { action: "read", work });
+    signal?.throwIfAborted();
+    const bundle = this.#bundle(work);
+    const instruction = (
+      item: Instruction | PublishedInstruction,
+    ): JsonObject => {
+      const { content: _content, ...metadata } = item;
+      return json({
+        ...metadata,
+        itemId: item.instructionId,
+        disabled: "disabled" in item ? item.disabled : false,
+      });
+    };
+    const skill = (item: SkillMetadata | PublishedSkill): JsonObject =>
+      json({
+        ...item,
+        itemId: item.skillId,
+        disabled: "disabled" in item ? item.disabled : false,
+      });
+    const view = json(opened);
+    (view.agent as JsonObject).management = {
+      instructions: [
+        ...bundle.published.instructions,
+        ...bundle.discovered.instructions.filter(
+          (item) => item.scope.type !== "project",
+        ),
+      ].map(instruction),
+      skills: [
+        ...bundle.published.skills,
+        ...bundle.discovered.skills.filter(
+          (item) => item.scope.type !== "project",
+        ),
+      ].map(skill),
+    };
+    const project = view.project as JsonObject;
+    project.descriptionItemId = bundle.description?.itemId ?? null;
+    project.management = {
+      instructions: bundle.discovered.instructions
+        .filter((item) => item.scope.type === "project")
+        .map(instruction),
+      skills: bundle.discovered.skills
+        .filter((item) => item.scope.type === "project")
+        .map(skill),
+      nestedInstructions: bundle.discovered.nestedInstructions.map(instruction),
+    };
+    return view;
+  }
+
   #authorize(
     caller: Caller,
     target: Parameters<WorkOptions["authorize"]>[1],
@@ -286,6 +377,29 @@ export class WorkService {
     const summary = project
       ? await readProjectSummary(project.root, signal)
       : null;
+    let description: Bundle["description"];
+    if (project && summary?.status === "updated" && summary.revision) {
+      try {
+        description = await this.#description(
+          project.root,
+          summary.revision,
+          signal,
+        );
+        requireCondition(
+          description,
+          "material_changed",
+          "The README disappeared before its full-description evidence was captured.",
+        );
+      } catch {
+        signal.throwIfAborted();
+        discovered.warnings.push({
+          code: "readme_unavailable",
+          path: project.root,
+          message:
+            "The optional README changed or became unavailable; no full-description reference was published.",
+        });
+      }
+    }
     if (project && summary?.description !== null)
       project.description = summary?.description ?? "";
     if (summary?.status === "unavailable")
@@ -323,7 +437,29 @@ export class WorkService {
       newId("snapshot"),
     );
     let committed = false;
+    let hold: { release(): void } | undefined;
+    const write = async (filename: string, text: string): Promise<void> => {
+      signal.throwIfAborted();
+      const reservation = await this.#options.reserve?.(
+        Buffer.byteLength(text),
+      );
+      try {
+        signal.throwIfAborted();
+        requireCondition(
+          realpathSync.native(this.#store.root) === this.#store.root &&
+            realpathSync.native(directory) === directory &&
+            lstatSync(directory).isDirectory() &&
+            !lstatSync(directory).isSymbolicLink(),
+          "material_path_escape",
+          "The work snapshot directory changed before its reserved write.",
+        );
+        atomicText(filename, text);
+      } finally {
+        reservation?.release();
+      }
+    };
     try {
+      hold = await this.#options.materialRetention?.hold("work", directory);
       const agentIndex = path.join(directory, "agent.json"),
         projectIndex = path.join(directory, "project.json");
       const agentInstructions = [
@@ -355,9 +491,9 @@ export class WorkService {
         skills: projectSkills,
         nestedInstructions: effective.nestedInstructions.map(withoutDisabled),
       });
-      atomicText(agentIndex, canonicalJson(allAgent, 16 * 1024 * 1024));
+      await write(agentIndex, canonicalJson(allAgent, 16 * 1024 * 1024));
       if (project)
-        atomicText(projectIndex, canonicalJson(allProject, 16 * 1024 * 1024));
+        await write(projectIndex, canonicalJson(allProject, 16 * 1024 * 1024));
       const cpus = os.cpus();
       const view = json({
         observedAt: new Date().toISOString(),
@@ -448,9 +584,10 @@ export class WorkService {
         view,
         discovered,
         published,
+        ...(description ? { description } : {}),
       };
       const filename = path.join(directory, "bundle.json");
-      atomicText(filename, canonicalJson(bundle, 16 * 1024 * 1024));
+      await write(filename, canonicalJson(bundle, 16 * 1024 * 1024));
       signal.throwIfAborted();
       this.#authorize(caller, {
         action: "commit",
@@ -478,8 +615,62 @@ export class WorkService {
       committed = true;
       return { contextId: work.contextId, revision: work.revision, ...view };
     } finally {
-      if (!committed) await rm(directory, { recursive: true, force: true });
+      try {
+        if (!committed && lstatSync(directory, { throwIfNoEntry: false })) {
+          requireCondition(
+            realpathSync.native(directory) === directory &&
+              lstatSync(directory).isDirectory() &&
+              !lstatSync(directory).isSymbolicLink(),
+            "material_path_escape",
+            "A failed work snapshot cannot redirect its cleanup.",
+          );
+          rmSync(directory, { recursive: true, force: true });
+        }
+      } finally {
+        hold?.release();
+      }
     }
+  }
+
+  async #description(
+    root: string,
+    revision: string,
+    signal: AbortSignal,
+  ): Promise<Bundle["description"]> {
+    signal.throwIfAborted();
+    const priority = (name: string) =>
+      name.toLowerCase() === "readme.md"
+        ? 0
+        : name.toLowerCase() === "readme"
+          ? 1
+          : 2;
+    const entries = (await readdir(root, { withFileTypes: true })).filter(
+      (item) => item.isFile() && /^readme(?:\..*)?$/i.test(item.name),
+    );
+    entries.sort(
+      (a, b) =>
+        priority(a.name) - priority(b.name) ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
+    if (!entries.length) return undefined;
+    const filename = path.join(root, entries[0]!.name),
+      actual = realpathSync.native(filename);
+    requireCondition(
+      actual === filename && contains(root, actual),
+      "material_path_escape",
+      "The actual README must stay inside its canonical Project.",
+    );
+    const read = await boundedFile(actual, 1024 * 1024, signal);
+    requireCondition(
+      read.revision === revision,
+      "material_changed",
+      "The README changed during work discovery; refresh the work.",
+    );
+    return {
+      itemId: "readme:" + digest({ path: actual, revision }),
+      path: actual,
+      revision,
+    };
   }
 
   #validatePublished(published: PublishedMaterials): void {
@@ -638,10 +829,37 @@ export class WorkService {
     relativePath?: string,
     signal?: AbortSignal,
   ): Promise<{ path: string | null; bytes: Buffer; revision: string }> {
+    caller = fixedCaller(caller);
+    signal?.throwIfAborted();
     const work = this.#store.activeWork(contextId, callerKey(caller));
     this.#authorize(caller, { action: "read-material", work });
     const bundle = this.#bundle(work);
-    const local = enabledMaterials(bundle.discovered);
+    const local =
+      caller.source === "owner_session"
+        ? bundle.discovered
+        : enabledMaterials(bundle.discovered);
+    if (bundle.description?.itemId === itemId) {
+      requireCondition(
+        !relativePath && work.projectId !== null,
+        "material_path_escape",
+        "A README identity grants only its exact Project file.",
+      );
+      const description = bundle.description,
+        actual = realpathSync.native(description.path);
+      requireCondition(
+        actual === description.path && contains(work.pwd, actual),
+        "material_path_escape",
+        "The README no longer belongs to this Project.",
+      );
+      const read = await boundedFile(actual, 1024 * 1024, signal);
+      requireCondition(
+        read.revision === description.revision,
+        "material_changed",
+        "The README changed after inspection; refresh the work.",
+      );
+      this.#authorize(caller, { action: "read-material", work });
+      return { path: actual, ...read };
+    }
     const instructions = [
       ...local.instructions,
       ...local.nestedInstructions,
@@ -670,12 +888,35 @@ export class WorkService {
       const actual = realpathSync.native(instruction.path);
       requireCondition(
         actual === instruction.path &&
-          work.projectId !== null &&
-          contains(work.pwd, actual),
+          (caller.source === "owner_session"
+            ? instruction.scope.type === "personal" ||
+              contains(instruction.scope.root, actual)
+            : work.projectId !== null && contains(work.pwd, actual)),
         "material_path_escape",
         "The nested instruction no longer belongs to this project.",
       );
+      const unchanged = () => {
+        if (
+          instruction.origin.type !== "local" ||
+          !instruction.origin.revision.startsWith("stat:")
+        )
+          return;
+        const info = statSync(actual);
+        const revision =
+          "stat:" +
+          createHash("sha256")
+            .update([info.ino, info.size, info.mtimeMs, info.ctimeMs].join(":"))
+            .digest("hex");
+        requireCondition(
+          revision === instruction.origin.revision,
+          "material_changed",
+          "The instruction changed after discovery; refresh the work before reading it.",
+        );
+      };
+      unchanged();
       const read = await boundedFile(actual, 65536, signal);
+      unchanged();
+      this.#authorize(caller, { action: "read-material", work });
       return { path: actual, ...read };
     }
     const skill = [...local.skills, ...bundle.published.skills].find(
@@ -717,6 +958,130 @@ export class WorkService {
         "material_changed",
         "The Skill changed while its resource was being read.",
       );
+    this.#authorize(caller, { action: "read-material", work });
     return { path: actual, ...result };
+  }
+
+  /** A bounded Skill subtree, identified by the same resolved snapshot winner as body reads. */
+  async readMaterialEntries(
+    caller: Caller,
+    contextId: string,
+    itemId: string,
+    relativePath?: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    entries: { displayPath: string; kind: "file" | "directory" }[];
+  }> {
+    caller = fixedCaller(caller);
+    signal?.throwIfAborted();
+    const work = this.#store.activeWork(contextId, callerKey(caller));
+    this.#authorize(caller, { action: "read-material", work });
+    const bundle = this.#bundle(work),
+      local =
+        caller.source === "owner_session"
+          ? bundle.discovered
+          : enabledMaterials(bundle.discovered);
+    const skill = [...local.skills, ...bundle.published.skills].find(
+      (item) => item.skillId === itemId,
+    );
+    requireCondition(
+      skill,
+      "material_forbidden",
+      "This Skill is not a resolved member available to this caller.",
+    );
+    const root = realpathSync.native(skill.path),
+      entry = realpathSync.native(skill.skillFile);
+    requireCondition(
+      root === skill.path && entry === skill.skillFile && contains(root, entry),
+      "material_path_escape",
+      "The Skill root or entry has redirected.",
+    );
+    // Reuse the complete entry/revision check before exposing its resource names.
+    await this.readMaterial(caller, contextId, itemId, undefined, signal);
+    requireCondition(
+      this.#store.activeWork(contextId, callerKey(caller)).revision ===
+        work.revision,
+      "context_revision_mismatch",
+      "The work changed before its Skill subtree could be listed.",
+    );
+    const start = path.resolve(root, relativePath ?? ".");
+    requireCondition(
+      contains(root, start) &&
+        realpathSync.native(start) === start &&
+        lstatSync(start).isDirectory(),
+      "material_path_escape",
+      "A Skill tree must stay inside its canonical root without redirects.",
+    );
+    const entries: { displayPath: string; kind: "file" | "directory" }[] = [];
+    let bytes = Buffer.byteLength(JSON.stringify({ entries }));
+    const visit = async (directory: string): Promise<void> => {
+      signal?.throwIfAborted();
+      this.#authorize(caller, { action: "read-material", work });
+      requireCondition(
+        realpathSync.native(directory) === directory &&
+          contains(root, directory),
+        "material_path_escape",
+        "The Skill subtree escaped its canonical root.",
+      );
+      const before = lstatSync(directory);
+      requireCondition(
+        before.isDirectory(),
+        "material_path_escape",
+        "Skill subtree directories cannot redirect.",
+      );
+      const children = await readdir(directory, { withFileTypes: true });
+      children.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      const after = lstatSync(directory);
+      requireCondition(
+        after.isDirectory() &&
+          before.dev === after.dev &&
+          before.ino === after.ino &&
+          realpathSync.native(directory) === directory,
+        "material_changed",
+        "The Skill subtree changed while being listed.",
+      );
+      for (const child of children) {
+        signal?.throwIfAborted();
+        const filename = path.join(directory, child.name),
+          current = lstatSync(filename);
+        requireCondition(
+          !current.isSymbolicLink() &&
+            realpathSync.native(filename) === filename &&
+            contains(root, filename),
+          "material_path_escape",
+          "A Skill subtree entry cannot redirect outside the selected tree.",
+        );
+        requireCondition(
+          current.isFile() || current.isDirectory(),
+          "material_unavailable",
+          "A Skill subtree supports only regular files and directories.",
+        );
+        const item = {
+          displayPath: path.relative(root, filename).split(path.sep).join("/"),
+          kind: current.isDirectory()
+            ? ("directory" as const)
+            : ("file" as const),
+        };
+        bytes +=
+          Buffer.byteLength(JSON.stringify(item)) + (entries.length ? 1 : 0);
+        entries.push(item);
+        requireCondition(
+          entries.length <= 1000 && bytes <= 64 * 1024,
+          "material_tree_too_large",
+          "The Skill subtree exceeds its 1000-entry or 64-KiB discovery budget.",
+        );
+        if (current.isDirectory()) await visit(filename);
+      }
+    };
+    await visit(start);
+    await this.readMaterial(caller, contextId, itemId, undefined, signal);
+    requireCondition(
+      this.#store.activeWork(contextId, callerKey(caller)).revision ===
+        work.revision,
+      "context_revision_mismatch",
+      "The work changed while its Skill subtree was being listed.",
+    );
+    this.#authorize(caller, { action: "read-material", work });
+    return { entries };
   }
 }

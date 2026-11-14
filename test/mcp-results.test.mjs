@@ -1077,3 +1077,45 @@ test("trusted MCP media respects individual, aggregate, final encoded and Host b
     { code: "host_content_unsupported" },
   );
 });
+
+test("transport descriptions preserve remote result slots and isolate Host metadata without fetching remote links", async (t) => {
+  const f = await fixture(t);
+  const remote = f.wrap({
+    content: [
+      { type: "text", text: "remote result" },
+      {
+        type: "resource_link",
+        uri: "remote:///report",
+        name: "report",
+        mimeType: "text/plain",
+      },
+    ],
+    structuredContent: { count: 2 },
+    isError: true,
+    _meta: { privateHostState: secret },
+  });
+  const saved = await f.encoder.encode(
+    f.output.result({ content: [remote], structuredContent: { local: true } }),
+    f.scope(),
+  );
+  const before = JSON.stringify(saved);
+  const described = await f.encoder.describe(saved, f.scope());
+  noSecret(described.result);
+  assert.equal(described.hostMeta.privateHostState, secret);
+  assert.equal(described.result.isError, true);
+  assert.deepEqual(described.result.mcpResults[0].structuredContent, {
+    count: 2,
+  });
+  assert.deepEqual(described.result.mcpResults[0].contentIndices, [0, 1]);
+  assert.match(
+    described.result.content[1].uri,
+    /^nexum:\/\/agents\/agent\/mcp\//,
+  );
+  assert.equal(JSON.stringify(described).includes(f.root), false);
+  assert.deepEqual(f.reads, []);
+  assert.equal(JSON.stringify(saved), before);
+  f.revoke();
+  await assert.rejects(f.encoder.describe(saved, f.scope()), {
+    code: "forbidden",
+  });
+});

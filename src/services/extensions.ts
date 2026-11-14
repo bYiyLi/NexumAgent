@@ -10,6 +10,7 @@ import {
   type PreparedExtensionMaterials,
 } from "../extensions/materials.js";
 import { ExtensionRegistry } from "../extensions/registry.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 interface Entry {
   readonly name: string;
@@ -28,6 +29,8 @@ interface Pending {
 export class ExtensionServices {
   #entries = new Map<string, Entry>();
   #pending = new Map<string, Pending>();
+  #packageOwner?: symbol;
+  #packageContext = new AsyncLocalStorage<symbol>();
   constructor(
     readonly registry: ExtensionRegistry,
     readonly packages: ExtensionPackageLoader,
@@ -67,6 +70,12 @@ export class ExtensionServices {
     intent: string,
     execute: () => Promise<JsonObject>,
   ): Promise<JsonObject> {
+    requireCondition(
+      !this.#packageOwner ||
+        this.#packageContext.getStore() === this.#packageOwner,
+      "extension_busy",
+      "An approved package change currently owns extension lifecycle admission.",
+    );
     this.#name(name);
     const existing = this.#pending.get(name);
     if (existing) {
@@ -215,5 +224,41 @@ export class ExtensionServices {
         left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
       )
       .map((entry) => this.#view(entry));
+  }
+
+  /** Reserve the real published instances while npm mutates their shared work tree. */
+  assertPackageChangeReady(): void {
+    requireCondition(
+      !this.#packageOwner ||
+        this.#packageContext.getStore() === this.#packageOwner,
+      "extension_busy",
+      "Another approved package change owns lifecycle admission.",
+    );
+    requireCondition(
+      this.#pending.size === 0,
+      "extension_busy",
+      "An extension initialization or stop still uses the package tree.",
+    );
+    for (const entry of this.#entries.values())
+      this.registry.assertIdle(entry.prepared.handle);
+  }
+  async withPackageChanges<T>(action: () => Promise<T>): Promise<T> {
+    requireCondition(
+      !this.#packageOwner,
+      "extension_busy",
+      "Another approved package change is using this work tree.",
+    );
+    this.assertPackageChangeReady();
+    const release = this.registry.reservePackageChanges(
+      [...this.#entries.values()].map((entry) => entry.prepared.handle),
+    );
+    const owner = Symbol("package-maintenance");
+    this.#packageOwner = owner;
+    try {
+      return await this.#packageContext.run(owner, action);
+    } finally {
+      this.#packageOwner = undefined;
+      release();
+    }
   }
 }

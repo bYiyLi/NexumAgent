@@ -9,7 +9,11 @@ import {
 import path from "node:path";
 import { MIMEType } from "node:util";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { AgentError, requireCondition } from "../contracts/errors.js";
+import {
+  AgentError,
+  isAgentError,
+  requireCondition,
+} from "../contracts/errors.js";
 import {
   canonicalJson,
   digest,
@@ -50,10 +54,37 @@ import {
   migration2,
   migration3,
   migration4,
+  migration5,
   schemaVersion,
 } from "./schema.js";
 
 const terminalSql = "'succeeded','failed','cancelled','interrupted'";
+export type McpTaskStatus =
+  "working" | "input_required" | "completed" | "cancelled" | "failed";
+export interface McpTaskRecord {
+  readonly taskId: string;
+  readonly callerKey: string;
+  readonly runId: string;
+  readonly status: McpTaskStatus;
+  readonly resultRef: string | null;
+  readonly error: JsonObject | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly expiresAt: number;
+}
+export interface CleanupBatch {
+  readonly processed: number;
+  readonly deleted: Readonly<Record<string, number>>;
+  readonly files: readonly {
+    readonly kind: "run" | "log" | "task" | "process_log" | "inputs";
+    readonly ref: string;
+  }[];
+}
+const taskTerminal = new Set<McpTaskStatus>([
+  "completed",
+  "cancelled",
+  "failed",
+]);
 const transitions: Record<RunStatus, readonly RunStatus[]> = {
   accepted: ["preparing_inputs", "failed"],
   preparing_inputs: ["running", "failed"],
@@ -93,6 +124,30 @@ export interface AcceptRun {
   controlEligible?: boolean;
   controlCapacity?: number;
 }
+export interface MaintenanceOperationInput {
+  readonly requestId: string;
+  readonly approvedRevision: string;
+  readonly callerKey: string;
+  readonly originRunId?: string | null;
+  readonly source: JsonObject;
+  readonly method: string;
+  readonly detailRef: string;
+}
+const maintenanceMethods = new Set([
+  "packages.install",
+  "packages.update",
+  "packages.remove",
+  "extensions.enable",
+  "extensions.disable",
+  "mcp.add",
+  "mcp.update",
+  "mcp.remove",
+  "api.import",
+  "api.update",
+  "api.remove",
+]);
+const maintenanceRequest = /^maint_req_[A-Za-z0-9_-]{1,128}$/;
+
 export interface ResourceHistoryFilter {
   readonly owner: string;
   readonly namespace: string;
@@ -108,14 +163,25 @@ export interface ResourceHistoryRecord extends ResourceRecord {
 }
 
 export class SqliteStore {
-  readonly bootId = newId("boot");
+  readonly bootId: string;
   readonly root: string;
   readonly binding: Readonly<Binding>;
   #db: DatabaseSync;
   #cursorKey = randomBytes(32);
   #closed = false;
 
-  constructor(root: string, binding: Binding, now = Date.now()) {
+  constructor(
+    root: string,
+    binding: Binding,
+    now = Date.now(),
+    bootId: string = newId("boot"),
+  ) {
+    requireCondition(
+      typeof bootId === "string" && /^boot_[0-9a-f]{32}$/.test(bootId),
+      "invalid_boot_id",
+      "The Agent process boot identity is invalid.",
+    );
+    this.bootId = bootId;
     requireCondition(
       path.isAbsolute(root),
       "invalid_root",
@@ -196,6 +262,7 @@ export class SqliteStore {
         if (version < 2) this.#db.exec(migration2);
         if (version < 3) this.#db.exec(migration3);
         if (version < 4) this.#db.exec(migration4);
+        if (version < 5) this.#db.exec(migration5);
         this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
@@ -292,9 +359,13 @@ export class SqliteStore {
     this.#db
       .prepare(
         `UPDATE managed_resources SET status='unavailable',
-      diagnostic_json=json_set(json_patch(diagnostic_json,?),'$.osStopped',NULL),revision=revision+1 WHERE closed_at IS NULL`,
+      diagnostic_json=json_set(json_patch(diagnostic_json,?),'$.osStopped',NULL,'$.unavailableAt',
+        CASE WHEN json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') THEN CAST(json_extract(diagnostic_json,'$.unavailableAt') AS INTEGER) ELSE CAST(? AS INTEGER) END),revision=revision+1 WHERE closed_at IS NULL`,
       )
-      .run(canonicalJson({ code: "agent_restarted", controlAvailable: false }));
+      .run(
+        canonicalJson({ code: "agent_restarted", controlAvailable: false }),
+        now,
+      );
     this.#db
       .prepare(
         `UPDATE transfers SET status='interrupted',ended_at=?,revision=revision+1
@@ -335,6 +406,502 @@ export class SqliteStore {
   }
   getRun(id: string): RunRecord {
     return this.#get("runs", "run_id", id, "run_not_found");
+  }
+
+  /** Bind an existing, authorized run before a Task handle can leave the Agent. */
+  createTask(
+    input: { taskId: string; callerKey: string; runId: string; ttlMs: number },
+    now = Date.now(),
+  ): McpTaskRecord {
+    requireCondition(
+      /^nx_task_[A-Za-z0-9_-]{1,1016}$/.test(input.taskId) &&
+        typeof input.callerKey === "string" &&
+        input.callerKey.length > 0 &&
+        Number.isSafeInteger(input.ttlMs) &&
+        input.ttlMs > 0 &&
+        Number.isSafeInteger(now) &&
+        now >= 0 &&
+        Number.isSafeInteger(now + input.ttlMs) &&
+        now + input.ttlMs <= 253402300799999,
+      "invalid_task",
+      "The Task identity or retention deadline is invalid.",
+    );
+    return this.#transaction(() => {
+      const run = this.getRun(input.runId);
+      requireCondition(
+        run.callerKey === input.callerKey,
+        "task_not_found",
+        "The Task run is unavailable to this caller.",
+      );
+      const previous = this.#db
+        .prepare(
+          "SELECT * FROM mcp_tasks WHERE caller_key=? AND run_id=? AND expires_at>? ORDER BY created_at,task_id LIMIT 1",
+        )
+        .get(input.callerKey, input.runId, now);
+      // A retried create never renews a published promise.
+      if (previous) return decode<McpTaskRecord>(previous);
+      this.#db
+        .prepare(
+          "INSERT INTO mcp_tasks(task_id,caller_key,run_id,status,created_at,updated_at,expires_at) VALUES(?,?,?,'working',?,?,?)",
+        )
+        .run(
+          input.taskId,
+          input.callerKey,
+          input.runId,
+          now,
+          now,
+          now + input.ttlMs,
+        );
+      return this.getTask(input.taskId, input.callerKey, now);
+    });
+  }
+
+  getTask(taskId: string, key: string, now = Date.now()): McpTaskRecord {
+    const row = this.#db
+      .prepare("SELECT * FROM mcp_tasks WHERE task_id=? AND caller_key=?")
+      .get(taskId, key);
+    requireCondition(
+      row,
+      "task_not_found",
+      "The Task does not exist for this caller.",
+    );
+    const task = decode<McpTaskRecord>(row);
+    requireCondition(
+      task.expiresAt > now,
+      "task_expired",
+      "The Task retention promise has expired.",
+    );
+    return task;
+  }
+
+  taskForRun(
+    runId: string,
+    key: string,
+    now = Date.now(),
+  ): McpTaskRecord | null {
+    requireCondition(
+      !this.#closed,
+      "storage_closed",
+      "The local store is closed.",
+    );
+    const row = this.#db
+      .prepare(
+        "SELECT * FROM mcp_tasks WHERE run_id=? AND caller_key=? AND expires_at>? ORDER BY created_at,task_id LIMIT 1",
+      )
+      .get(runId, key, now);
+    return row ? decode<McpTaskRecord>(row) : null;
+  }
+
+  updateTask(
+    taskId: string,
+    key: string,
+    patch: { status: McpTaskStatus; resultRef?: string; error?: JsonObject },
+    now = Date.now(),
+  ): McpTaskRecord {
+    requireCondition(
+      [
+        "working",
+        "input_required",
+        "completed",
+        "cancelled",
+        "failed",
+      ].includes(patch.status),
+      "invalid_task",
+      "The Task status is invalid.",
+    );
+    if (taskTerminal.has(patch.status)) {
+      requireCondition(
+        typeof patch.resultRef === "string" &&
+          /^state\/tasks\/[0-9a-f]{64}\/result_[0-9a-f]{32}\.json$/.test(
+            patch.resultRef,
+          ),
+        "invalid_task_result",
+        "A terminal Task requires its already fixed local method-result snapshot.",
+      );
+    } else
+      requireCondition(
+        patch.resultRef === undefined && patch.error === undefined,
+        "invalid_task_result",
+        "A working Task cannot publish a terminal result.",
+      );
+    if (patch.status === "failed")
+      requireCondition(
+        patch.error &&
+          Number.isSafeInteger(patch.error.code) &&
+          typeof patch.error.message === "string" &&
+          Buffer.byteLength(patch.error.message) <= 4096,
+        "invalid_task_error",
+        "A failed Task requires a bounded JSON-RPC error.",
+      );
+    else
+      requireCondition(
+        patch.error === undefined,
+        "invalid_task_error",
+        "Only a failed Task can carry a JSON-RPC error.",
+      );
+    return this.#transaction(() => {
+      const previous = this.getTask(taskId, key, now);
+      if (taskTerminal.has(previous.status)) return previous;
+      if (previous.status === patch.status) return previous;
+      this.#db
+        .prepare(
+          "UPDATE mcp_tasks SET status=?,result_ref=?,error_json=?,updated_at=? WHERE task_id=?",
+        )
+        .run(
+          patch.status,
+          patch.resultRef ?? null,
+          patch.error ? canonicalJson(patch.error, 16384) : null,
+          now,
+          taskId,
+        );
+      return this.getTask(taskId, key, now);
+    });
+  }
+
+  pinTaskRunArtifacts(
+    runId: string,
+    ids: readonly string[],
+    now = Date.now(),
+  ): void {
+    requireCondition(
+      ids.length <= 16384 && ids.every((id) => /^res_[0-9a-f]{32}$/.test(id)),
+      "invalid_task_resource",
+      "Task artifact references must be bounded local resource identities.",
+    );
+    if (!ids.length) return;
+    this.#transaction(() => {
+      const tasks = this.#db
+        .prepare(
+          "SELECT task_id FROM mcp_tasks WHERE run_id=? AND expires_at>?",
+        )
+        .all(runId, now);
+      const insert = this.#db.prepare(
+        "INSERT OR IGNORE INTO task_artifacts(task_id,resource_id) VALUES(?,?)",
+      );
+      for (const task of tasks)
+        for (const id of new Set(ids)) insert.run(task.task_id as string, id);
+    });
+  }
+
+  taskArtifactRetentionUntil(
+    id: string,
+    originRunId: string | null,
+    now = Date.now(),
+    originalExpiresAt = 0,
+  ): number {
+    requireCondition(
+      /^res_[0-9a-f]{32}$/.test(id),
+      "invalid_task_resource",
+      "The artifact identity is invalid.",
+    );
+    const row = this.#db
+      .prepare(
+        `SELECT max(t.expires_at) expires_at FROM mcp_tasks t
+      WHERE t.expires_at>? AND ((t.run_id=? AND (?=0 OR t.created_at<?)) OR EXISTS
+        (SELECT 1 FROM task_artifacts a WHERE a.task_id=t.task_id AND a.resource_id=?))`,
+      )
+      .get(now, originRunId, originalExpiresAt, originalExpiresAt, id);
+    return typeof row?.expires_at === "number" ? row.expires_at : 0;
+  }
+
+  /** Coarse source protection is intentional: loss is preferable to guessing liveness. */
+  activeRunIds(): ReadonlySet<string> {
+    const rows = this.#db
+      .prepare(
+        `SELECT run_id FROM runs WHERE ended_at IS NULL
+      UNION SELECT origin_run_id FROM managed_resources WHERE boot_id=? AND closed_at IS NULL AND status!='unavailable' AND origin_run_id IS NOT NULL
+      UNION SELECT origin_run_id FROM operations WHERE ended_at IS NULL AND origin_run_id IS NOT NULL
+      UNION SELECT origin_run_id FROM transfers WHERE ended_at IS NULL AND origin_run_id IS NOT NULL
+      UNION SELECT json_extract(source_json,'$.replayRunId') FROM runs WHERE ended_at IS NULL AND json_type(source_json,'$.replayRunId')='text'`,
+      )
+      .all(this.bootId);
+    return new Set(rows.map((row) => row.run_id as string));
+  }
+
+  workSnapshotRefs(now = Date.now()): ReadonlySet<string> {
+    return new Set(
+      this.#db
+        .prepare(
+          `SELECT snapshot_ref FROM work_contexts c
+      WHERE (c.status='open' AND c.expires_at>?) OR EXISTS
+        (SELECT 1 FROM runs r WHERE r.context_id=c.context_id AND r.ended_at IS NULL)`,
+        )
+        .all(now)
+        .map((row) => row.snapshot_ref as string),
+    );
+  }
+
+  protectedArtifactIds(now = Date.now()): ReadonlySet<string> {
+    const ids = new Set(
+      this.#db
+        .prepare(
+          `SELECT DISTINCT a.resource_id FROM task_artifacts a
+      JOIN mcp_tasks t ON t.task_id=a.task_id WHERE t.expires_at>?`,
+        )
+        .all(now)
+        .map((row) => row.resource_id as string),
+    );
+    const prefix = `nexum://agents/${encodeURIComponent(this.binding.agentId)}/resources/`;
+    for (const row of this.#db
+      .prepare(
+        "SELECT json_extract(metadata_json,'$.target.resourceUri') uri FROM transfers WHERE ended_at IS NULL",
+      )
+      .all()) {
+      const uri = row.uri;
+      if (
+        typeof uri === "string" &&
+        uri.startsWith(prefix) &&
+        /^res_[0-9a-f]{32}$/.test(uri.slice(prefix.length))
+      )
+        ids.add(uri.slice(prefix.length));
+    }
+    return ids;
+  }
+
+  completeInputsCleanup(runId: string, now = Date.now()): void {
+    this.#transaction(() => {
+      const row = this.#db
+        .prepare("SELECT * FROM runs WHERE run_id=?")
+        .get(runId);
+      if (!row) return;
+      const run = decode<RunRecord>(row);
+      requireCondition(
+        run.endedAt !== null &&
+          run.endedAt + 86400000 <= now &&
+          !this.activeRunIds().has(runId),
+        "cleanup_protected",
+        "Temporary inputs are still protected by live work.",
+      );
+      this.#db
+        .prepare(
+          "UPDATE runs SET cleanup_json=json_set(cleanup_json,'$.temporaryInputsExpiredAt',?) WHERE run_id=?",
+        )
+        .run(now, runId);
+    });
+  }
+
+  /** One bounded metadata transaction. File removal is deliberately outside SQLite. */
+  cleanupBatch(options: { now?: number; limit?: number } = {}): CleanupBatch {
+    const now = options.now ?? Date.now(),
+      limit = options.limit ?? 100;
+    requireCondition(
+      Number.isSafeInteger(now) &&
+        now >= 0 &&
+        Number.isSafeInteger(limit) &&
+        limit >= 1 &&
+        limit <= 100,
+      "invalid_cleanup",
+      "A cleanup batch must use a valid clock and at most 100 records.",
+    );
+    return this.#transaction(() => {
+      let processed = 0;
+      const deleted: Record<string, number> = {},
+        files: {
+          kind: "run" | "log" | "task" | "process_log" | "inputs";
+          ref: string;
+        }[] = [];
+      const remove = (
+        table: string,
+        key: string,
+        where: string,
+        parameters: SQLInputValue[] = [],
+        file?: (row: Record<string, unknown>) => void,
+      ) => {
+        if (processed >= limit) return;
+        const rows = this.#db
+          .prepare(`SELECT * FROM ${table} WHERE ${where} LIMIT ?`)
+          .all(...parameters, limit - processed);
+        const statement = this.#db.prepare(
+          `DELETE FROM ${table} WHERE ${key}=?`,
+        );
+        for (const row of rows) {
+          statement.run(row[key] as SQLInputValue);
+          file?.(row);
+          processed++;
+          deleted[table] = (deleted[table] ?? 0) + 1;
+        }
+      };
+      // Pins are small reference rows, but still count toward the same hard batch bound.
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare(
+            "SELECT a.task_id,a.resource_id FROM task_artifacts a JOIN mcp_tasks t ON t.task_id=a.task_id WHERE t.expires_at<=? LIMIT ?",
+          )
+          .all(now, limit - processed);
+        const statement = this.#db.prepare(
+          "DELETE FROM task_artifacts WHERE task_id=? AND resource_id=?",
+        );
+        for (const row of rows) {
+          statement.run(row.task_id as string, row.resource_id as string);
+          processed++;
+          deleted.task_artifacts = (deleted.task_artifacts ?? 0) + 1;
+        }
+      }
+      remove(
+        "mcp_tasks",
+        "task_id",
+        "expires_at<=? AND NOT EXISTS(SELECT 1 FROM task_artifacts a WHERE a.task_id=mcp_tasks.task_id)",
+        [now],
+        (row) => {
+          if (typeof row.result_ref === "string")
+            files.push({ kind: "task", ref: row.result_ref });
+        },
+      );
+      // run_requests has a compound primary key; rowid is local to this transaction.
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare("SELECT rowid FROM run_requests WHERE expires_at<=? LIMIT ?")
+          .all(now, limit - processed);
+        for (const row of rows) {
+          this.#db
+            .prepare("DELETE FROM run_requests WHERE rowid=?")
+            .run(row.rowid as number);
+          processed++;
+          deleted.run_requests = (deleted.run_requests ?? 0) + 1;
+        }
+      }
+      remove("close_receipts", "context_id", "expires_at<=?", [now]);
+      const historyBefore = now - 30 * 86400000;
+      remove(
+        "transfers",
+        "transfer_id",
+        "ended_at IS NOT NULL AND ended_at<=?",
+        [historyBefore],
+      );
+      remove(
+        "operations",
+        "operation_id",
+        "ended_at IS NOT NULL AND ended_at<=?",
+        [historyBefore],
+      );
+      remove(
+        "managed_resources",
+        "resource_id",
+        `NOT EXISTS(SELECT 1 FROM transfers t WHERE t.resource_id=managed_resources.resource_id)
+        AND ((closed_at IS NOT NULL AND closed_at<=?) OR (status='unavailable' AND boot_id!=? AND
+          json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?))
+        AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.run_id=managed_resources.owner_run_id AND r.ended_at IS NULL)`,
+        [historyBefore, this.bootId, historyBefore],
+        (row) => {
+          if (row.kind === "sh.process" && typeof row.resource_id === "string")
+            files.push({
+              kind: "process_log",
+              ref: `logs/processes/${row.resource_id}.output`,
+            });
+        },
+      );
+      const eligible = `ended_at IS NOT NULL AND ended_at<=?
+        AND NOT EXISTS(SELECT 1 FROM mcp_tasks t WHERE t.run_id=runs.run_id)
+        AND NOT EXISTS(SELECT 1 FROM run_requests q WHERE q.run_id=runs.run_id)
+        AND NOT EXISTS(SELECT 1 FROM managed_resources m WHERE m.owner_run_id=runs.run_id OR m.origin_run_id=runs.run_id)
+        AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.origin_run_id=runs.run_id)
+        AND NOT EXISTS(SELECT 1 FROM transfers t WHERE t.origin_run_id=runs.run_id)
+        AND NOT EXISTS(SELECT 1 FROM runs live WHERE live.ended_at IS NULL AND json_extract(live.source_json,'$.replayRunId')=runs.run_id)`;
+      remove(
+        "run_waits",
+        "wait_id",
+        `status!='waiting' AND run_id IN(SELECT run_id FROM runs WHERE ${eligible})`,
+        [historyBefore],
+      );
+      remove(
+        "runs",
+        "run_id",
+        `${eligible} AND NOT EXISTS(SELECT 1 FROM run_waits w WHERE w.run_id=runs.run_id)`,
+        [historyBefore],
+        (row) => {
+          files.push({ kind: "run", ref: `work/tmp/runs/${row.run_id}` });
+          files.push({
+            kind: "log",
+            ref: `logs/runs/${row.run_id}/console.log`,
+          });
+        },
+      );
+      // Reading logs does not extend their independent seven-day retention.
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare(
+            "SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=? AND logs_ref IS NOT NULL LIMIT ?",
+          )
+          .all(now - 7 * 86400000, limit - processed);
+        for (const row of rows) {
+          this.#db
+            .prepare("UPDATE runs SET logs_ref=NULL WHERE run_id=?")
+            .run(row.run_id as string);
+          files.push({
+            kind: "log",
+            ref: `logs/runs/${row.run_id}/console.log`,
+          });
+          processed++;
+          deleted.logs = (deleted.logs ?? 0) + 1;
+        }
+      }
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare(
+            `SELECT run_id FROM runs WHERE ended_at IS NOT NULL AND ended_at<=?
+          AND json_type(cleanup_json,'$.temporaryInputsExpiredAt') IS NULL
+          AND NOT EXISTS(SELECT 1 FROM managed_resources m WHERE m.origin_run_id=runs.run_id AND m.boot_id=? AND m.closed_at IS NULL AND m.status!='unavailable')
+          AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.origin_run_id=runs.run_id AND o.ended_at IS NULL)
+          AND NOT EXISTS(SELECT 1 FROM transfers t WHERE t.origin_run_id=runs.run_id AND t.ended_at IS NULL)
+          AND NOT EXISTS(SELECT 1 FROM runs live WHERE live.ended_at IS NULL AND json_extract(live.source_json,'$.replayRunId')=runs.run_id) LIMIT ?`,
+          )
+          .all(now - 86400000, this.bootId, limit - processed);
+        for (const row of rows) {
+          files.push({
+            kind: "inputs",
+            ref: `work/tmp/runs/${row.run_id}/inputs`,
+          });
+          processed++;
+          deleted.input_candidates = (deleted.input_candidates ?? 0) + 1;
+        }
+      }
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare(
+            `SELECT resource_id FROM managed_resources WHERE kind='sh.process'
+          AND json_type(diagnostic_json,'$.logsExpiredAt') IS NULL AND
+          ((closed_at IS NOT NULL AND closed_at<=?) OR (status='unavailable' AND boot_id!=? AND
+            json_type(diagnostic_json,'$.unavailableAt') IN ('integer','real') AND json_extract(diagnostic_json,'$.unavailableAt')<=?)) LIMIT ?`,
+          )
+          .all(
+            now - 7 * 86400000,
+            this.bootId,
+            now - 7 * 86400000,
+            limit - processed,
+          );
+        for (const row of rows) {
+          this.#db
+            .prepare(
+              "UPDATE managed_resources SET diagnostic_json=json_set(diagnostic_json,'$.logsExpiredAt',?) WHERE resource_id=?",
+            )
+            .run(now, row.resource_id as string);
+          files.push({
+            kind: "process_log",
+            ref: `logs/processes/${row.resource_id}.output`,
+          });
+          processed++;
+          deleted.expired_process_logs =
+            (deleted.expired_process_logs ?? 0) + 1;
+        }
+      }
+      if (processed < limit) {
+        const rows = this.#db
+          .prepare(
+            "SELECT context_id FROM work_contexts c WHERE status='open' AND expires_at<=? AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.context_id=c.context_id AND r.ended_at IS NULL) LIMIT ?",
+          )
+          .all(now, limit - processed);
+        for (const row of rows) {
+          this.#db
+            .prepare(
+              "UPDATE work_contexts SET status='expired' WHERE context_id=?",
+            )
+            .run(row.context_id as string);
+          processed++;
+          deleted.expired_contexts = (deleted.expired_contexts ?? 0) + 1;
+        }
+      }
+      return { processed, deleted, files };
+    });
   }
   getWait(id: string): WaitRecord {
     return this.#get("run_waits", "wait_id", id, "wait_not_found");
@@ -408,6 +975,132 @@ export class SqliteStore {
           now,
         );
       return this.getOperation(id);
+    });
+  }
+
+  getMaintenanceOperation(requestId: string): OperationRecord | null {
+    requireCondition(
+      typeof requestId === "string" && maintenanceRequest.test(requestId),
+      "invalid_maintenance_request",
+      "The maintenance request identity is invalid.",
+    );
+    const row = this.#db
+      .prepare("SELECT * FROM operations WHERE maintenance_request_id=?")
+      .get(requestId);
+    return row ? decode<OperationRecord>(row) : null;
+  }
+
+  /** Trusted approved execution admission; no package/network/filesystem effects run in this transaction. */
+  startMaintenanceOperation(
+    input: MaintenanceOperationInput,
+    now = Date.now(),
+  ): { operation: OperationRecord; duplicate: boolean } {
+    requireCondition(
+      typeof input.requestId === "string" &&
+        maintenanceRequest.test(input.requestId) &&
+        typeof input.approvedRevision === "string" &&
+        /^[0-9a-f]{64}$/.test(input.approvedRevision) &&
+        typeof input.callerKey === "string" &&
+        input.callerKey.length > 0 &&
+        input.callerKey.length <= 256 &&
+        maintenanceMethods.has(input.method) &&
+        (input.originRunId == null ||
+          (typeof input.originRunId === "string" &&
+            /^run_[0-9a-f]{32}$/.test(input.originRunId))) &&
+        input.detailRef ===
+          `state/maintenance/${input.requestId}/execution.json` &&
+        Number.isSafeInteger(now) &&
+        now >= 0,
+      "invalid_maintenance_operation",
+      "Maintenance execution needs its approved identity, action and fixed private detail reference.",
+    );
+    const source = JSON.parse(canonicalJson(input.source, 16384)) as JsonObject;
+    const origin = source.origin;
+    const safeText = (value: JsonValue | undefined): boolean =>
+      typeof value === "string" && value.length > 0 && value.length <= 256;
+    requireCondition(
+      Object.keys(source).every((key) =>
+        [
+          "origin",
+          "target",
+          "name",
+          "objectId",
+          "baseRevision",
+          "candidateRevision",
+        ].includes(key),
+      ) &&
+        origin &&
+        typeof origin === "object" &&
+        !Array.isArray(origin) &&
+        Object.keys(origin).length === 5 &&
+        Object.keys(origin).every((key) =>
+          ["type", "owner", "namespace", "version", "revision"].includes(key),
+        ) &&
+        origin.type === "platform" &&
+        origin.namespace === "maintenance" &&
+        safeText(origin.owner) &&
+        safeText(origin.version) &&
+        safeText(origin.revision) &&
+        source.target ===
+          (
+            {
+              packages: "package",
+              extensions: "extension",
+              mcp: "mcp",
+              api: "api",
+            } as Record<string, string>
+          )[input.method.split(".")[0]!] &&
+        safeText(source.name) &&
+        (source.objectId === null || safeText(source.objectId)) &&
+        (source.baseRevision === null || safeText(source.baseRevision)) &&
+        source.candidateRevision === input.approvedRevision,
+      "invalid_maintenance_operation",
+      "Maintenance operation metadata must contain only its actual safe approved target and platform origin.",
+    );
+    return this.#transaction(() => {
+      const previous = this.getMaintenanceOperation(input.requestId);
+      if (previous) {
+        requireCondition(
+          previous.callerKey === input.callerKey &&
+            previous.approvedRevision === input.approvedRevision &&
+            previous.method === input.method &&
+            canonicalJson(previous.source) === canonicalJson(source) &&
+            previous.originRunId === (input.originRunId ?? null) &&
+            previous.detailRef === input.detailRef,
+          "maintenance_execution_conflict",
+          "The request already belongs to another approved execution identity.",
+        );
+        return { operation: previous, duplicate: true };
+      }
+      if (input.originRunId) {
+        const run = this.getRun(input.originRunId);
+        requireCondition(
+          run.callerKey === input.callerKey,
+          "maintenance_execution_conflict",
+          "The source run belongs to another caller.",
+        );
+      }
+      const id = newId("op");
+      this.#db
+        .prepare(
+          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,maintenance_request_id,approved_revision,status,detail_ref,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?)`,
+        )
+        .run(
+          id,
+          input.originRunId ?? null,
+          input.callerKey,
+          this.bootId,
+          "maintenance",
+          input.method,
+          canonicalJson(source, 16384),
+          input.requestId,
+          input.approvedRevision,
+          input.detailRef,
+          now,
+          now,
+        );
+      return { operation: this.getOperation(id), duplicate: false };
     });
   }
 
@@ -768,7 +1461,17 @@ export class SqliteStore {
       "submission_unknown",
       "No accepted submission can be confirmed.",
     );
-    return this.getRun(row.run_id as string);
+    try {
+      return this.getRun(row.run_id as string);
+    } catch (cause) {
+      if (!isAgentError(cause) || cause.code !== "run_not_found") throw cause;
+      throw new AgentError(
+        "submission_unknown",
+        "The original accepted run is unavailable.",
+        undefined,
+        { cause },
+      );
+    }
   }
 
   transitionRun(
@@ -2415,12 +3118,13 @@ export class SqliteStore {
     });
   }
 
-  listRuns(
+  /** Internal bounded scan; cursors hide even records denied by the current policy. */
+  scanRuns(
     filter: HistoryFilter,
     scopeKey: string,
     limit = 20,
     cursor?: string,
-  ): { runs: RunRecord[]; nextCursor: string | null } {
+  ): { items: { record: RunRecord; cursor: string }[]; more: boolean } {
     requireCondition(
       Number.isInteger(limit) && limit >= 1 && limit <= 100,
       "invalid_limit",
@@ -2462,65 +3166,92 @@ export class SqliteStore {
       where.push("accepted_at<?");
       values.push(filter.to);
     }
-    if (cursor) {
-      let page: { time: number; id: string; query: string };
+    if (cursor !== undefined) {
       try {
-        const [encoded, signature, extra] = cursor.split(".");
         requireCondition(
-          encoded && signature && !extra && cursor.length <= 4096,
+          typeof cursor === "string" &&
+            cursor.length > 0 &&
+            cursor.length <= 4096 &&
+            /^[A-Za-z0-9_-]+$/.test(cursor),
           "invalid_cursor",
           "The history cursor is invalid.",
         );
-        const expected = createHmac("sha256", this.#cursorKey)
-          .update(encoded)
-          .digest();
-        const supplied = Buffer.from(signature, "base64url");
+        const envelope = Buffer.from(cursor, "base64url");
         requireCondition(
-          supplied.length === expected.length &&
-            timingSafeEqual(supplied, expected),
+          envelope.length > 28,
           "invalid_cursor",
           "The history cursor is invalid.",
         );
-        page = JSON.parse(
-          Buffer.from(encoded, "base64url").toString("utf8"),
-        ) as typeof page;
+        const decipher = createDecipheriv(
+          "aes-256-gcm",
+          this.#cursorKey,
+          envelope.subarray(0, 12),
+        );
+        decipher.setAAD(Buffer.from(query));
+        decipher.setAuthTag(envelope.subarray(-16));
+        const page = JSON.parse(
+          Buffer.concat([
+            decipher.update(envelope.subarray(12, -16)),
+            decipher.final(),
+          ]).toString("utf8"),
+        ) as { time: number; id: string };
         requireCondition(
-          page.query === query &&
-            Number.isSafeInteger(page.time) &&
-            typeof page.id === "string",
+          Number.isSafeInteger(page.time) &&
+            page.time >= 0 &&
+            typeof page.id === "string" &&
+            /^run_[0-9a-f]{32}$/.test(page.id),
           "invalid_cursor",
           "The cursor belongs to another query or scope.",
         );
-      } catch (error) {
+        where.push("(accepted_at<? OR (accepted_at=? AND run_id<?))");
+        values.push(page.time, page.time, page.id);
+      } catch (cause) {
         throw new AgentError(
           "invalid_cursor",
           "The history cursor is invalid or no longer current.",
           undefined,
-          { cause: error },
+          { cause },
         );
       }
-      where.push("(accepted_at<? OR (accepted_at=? AND run_id<?))");
-      values.push(page.time, page.time, page.id);
     }
     const rows = this.#db
       .prepare(
         `SELECT * FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY accepted_at DESC,run_id DESC LIMIT ?`,
       )
       .all(...values, limit + 1);
-    const runs = rows.slice(0, limit).map((row) => decode<RunRecord>(row));
-    let nextCursor: string | null = null;
-    const last = runs.at(-1);
-    if (rows.length > limit && last) {
-      const encoded = Buffer.from(
-        JSON.stringify({ query, time: last.acceptedAt, id: last.runId }),
-      ).toString("base64url");
-      nextCursor =
-        encoded +
-        "." +
-        createHmac("sha256", this.#cursorKey)
-          .update(encoded)
-          .digest("base64url");
-    }
-    return { runs, nextCursor };
+    return {
+      more: rows.length > limit,
+      items: rows.slice(0, limit).map((row) => {
+        const record = decode<RunRecord>(row);
+        const iv = randomBytes(12),
+          cipher = createCipheriv("aes-256-gcm", this.#cursorKey, iv);
+        cipher.setAAD(Buffer.from(query));
+        const ciphertext = Buffer.concat([
+          cipher.update(
+            JSON.stringify({ time: record.acceptedAt, id: record.runId }),
+          ),
+          cipher.final(),
+        ]);
+        return {
+          record,
+          cursor: Buffer.concat([iv, ciphertext, cipher.getAuthTag()]).toString(
+            "base64url",
+          ),
+        };
+      }),
+    };
+  }
+
+  listRuns(
+    filter: HistoryFilter,
+    scopeKey: string,
+    limit = 20,
+    cursor?: string,
+  ): { runs: RunRecord[]; nextCursor: string | null } {
+    const page = this.scanRuns(filter, scopeKey, limit, cursor);
+    return {
+      runs: page.items.map((item) => item.record),
+      nextCursor: page.more ? page.items.at(-1)!.cursor : null,
+    };
   }
 }

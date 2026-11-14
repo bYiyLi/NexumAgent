@@ -299,6 +299,26 @@ export function materializeControlScripts(
   return Object.freeze(sources);
 }
 
+/** Fixed lifecycle sources may use the Core's reserved control headroom. */
+export async function materializeManagedControlScripts(
+  work: string,
+  reserve: (
+    bytes: number,
+    options?: { readonly control?: boolean },
+  ) => Promise<{ release(): void }>,
+): Promise<readonly ScriptSource[]> {
+  const bytes = FIXED_CONTROL_SCRIPTS.reduce(
+    (total, script) => total + Buffer.byteLength(script.code) + 1024,
+    0,
+  );
+  const ticket = await reserve(bytes, { control: true });
+  try {
+    return materializeControlScripts(work);
+  } finally {
+    ticket.release();
+  }
+}
+
 const changedSource = new Set([
   "script_not_found",
   "script_name_conflict",

@@ -14,99 +14,16 @@
           "maxLength": 256
         },
         "operation": {
-          "enum": [
-            "agent.open",
-            "agent.close",
-            "agent.run.start",
-            "agent.run.get",
-            "agent.run.input",
-            "agent.run.cancel",
-            "agent.run.list",
-            "agent.resources.list",
-            "agent.resources.read",
-            "agent.context.read",
-            "agent.maintenance.execute",
-            "agent.maintenance.get",
-            "agent.maintenance.cancel"
-          ]
+          "const": "agent.project.resolve"
         },
         "context": {
-          "type": "object",
-          "properties": {
-            "caller": {
-              "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/caller"
-            },
-            "authorization": {
-              "type": "object",
-              "properties": {
-                "agentId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                },
-                "projectId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                },
-                "allowedRoots": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "budgets": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
-                }
-              },
-              "required": [
-                "agentId"
-              ],
-              "additionalProperties": false
-            },
-            "connection": {
-              "type": "object",
-              "properties": {
-                "cloudEnvironment": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                },
-                "connectionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              },
-              "required": [
-                "cloudEnvironment",
-                "connectionId"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "caller",
-            "authorization",
-            "connection"
-          ],
-          "additionalProperties": false
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/InvocationContext"
         },
         "input": {
-          "type": "object"
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.resolve.input"
         }
       },
-      "required": [
-        "type",
-        "id",
-        "operation",
-        "context",
-        "input"
-      ],
+      "required": ["type", "id", "operation", "context", "input"],
       "additionalProperties": false
     },
     {
@@ -120,15 +37,1004 @@
           "minLength": 1,
           "maxLength": 256
         },
+        "operation": {
+          "const": "agent.project.resolve"
+        },
         "output": {
-          "type": "object"
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.resolve.output"
         }
       },
-      "required": [
-        "type",
-        "id",
-        "output"
-      ],
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.open"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.open.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.open"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.open.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.close"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.close.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.close"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.close.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.start"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.start.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.start"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.start.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.input"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.input.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.input"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.input.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.cancel"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.cancel.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.cancel"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.cancel.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.list"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.list.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.run.list"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.list.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.resources.list"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.resources.list.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.resources.list"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.resources.list.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.resources.read"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.resources.read.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.resources.read"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.resources.read.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.context.read"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/InvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.context.read.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.context.read"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.context.read.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "transfer.prepare"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/transfer.prepare.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "transfer.prepare"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/transfer.prepare.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "transfer.revoke"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/transfer.revoke.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "transfer.revoke"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/transfer.revoke.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.reserveClaim"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.reserveClaim.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.reserveClaim"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.reserveClaim.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.commitClaim"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.commitClaim.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.commitClaim"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.commitClaim.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.releaseReservation"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.releaseReservation.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.transfer.releaseReservation"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.transfer.releaseReservation.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "authorization.refresh"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/authorization.refresh.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "authorization.refresh"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/authorization.refresh.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "host.request"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/host.request.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "host.request"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/host.request.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "stream.prepare"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/stream.prepare.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "stream.prepare"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/stream.prepare.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "stream.revoke"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/stream.revoke.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "stream.revoke"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/stream.revoke.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.execute"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.execute.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.execute"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.execute.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.cancel"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.cancel.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.cancel"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.cancel.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
       "additionalProperties": false
     },
     {
@@ -143,14 +1049,10 @@
           "maxLength": 256
         },
         "error": {
-          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/error"
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
         }
       },
-      "required": [
-        "type",
-        "id",
-        "error"
-      ],
+      "required": ["type", "id", "error"],
       "additionalProperties": false
     },
     {
@@ -165,10 +1067,7 @@
           "maxLength": 256
         }
       },
-      "required": [
-        "type",
-        "id"
-      ],
+      "required": ["type", "id"],
       "additionalProperties": false
     },
     {
@@ -178,20 +1077,1039 @@
           "const": "event"
         },
         "name": {
-          "enum": [
-            "agent.run.changed",
-            "agent.catalog.changed"
-          ]
+          "const": "agent.run.changed"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
         },
         "data": {
-          "type": "object"
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.run.changed"
         }
       },
-      "required": [
-        "type",
-        "name",
-        "data"
-      ],
+      "required": ["type", "name", "connection", "data"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "agent.catalog.sync"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        },
+        "data": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.catalog.sync"
+        }
+      },
+      "required": ["type", "name", "connection", "data"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "agent.catalog.changed"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        },
+        "data": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.catalog.changed"
+        }
+      },
+      "required": ["type", "name", "connection", "data"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "agent.authorization.changed"
+        },
+        "connection": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
+        },
+        "data": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.authorization.changed"
+        }
+      },
+      "required": ["type", "name", "connection", "data"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.create"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.create.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.create"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.create.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.list"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.list.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.list"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.list.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.cancel"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.cancel.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.cancel"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.cancel.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.decision"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.decision.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.decision"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.decision.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.beginExecution"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.beginExecution.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "maintenance.request.beginExecution"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/maintenance.request.beginExecution.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.read"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.read.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.read"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.read.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.prepare"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.prepare.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.prepare"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.prepare.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.verify"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.verify.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.verify"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.verify.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.notify"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.notify.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.draft.notify"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.draft.notify.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.oauth.start"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.oauth.start.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.oauth.start"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.oauth.start.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.oauth.complete"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.oauth.complete.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "agent.maintenance.oauth.complete"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.maintenance.oauth.complete.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "attachment.open"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/attachment.open.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "attachment.open"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/attachment.open.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.set"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.set.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.set"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.set.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.delete"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.delete.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation": {
+          "const": "state.user.delete"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/state.user.delete.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.create"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.create.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.create"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.create.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.get"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.get.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.get"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.get.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.update"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.update.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.update"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.update.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.cancel"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.cancel.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.tasks.cancel"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.tasks.cancel.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.project.inspect"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/InvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.inspect.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.project.inspect"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.project.inspect.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "invoke"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.run.inspect"
+        },
+        "context": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/OwnerSessionInvocationContext"
+        },
+        "input": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.inspect.input"
+        }
+      },
+      "required": ["type", "id", "operation", "context", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "operation": {
+          "const": "agent.run.inspect"
+        },
+        "output": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.run.inspect.output"
+        }
+      },
+      "required": ["type", "id", "operation", "output"],
       "additionalProperties": false
     }
   ]

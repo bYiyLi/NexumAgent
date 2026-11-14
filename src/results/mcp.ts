@@ -971,7 +971,7 @@ export class McpResultResources {
       "resource_read_too_large",
       "Remote resource contents exceed the aggregate read budget.",
     );
-    const response: JsonObject = { contents };
+    const response: JsonObject = { ...info.model, contents };
     boundedSize(
       {
         contents: contents.map((item) =>
@@ -981,6 +981,19 @@ export class McpResultResources {
       maxText,
       "resource_read_too_large",
     );
+    // This endpoint returns a complete standard ReadResourceResult to the
+    // actual Host. Reattach only the finite resource protocol positions that
+    // the model projection separated from ordinary business data.
+    for (const slot of info.meta) {
+      if (slot.target === "resource" && Number.isSafeInteger(slot.index)) {
+        const item = contents[Number(slot.index)];
+        if (item)
+          item._meta = copyMcpJSON(
+            slot.meta,
+            limits.metaBytes ?? 16 * 1024 * 1024,
+          );
+      }
+    }
     applyProtocolMeta(
       response,
       info.meta,

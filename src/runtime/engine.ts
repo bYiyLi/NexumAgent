@@ -2,7 +2,18 @@ import { EventEmitter, once } from "node:events";
 import { Console } from "node:console";
 import { Writable } from "node:stream";
 import { performance } from "node:perf_hooks";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  readFileSync,
+  realpathSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+  fstatSync,
+  constants,
+} from "node:fs";
+import { types } from "node:util";
+import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
@@ -12,6 +23,8 @@ import type {
   JsonValue,
   ContributionOrigin,
   RunRecord,
+  RunStatus,
+  HistoryFilter,
   WaitRecord,
   WorkRecord,
 } from "../contracts/types.js";
@@ -48,6 +61,59 @@ export interface StartInput {
   timeoutMs?: number;
   waitMs?: number;
 }
+export interface GetInput {
+  agentId: string;
+  runId?: string;
+  requestId?: string;
+  waitMs?: number;
+}
+export interface ListInput {
+  agentId: string;
+  status?: RunStatus;
+  scriptName?: string;
+  source?: "inline" | "named" | "history";
+  projectId?: string;
+  contextId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  cursor?: string;
+}
+export interface RetainedSnapshot {
+  readonly ref: string | null;
+  readonly status: "available" | "unavailable" | "not_recorded" | "too_large";
+  readonly bytes: number | null;
+  readonly value?: JsonValue;
+  readonly truncated?: true;
+  readonly nextOffset?: number;
+}
+export interface CancelView extends RunView {
+  /** This invocation actually recorded the first stop request; it does not confirm shutdown. */
+  readonly accepted: boolean;
+}
+/** Internal retained detail; the Cloud adapter must project results and move media before model delivery. */
+export interface RunDetails extends RunView {
+  readonly snapshots: {
+    readonly code: RetainedSnapshot;
+    readonly input: RetainedSnapshot;
+    readonly logs: RetainedSnapshot;
+  };
+}
+export interface RunSummary extends JsonObject {
+  runId: string;
+  scriptName: string | null;
+  scriptDesc: string | null;
+  source: "inline" | "named" | "history";
+  origin: JsonObject | null;
+  projectId: string | null;
+  contextId: string;
+  status: RunStatus;
+  acceptedAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  replayOfRunId: string | null;
+  availability: JsonObject;
+}
 export interface InputRequest {
   message: string;
   inputSchema: JsonValue;
@@ -57,6 +123,8 @@ export interface RunServices {
   readonly runId: string;
   readonly signal: AbortSignal;
   readonly context: JsonObject;
+  /** Fixed Core verdict; not script context or an extension-provided permission. */
+  readonly controlStorage?: boolean;
   readonly deadlineAt: number;
   assertActive(): void;
   /** Existing operations keep current authority while root admission is closed. */
@@ -94,6 +162,10 @@ export interface EngineOptions {
   controlCapacity?: number;
   resources?: ResourceManager;
   leaseScript?(origin: ContributionOrigin): () => void;
+  reserve?(
+    bytes: number,
+    options?: { readonly control?: boolean },
+  ): Promise<{ release(): void }>;
 }
 export interface RunView {
   run: RunRecord;
@@ -113,6 +185,7 @@ interface Scope {
   readonly runId: string;
   readonly caller: Caller;
   readonly work: WorkRecord;
+  readonly controlEligible: boolean;
   readonly controller: AbortController;
   readonly acceptedMono: number;
   readonly acceptedAt: number;
@@ -122,6 +195,9 @@ interface Scope {
   accepting: boolean;
   pending: PendingWait | null;
   deliveries: Set<Promise<void>>;
+  inputPreparation?: Promise<void>;
+  logReservation?: { release(): void };
+  loggingClosed?: boolean;
   operations: RunOperations;
   timer?: NodeJS.Timeout;
   fatal?: AgentError;
@@ -156,6 +232,8 @@ function frozenJson(value: JsonObject): JsonObject {
 
 function attachmentIntent(references: readonly JsonObject[] = []): JsonValue[] {
   return references.map((reference): JsonObject => {
+    if (typeof reference.sourceId === "string")
+      return { sourceId: reference.sourceId };
     // Host temporary URLs are delivery credentials, not a submission's identity.
     if (typeof reference.file_id === "string")
       return {
@@ -171,6 +249,20 @@ function attachmentIntent(references: readonly JsonObject[] = []): JsonValue[] {
       return { transferId: reference.transferId };
     return { uri: reference.uri! };
   });
+}
+
+const historyDenials = new Set([
+  "forbidden",
+  "permission_denied",
+  "access_denied",
+  "resource_forbidden",
+  "path_not_allowed",
+  "unauthorized",
+]);
+function deniedHistory(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object" || types.isProxy(cause)) return false;
+  const code = Object.getOwnPropertyDescriptor(cause, "code");
+  return !!code && "value" in code && historyDenials.has(code.value);
 }
 
 export class RunEngine extends EventEmitter {
@@ -210,6 +302,11 @@ export class RunEngine extends EventEmitter {
   #publish(runId: string): void {
     this.emit(runId);
   }
+  activeSnapshotRefs(): ReadonlySet<string> {
+    return new Set(
+      [...this.#scopes.values()].map((scope) => scope.work.snapshotRef),
+    );
+  }
   #authorize(
     caller: Caller,
     target: Parameters<EngineOptions["authorize"]>[1],
@@ -225,17 +322,16 @@ export class RunEngine extends EventEmitter {
   #relative(filename: string): string {
     return path.relative(this.store.root, filename).split(path.sep).join("/");
   }
-  #read(ref: string | null, limit = 2 * 1024 * 1024): string {
+  #read(ref: string | null, runId: string, limit = 2 * 1024 * 1024): string {
     requireCondition(
       ref,
       "snapshot_unavailable",
       "The retained run snapshot is unavailable.",
     );
-    const root = realpathSync.native(
-      path.join(this.scripts.work, "tmp", "runs"),
-    );
+    const expected = path.join(this.scripts.work, "tmp", "runs", runId);
+    const root = realpathSync.native(expected);
     requireCondition(
-      contains(this.scripts.work, root),
+      root === expected,
       "snapshot_unavailable",
       "The retained run root was redirected outside the Agent work directory.",
     );
@@ -253,12 +349,300 @@ export class RunEngine extends EventEmitter {
     return privateDirectory(this.scripts.work, "tmp", "runs", runId);
   }
 
+  #agent(agentId: string): void {
+    requireCondition(
+      agentId === this.store.binding.agentId,
+      "agent_mismatch",
+      "The query targets another Agent.",
+    );
+  }
+
+  async get(
+    caller: Caller,
+    input: GetInput,
+    signal?: AbortSignal,
+  ): Promise<RunDetails> {
+    validateContract("agent.run.get", input);
+    input = JSON.parse(canonicalJson(input)) as GetInput;
+    caller = fixedCaller(caller);
+    this.#agent(input.agentId);
+    this.#authorize(caller, { action: "get" });
+    const runId =
+      input.runId ??
+      this.store.findSubmission(callerKey(caller), input.requestId!).runId;
+    let view = await this.observe(caller, runId, input.waitMs ?? 0, signal);
+    // Observation can yield; inspect retained details only under current authority.
+    const current = this.#run(caller, runId, "get");
+    if (current.revision !== view.run.revision)
+      view = this.#view(caller, runId);
+    return {
+      ...view,
+      snapshots: {
+        code: this.#snapshot(view.run, "code", true),
+        input: this.#snapshot(view.run, "input", true),
+        logs: this.#snapshot(view.run, "logs", true),
+      },
+    };
+  }
+
+  list(
+    caller: Caller,
+    input: ListInput,
+  ): { runs: RunSummary[]; nextCursor: string | null } {
+    validateContract("agent.run.list", input);
+    input = JSON.parse(canonicalJson(input)) as ListInput;
+    caller = fixedCaller(caller);
+    this.#agent(input.agentId);
+    this.#authorize(caller, { action: "list" });
+    const time = (
+      value: string | undefined,
+    ):
+      | { milliseconds: number; remainder: string; boundary: number }
+      | undefined => {
+      if (value === undefined) return undefined;
+      const milliseconds = Date.parse(value);
+      requireCondition(
+        Number.isFinite(milliseconds),
+        "invalid_range",
+        "The history time must be representable.",
+      );
+      // SQLite accepts integer milliseconds. Keep RFC3339 sub-millisecond
+      // ordering before rounding both half-open boundaries up to that grid.
+      const fraction = /\.(\d+)(?:z|[+-]\d{2}:\d{2})$/i.exec(value)?.[1] ?? "";
+      const remainder = fraction.slice(3).replace(/0+$/, "");
+      return {
+        milliseconds,
+        remainder,
+        boundary: milliseconds + (remainder ? 1 : 0),
+      };
+    };
+    const from = time(input.from),
+      to = time(input.to);
+    if (from && to) {
+      const precision = Math.max(from.remainder.length, to.remainder.length);
+      requireCondition(
+        from.milliseconds < to.milliseconds ||
+          (from.milliseconds === to.milliseconds &&
+            from.remainder.padEnd(precision, "0") <=
+              to.remainder.padEnd(precision, "0")),
+        "invalid_range",
+        "The history start must not exceed the end.",
+      );
+    }
+    const filter: HistoryFilter = {
+      status: input.status,
+      scriptName: input.scriptName,
+      sourceKind:
+        input.source === undefined
+          ? undefined
+          : ({ inline: "inline", named: "script", history: "replay" } as const)[
+              input.source
+            ],
+      projectId: input.projectId,
+      contextId: input.contextId,
+      from: from?.boundary,
+      to: to?.boundary,
+    };
+    const scope = digest({
+      caller: callerKey(caller),
+      grantId: caller.grantId ?? null,
+      from: input.from ?? null,
+      to: input.to ?? null,
+    });
+    const runs: RunSummary[] = [];
+    let cursor = input.cursor,
+      scanned = 0;
+    const limit = input.limit ?? 20;
+    // Bounded scan, including denied rows. A short/empty page can carry its
+    // opaque continuation without claiming that no further authorized history exists.
+    while (scanned < 1000) {
+      const page = this.store.scanRuns(
+        filter,
+        scope,
+        Math.min(100, 1000 - scanned),
+        cursor,
+      );
+      for (const item of page.items) {
+        let run: RunRecord;
+        try {
+          run = this.#run(caller, item.record.runId, "get");
+        } catch (cause) {
+          if (!deniedHistory(cause)) throw cause;
+          cursor = item.cursor;
+          scanned++;
+          continue;
+        }
+        // Deadline observation or a reentrant current-policy callback can change
+        // mutable fields after SQL selected the candidate.
+        if (
+          (filter.status !== undefined && run.status !== filter.status) ||
+          (filter.scriptName !== undefined &&
+            run.scriptName !== filter.scriptName)
+        ) {
+          cursor = item.cursor;
+          scanned++;
+          continue;
+        }
+        const summary = this.#summary(run);
+        if (
+          Buffer.byteLength(
+            canonicalJson(
+              { runs: [...runs, summary], nextCursor: item.cursor },
+              128 * 1024,
+            ),
+          ) >
+          64 * 1024
+        ) {
+          requireCondition(
+            runs.length > 0,
+            "history_summary_too_large",
+            "A retained history summary exceeds the page budget.",
+          );
+          return { runs, nextCursor: cursor ?? null };
+        }
+        runs.push(summary);
+        cursor = item.cursor;
+        scanned++;
+        if (runs.length === limit) {
+          const remaining = item !== page.items.at(-1) || page.more;
+          return { runs, nextCursor: remaining ? cursor : null };
+        }
+      }
+      if (!page.more) return { runs, nextCursor: null };
+    }
+    return { runs, nextCursor: cursor ?? null };
+  }
+
+  #snapshot(
+    run: RunRecord,
+    kind: "code" | "input" | "result" | "logs",
+    value = false,
+  ): RetainedSnapshot {
+    const ref = run[`${kind}Ref`];
+    if (!ref) return { ref: null, status: "not_recorded", bytes: null };
+    let bytes: number | null = null;
+    try {
+      const expected = path.join(
+        this.store.root,
+        ...(kind === "logs"
+          ? ["logs", "runs", run.runId]
+          : ["work", "tmp", "runs", run.runId]),
+      );
+      const root = realpathSync.native(expected);
+      const filename = realpathSync.native(path.resolve(this.store.root, ref));
+      requireCondition(
+        root === expected && contains(root, filename),
+        "snapshot_unavailable",
+        "The retained snapshot was redirected.",
+      );
+      const file = openSync(
+        filename,
+        constants.O_RDONLY |
+          (constants.O_NOFOLLOW ?? 0) |
+          (constants.O_NONBLOCK ?? 0),
+      );
+      try {
+        const stat = fstatSync(file);
+        requireCondition(
+          stat.isFile(),
+          "snapshot_unavailable",
+          "The retained snapshot is not a file.",
+        );
+        bytes = stat.size;
+        if (!value) return { ref, status: "available", bytes };
+        if (kind !== "logs" && bytes > 8192)
+          return { ref, status: "too_large", bytes };
+        const maximum = kind === "logs" ? 4096 : 8192;
+        const buffer = Buffer.alloc(Math.min(bytes + 1, maximum + 1));
+        const count = readSync(file, buffer, 0, buffer.length, 0);
+        if (kind !== "logs") {
+          if (count > 8192)
+            return { ref, status: "too_large", bytes: Math.max(bytes, count) };
+          return {
+            ref,
+            status: "available",
+            bytes,
+            value: JSON.parse(
+              canonicalJson(
+                JSON.parse(buffer.subarray(0, count).toString("utf8")),
+                8192,
+              ),
+            ) as JsonValue,
+          };
+        }
+        const text = new StringDecoder("utf8").write(
+          buffer.subarray(0, Math.min(count, maximum)),
+        );
+        const consumed = Buffer.byteLength(text);
+        return {
+          ref,
+          status: "available",
+          bytes,
+          value: text,
+          ...(consumed < bytes || count > maximum
+            ? { truncated: true, nextOffset: consumed }
+            : {}),
+        };
+      } finally {
+        closeSync(file);
+      }
+    } catch {
+      return { ref, status: "unavailable", bytes };
+    }
+  }
+
+  #summary(run: RunRecord): RunSummary {
+    const source = run.source;
+    const origin = source.origin;
+    const trustedOrigin =
+      origin && typeof origin === "object" && !Array.isArray(origin)
+        ? {
+            type: origin.type ?? null,
+            owner: origin.owner ?? null,
+            namespace: origin.namespace ?? null,
+            version: origin.version ?? null,
+            revision: origin.revision ?? null,
+          }
+        : null;
+    const description =
+      typeof source.scriptDesc === "string" ? source.scriptDesc : null;
+    return {
+      runId: run.runId,
+      scriptName: run.scriptName,
+      scriptDesc: description === null ? null : description.slice(0, 2048),
+      ...(description !== null && description.length > 2048
+        ? { descriptionTruncated: true }
+        : {}),
+      source: (
+        { inline: "inline", script: "named", replay: "history" } as const
+      )[run.sourceKind],
+      origin: trustedOrigin,
+      projectId: run.projectId,
+      contextId: run.contextId,
+      status: run.status,
+      acceptedAt: new Date(run.acceptedAt).toISOString(),
+      startedAt:
+        run.startedAt === null ? null : new Date(run.startedAt).toISOString(),
+      endedAt:
+        run.endedAt === null ? null : new Date(run.endedAt).toISOString(),
+      replayOfRunId:
+        typeof source.replayRunId === "string" ? source.replayRunId : null,
+      availability: {
+        code: this.#snapshot(run, "code").status,
+        input: this.#snapshot(run, "input").status,
+        result: this.#snapshot(run, "result").status,
+        logs: this.#snapshot(run, "logs").status,
+        artifacts: "unknown",
+      },
+    };
+  }
+
   async start(
     caller: Caller,
     input: StartInput,
     observationSignal?: AbortSignal,
   ) {
-    validateContract("agent.run.start", input);
+    validateContract("runtime:agent.run.start", input);
     input = JSON.parse(canonicalJson(input)) as StartInput;
     caller = fixedCaller(caller);
     this.#authorize(caller, { action: "start" });
@@ -301,43 +685,73 @@ export class RunEngine extends EventEmitter {
         observationSignal,
       );
     }
-    const accepted = this.store.acceptRun({
-      callerKey: key,
-      contextId: input.contextId,
-      sourceKind:
-        input.script !== undefined
-          ? "inline"
-          : input.scriptName !== undefined
-            ? "script"
-            : "replay",
-      source: {
-        entry:
+    let admission: { release(): void } | undefined;
+    try {
+      if (this.#options.reserve)
+        admission = await this.#options.reserve(65536, {
+          control: pinned !== undefined,
+        });
+    } catch (cause) {
+      const concurrent = input.requestId
+        ? this.store.findMatchingSubmission(key, input.requestId, intentDigest)
+        : null;
+      if (!concurrent) throw cause;
+      this.#authorize(caller, { action: "get", run: concurrent });
+      return await this.observe(
+        caller,
+        concurrent.runId,
+        input.waitMs ?? 1000,
+        observationSignal,
+      );
+    }
+    let accepted: { run: RunRecord; duplicate: boolean };
+    try {
+      this.#authorize(caller, { action: "start" });
+      accepted = this.store.acceptRun({
+        callerKey: key,
+        contextId: input.contextId,
+        sourceKind:
           input.script !== undefined
             ? "inline"
             : input.scriptName !== undefined
-              ? "named"
-              : "history",
-      },
-      ...(input.scriptName === undefined
-        ? {}
-        : { scriptName: input.scriptName }),
-      timeoutMs: input.timeoutMs,
-      requestId: input.requestId,
-      intentDigest,
-      capacity: this.#options.capacity,
-      controlCapacity: this.#options.controlCapacity,
-      controlEligible: pinned !== undefined,
-    });
+              ? "script"
+              : "replay",
+        source: {
+          entry:
+            input.script !== undefined
+              ? "inline"
+              : input.scriptName !== undefined
+                ? "named"
+                : "history",
+          ...(input.replayRunId ? { replayRunId: input.replayRunId } : {}),
+        },
+        ...(input.scriptName === undefined
+          ? {}
+          : { scriptName: input.scriptName }),
+        timeoutMs: input.timeoutMs,
+        requestId: input.requestId,
+        intentDigest,
+        capacity: this.#options.capacity,
+        controlCapacity: this.#options.controlCapacity,
+        controlEligible: pinned !== undefined,
+      });
+    } finally {
+      admission?.release();
+    }
     if (accepted.duplicate)
       this.#authorize(caller, { action: "get", run: accepted.run });
     else {
-      const scope = this.#scope(accepted.run, caller);
+      const scope = this.#scope(accepted.run, caller, pinned !== undefined);
       this.#scopes.set(scope.runId, scope);
       this.#scheduleDeadline(scope);
       const begin = () => {
-        void this.#drive(scope, input, pinned).catch((error) =>
-          this.#persistenceFailure(scope, error),
-        );
+        void this.#drive(scope, input, pinned)
+          .finally(() => {
+            scope.loggingClosed = true;
+            scope.logReservation?.release();
+            scope.logReservation = undefined;
+          })
+          .catch((error) => this.#persistenceFailure(scope, error));
       };
       // Fixed code already has a known source. Acquire its lease before the
       // caller can synchronously stop/replace that source after start returns.
@@ -352,10 +766,11 @@ export class RunEngine extends EventEmitter {
     );
   }
 
-  #scope(run: RunRecord, caller: Caller): Scope {
+  #scope(run: RunRecord, caller: Caller, controlEligible = false): Scope {
     const scope = {
       runId: run.runId,
       caller: fixedCaller(caller),
+      controlEligible,
       work: this.store.getWork(run.contextId),
       controller: new AbortController(),
       acceptedMono: performance.now(),
@@ -375,6 +790,7 @@ export class RunEngine extends EventEmitter {
     );
     scope.services = Object.freeze({
       runId: run.runId,
+      controlStorage: scope.controlEligible,
       signal: scope.controller.signal,
       deadlineAt: run.deadlineAt,
       get context() {
@@ -477,7 +893,10 @@ export class RunEngine extends EventEmitter {
       run,
     });
   }
-  #stop(scope: Scope, reason: JsonObject): RunRecord {
+  #stop(
+    scope: Scope,
+    reason: JsonObject,
+  ): { accepted: boolean; run: RunRecord } {
     const stopped = this.store.requestStop(
       scope.runId,
       reason,
@@ -488,7 +907,11 @@ export class RunEngine extends EventEmitter {
       clearTimeout(scope.timer);
       scope.controller.abort(
         new AgentError(
-          reason.kind === "cancel" ? "run_cancelled" : "run_deadline_exceeded",
+          reason.kind === "cancel"
+            ? "run_cancelled"
+            : reason.kind === "authorization"
+              ? String(reason.code)
+              : "run_deadline_exceeded",
           "The run accepted a stop request.",
         ),
       );
@@ -500,7 +923,7 @@ export class RunEngine extends EventEmitter {
       }
       this.#publish(scope.runId);
     }
-    return stopped.run;
+    return stopped;
   }
 
   async #drive(
@@ -552,13 +975,27 @@ export class RunEngine extends EventEmitter {
         businessInput: JsonValue = null;
       let attachments = input.attachments;
       if (input.script !== undefined)
-        snapshot = this.scripts.enroll(input.script).snapshot;
+        snapshot = (
+          await this.scripts.enrollManaged(input.script, {
+            reserve: this.#options.reserve
+              ? (bytes) =>
+                  this.#options.reserve!(bytes, {
+                    control: scope.controlEligible,
+                  })
+              : undefined,
+            assertCurrent: () => this.#assertActive(scope),
+          })
+        ).snapshot;
       else if (input.scriptName !== undefined)
         snapshot = pinned ?? this.scripts.resolve(input.scriptName);
       else {
         const previous = this.#run(scope.caller, input.replayRunId!, "replay");
-        const saved = JSON.parse(this.#read(previous.inputRef)) as JsonObject;
-        snapshot = JSON.parse(this.#read(previous.codeRef)) as ScriptSnapshot;
+        const saved = JSON.parse(
+          this.#read(previous.inputRef, previous.runId),
+        ) as JsonObject;
+        snapshot = JSON.parse(
+          this.#read(previous.codeRef, previous.runId),
+        ) as ScriptSnapshot;
         requireCondition(
           typeof snapshot.code === "string" &&
             createHash("sha256").update(snapshot.code).digest("hex") ===
@@ -604,8 +1041,13 @@ export class RunEngine extends EventEmitter {
       if (!pinned) releaseScript = this.#options.leaseScript?.(snapshot.origin);
       const codeRef = this.#relative(path.join(directory, "code.json"));
       const inputRef = this.#relative(path.join(directory, "input.json"));
-      atomicText(path.join(directory, "code.json"), canonicalJson(snapshot));
-      atomicText(
+      await this.#writeSnapshot(
+        scope,
+        path.join(directory, "code.json"),
+        canonicalJson(snapshot),
+      );
+      await this.#writeSnapshot(
+        scope,
         path.join(directory, "input.json"),
         canonicalJson({
           input: businessInput,
@@ -620,6 +1062,9 @@ export class RunEngine extends EventEmitter {
         revision: snapshot.origin.revision,
         nodeVersion: process.version,
         workRevision: scope.work.revision,
+        ...(snapshot.metadata
+          ? { scriptDesc: snapshot.metadata.scriptDesc }
+          : {}),
         ...(input.replayRunId ? { replayRunId: input.replayRunId } : {}),
       };
       run = this.store.savePreparation(run.runId, run.revision, {
@@ -670,7 +1115,8 @@ export class RunEngine extends EventEmitter {
       scope.context.attachments = prepared;
       scope.context = frozenJson(scope.context);
       // The context is copied/frozen by ModuleLoader; later input never mutates it.
-      atomicText(
+      await this.#writeSnapshot(
+        scope,
         path.join(directory, "input.json"),
         canonicalJson(
           {
@@ -685,11 +1131,19 @@ export class RunEngine extends EventEmitter {
         privateDirectory(this.store.root, "logs", "runs", run.runId),
         "console.log",
       );
+      scope.logReservation = await this.#options.reserve?.(1024 * 1024 + 1024, {
+        control: scope.controlEligible,
+      });
+      this.#assertActive(scope);
       atomicText(logsFile, "");
       let log = "";
       const stream = new Writable({
         write: (chunk, _encoding, done) => {
           try {
+            if (scope.loggingClosed) {
+              done();
+              return;
+            }
             if (Buffer.byteLength(log) < 1024 * 1024) {
               log += Buffer.from(chunk)
                 .subarray(0, 1024 * 1024 - Buffer.byteLength(log))
@@ -748,16 +1202,18 @@ export class RunEngine extends EventEmitter {
           "The local run log could not be saved.",
         );
       scope.accepting = false;
-      if (scope.pending) {
+      if (scope.pending || scope.inputPreparation) {
         const pending = scope.pending;
         scope.pending = null;
-        clearTimeout(pending.timer);
-        pending.reject(
-          new AgentError(
-            "input_not_awaited",
-            "The root script returned without awaiting its input request.",
-          ),
-        );
+        if (pending) {
+          clearTimeout(pending.timer);
+          pending.reject(
+            new AgentError(
+              "input_not_awaited",
+              "The root script returned without awaiting its input request.",
+            ),
+          );
+        }
         throw new AgentError(
           "input_not_awaited",
           "The root script returned without awaiting its input request.",
@@ -776,7 +1232,8 @@ export class RunEngine extends EventEmitter {
       result = await this.#options.encodeResult(value, scope.services);
       this.#checkDeadline(scope);
       scope.controller.signal.throwIfAborted();
-      atomicText(
+      await this.#writeSnapshot(
+        scope,
         path.join(directory, "result.json"),
         canonicalJson(result, 96 * 1024 * 1024),
       );
@@ -869,6 +1326,11 @@ export class RunEngine extends EventEmitter {
         : "succeeded";
     releaseScript?.();
     releaseScript = undefined;
+    // The root can return before tracked handlers finish. Keep its captured
+    // console and reserved log budget until their actual settlement is known.
+    scope.loggingClosed = true;
+    scope.logReservation?.release();
+    scope.logReservation = undefined;
     this.store.transitionRun(
       run.runId,
       run.revision,
@@ -891,6 +1353,23 @@ export class RunEngine extends EventEmitter {
     this.#publish(scope.runId);
   }
 
+  async #writeSnapshot(
+    scope: Scope,
+    filename: string,
+    text: string,
+  ): Promise<void> {
+    const ticket = await this.#options.reserve?.(
+      Buffer.byteLength(text) + 1024,
+      { control: scope.controlEligible },
+    );
+    try {
+      this.#assertCurrent(scope);
+      atomicText(filename, text);
+    } finally {
+      ticket?.release();
+    }
+  }
+
   async #prepareAttachments(
     references: readonly JsonObject[],
     directory: string,
@@ -909,6 +1388,42 @@ export class RunEngine extends EventEmitter {
     );
   }
   #requestInput(scope: Scope, request: InputRequest): Promise<JsonObject> {
+    if (!this.#options.reserve) return this.#openInput(scope, request);
+    this.#assertActive(scope);
+    requireCondition(
+      !scope.pending && !scope.inputPreparation,
+      "input_busy",
+      "This run already has an input request being prepared or awaiting a response.",
+    );
+    const fixed = JSON.parse(canonicalJson(request)) as InputRequest;
+    const response = Promise.withResolvers<JsonObject>();
+    void response.promise.catch(() => {});
+    const prepare = (async () => {
+      const ticket = await this.#options.reserve!(
+        Buffer.byteLength(canonicalJson(fixed)) + 65536,
+        { control: scope.controlEligible },
+      );
+      try {
+        this.#assertActive(scope);
+        this.#openInput(scope, fixed).then(response.resolve, response.reject);
+      } finally {
+        ticket.release();
+      }
+    })();
+    scope.inputPreparation = prepare;
+    scope.deliveries.add(prepare);
+    const settled = () => {
+      if (scope.inputPreparation === prepare)
+        scope.inputPreparation = undefined;
+      scope.deliveries.delete(prepare);
+    };
+    void prepare.then(settled, (cause) => {
+      settled();
+      response.reject(cause);
+    });
+    return response.promise;
+  }
+  #openInput(scope: Scope, request: InputRequest): Promise<JsonObject> {
     this.#assertActive(scope);
     request = JSON.parse(canonicalJson(request)) as InputRequest;
     requireCondition(
@@ -1005,7 +1520,7 @@ export class RunEngine extends EventEmitter {
     },
     signal?: AbortSignal,
   ) {
-    validateContract("agent.run.input", input);
+    validateContract("runtime:agent.run.input", input);
     input = JSON.parse(canonicalJson(input)) as typeof input;
     requireCondition(
       input.agentId === this.store.binding.agentId,
@@ -1019,11 +1534,24 @@ export class RunEngine extends EventEmitter {
         ? {}
         : { attachments: attachmentIntent(input.attachments) }),
     });
-    const reservation = this.store.reserveInput(
-      input.runId,
-      input.waitId,
-      intent,
-    );
+    const previous = this.store.getWait(input.waitId);
+    const duplicate =
+      previous.runId === input.runId &&
+      previous.inputDigest === intent &&
+      (previous.status === "consumed" ||
+        previous.deliveryState === "preparing");
+    const ticket = duplicate
+      ? undefined
+      : await this.#options.reserve?.(65536, {
+          control: this.#scopes.get(input.runId)?.controlEligible === true,
+        });
+    let reservation: ReturnType<SqliteStore["reserveInput"]>;
+    try {
+      this.#run(caller, input.runId, "input");
+      reservation = this.store.reserveInput(input.runId, input.waitId, intent);
+    } finally {
+      ticket?.release();
+    }
     if (!reservation.duplicate) {
       const scope = this.#scopes.get(input.runId);
       requireCondition(
@@ -1088,7 +1616,12 @@ export class RunEngine extends EventEmitter {
           2 * 1024 * 1024,
         ),
       ) as JsonObject;
-      atomicText(filename, canonicalJson(reply, 2 * 1024 * 1024));
+      await this.#writeSnapshot(
+        scope,
+        filename,
+        canonicalJson(reply, 2 * 1024 * 1024),
+      );
+      this.#run(controller, scope.runId, "input");
       this.store.consumeInput(
         scope.runId,
         input.waitId,
@@ -1120,18 +1653,43 @@ export class RunEngine extends EventEmitter {
     }
   }
 
-  cancel(caller: Caller, runId: string) {
+  /** Trusted Core authority revocation, never a script/transport parameter entry. */
+  stopAcceptedRun(
+    runId: string,
+    reason: { readonly code: string },
+  ): { accepted: boolean; run: RunRecord } {
+    requireCondition(
+      typeof reason.code === "string" &&
+        /^[a-z][a-z0-9_]{0,127}$/.test(reason.code),
+      "invalid_stop_reason",
+      "A Core authority stop needs its fixed failure code.",
+    );
+    const run = this.store.getRun(runId);
+    requireCondition(
+      run.bootId === this.store.bootId,
+      "run_boot_mismatch",
+      "Only this boot's actually accepted execution can be stopped.",
+    );
+    const scope = this.#scopes.get(runId);
+    return scope && !terminalStatuses.has(run.status)
+      ? this.#stop(scope, { kind: "authorization", code: reason.code })
+      : { accepted: false, run };
+  }
+  cancel(caller: Caller, runId: string): CancelView {
+    caller = fixedCaller(caller);
     const run = this.#run(caller, runId, "cancel");
     const scope = this.#scopes.get(runId);
-    if (scope && !terminalStatuses.has(run.status))
-      this.#stop(scope, {
-        kind: "cancel",
-        requestedBy: {
-          principalId: caller.principalId,
-          clientId: caller.clientId,
-        },
-      });
-    return this.#view(caller, runId);
+    const accepted =
+      scope && !terminalStatuses.has(run.status)
+        ? this.#stop(scope, {
+            kind: "cancel",
+            requestedBy: {
+              principalId: caller.principalId,
+              clientId: caller.clientId,
+            },
+          }).accepted
+        : false;
+    return { ...this.#view(caller, runId), accepted };
   }
   #view(caller: Caller, runId: string): RunView {
     const run = this.#run(caller, runId, "get");
@@ -1142,7 +1700,7 @@ export class RunEngine extends EventEmitter {
     if (run.resultRef) {
       try {
         result = JSON.parse(
-          this.#read(run.resultRef, 96 * 1024 * 1024),
+          this.#read(run.resultRef, runId, 96 * 1024 * 1024),
         ) as JsonObject;
       } catch {
         unavailable = {

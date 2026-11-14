@@ -23,6 +23,7 @@ import { ArtifactStore } from "../dist/results/artifacts.js";
 import { SqliteStore } from "../dist/storage/sqlite.js";
 import { TransferServices } from "../dist/services/transfer.js";
 import { TransferOfferDelivery } from "../dist/transfer/offers.js";
+import { TransferIoError } from "../dist/transfer/io.js";
 import { TransferStreamSlots } from "../dist/transfer/stream-slots.js";
 import { transferExtension } from "../dist/sdk/transfer.js";
 
@@ -70,13 +71,21 @@ async function fixture(t, options = {}) {
     store = new SqliteStore(root, binding);
   }
   const manager = new ResourceManager(store, { cleanupTimeoutMs: 40 });
+  const instances = [];
+  const createInstance = manager.instance.bind(manager);
+  manager.instance = (...args) => {
+    const instance = createInstance(...args);
+    instances.push(instance);
+    return instance;
+  };
   const artifacts = new ArtifactStore(root, binding.agentId, {
     maxFileBytes: 1024 * 1024,
   });
   let service,
     allowed = true,
     deniedPath,
-    brokenPolicy = false;
+    brokenPolicy = false,
+    controlOffline = options.controlOffline ?? false;
   const faults = [],
     channels = new Map(),
     runs = [],
@@ -115,6 +124,12 @@ async function fixture(t, options = {}) {
     async revoke(info) {
       const entry = channels.get(info.transferId);
       if (!entry) return;
+      entry.revokeCalls = (entry.revokeCalls ?? 0) + 1;
+      if (controlOffline)
+        throw new AgentError(
+          "connection_closed",
+          "Synthetic control observation disconnected.",
+        );
       entry.revoked = true;
       if (options.revokeGate) await options.revokeGate.promise;
       if (entry.closed) {
@@ -144,12 +159,67 @@ async function fixture(t, options = {}) {
         // This fixture's atomic one-use fact is deliberately after Core permit
         // admission. The production Cloud authority is wired separately.
         channel.used = true;
+        channel.claims = (channel.claims ?? 0) + 1;
         channel.req = req;
         channel.res = res;
         const endpoint = req.method === "PUT" ? req : res;
         channel.closed = new Promise((resolve) => {
           endpoint.once("close", resolve);
         });
+        let closed = channel.closed;
+        if (options.knownClosedFailure) {
+          channel.closedFacts = {
+            request: false,
+            response: false,
+            socket: false,
+          };
+          const transportClosed = Promise.all([
+            channel.closed.then(() => {
+              channel.closedFacts.request = true;
+            }),
+            new Promise((resolve) =>
+              res.once("close", () => {
+                channel.closedFacts.response = true;
+                resolve();
+              }),
+            ),
+            new Promise((resolve) =>
+              req.socket.once("close", () => {
+                channel.closedFacts.socket = true;
+                resolve();
+              }),
+            ),
+          ]);
+          closed = (async () => {
+            await channel.closed;
+            await until(
+              () =>
+                store.getTransfer(id, {
+                  callerKey: callerKey(caller),
+                  owner: origin,
+                }).metadata.fileCommitted === true,
+            );
+            res.writeHead(409, { Connection: "close" });
+            res.end("stream_http_failed");
+            await transportClosed;
+            throw new TransferIoError(
+              "stream_http_failed",
+              "Synthetic business failure after actual HTTP closure.",
+              false,
+              true,
+              undefined,
+              new Error("HTTP business response failed"),
+            );
+          })();
+        } else if (options.unknownClosedFailure) {
+          closed = channel.closed.then(() => {
+            throw new AgentError(
+              "stream_close_unknown",
+              "Synthetic missing local cleanup certificate.",
+              { cleanupConfirmed: true },
+            );
+          });
+        }
         const io =
           req.method === "PUT"
             ? {
@@ -157,9 +227,9 @@ async function fixture(t, options = {}) {
                 ...(req.headers["content-length"] === undefined
                   ? {}
                   : { contentLength: Number(req.headers["content-length"]) }),
-                closed: channel.closed,
+                closed,
               }
-            : { download: res, closed: channel.closed };
+            : { download: res, closed };
         const snapshot = await service.commitClaim(reservation, io);
         if (!res.destroyed && !res.writableEnded) {
           res.writeHead(snapshot.status === "succeeded" ? 200 : 409);
@@ -239,6 +309,7 @@ async function fixture(t, options = {}) {
     options.prepareGate?.resolve();
     options.revokeGate?.resolve();
     allowed = true;
+    controlOffline = false;
     deniedPath = undefined;
     brokenPolicy = false;
     const observer = run();
@@ -277,7 +348,11 @@ async function fixture(t, options = {}) {
     run,
     channels,
     faults,
+    instances,
     freshClaim,
+    setControlOffline: (value) => {
+      controlOffline = value;
+    },
     deny: (value) => {
       allowed = !value;
     },
@@ -679,4 +754,272 @@ test("the SDK factory only normalizes and delegates the same public transfer met
     ["list", {}],
     ["cancel", "identity"],
   ]);
+});
+
+test("a committed HTTP upload retains its file and slot through lost revoke observation, then explicit cancel shares one cleanup retry", async (t) => {
+  const gate = Promise.withResolvers(),
+    f = await fixture(t, { controlOffline: true, revokeGate: gate }),
+    creator = f.run(),
+    offer = await creator.api.createUpload({ path: "retry-committed.bin" });
+  const response = await fetch(offer.request.url, {
+    method: "PUT",
+    body: "committed-once",
+  });
+  await response.text();
+  const original = await creator.api.get(offer.transferId),
+    row = f.store.getTransfer(offer.transferId, {
+      callerKey: callerKey(caller),
+      owner: origin,
+    }),
+    channel = f.channels.get(offer.transferId);
+  assert.equal(original.status, "transferring");
+  assert.equal(original.finishedAt, null);
+  assert.equal(original.error.code, "connection_closed");
+  assert.equal(original.file.sha256, hash("committed-once"));
+  assert.equal(row.metadata.fileCommitted, true);
+  assert.equal(row.bytesTransferred, Buffer.byteLength("committed-once"));
+  assert.equal(f.store.getResource(row.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 1);
+  assert.equal(channel.revokeCalls, 1);
+  assert.equal(channel.claims, 1);
+  const actual = f.store.getRun(creator.row.runId);
+  f.store.transitionRun(actual.runId, actual.revision, "succeeded");
+  creator.controller.abort();
+  const observer = f.run();
+  assert.equal(
+    (await observer.api.get(offer.transferId)).file.revision,
+    original.file.revision,
+  );
+  assert.equal(channel.revokeCalls, 1);
+  f.setControlOffline(false);
+  const [first, repeated] = await Promise.all([
+    observer.api.cancel(offer.transferId),
+    observer.api.cancel(offer.transferId),
+  ]);
+  assert.equal(first.transfer.status, "cancelling");
+  assert.equal(repeated.transfer.status, "cancelling");
+  await until(() => channel.revokeCalls === 2);
+  assert.equal(f.streams.active, 1);
+  assert.equal(f.store.getResource(row.resourceId).closedAt, null);
+  gate.resolve();
+  const done = await until(async () => {
+    const value = await observer.api.get(offer.transferId);
+    return value.finishedAt !== null && value;
+  });
+  assert.equal(done.status, "cancelled");
+  assert.equal(done.runId, creator.row.runId);
+  assert.equal(done.contextId, creator.row.contextId);
+  assert.deepEqual(done.file, original.file);
+  assert.equal(done.error.code, "connection_closed");
+  assert.equal(
+    done.progress.bytesTransferred,
+    original.progress.bytesTransferred,
+  );
+  assert.equal(readFileSync(done.file.path, "utf8"), "committed-once");
+  assert.equal(channel.claims, 1);
+  assert.equal(channel.revokeCalls, 2);
+  assert.notEqual(f.store.getResource(row.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 0);
+  assert.equal((await observer.api.cancel(offer.transferId)).accepted, false);
+});
+
+test("a real ResourceManager cleanup retry can re-observe a previously disconnected channel", async (t) => {
+  const f = await fixture(t, { controlOffline: true }),
+    owner = f.run(),
+    offer = await owner.api.createUpload({ path: "never-claimed.bin" });
+  const record = f.store.getTransfer(offer.transferId, {
+    callerKey: callerKey(caller),
+    owner: origin,
+  });
+  const resources = f.instances[0].bind({
+      runId: owner.row.runId,
+      signal: owner.controller.signal,
+      assertActive: owner.scope.assertCurrent,
+      authorize: () => {},
+    }),
+    ref = await resources.get(record.resourceId);
+  const first = await f.manager.dispose(ref);
+  assert.equal(first.closedAt, null);
+  assert.equal(first.status, "unconfirmed");
+  assert.equal(f.channels.get(offer.transferId).revokeCalls, 1);
+  f.setControlOffline(false);
+  const closed = await f.manager.dispose(ref);
+  assert.notEqual(closed.closedAt, null);
+  const done = await until(async () => {
+    const value = await owner.api.get(offer.transferId);
+    return value.finishedAt && value;
+  });
+  assert.equal(done.status, "cancelled");
+  assert.equal(f.channels.get(offer.transferId).revokeCalls, 2);
+});
+
+test("confirmed remote revoke cannot erase a download's unknown local source closure or release its actual stream slot", async (t) => {
+  const f = await fixture(t),
+    owner = f.run();
+  writeFileSync(
+    path.join(f.root, "work", "source-unknown.txt"),
+    "downloaded-once",
+  );
+  const actualOpen = f.artifacts.open.bind(f.artifacts);
+  let opens = 0;
+  f.artifacts.open = async (...args) => {
+    const source = await actualOpen(...args);
+    opens++;
+    return {
+      ...source,
+      closed: source.closed.then(() => {
+        throw new AgentError(
+          "source_close_unknown",
+          "Synthetic local source cleanup uncertainty.",
+        );
+      }),
+    };
+  };
+  const offer = await owner.api.createDownload({ path: "source-unknown.txt" });
+  const received = await new Promise((resolve, reject) => {
+    const request = http.get(offer.request.url, (response) => {
+      const chunks = [];
+      let error;
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("error", (cause) => {
+        error = cause;
+      });
+      response.on("close", () =>
+        resolve({
+          bytes: Buffer.concat(chunks),
+          complete: response.complete,
+          error,
+        }),
+      );
+    });
+    request.on("error", reject);
+  });
+  assert.equal(received.bytes.toString(), "downloaded-once");
+  assert.equal(received.complete, false);
+  assert.equal(received.error?.code, "ECONNRESET");
+  const value = await until(async () => {
+    const snapshot = await owner.api.get(offer.transferId);
+    return snapshot.error?.code === "transfer_cleanup_unconfirmed" && snapshot;
+  });
+  const record = f.store.getTransfer(offer.transferId, {
+    callerKey: callerKey(caller),
+    owner: origin,
+  });
+  assert.equal(value.status, "cancelling");
+  assert.equal(value.finishedAt, null);
+  assert.equal(f.store.getResource(record.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 1);
+  assert.equal(opens, 1);
+  assert.equal(f.channels.get(offer.transferId).revokeCalls, 1);
+  const retry = await owner.api.cancel(offer.transferId);
+  assert.equal(retry.accepted, false);
+  await until(
+    () =>
+      f.faults.filter((item) => item.transferId === offer.transferId).length >=
+      2,
+  );
+  const after = await owner.api.get(offer.transferId);
+  assert.equal(after.status, "cancelling");
+  assert.equal(after.finishedAt, null);
+  assert.equal(after.error.code, "transfer_cleanup_unconfirmed");
+  assert.equal(f.store.getResource(record.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 1);
+  assert.equal(opens, 1);
+});
+
+test("a permanent terminal SQLite failure remains visible after explicit cleanup retry instead of becoming cancelled success", async (t) => {
+  const f = await fixture(t, { rejectFinish: true }),
+    owner = f.run(),
+    offer = await owner.api.createUpload({ path: "persistent-failure.bin" }),
+    response = await fetch(offer.request.url, {
+      method: "PUT",
+      body: "keep-this-file",
+    });
+  await response.text();
+  const original = await owner.api.get(offer.transferId);
+  assert.equal(original.error.code, "transfer_persistence_failed");
+  assert.equal(original.finishedAt, null);
+  assert.equal(f.streams.active, 0);
+  const previous = f.faults.length;
+  await assert.rejects(owner.api.cancel(offer.transferId), {
+    code: "transfer_persistence_failed",
+  });
+  await until(() => f.faults.length > previous);
+  const after = await owner.api.get(offer.transferId);
+  assert.equal(after.finishedAt, null);
+  assert.equal(after.error.code, "transfer_persistence_failed");
+  assert.equal(after.status, "cancelling");
+  assert.deepEqual(after.file, original.file);
+  assert.equal(readFileSync(after.file.path, "utf8"), "keep-this-file");
+  assert.equal(f.channels.get(offer.transferId).claims, 1);
+  assert.equal(f.streams.active, 0);
+});
+
+test("a business failure certified after real HTTP closure fails the transfer while releasing its resource and slot, preserving committed file facts", async (t) => {
+  const f = await fixture(t, { knownClosedFailure: true }),
+    owner = f.run(),
+    offer = await owner.api.createUpload({
+      path: "closed-business-failure.bin",
+    });
+  const response = await fetch(offer.request.url, {
+    method: "PUT",
+    body: "committed-before-response-error",
+  });
+  assert.equal(response.status, 409);
+  assert.equal(await response.text(), "stream_http_failed");
+  const value = await until(async () => {
+    const snapshot = await owner.api.get(offer.transferId);
+    return snapshot.finishedAt !== null && snapshot;
+  });
+  const record = f.store.getTransfer(offer.transferId, {
+    callerKey: callerKey(caller),
+    owner: origin,
+  });
+  assert.equal(value.status, "failed");
+  assert.equal(value.error.code, "stream_http_failed");
+  assert.equal(value.error.details.cleanupConfirmed, true);
+  assert.equal(record.metadata.fileCommitted, true);
+  assert.equal(value.file.sha256, hash("committed-before-response-error"));
+  assert.equal(
+    readFileSync(value.file.path, "utf8"),
+    "committed-before-response-error",
+  );
+  assert.notEqual(f.store.getResource(record.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 0);
+  assert.deepEqual(f.channels.get(offer.transferId).closedFacts, {
+    request: true,
+    response: true,
+    socket: true,
+  });
+  assert.equal(f.channels.get(offer.transferId).claims, 1);
+});
+
+test("an ordinary rejected I/O closure cannot forge a cleanup certificate through error details", async (t) => {
+  const f = await fixture(t, { unknownClosedFailure: true }),
+    owner = f.run(),
+    offer = await owner.api.createUpload({ path: "unknown-local-close.bin" }),
+    response = await fetch(offer.request.url, {
+      method: "PUT",
+      body: "preserve-this-commit",
+    });
+  await response.text();
+  const value = await owner.api.get(offer.transferId),
+    record = f.store.getTransfer(offer.transferId, {
+      callerKey: callerKey(caller),
+      owner: origin,
+    });
+  assert.equal(value.status, "cancelling");
+  assert.equal(value.finishedAt, null);
+  assert.equal(value.error.code, "stream_close_unknown");
+  assert.equal(record.metadata.fileCommitted, true);
+  assert.equal(readFileSync(value.file.path, "utf8"), "preserve-this-commit");
+  assert.equal(f.store.getResource(record.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 1);
+  const prior = f.faults.length;
+  await owner.api.cancel(offer.transferId);
+  await until(() => f.faults.length > prior);
+  assert.equal((await owner.api.get(offer.transferId)).finishedAt, null);
+  assert.equal(f.store.getResource(record.resourceId).closedAt, null);
+  assert.equal(f.streams.active, 1);
+  assert.equal(f.channels.get(offer.transferId).claims, 1);
 });

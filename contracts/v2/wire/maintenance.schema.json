@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json",
+  "$defs": {
+    "MaintenanceCredentialField": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": ["key", "label", "configured", "required"],
+      "additionalProperties": false
+    },
+    "MaintenanceAuthScheme": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "flow": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "oauth": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json#/$defs/MaintenanceCredentialField"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": ["id", "type", "oauth", "fields"],
+      "additionalProperties": false
+    },
+    "MaintenanceDraft": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "object"
+        },
+        "authentication": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json#/$defs/MaintenanceAuthScheme"
+          },
+          "maxItems": 100
+        },
+        "security": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 100
+          },
+          "maxItems": 100
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "maxItems": 100
+        },
+        "currentConfig": {
+          "type": "object"
+        }
+      },
+      "required": ["config", "authentication", "security", "diagnostics"],
+      "additionalProperties": false
+    },
+    "MaintenanceDraftInput": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "config": {
+          "type": "object"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "credentials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "operation": {
+                "enum": ["keep", "replace", "clear"]
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 32768
+              }
+            },
+            "required": ["key", "operation"],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "operation": {
+                      "const": "replace"
+                    }
+                  },
+                  "required": ["operation"]
+                },
+                "then": {
+                  "required": ["value"],
+                  "properties": {
+                    "value": {}
+                  }
+                },
+                "else": {
+                  "not": {
+                    "required": ["value"],
+                    "properties": {
+                      "value": {}
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "maxItems": 100
+        }
+      },
+      "required": ["revision"],
+      "additionalProperties": false
+    },
+    "MaintenanceDraftRead": {
+      "type": "object",
+      "properties": {
+        "draft": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json#/$defs/MaintenanceDraft"
+        },
+        "execution": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceExecution"
+        }
+      },
+      "required": ["draft"],
+      "additionalProperties": false
+    },
+    "MaintenancePrepared": {
+      "type": "object",
+      "properties": {
+        "candidate": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceCandidate"
+        },
+        "draft": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json#/$defs/MaintenanceDraft"
+        }
+      },
+      "required": ["candidate", "draft"],
+      "additionalProperties": false
+    },
+    "MaintenanceOAuthBinding": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "callbackUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192
+        },
+        "schemeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": ["state", "callbackUrl", "schemeId", "candidateRevision"],
+      "additionalProperties": false
+    },
+    "MaintenanceOAuthLaunch": {
+      "type": "object",
+      "properties": {
+        "authorizationUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192
+        },
+        "verificationUri": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192
+        },
+        "userCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192
+        },
+        "requireIssuer": {
+          "type": "boolean"
+        }
+      },
+      "required": ["issuer", "requireIssuer"],
+      "additionalProperties": false
+    },
+    "MaintenanceOAuthCallback": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 8192
+        }
+      },
+      "required": ["state"],
+      "additionalProperties": false
+    },
+    "MaintenanceOAuthComplete": {
+      "type": "object",
+      "properties": {
+        "schemeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "candidateRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "callback": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/maintenance.schema.json#/$defs/MaintenanceOAuthCallback"
+        }
+      },
+      "required": ["schemeId", "candidateRevision", "callback"],
+      "additionalProperties": false
+    }
+  }
+}

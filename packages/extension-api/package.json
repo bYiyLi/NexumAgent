@@ -1,0 +1,22 @@
+{
+  "name": "@nexum/extension-api",
+  "version": "0.0.1-development.0",
+  "private": true,
+  "description": "Nexum SDK 扩展公共类型协议",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false
+}

@@ -1,0 +1,1671 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json",
+  "$defs": {
+    "agent.project.resolve.input": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "agent.project.resolve.output": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["root", "name"],
+      "additionalProperties": false
+    },
+    "agent.open.input": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "projectId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "contextId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["agentId"],
+      "additionalProperties": false,
+      "not": {
+        "required": ["projectId", "path"],
+        "properties": {
+          "projectId": {},
+          "path": {}
+        }
+      }
+    },
+    "agent.open.output": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "pwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "agent": {
+          "type": "object"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "contextId",
+        "revision",
+        "observedAt",
+        "pwd",
+        "agent",
+        "project",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "agent.close.input": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["contextId"],
+      "additionalProperties": false
+    },
+    "agent.close.output": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agentConfirmed": {
+          "const": true
+        },
+        "affectedContextIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "maxItems": 1000
+        },
+        "closedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        }
+      },
+      "required": [
+        "contextId",
+        "projectId",
+        "agentConfirmed",
+        "affectedContextIds",
+        "closedAt"
+      ],
+      "additionalProperties": false
+    },
+    "agent.run.start.input": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "script": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576
+        },
+        "scriptName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "replayRunId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "input": {},
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Attachment"
+          },
+          "maxItems": 20
+        },
+        "requestId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/requestId"
+        },
+        "pwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "waitMs": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "submission": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Submission"
+        }
+      },
+      "required": ["contextId"],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": ["script"],
+          "properties": {
+            "script": {}
+          }
+        },
+        {
+          "required": ["scriptName"],
+          "properties": {
+            "scriptName": {}
+          }
+        },
+        {
+          "required": ["replayRunId"],
+          "properties": {
+            "replayRunId": {}
+          }
+        }
+      ],
+      "dependentRequired": {
+        "requestId": ["submission"],
+        "submission": ["requestId"]
+      }
+    },
+    "agent.run.start.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+    },
+    "agent.run.get.input": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/requestId"
+        },
+        "waitMs": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
+        }
+      },
+      "required": ["agentId"],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": ["runId"],
+          "properties": {
+            "runId": {}
+          }
+        },
+        {
+          "required": ["requestId"],
+          "properties": {
+            "requestId": {}
+          }
+        }
+      ]
+    },
+    "agent.run.get.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+    },
+    "agent.run.input.input": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "waitId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "input": {},
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Attachment"
+          },
+          "maxItems": 20
+        },
+        "waitMs": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
+        }
+      },
+      "required": ["agentId", "runId", "waitId", "input"],
+      "additionalProperties": false
+    },
+    "agent.run.input.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+    },
+    "agent.run.cancel.input": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["agentId", "runId"],
+      "additionalProperties": false
+    },
+    "agent.run.cancel.output": {
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "view": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+        }
+      },
+      "required": ["accepted", "view"],
+      "additionalProperties": false
+    },
+    "agent.run.list.input": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "status": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/status"
+        },
+        "scriptName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {
+          "enum": ["inline", "named", "history"]
+        },
+        "projectId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "contextId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "from": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/time"
+        },
+        "to": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/time"
+        },
+        "limit": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/limit"
+        },
+        "cursor": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/cursor"
+        }
+      },
+      "required": ["agentId"],
+      "additionalProperties": false
+    },
+    "agent.run.list.output": {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Run"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        }
+      },
+      "required": ["runs", "nextCursor", "observedAt"],
+      "additionalProperties": false
+    },
+    "agent.resources.list.input": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "agent.resources.list.output": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "resources": {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/ResourceEntry"
+              },
+              "maxItems": 100
+            },
+            "nextCursor": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["resources", "nextCursor"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "body": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+            }
+          },
+          "required": ["body"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "agent.resources.read.input": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["uri", "maxBytes"],
+      "additionalProperties": false
+    },
+    "agent.resources.read.output": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "contents": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "uri": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 256,
+                        "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+                      },
+                      "text": {
+                        "type": "string",
+                        "maxLength": 1048576
+                      }
+                    },
+                    "required": ["uri", "mimeType", "text"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "uri": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 256,
+                        "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+                      },
+                      "stream": {
+                        "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+                      }
+                    },
+                    "required": ["uri", "mimeType", "stream"],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "maxItems": 100
+            }
+          },
+          "required": ["contents"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "body": {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+            }
+          },
+          "required": ["body"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "agent.context.read.input": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "relativePath": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "includeEntries": {
+          "type": "boolean"
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxLines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": ["contextId", "revision", "itemId", "maxBytes"],
+      "additionalProperties": false,
+      "not": {
+        "properties": {
+          "cursor": {},
+          "startLine": {}
+        },
+        "required": ["cursor", "startLine"]
+      }
+    },
+    "agent.context.read.output": {
+      "type": "object",
+      "properties": {
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "contentRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "displayPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "kind": {
+                "enum": ["file", "directory"]
+              }
+            },
+            "required": ["displayPath", "kind"],
+            "additionalProperties": false
+          }
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "startsMidLine": {
+          "type": "boolean"
+        },
+        "endsMidLine": {
+          "type": "boolean"
+        },
+        "treeTruncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contextId",
+        "revision",
+        "itemId",
+        "contentRevision",
+        "text",
+        "complete",
+        "nextCursor"
+      ],
+      "additionalProperties": false,
+      "dependentRequired": {
+        "startLine": ["endLine", "startsMidLine", "endsMidLine"],
+        "endLine": ["startLine", "startsMidLine", "endsMidLine"],
+        "startsMidLine": ["startLine", "endLine", "endsMidLine"],
+        "endsMidLine": ["startLine", "endLine", "startsMidLine"]
+      }
+    },
+    "transfer.prepare.input": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "resourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "direction": {
+          "enum": ["upload", "download"]
+        },
+        "claimDeadlineAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "target": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferTarget"
+        }
+      },
+      "required": [
+        "transferId",
+        "resourceId",
+        "runId",
+        "contextId",
+        "projectId",
+        "direction",
+        "claimDeadlineAt",
+        "maxBytes",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "transfer.prepare.output": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "request": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferRequest"
+        }
+      },
+      "required": ["transferId", "request"],
+      "additionalProperties": false
+    },
+    "transfer.revoke.input": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reason": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferStop"
+        }
+      },
+      "required": ["transferId", "reason"],
+      "additionalProperties": false
+    },
+    "transfer.revoke.output": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "closed": {
+          "const": true
+        }
+      },
+      "required": ["transferId", "closed"],
+      "additionalProperties": false
+    },
+    "agent.transfer.reserveClaim.input": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["transferId"],
+      "additionalProperties": false
+    },
+    "agent.transfer.reserveClaim.output": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reservationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "direction": {
+          "enum": ["upload", "download"]
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "transferId",
+        "reservationId",
+        "expiresAt",
+        "direction",
+        "maxBytes"
+      ],
+      "additionalProperties": false
+    },
+    "agent.transfer.commitClaim.input": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reservationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stream": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/StreamRef"
+        },
+        "contentLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["transferId", "reservationId", "stream"],
+      "additionalProperties": false
+    },
+    "agent.transfer.commitClaim.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TransferSnapshot"
+    },
+    "agent.transfer.releaseReservation.input": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reservationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["transferId", "reservationId"],
+      "additionalProperties": false
+    },
+    "agent.transfer.releaseReservation.output": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "released": {
+          "const": true
+        }
+      },
+      "required": ["transferId", "released"],
+      "additionalProperties": false
+    },
+    "authorization.refresh.input": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "maintenanceRequestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "transferId": {
+          "type": "string",
+          "pattern": "^tr_[0-9a-f]{32}$"
+        },
+        "streamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "originInvocationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["originInvocationId"],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": ["runId"],
+          "properties": {
+            "runId": {}
+          }
+        },
+        {
+          "required": ["maintenanceRequestId"],
+          "properties": {
+            "maintenanceRequestId": {}
+          }
+        },
+        {
+          "required": ["transferId"],
+          "properties": {
+            "transferId": {}
+          }
+        },
+        {
+          "required": ["streamId"],
+          "properties": {
+            "streamId": {}
+          }
+        }
+      ]
+    },
+    "authorization.refresh.output": {
+      "type": "object",
+      "properties": {
+        "authorization": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
+        }
+      },
+      "required": ["authorization"],
+      "additionalProperties": false
+    },
+    "host.request.input": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "originInvocationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "hostRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "action": {
+          "enum": ["sampling", "elicitation", "roots"]
+        },
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["runId", "originInvocationId", "hostRef", "action", "body"],
+      "additionalProperties": false
+    },
+    "host.request.output": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "enum": ["sampling", "elicitation", "roots"]
+        },
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["action", "body"],
+      "additionalProperties": false
+    },
+    "stream.prepare.input": {
+      "type": "object",
+      "properties": {
+        "originInvocationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "resourceUri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
+        },
+        "purpose": {
+          "enum": [
+            "resource",
+            "attachment",
+            "transfer",
+            "host-request",
+            "host-response",
+            "result-meta",
+            "maintenance"
+          ]
+        },
+        "direction": {
+          "const": "agent-to-cloud"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "originInvocationId",
+        "purpose",
+        "direction",
+        "expiresAt",
+        "maxBytes",
+        "mimeType",
+        "size",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "stream.prepare.output": {
+      "type": "object",
+      "properties": {
+        "stream": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["stream"],
+      "additionalProperties": false
+    },
+    "stream.revoke.input": {
+      "type": "object",
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reason": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Error"
+        }
+      },
+      "required": ["streamId", "reason"],
+      "additionalProperties": false
+    },
+    "stream.revoke.output": {
+      "type": "object",
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "closed": {
+          "const": true
+        }
+      },
+      "required": ["streamId", "closed"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.execute.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.execute.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "agent.maintenance.get.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.get.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "agent.maintenance.cancel.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.cancel.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "maintenance.request.create.input": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceCreate"
+    },
+    "maintenance.request.create.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "maintenance.request.get.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "maintenance.request.get.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "maintenance.request.list.input": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceListOptions"
+    },
+    "maintenance.request.list.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenancePage"
+    },
+    "maintenance.request.cancel.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "maintenance.request.cancel.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "maintenance.request.decision.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "maintenance.request.decision.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "maintenance.request.beginExecution.input": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceBeginExecution"
+    },
+    "maintenance.request.beginExecution.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceView"
+    },
+    "agent.maintenance.draft.read.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.read.output": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.prepare.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["requestId", "revision", "body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.prepare.output": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.verify.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.verify.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/MaintenanceCandidate"
+    },
+    "agent.maintenance.draft.notify.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.draft.notify.output": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "notified": {
+          "const": true
+        }
+      },
+      "required": ["requestId", "notified"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.oauth.start.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["requestId", "revision", "body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.oauth.start.output": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.oauth.complete.input": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^maint_req_[A-Za-z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["requestId", "revision", "body"],
+      "additionalProperties": false
+    },
+    "agent.maintenance.oauth.complete.output": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/FixedStreamRef"
+        }
+      },
+      "required": ["body"],
+      "additionalProperties": false
+    },
+    "attachment.open.input": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "pattern": "^att_[0-9a-f]{64}$"
+        },
+        "originInvocationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": ["sourceId", "originInvocationId"],
+      "additionalProperties": false
+    },
+    "attachment.open.output": {
+      "type": "object",
+      "properties": {
+        "stream": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/StreamRef"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/;]+/[^\\s;]+(?:;[^\\r\\n]+)?$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": ["stream", "name", "mimeType"],
+      "additionalProperties": false
+    },
+    "state.user.get.input": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "const": "default"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]+$"
+        }
+      },
+      "required": ["namespace", "key"],
+      "additionalProperties": false
+    },
+    "state.user.get.output": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/StateValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["state"],
+      "additionalProperties": false
+    },
+    "state.user.set.input": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "const": "default"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]+$"
+        },
+        "value": {},
+        "expectedVersion": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["namespace", "key", "value", "expectedVersion"],
+      "additionalProperties": false
+    },
+    "state.user.set.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/StateValue"
+    },
+    "state.user.delete.input": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "const": "default"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]+$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["namespace", "key", "expectedVersion"],
+      "additionalProperties": false
+    },
+    "state.user.delete.output": {
+      "type": "object",
+      "properties": {
+        "deleted": {
+          "const": true
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["deleted", "version", "updatedAt"],
+      "additionalProperties": false
+    },
+    "agent.tasks.create.input": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "ttlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["runId"],
+      "additionalProperties": false
+    },
+    "agent.tasks.create.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskBinding"
+    },
+    "agent.tasks.get.input": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskId"
+        }
+      },
+      "required": ["taskId"],
+      "additionalProperties": false
+    },
+    "agent.tasks.get.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskView"
+    },
+    "agent.tasks.update.input": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskId"
+        },
+        "waitId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "input": {},
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Attachment"
+          },
+          "maxItems": 20
+        }
+      },
+      "required": ["taskId", "waitId", "input"],
+      "additionalProperties": false
+    },
+    "agent.tasks.update.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskView"
+    },
+    "agent.tasks.cancel.input": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskId"
+        }
+      },
+      "required": ["taskId"],
+      "additionalProperties": false
+    },
+    "agent.tasks.cancel.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TaskCancelOutput"
+    },
+    "agent.project.inspect.input": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        },
+        "contextId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["projectId"],
+      "additionalProperties": false
+    },
+    "agent.project.inspect.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.open.output"
+    },
+    "agent.run.inspect.input": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["runId"],
+      "additionalProperties": false
+    },
+    "agent.run.inspect.output": {
+      "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView"
+    }
+  }
+}

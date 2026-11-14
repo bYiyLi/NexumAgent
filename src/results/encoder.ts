@@ -4,6 +4,7 @@ import path from "node:path";
 import { types, MIMEType } from "node:util";
 import { fileTypeFromBuffer } from "file-type";
 import { AgentError, requireCondition } from "../contracts/errors.js";
+import { authorizeCall } from "../contracts/caller.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { JsonObject, JsonValue } from "../contracts/types.js";
 import type { AccessTarget } from "../extensions/api.js";
@@ -65,6 +66,14 @@ export interface RenderOptions {
 }
 export interface StoredResult extends JsonObject {
   content: JsonObject[];
+}
+export interface ResultDescription {
+  /** Normalized content coordinates, without inline media, private source controls or credentials. */
+  readonly result: JsonObject;
+  /** Host-only protocol data; the application moves a large value over its independent byte channel. */
+  readonly hostMeta?: JsonObject;
+  /** Fresh short-lived delivery only; never write this back into the stored result. */
+  readonly transfers: readonly JsonObject[];
 }
 const KiB = 1024,
   MiB = KiB * KiB;
@@ -1215,6 +1224,157 @@ export class ResultEncoder {
       "result_context_too_large",
       "The result metadata or explicitly embedded text exceeds its context budget; choose resource links.",
     );
+  }
+
+  async describe(
+    result: StoredResult,
+    scope: ResultScope,
+    options: { readonly textBytes?: number; readonly readOnly?: boolean } = {},
+  ): Promise<ResultDescription> {
+    authorizeCall(() => scope.assertCurrent());
+    scope.signal?.throwIfAborted();
+    result = JSON.parse(
+      JSON.stringify(
+        copyMcpJSON(
+          result,
+          Math.min(
+            128 * MiB,
+            Math.max(this.limits.textBytes * 4, MiB) + this.limits.metaBytes,
+          ),
+        ),
+      ),
+    ) as StoredResult;
+    if (options.textBytes !== undefined) {
+      requireCondition(
+        Number.isSafeInteger(options.textBytes) && options.textBytes > 0,
+        "invalid_result_options",
+        "The current result text budget must be a positive integer.",
+      );
+      if (!options.readOnly && options.textBytes < this.limits.textBytes) {
+        const encoder = new ResultEncoder(
+          this.artifacts,
+          { ...this.limits, textBytes: options.textBytes },
+          this.offers,
+          this.mcp,
+        );
+        await encoder.#fit(result, scope);
+        return encoder.describe(result, scope);
+      }
+    }
+    if (!options.readOnly) await this.#authorizeMcp(result, scope);
+    const projected = this.#projection(result, {}, false);
+    const visible = projected.content as JsonObject[];
+    const content: JsonObject[] = [];
+    const artifact = (value: ArtifactRecord): JsonObject => ({
+      uri: value.uri,
+      name: value.name,
+      mimeType: value.mimeType,
+      size: value.size,
+      sha256: value.sha256,
+      expiresAt: value.expiresAt,
+    });
+    for (let index = 0; index < result.content.length; index++) {
+      const item = result.content[index]!,
+        view = visible[index]!;
+      if (
+        item.type === "text" ||
+        (item.type === "resource_link" && item.remote)
+      ) {
+        content.push(view);
+        continue;
+      }
+      const fixed = await this.artifacts.metadata(
+        record(item.resource).uri,
+        scope,
+      );
+      const metadata = {
+        ...(view.annotations === undefined
+          ? {}
+          : { annotations: view.annotations }),
+        ...(view.description === undefined
+          ? {}
+          : { description: view.description }),
+      };
+      if (item.type === "resource_link") content.push(view);
+      else if (item.type === "resource")
+        content.push({
+          type: "resource",
+          resource: artifact(fixed),
+          uri: (view.resource as JsonObject).uri!,
+          encoding: item.encoding!,
+          ...metadata,
+        });
+      else {
+        requireCondition(
+          (item.type === "image" || item.type === "audio") &&
+            fixed.size <=
+              (item.type === "image"
+                ? this.limits.imageBytes
+                : this.limits.audioBytes),
+          "inline_media_too_large",
+          "The retained media exceeds the current delivery budget.",
+        );
+        content.push({
+          type: item.type!,
+          resource: artifact(fixed),
+          mimeType: view.mimeType!,
+          ...metadata,
+        });
+      }
+    }
+    const structured = projected.structuredContent as JsonObject;
+    const described: JsonObject = {
+      content,
+      ...(Object.hasOwn(result, "data") ? { data: result.data! } : {}),
+      ...(result.conversions === undefined
+        ? {}
+        : { conversions: result.conversions }),
+      ...(structured.mcpResults === undefined
+        ? {}
+        : { mcpResults: structured.mcpResults }),
+      ...(result.isError === undefined ? {} : { isError: result.isError }),
+      ...(result.resultType === undefined
+        ? {}
+        : { resultType: result.resultType }),
+    };
+    if (result.delivery) {
+      const delivery = result.delivery as JsonObject;
+      const fixedDelivery: JsonObject = {
+        complete: delivery.complete!,
+        reason: delivery.reason!,
+      };
+      for (const key of ["dataResource", "textResource"])
+        if (delivery[key])
+          fixedDelivery[key] = artifact(
+            await this.artifacts.metadata(record(delivery[key]).uri, scope),
+          );
+      described.delivery = fixedDelivery;
+    }
+    const meta: JsonObject = {};
+    if (!options.readOnly) this.#applyMcpMeta(result, meta);
+    const transfers = this.#transfers(result).map<JsonObject>((entry) => {
+      const delivery = (options.readOnly
+        ? undefined
+        : this.offers?.deliver(entry.reference, scope)) ?? {
+        transferId: entry.reference.transferId,
+        available: false,
+        reason: options.readOnly ? "read_only_view" : "delivery_unavailable",
+      };
+      const value: JsonObject = {
+        transferId: delivery.transferId!,
+        available: delivery.available!,
+      };
+      if (delivery.available) value.request = delivery.request!;
+      else value.reason = delivery.reason!;
+      return value;
+    });
+    authorizeCall(() => scope.assertCurrent());
+    scope.signal?.throwIfAborted();
+    return {
+      result: described,
+      ...(meta._meta ? { hostMeta: meta._meta as JsonObject } : {}),
+      transfers,
+    };
   }
 
   async render(

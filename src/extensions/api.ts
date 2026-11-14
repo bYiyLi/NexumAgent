@@ -5,6 +5,8 @@ import type { OutputAPI } from "../sdk/output.js";
 import type { ResourceService } from "./resources.js";
 import type { StateService } from "./state.js";
 import type { TransferService } from "./transfer.js";
+import type { HostRequestServices } from "./host-requests.js";
+import type { MaintenanceService } from "../maintenance/requests.js";
 
 export interface AccessTarget {
   type:
@@ -14,7 +16,8 @@ export interface AccessTarget {
     | "connection"
     | "agent-state"
     | "user-state"
-    | "transfer";
+    | "transfer"
+    | "maintenance";
   value: string;
   access: string;
 }
@@ -23,11 +26,19 @@ export interface LogEntry {
   message: string;
   data?: JsonObject;
 }
+/** Budget ownership only; neither a filesystem handle nor a native-close proof. */
+export interface StorageReservation {
+  release(): void;
+}
+export interface StorageService {
+  reserve(bytes: number): Promise<StorageReservation>;
+}
 export interface ExtensionHost {
   readonly context: Readonly<JsonObject>;
   readonly config: Readonly<JsonObject>;
   readonly signal: AbortSignal;
   readonly resources: ResourceService;
+  readonly storage: StorageService;
   /** Current instance authority, independent of any particular run/caller. */
   authorize(target: AccessTarget): void;
   log(entry: LogEntry): void;
@@ -38,9 +49,13 @@ export interface Invocation {
   readonly signal: AbortSignal;
   readonly deadline: number;
   readonly resources: ResourceService;
+  readonly storage: StorageService;
   readonly output: OutputAPI;
   readonly state: StateService;
   readonly transfer: TransferService;
+  readonly maintenance: MaintenanceService;
+  /** Available only when the original, currently authorized Host session supports it. */
+  readonly hostRequests?: HostRequestServices;
   log(entry: LogEntry): void;
   progress(value: JsonObject): void;
   authorize(target: AccessTarget): void;

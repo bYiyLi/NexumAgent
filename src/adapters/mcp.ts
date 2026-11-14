@@ -1,4 +1,4 @@
-import { addAbortListener } from "node:events";
+import { addAbortListener, EventEmitter, once } from "node:events";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import {
@@ -14,6 +14,14 @@ import {
   type RequestOptions,
   type JsonSchemaType,
   type JsonSchemaValidatorResult,
+  type ClientCapabilities,
+  type ClientContext,
+  type CreateMessageResult,
+  type ElicitResult,
+  type ListRootsResult,
+  type McpSubscription,
+  type OAuthClientProvider,
+  getSupportedElicitationModes,
 } from "@modelcontextprotocol/client";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
@@ -41,6 +49,26 @@ import {
   type McpResourceReader,
 } from "../results/mcp.js";
 import { ManagedHttpTransport } from "./mcp-http.js";
+import { McpWire } from "./mcp-wire.js";
+import {
+  createSessionPortFromClient,
+  withTasks,
+  toolDeclarationFromMcpTool,
+  resultFromTaskOutcome,
+  createApplicationInputHandler,
+  type TaskEnabledSession,
+  type ToolExecution,
+  type TaskView,
+  type TaskOutcome,
+  type ConnectedMcpSessionPort,
+  type ApplicationInputRequest,
+} from "@modelcontextprotocol/ext-tasks/client";
+import {
+  taskId as taskIdentity,
+  type TaskId,
+} from "@modelcontextprotocol/ext-tasks/core";
+import { CreateTaskResultV1Schema } from "@modelcontextprotocol/ext-tasks/core/v1";
+import { CreateTaskResultV2Schema } from "@modelcontextprotocol/ext-tasks/core/v2";
 
 export type McpConnectionConfig =
   | {
@@ -64,6 +92,12 @@ export interface McpAdapterOptions {
   maxMessageBytes?: number;
   maxCatalogBytes?: number;
   maxCatalogItems?: number;
+  /** Trusted Core bridge availability, never inferred from a caller or config file. */
+  hostCapabilities?: JsonObject;
+  /** Core-provided after user approval; not a connection JSON field. */
+  authProvider?: OAuthClientProvider;
+  /** Binds approved private credentials to this exact live extension host. */
+  authProviderFactory?: (host: ExtensionHost) => OAuthClientProvider;
 }
 export interface McpCatalog {
   readonly name: string;
@@ -127,9 +161,13 @@ const getPromptSchema = {
   },
 };
 
-type Limits = Required<Omit<McpAdapterOptions, "revision">> &
-  Pick<McpAdapterOptions, "revision">;
-function configuration(value: unknown): McpConnectionConfig {
+type Limits = Required<
+  Omit<McpAdapterOptions, "revision" | "authProvider" | "authProviderFactory">
+> &
+  Pick<McpAdapterOptions, "revision" | "authProvider" | "authProviderFactory">;
+export function validateMcpConnectionConfig(
+  value: unknown,
+): McpConnectionConfig {
   const input = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
   requireCondition(
     isPlainRecord(input),
@@ -138,7 +176,7 @@ function configuration(value: unknown): McpConnectionConfig {
   );
   requireCondition(
     typeof input.name === "string" &&
-      /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(input.name),
+      /^[A-Za-z_$][A-Za-z0-9_$-]{0,127}$/.test(input.name),
     "invalid_mcp_config",
     "An MCP connection needs a bounded unambiguous name.",
   );
@@ -228,7 +266,44 @@ function configuration(value: unknown): McpConnectionConfig {
   return deepFreeze(input) as unknown as McpConnectionConfig;
 }
 function optionsSnapshot(value: McpAdapterOptions): Limits {
-  const fixed = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
+  requireCondition(
+    isPlainRecord(value),
+    "invalid_mcp_options",
+    "MCP adapter options require a trusted data object.",
+  );
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  requireCondition(
+    Object.values(descriptors).every((descriptor) => "value" in descriptor),
+    "invalid_mcp_options",
+    "MCP adapter options cannot contain accessors.",
+  );
+  const { authProvider, authProviderFactory, ...data } = value;
+  requireCondition(
+    authProviderFactory === undefined ||
+      (typeof authProviderFactory === "function" && authProvider === undefined),
+    "invalid_mcp_options",
+    "Use one trusted OAuth provider or its instance-bound factory.",
+  );
+  if (authProvider !== undefined)
+    requireCondition(
+      typeof authProvider === "object" &&
+        authProvider !== null &&
+        [
+          "clientInformation",
+          "tokens",
+          "saveTokens",
+          "redirectToAuthorization",
+          "saveCodeVerifier",
+          "codeVerifier",
+        ].every(
+          (key) =>
+            typeof (authProvider as unknown as Record<string, unknown>)[key] ===
+            "function",
+        ),
+      "invalid_mcp_options",
+      "MCP OAuth requires the official trusted provider service.",
+    );
+  const fixed = JSON.parse(canonicalJson(data)) as Record<string, unknown>;
   requireCondition(
     isPlainRecord(fixed) &&
       Object.keys(fixed).every((key) =>
@@ -239,6 +314,7 @@ function optionsSnapshot(value: McpAdapterOptions): Limits {
           "maxMessageBytes",
           "maxCatalogBytes",
           "maxCatalogItems",
+          "hostCapabilities",
         ].includes(key),
       ),
     "invalid_mcp_options",
@@ -258,6 +334,7 @@ function optionsSnapshot(value: McpAdapterOptions): Limits {
     maxMessageBytes: 128 * MiB,
     maxCatalogBytes: 4 * MiB,
     maxCatalogItems: 1000,
+    hostCapabilities: {},
     ...fixed,
   } as Limits;
   for (const key of [
@@ -279,7 +356,29 @@ function optionsSnapshot(value: McpAdapterOptions): Limits {
       "invalid_mcp_options",
       "An MCP adapter limit is outside its supported budget.",
     );
-  return Object.freeze(result);
+  requireCondition(
+    isPlainRecord(result.hostCapabilities) &&
+      Object.keys(result.hostCapabilities).every((key) =>
+        ["sampling", "elicitation", "roots"].includes(key),
+      ),
+    "invalid_mcp_options",
+    "Only actual Host bridge capabilities may be advertised.",
+  );
+  // Freeze JSON options, never freeze or enumerate a trusted provider's private
+  // mutable token/session service.
+  return Object.freeze({
+    ...deepFreeze(result),
+    ...(authProvider
+      ? { authProvider: authProvider as OAuthClientProvider }
+      : {}),
+    ...(authProviderFactory
+      ? {
+          authProviderFactory: authProviderFactory as (
+            host: ExtensionHost,
+          ) => OAuthClientProvider,
+        }
+      : {}),
+  });
 }
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -325,6 +424,12 @@ interface StdioCallScope {
 }
 /** Official MCP framing over the same cold, physically managed process backend as sh. */
 class ManagedStdioTransport implements Transport, ManagedResource {
+  get pid(): number | undefined {
+    return this.#backend?.facts().pid ?? undefined;
+  }
+  get stderr(): null {
+    return null;
+  }
   readonly closed: Promise<void>;
   onclose?: () => void;
   onerror?: (error: Error) => void;
@@ -349,6 +454,7 @@ class ManagedStdioTransport implements Transport, ManagedResource {
     readonly host: ExtensionHost,
     readonly maximum: number,
     readonly report: (facts: JsonObject) => void,
+    readonly committed?: () => void,
   ) {
     this.closed = this.#done.promise;
     this.#buffer = new ReadBuffer({ maxBufferSize: maximum });
@@ -489,6 +595,7 @@ class ManagedStdioTransport implements Transport, ManagedResource {
         )
           return;
       }
+      if (request) this.committed?.();
       for (let offset = 0; offset < serialized.byteLength; offset += 65536)
         await this.#backend!.write(
           serialized.subarray(offset, offset + 65536),
@@ -565,6 +672,435 @@ class ManagedStdioTransport implements Transport, ManagedResource {
   }
 }
 
+interface TaskCreation {
+  readonly call: Invocation;
+  maybeStarted: boolean;
+  awaitingResponse: boolean;
+  taskId?: TaskId;
+  malformedTask: boolean;
+  stopping: boolean;
+}
+/** Tracks the official execution, not a second task runner. Cancel ACK is not terminal evidence. */
+class ManagedMcpExecution implements ManagedResource {
+  readonly closed: Promise<void>;
+  #done = Promise.withResolvers<void>();
+  #ref?: ResourceRef;
+  #execution?: ToolExecution<unknown, Invocation>;
+  #running?: Promise<unknown>;
+  #creation?: Promise<ToolExecution<unknown, Invocation>>;
+  #disposal?: Promise<void>;
+  #terminal = false;
+  #stopping = false;
+  #reportFailure: unknown;
+  #last?: TaskView;
+  #state = "preparing";
+  #cancelAcknowledged = false;
+  #cleanupActive = false;
+  #finishRequested = false;
+  #finished = false;
+  #confirmedOutcome?: TaskOutcome<unknown>;
+  constructor(
+    readonly session: TaskEnabledSession<Invocation>,
+    readonly call: Invocation,
+    readonly connection: string,
+    readonly begin: () => Promise<ToolExecution<unknown, Invocation>>,
+    readonly drain: () => Promise<void>,
+    readonly creation: TaskCreation,
+    readonly cleanup: <T>(action: () => Promise<T>) => Promise<T>,
+  ) {
+    this.closed = this.#done.promise;
+  }
+  attach(ref: ResourceRef): void {
+    this.#ref = ref;
+    this.#report();
+  }
+  #finish(): void {
+    this.#finishRequested = true;
+    if (!this.#cleanupActive && !this.#finished) {
+      this.#finished = true;
+      this.#done.resolve();
+    }
+  }
+  #report(task?: TaskView): void {
+    if (this.#finished) return;
+    if (
+      task &&
+      this.#terminal &&
+      !["completed", "failed", "cancelled"].includes(task.status)
+    )
+      return;
+    if (task) {
+      this.#last = task;
+      this.#state = task.status;
+    }
+    try {
+      this.#ref?.report({
+        connection: this.connection,
+        state: task?.status ?? (this.#stopping ? "stopping" : this.#state),
+        remoteTaskId: task?.taskId ?? this.creation.taskId ?? null,
+        remoteTerminal: this.#terminal,
+        cancelAcknowledged: this.#cancelAcknowledged,
+        creationMayHaveStarted: this.creation.maybeStarted,
+        creationResponsePending: this.creation.awaitingResponse,
+      });
+    } catch (cause) {
+      this.#reportFailure ??= cause;
+    }
+  }
+  execute(): Promise<unknown> {
+    requireCondition(
+      !this.#running && !this.#stopping,
+      "mcp_task_closed",
+      "The task controller cannot start again.",
+    );
+    if (this.#reportFailure) {
+      this.#finish();
+      throw this.#reportFailure;
+    }
+    this.#running = (async () => {
+      try {
+        this.#creation = this.begin();
+        this.#execution = await this.#creation;
+        const settlement = await this.#execution.settle({
+          close: false,
+          onEvent: (event) => {
+            if (event.type === "task") {
+              if (
+                this.#terminal &&
+                !["completed", "failed", "cancelled"].includes(
+                  event.task.status,
+                )
+              )
+                return;
+              this.#terminal ||= ["completed", "failed", "cancelled"].includes(
+                event.task.status,
+              );
+              this.#report(event.task);
+              if (!this.call.signal.aborted)
+                this.call.progress({
+                  connection: this.connection,
+                  remoteTaskId: event.task.taskId,
+                  taskStatus: event.task.status,
+                });
+            }
+          },
+        });
+        if (this.#execution.kind === "immediate") {
+          this.#terminal = true;
+          this.#state = "completed";
+          this.#report();
+        }
+        if (settlement.lastTask) {
+          this.#terminal ||= ["completed", "failed", "cancelled"].includes(
+            settlement.lastTask.status,
+          );
+          this.#report(settlement.lastTask);
+        }
+        if (this.#terminal) {
+          await this.#execution.detach();
+          await this.drain();
+          this.#finish();
+        }
+        if (this.#reportFailure) throw this.#reportFailure;
+        return resultFromTaskOutcome(
+          this.#confirmedOutcome ?? settlement.outcome,
+        );
+      } catch (cause) {
+        if (!this.#execution) {
+          this.#state =
+            this.creation.taskId ||
+            (this.creation.maybeStarted &&
+              (this.creation.awaitingResponse || this.creation.malformedTask))
+              ? "creation_unknown"
+              : this.call.signal.aborted
+                ? "cancelled"
+                : "failed";
+          this.#report();
+          await this.drain();
+          if (this.#state !== "creation_unknown") this.#finish();
+        } else if (this.#terminal) {
+          await this.#execution.detach();
+          await this.drain();
+          this.#finish();
+        }
+        throw cause;
+      }
+    })();
+    return this.#running;
+  }
+  facts(): JsonObject {
+    return {
+      connection: this.connection,
+      state: this.#last?.status ?? this.#state,
+      remoteTaskId:
+        this.#last?.taskId ??
+        (this.#execution?.kind === "task"
+          ? this.#execution.handle.taskId
+          : (this.creation.taskId ?? null)),
+      remoteTerminal: this.#terminal,
+      cancelAcknowledged: this.#cancelAcknowledged,
+      creationMayHaveStarted: this.creation.maybeStarted,
+      creationResponsePending: this.creation.awaitingResponse,
+    };
+  }
+  async snapshot(signal: AbortSignal): Promise<JsonObject> {
+    if (this.#execution?.kind !== "task") return this.facts();
+    const task = await this.session
+      .task(this.#execution.handle.taskId, { requestTimeoutMs: 5000 })
+      .snapshot(signal);
+    this.#terminal ||= ["completed", "failed", "cancelled"].includes(
+      task.status,
+    );
+    this.#report(task);
+    return this.facts();
+  }
+  dispose(): Promise<void> {
+    if (this.#disposal) return this.#disposal;
+    this.#stopping = true;
+    this.creation.stopping = true;
+    this.#report();
+    this.#cleanupActive = true;
+    this.#disposal = this.cleanup(async () => {
+      if (!this.#running) {
+        this.#finish();
+        return;
+      }
+      await this.#creation?.catch(() => {});
+      if (!this.#execution && !this.creation.taskId) {
+        await this.#running.catch(() => {});
+        requireCondition(
+          !(
+            this.creation.maybeStarted &&
+            (this.creation.awaitingResponse || this.creation.malformedTask)
+          ),
+          "mcp_task_creation_unconfirmed",
+          "The committed task creation has no confirmed response or task identity.",
+        );
+        this.#finish();
+        return;
+      }
+      if (this.#terminal) {
+        if (!this.call.signal.aborted) await this.#running.catch(() => {});
+        await this.#execution?.detach();
+        await this.drain();
+        this.#finish();
+        return;
+      }
+      if (this.#execution?.kind === "immediate") {
+        await this.#execution.detach();
+        await this.#running.catch(() => {});
+        this.#finish();
+        return;
+      }
+      const signal = AbortSignal.timeout(5000);
+      const taskId =
+        this.#execution?.kind === "task"
+          ? this.#execution.handle.taskId
+          : this.creation.taskId!;
+      const remote = this.session.task(taskId, { requestTimeoutMs: 5000 });
+      await remote.cancel(signal);
+      this.#cancelAcknowledged = true;
+      try {
+        if (!this.#finished)
+          this.#ref?.report({
+            connection: this.connection,
+            state: this.#terminal
+              ? (this.#last?.status ?? this.#state)
+              : "cancelling",
+            remoteTaskId: taskId,
+            cancelAcknowledged: true,
+            remoteTerminal: this.#terminal,
+          });
+      } catch (cause) {
+        this.#reportFailure ??= cause;
+      }
+      // The official controller performs generation-specific observation. A
+      // cooperative V2 cancel is not falsely converted into remote termination.
+      const outcome = await remote.result({ signal });
+      this.#confirmedOutcome = outcome;
+      this.#terminal ||=
+        !!outcome.task &&
+        ["completed", "failed", "cancelled"].includes(outcome.task.status);
+      requireCondition(
+        this.#terminal,
+        "mcp_task_stop_unconfirmed",
+        "The remote task has not reached a confirmed terminal state.",
+      );
+      this.#report(outcome.task);
+      await this.#execution?.detach();
+      await this.#running.catch(() => {});
+      await this.drain();
+      this.#finish();
+      if (this.#reportFailure) throw this.#reportFailure;
+    })
+      .finally(async () => {
+        await this.drain();
+        this.#cleanupActive = false;
+        if (this.#finishRequested) this.#finish();
+      })
+      .catch((cause) => {
+        throw cause instanceof AgentError
+          ? cause
+          : publicError(cause, "task cleanup");
+      });
+    void this.#disposal.catch(() => {
+      this.#disposal = undefined;
+    });
+    return this.#disposal;
+  }
+}
+
+interface SubscriptionChannel {
+  readonly uri: string;
+  readonly members: Set<ManagedMcpSubscription>;
+  readonly ready: Promise<void>;
+  readonly closed: Promise<void>;
+  readonly closing: boolean;
+  readonly active: boolean;
+  readonly acceptingUpdates: boolean;
+  stop(): Promise<void>;
+}
+/** A listener is a normal Core resource; its channel uses the registered connection. */
+class ManagedMcpSubscription extends EventEmitter implements ManagedResource {
+  readonly closed: Promise<void>;
+  #done = Promise.withResolvers<void>();
+  #channel?: SubscriptionChannel;
+  #ref?: ResourceRef;
+  #events: { cursor: number; uri: string; receivedAt: string }[] = [];
+  #sequence = 0;
+  #stopping = false;
+  #complete = false;
+  #ready = false;
+  #opening?: Promise<void>;
+  #disposal?: Promise<void>;
+  #reportFailure: unknown;
+  constructor(
+    readonly connection: string,
+    readonly uri: string,
+    readonly acquire: (member: ManagedMcpSubscription) => SubscriptionChannel,
+    readonly release: (
+      member: ManagedMcpSubscription,
+      channel: SubscriptionChannel,
+    ) => Promise<void>,
+  ) {
+    super();
+    this.setMaxListeners(0);
+    this.closed = this.#done.promise;
+  }
+  attach(ref: ResourceRef): void {
+    this.#ref = ref;
+  }
+  open(): Promise<void> {
+    requireCondition(
+      !this.#opening && !this.#stopping,
+      "mcp_subscription_closed",
+      "The subscription cannot be opened again.",
+    );
+    this.#opening = (async () => {
+      this.#channel = this.acquire(this);
+      try {
+        await this.#channel.ready;
+        requireCondition(
+          !this.#stopping,
+          "mcp_subscription_closed",
+          "The subscription closed while opening.",
+        );
+        this.#ready = true;
+        this.#report();
+      } catch (cause) {
+        await this.dispose().catch(() => {});
+        throw cause;
+      }
+    })();
+    return this.#opening;
+  }
+  updated(): void {
+    if (this.#stopping || this.#complete) return;
+    this.#events.push({
+      cursor: ++this.#sequence,
+      uri: this.uri,
+      receivedAt: new Date().toISOString(),
+    });
+    if (this.#events.length > 256) this.#events.shift();
+    this.#report();
+    this.emit("change");
+  }
+  #report(): void {
+    try {
+      this.#ref?.report({
+        connection: this.connection,
+        uri: this.uri,
+        state: this.#complete
+          ? "closed"
+          : this.#stopping
+            ? "stopping"
+            : this.#ready
+              ? "subscribed"
+              : "opening",
+        latestCursor: this.#sequence,
+      });
+    } catch (cause) {
+      this.#reportFailure ??= cause;
+      queueMicrotask(() => {
+        void this.dispose().catch(() => {});
+      });
+    }
+  }
+  async read(
+    cursor: number,
+    waitMs: number,
+    signal: AbortSignal,
+  ): Promise<JsonObject> {
+    signal.throwIfAborted();
+    if (!this.#complete && this.#sequence <= cursor && waitMs > 0) {
+      const waiting = AbortSignal.any([signal, AbortSignal.timeout(waitMs)]);
+      try {
+        await once(this, "change", { signal: waiting });
+      } catch {
+        signal.throwIfAborted();
+      }
+    }
+    signal.throwIfAborted();
+    return {
+      uri: this.uri,
+      state: this.#complete
+        ? "closed"
+        : this.#stopping
+          ? "stopping"
+          : this.#ready
+            ? "subscribed"
+            : "opening",
+      events: this.#events.filter((item) => item.cursor > cursor),
+      cursor: this.#sequence,
+      historyLost:
+        !!this.#events.length && cursor < this.#events[0]!.cursor - 1,
+    };
+  }
+  channelClosed(): void {
+    if (this.#complete) return;
+    this.#complete = true;
+    this.#report();
+    this.#done.resolve();
+    this.emit("change");
+  }
+  dispose(): Promise<void> {
+    if (this.#disposal) return this.#disposal;
+    this.#stopping = true;
+    this.#disposal = (async () => {
+      try {
+        if (this.#channel) await this.release(this, this.#channel);
+      } finally {
+        this.channelClosed();
+      }
+      if (this.#reportFailure) throw this.#reportFailure;
+    })();
+    void this.#disposal.catch(() => {
+      this.#disposal = undefined;
+    });
+    return this.#disposal;
+  }
+}
+
 class McpConnection implements McpResourceReader {
   get connection(): string {
     return this.config.name;
@@ -573,6 +1109,16 @@ class McpConnection implements McpResourceReader {
   readonly client: Client;
   readonly transport: Transport;
   #control: ManagedResource;
+  #wire: McpWire<Invocation>;
+  #calls = new Set<Invocation>();
+  #tasks?: TaskEnabledSession<Invocation>;
+  #taskPending = new Map<Invocation, Set<Promise<unknown>>>();
+  #creations = new WeakMap<Invocation, TaskCreation>();
+  #knownTasks = new Map<string, TaskCreation>();
+  #creationContext = new AsyncLocalStorage<TaskCreation>();
+  #cleanupContext = new AsyncLocalStorage<boolean>();
+  #subscriptions = new Map<string, SubscriptionChannel>();
+  #taskPort?: ConnectedMcpSessionPort & Disposable;
   #http?: ManagedHttpTransport;
   #stdio?: ManagedStdioTransport;
   #ref?: ResourceRef;
@@ -591,7 +1137,7 @@ class McpConnection implements McpResourceReader {
     readonly limits: Limits,
   ) {
     this.client = new Client(clientIdentity, {
-      capabilities: {},
+      capabilities: limits.hostCapabilities as ClientCapabilities,
       // The official client otherwise selects its own default dialect for
       // outputSchema. Reuse the exact declared-dialect validator used by Core.
       jsonSchemaValidator: {
@@ -636,6 +1182,13 @@ class McpConnection implements McpResourceReader {
             ...facts,
           });
         },
+        () => {
+          const creation = this.#creationContext.getStore();
+          if (creation) {
+            creation.call.signal.throwIfAborted();
+            creation.maybeStarted = true;
+          }
+        },
       );
       this.#stdio = stdio;
       this.#control = stdio;
@@ -644,19 +1197,90 @@ class McpConnection implements McpResourceReader {
       this.#http = new ManagedHttpTransport({
         url: config.url,
         headers: config.headers,
+        authProvider: limits.authProviderFactory?.(host) ?? limits.authProvider,
         maxMessageBytes: limits.maxMessageBytes,
-        authorize: (value) =>
-          host.authorize({ type: "url", value, access: "connect" }),
+        authorize: (value) => {
+          host.authorize({ type: "url", value, access: "connect" });
+          const creation = this.#creationContext.getStore();
+          if (creation) {
+            creation.call.signal.throwIfAborted();
+            creation.maybeStarted = true;
+          }
+        },
       });
       this.#control = this.#http;
       this.transport = this.#http.transport;
     }
-    this.closed = this.#control.closed;
+    this.#wire = new McpWire<Invocation>(this.transport, {
+      maxMessageBytes: limits.maxMessageBytes,
+    });
+    this.transport = this.#wire.transport;
+    const send = this.transport.send.bind(this.transport);
+    this.transport.send = (message, options) => {
+      if ("method" in message && this.client.getProtocolEra() === "modern") {
+        const params = isPlainRecord(message.params) ? message.params : {};
+        const meta = isPlainRecord(params._meta) ? params._meta : {};
+        message = {
+          ...message,
+          params: {
+            ...params,
+            _meta: { ...meta, ...this.#metadata(this.#wire.current()) },
+          },
+        } as typeof message;
+      }
+      return send(message, options);
+    };
+    this.closed = this.#control.closed.then(async () => {
+      await Promise.allSettled(
+        [...this.#subscriptions.values()].map((channel) => channel.stop()),
+      );
+      this.#wire.finish();
+      this.#creationContext.disable();
+      this.#cleanupContext.disable();
+    });
+    if (limits.hostCapabilities.sampling)
+      this.client.setRequestHandler(
+        "sampling/createMessage",
+        (request, context) =>
+          this.#hostRequest(
+            request,
+            context,
+            "sampling",
+          ) as Promise<CreateMessageResult>,
+      );
+    if (limits.hostCapabilities.elicitation)
+      this.client.setRequestHandler(
+        "elicitation/create",
+        (request, context) =>
+          this.#hostRequest(
+            request,
+            context,
+            "elicitation",
+          ) as Promise<ElicitResult>,
+      );
+    if (limits.hostCapabilities.roots)
+      this.client.setRequestHandler(
+        "roots/list",
+        (request, context) =>
+          this.#hostRequest(
+            request,
+            context,
+            "roots",
+          ) as Promise<ListRootsResult>,
+      );
     void this.closed.then(() => {
       this.#physicallyClosed = true;
       this.#ready = false;
       for (const detach of this.#detach.splice(0)) detach();
     });
+    this.client.setNotificationHandler(
+      "notifications/resources/updated",
+      async (notification) => {
+        const channel = this.#subscriptions.get(notification.params.uri);
+        if (channel?.acceptingUpdates && !channel.closing)
+          for (const member of channel.members) member.updated();
+      },
+    );
     this.client.onerror = () =>
       host.log({
         level: "warn",
@@ -680,6 +1304,386 @@ class McpConnection implements McpResourceReader {
           state: "catalog-stale",
         });
       });
+  }
+  #hostCapabilities(call?: Invocation): JsonObject {
+    const actual = call?.hostRequests?.capabilities;
+    if (
+      !actual ||
+      this.#cleanupContext.getStore() ||
+      call?.signal.aborted ||
+      (call && this.#creations.get(call)?.stopping)
+    )
+      return {};
+    const intersect = (left: unknown, right: unknown): unknown => {
+      if (isPlainRecord(left) && isPlainRecord(right))
+        return Object.fromEntries(
+          Object.keys(left)
+            .filter((key) => Object.hasOwn(right, key))
+            .map((key) => [key, intersect(left[key], right[key])])
+            .filter(([, value]) => value !== undefined),
+        );
+      return left === right ? left : undefined;
+    };
+    const capabilities: JsonObject = {};
+    for (const key of ["sampling", "elicitation", "roots"] as const) {
+      if (
+        Object.hasOwn(this.limits.hostCapabilities, key) &&
+        Object.hasOwn(actual, key)
+      ) {
+        if (key === "elicitation") {
+          const left = getSupportedElicitationModes(
+            this.limits.hostCapabilities
+              .elicitation as ClientCapabilities["elicitation"],
+          );
+          const right = getSupportedElicitationModes(
+            actual.elicitation as ClientCapabilities["elicitation"],
+          );
+          const modes: JsonObject = {};
+          const l = this.limits.hostCapabilities.elicitation as JsonObject,
+            r = actual.elicitation as JsonObject;
+          if (left.supportsFormMode && right.supportsFormMode)
+            modes.form = copyMcpJSON(intersect(l.form ?? {}, r.form ?? {}));
+          if (left.supportsUrlMode && right.supportsUrlMode)
+            modes.url = copyMcpJSON(intersect(l.url ?? {}, r.url ?? {}));
+          if (Object.keys(modes).length) capabilities.elicitation = modes;
+        } else {
+          const value = intersect(
+            this.limits.hostCapabilities[key],
+            actual[key],
+          );
+          if (value !== undefined) capabilities[key] = copyMcpJSON(value);
+        }
+      }
+    }
+    return capabilities;
+  }
+  #metadata(call?: Invocation): JsonObject {
+    return this.client.getProtocolEra() === "modern"
+      ? {
+          "io.modelcontextprotocol/clientCapabilities":
+            this.#hostCapabilities(call),
+        }
+      : {};
+  }
+  #hostRequest(
+    request: { method: string; params?: unknown },
+    context: ClientContext,
+    kind: "sampling" | "elicitation" | "roots",
+  ): Promise<JsonObject> {
+    // Legacy task-associated input has protocol evidence owned by ext-tasks.
+    // Its public fallback performs correlation; an unrelated peer request is
+    // rejected rather than borrowing whichever invocation happens to be active.
+    if (
+      !this.#wire.current() &&
+      this.#tasks &&
+      this.client.fallbackRequestHandler
+    )
+      return this.client.fallbackRequestHandler(
+        request as never,
+        context,
+      ) as Promise<JsonObject>;
+    return this.#hostInput(
+      kind,
+      (request.params ?? {}) as JsonObject,
+      context.mcpReq.signal,
+    );
+  }
+  async #hostInput(
+    kind: "sampling" | "elicitation" | "roots",
+    params: JsonObject,
+    inputSignal: AbortSignal,
+  ): Promise<JsonObject> {
+    const call = this.#wire.current();
+    requireCondition(
+      call && this.#calls.has(call) && call.hostRequests,
+      "mcp_input_unassociated",
+      "The remote Host request has no verified active originating invocation.",
+    );
+    this.assertCurrent();
+    call.signal.throwIfAborted();
+    requireCondition(
+      !this.#creations.get(call)?.stopping,
+      "mcp_task_stopping",
+      "The originating task is stopping and no longer accepts Host requests.",
+    );
+    inputSignal.throwIfAborted();
+    call.hostRequests.assertCurrent();
+    const capabilities = this.#hostCapabilities(call);
+    requireCondition(
+      Object.hasOwn(capabilities, kind),
+      "mcp_host_capability_unavailable",
+      "The original Host does not currently provide the requested capability.",
+    );
+    if (kind === "elicitation") {
+      const modes = getSupportedElicitationModes(
+        capabilities.elicitation as ClientCapabilities["elicitation"],
+      );
+      requireCondition(
+        params.mode === "url" ? modes.supportsUrlMode : modes.supportsFormMode,
+        "mcp_host_capability_unavailable",
+        "The original Host does not support this elicitation mode.",
+      );
+    }
+    if (
+      kind === "sampling" &&
+      (params.tools !== undefined || params.toolChoice !== undefined)
+    )
+      requireCondition(
+        isPlainRecord(capabilities.sampling) &&
+          capabilities.sampling.tools !== undefined,
+        "mcp_host_capability_unavailable",
+        "The original Host does not support sampling tools.",
+      );
+    call.authorize({
+      type: "connection",
+      value: this.config.name,
+      access: `host.${kind}`,
+    });
+    const signal = AbortSignal.any([call.signal, inputSignal]);
+    const input = copyMcpJSON(
+      params,
+      this.limits.maxMessageBytes,
+    ) as JsonObject;
+    const result =
+      kind === "roots"
+        ? await call.hostRequests.roots({ signal })
+        : await call.hostRequests[kind](input, { signal });
+    signal.throwIfAborted();
+    call.hostRequests.assertCurrent();
+    this.assertCurrent();
+    call.authorize({
+      type: "connection",
+      value: this.config.name,
+      access: `host.${kind}`,
+    });
+    return copyMcpJSON(result, this.limits.maxMessageBytes) as JsonObject;
+  }
+  #io<T>(signal: AbortSignal, action: () => Promise<T>): Promise<T> {
+    return this.#http
+      ? this.#http.run(signal, action)
+      : this.#stdio!.run(signal, action);
+  }
+  #claimTask(creation: TaskCreation, id: string): void {
+    const known = this.#knownTasks.get(id);
+    if (known && known !== creation) {
+      creation.malformedTask = true;
+      throw new AgentError(
+        "mcp_task_identity_conflict",
+        "The server returned a task identity already owned by another active invocation.",
+      );
+    }
+    creation.taskId = taskIdentity(id);
+    this.#knownTasks.set(id, creation);
+  }
+  #setupTasks(): void {
+    const capabilities = this.client.getServerCapabilities();
+    if (
+      !capabilities?.tasks &&
+      !capabilities?.extensions?.["io.modelcontextprotocol/tasks"]
+    )
+      return;
+    const native = createSessionPortFromClient(this.client, this.#ref!.id, {
+      rawDispatch: (request, options) => {
+        const value = copyMcpJSON(
+          request,
+          this.limits.maxMessageBytes,
+        ) as JsonObject;
+        const params = isPlainRecord(value.params)
+          ? (value.params as JsonObject)
+          : {};
+        const meta = isPlainRecord(params._meta)
+          ? (params._meta as JsonObject)
+          : {};
+        const actual = this.#hostCapabilities(this.#wire.current());
+        // Tasks support belongs to this real extension port; reverse Host
+        // capabilities still come from the one originating invocation.
+        value.params = {
+          ...params,
+          _meta: {
+            ...meta,
+            "io.modelcontextprotocol/clientCapabilities": {
+              ...actual,
+              extensions: { "io.modelcontextprotocol/tasks": {} },
+            },
+          },
+        };
+        return this.#wire.rawDispatch(value, options);
+      },
+      v2RequestFraming: {
+        protocolVersion: this.client.getNegotiatedProtocolVersion()!,
+        clientInfo: clientIdentity,
+        clientCapabilities: this.limits.hostCapabilities,
+      },
+    });
+    this.#taskPort = native;
+    const port: ConnectedMcpSessionPort = {
+      endpointId: native.endpointId,
+      taskCapabilities: native.taskCapabilities,
+      get invalidated() {
+        return native.invalidated;
+      },
+      onServerRequest: (handler) => native.onServerRequest(handler),
+      onNotification: (handler) => native.onNotification(handler),
+      onInvalidated: (handler) => native.onInvalidated(handler),
+      dispatch: (request, options) => {
+        this.host.signal.throwIfAborted();
+        requireCondition(
+          !this.#stopping && this.#ready,
+          "mcp_connection_unavailable",
+          "The original MCP Task connection is unavailable.",
+        );
+        this.host.authorize({
+          type: "connection",
+          value: this.config.name,
+          access:
+            isPlainRecord(request) && typeof request.method === "string"
+              ? request.method
+              : "tasks.use",
+        });
+        const owner = this.#wire.current();
+        const creation =
+          isPlainRecord(request) && request.method === "tools/call" && owner
+            ? this.#creations.get(owner)
+            : undefined;
+        const method = isPlainRecord(request) ? request.method : undefined;
+        const params =
+          isPlainRecord(request) && isPlainRecord(request.params)
+            ? request.params
+            : undefined;
+        const cleanup = this.#cleanupContext.getStore() === true;
+        if (owner && !owner.signal.aborted && !cleanup)
+          owner.authorize({
+            type: "connection",
+            value: this.config.name,
+            access: typeof method === "string" ? method : "tasks.use",
+          });
+        if (
+          owner &&
+          (owner.signal.aborted ||
+            this.#creations.get(owner)?.stopping ||
+            cleanup)
+        )
+          requireCondition(
+            ["tasks/get", "tasks/result", "tasks/cancel"].includes(
+              method as string,
+            ) &&
+              typeof params?.taskId === "string" &&
+              this.#knownTasks.has(params.taskId),
+            "mcp_task_stopping",
+            "Only known-task observation and cancellation may continue during cleanup.",
+          );
+        if (!owner)
+          requireCondition(
+            ["tasks/get", "tasks/result", "tasks/cancel"].includes(
+              method as string,
+            ) &&
+              typeof params?.taskId === "string" &&
+              this.#knownTasks.has(params.taskId),
+            "mcp_task_unassociated",
+            "An unassociated task operation cannot use this connection.",
+          );
+        if (creation) creation.call.signal.throwIfAborted();
+        const perform = () =>
+          this.#io(
+            creation && this.#stdio
+              ? creation.call.signal
+              : (options?.signal ?? this.host.signal),
+            () => native.dispatch(request, options),
+          );
+        if (creation) creation.awaitingResponse = true;
+        const pending = creation
+          ? this.#creationContext.run(creation, perform).then((response) => {
+              creation.awaitingResponse = false;
+              if (response.kind === "result") {
+                if (native.taskCapabilities.generation === "v2") {
+                  const task = CreateTaskResultV2Schema.safeParse(
+                    response.result,
+                  );
+                  if (task.success) {
+                    this.#claimTask(creation, task.data.taskId);
+                  } else if (
+                    isPlainRecord(response.result) &&
+                    response.result.resultType === "task"
+                  )
+                    creation.malformedTask = true;
+                } else {
+                  const task = CreateTaskResultV1Schema.safeParse(
+                    response.result,
+                  );
+                  if (task.success) {
+                    this.#claimTask(creation, task.data.task.taskId);
+                  } else if (
+                    isPlainRecord(response.result) &&
+                    Object.hasOwn(response.result, "task")
+                  )
+                    creation.malformedTask = true;
+                }
+              }
+              return response;
+            })
+          : perform();
+        if (owner) {
+          let group = this.#taskPending.get(owner);
+          if (!group) this.#taskPending.set(owner, (group = new Set()));
+          group.add(pending);
+          void pending.then(
+            () => group!.delete(pending),
+            () => group!.delete(pending),
+          );
+        }
+        return pending;
+      },
+    };
+    this.#tasks = withTasks<Invocation>(port, {
+      signal: this.host.signal,
+      maxInputRounds: 10,
+      tools: {
+        currentTool: (name) => {
+          const tool = this.#catalog!.tools.find((item) => item.name === name);
+          return tool ? toolDeclarationFromMcpTool(tool) : undefined;
+        },
+      },
+      onInputRequest: async (request, context) => {
+        const call = context.applicationContext;
+        requireCondition(
+          call && this.#calls.has(call),
+          "mcp_input_unassociated",
+          "Task input has no verified originating invocation.",
+        );
+        return (await this.#wire.run(call, () =>
+          this.#hostInput(
+            request.kind,
+            copyMcpJSON(request.params ?? {}) as JsonObject,
+            context.signal ?? call.signal,
+          ),
+        )) as never;
+      },
+      onError: () =>
+        this.host.log({
+          level: "warn",
+          message: "The MCP Tasks adapter reported a protocol error.",
+          data: { connection: this.config.name },
+        }),
+    });
+  }
+  async #drainTasks(call: Invocation): Promise<void> {
+    const group = this.#taskPending.get(call);
+    while (group?.size) await Promise.allSettled([...group]);
+    if (this.#taskPending.get(call) === group) this.#taskPending.delete(call);
+  }
+  async #withCall<T>(call: Invocation, action: () => Promise<T>): Promise<T> {
+    this.#calls.add(call);
+    try {
+      return await this.#wire.run(call, action);
+    } catch (cause) {
+      call.signal.throwIfAborted();
+      throw cause instanceof AgentError ? cause : publicError(cause, "call");
+    } finally {
+      await this.#drainTasks(call);
+      this.#calls.delete(call);
+      this.#wire.release(call);
+      this.#creations.delete(call);
+    }
   }
   attach(ref: ResourceRef): void {
     this.#ref = ref;
@@ -772,6 +1776,7 @@ class McpConnection implements McpResourceReader {
         resourceTemplates,
         prompts,
       });
+      this.#setupTasks();
       this.#initialCurrent("connect");
       this.#stale = false;
       this.#ready = true;
@@ -959,7 +1964,10 @@ class McpConnection implements McpResourceReader {
     canonicalJson(params, this.limits.maxMessageBytes);
     const action = () =>
       this.client.request(
-        { method: method as "tools/list", params },
+        {
+          method: method as "tools/list",
+          params: { ...params, _meta: this.#metadata(this.#wire.current()) },
+        },
         this.#requestOptions(signal, timeout),
       );
     try {
@@ -980,7 +1988,15 @@ class McpConnection implements McpResourceReader {
       throw cause instanceof AgentError ? cause : publicError(cause, "request");
     }
   }
-  async invoke(
+  invoke(
+    method: RemoteMethod,
+    params: Record<string, unknown>,
+    call: Invocation,
+    tool?: Tool,
+  ): Promise<unknown> {
+    return this.#withCall(call, () => this.#invoke(method, params, call, tool));
+  }
+  async #invoke(
     method: RemoteMethod,
     params: Record<string, unknown>,
     call: Invocation,
@@ -1025,9 +2041,11 @@ class McpConnection implements McpResourceReader {
     call.signal.throwIfAborted();
     if (tool) {
       canonicalJson(params, this.limits.maxMessageBytes);
+      if (this.#tasks?.capabilities.execution)
+        return this.#invokeTask(tool, params, call, timeout);
       const action = () =>
         this.client.callTool(
-          { name: tool.name, arguments: params },
+          { name: tool.name, arguments: params, _meta: this.#metadata(call) },
           {
             ...this.#requestOptions(call.signal, timeout),
             toolDefinition: this.#catalog!.tools.find(
@@ -1068,6 +2086,331 @@ class McpConnection implements McpResourceReader {
       connectionResourceId: this.#ref!.id,
       connection: this.config.name,
       method,
+    });
+  }
+  #channel(uri: string, member: ManagedMcpSubscription): SubscriptionChannel {
+    const existing = this.#subscriptions.get(uri);
+    if (existing && !existing.closing) {
+      existing.members.add(member);
+      return existing;
+    }
+    const abort = new AbortController();
+    const signal = AbortSignal.any([this.host.signal, abort.signal]);
+    const ready = Promise.withResolvers<void>(),
+      closed = Promise.withResolvers<void>();
+    void ready.promise.catch(() => {});
+    let running: Promise<void>,
+      closing = false,
+      active = false,
+      acceptingUpdates = false;
+    const channel: SubscriptionChannel = {
+      uri,
+      members: new Set([member]),
+      ready: ready.promise,
+      closed: closed.promise,
+      get closing() {
+        return closing;
+      },
+      get active() {
+        return active;
+      },
+      get acceptingUpdates() {
+        return acceptingUpdates;
+      },
+      stop: async () => {
+        closing = true;
+        active = false;
+        acceptingUpdates = false;
+        abort.abort();
+        try {
+          await running;
+        } catch (cause) {
+          throw cause instanceof AgentError
+            ? cause
+            : publicError(cause, "subscription cleanup");
+        }
+      },
+    };
+    this.#subscriptions.set(uri, channel);
+    running = this.#wire.run(undefined, async () => {
+      let attempted = false;
+      try {
+        // The old legacy unsubscribe must settle before a replacement subscribe;
+        // otherwise its late ACK can clear the newly accepted subscription.
+        if (existing) await existing.stop();
+        signal.throwIfAborted();
+        this.host.authorize({
+          type: "connection",
+          value: this.config.name,
+          access: "resources.subscribe",
+        });
+        this.host.authorize({
+          type: "resource",
+          value: uri,
+          access: "subscribe",
+        });
+        acceptingUpdates = true;
+        if (this.client.getProtocolEra() === "modern") {
+          await this.#io(signal, async () => {
+            const subscription = await this.client.listen(
+              { resourceSubscriptions: [uri] },
+              {
+                signal,
+                timeout: Math.min(this.limits.requestTimeoutMs, 10000),
+              },
+            );
+            try {
+              requireCondition(
+                subscription.honoredFilter.resourceSubscriptions?.includes(uri),
+                "mcp_subscription_rejected",
+                "The MCP server did not honor this resource subscription.",
+              );
+              active = true;
+              ready.resolve();
+              await subscription.closed;
+            } finally {
+              await subscription.close();
+            }
+          });
+        } else {
+          attempted = true;
+          await this.#io(signal, () =>
+            this.client.subscribeResource(
+              { uri },
+              {
+                signal,
+                timeout: Math.min(this.limits.requestTimeoutMs, 10000),
+              },
+            ),
+          );
+          active = true;
+          ready.resolve();
+          if (!signal.aborted) await once(signal, "abort");
+        }
+      } catch (cause) {
+        ready.reject(cause);
+        throw cause;
+      } finally {
+        active = false;
+        acceptingUpdates = false;
+        closing = true;
+        try {
+          if (attempted && !this.host.signal.aborted) {
+            const stopSignal = AbortSignal.any([
+              this.host.signal,
+              AbortSignal.timeout(5000),
+            ]);
+            this.host.authorize({
+              type: "connection",
+              value: this.config.name,
+              access: "resources.unsubscribe",
+            });
+            await this.#io(stopSignal, () =>
+              this.client.unsubscribeResource(
+                { uri },
+                { signal: stopSignal, timeout: 5000 },
+              ),
+            );
+          }
+        } finally {
+          if (this.#subscriptions.get(uri) === channel)
+            this.#subscriptions.delete(uri);
+          closed.resolve();
+          for (const listener of channel.members) listener.channelClosed();
+          channel.members.clear();
+        }
+      }
+    });
+    void running.catch(() => {});
+    return channel;
+  }
+  subscriptionControl(
+    action: "subscribe" | "get" | "unsubscribe",
+    input: Record<string, unknown>,
+    call: Invocation,
+  ): Promise<unknown> {
+    return this.#withCall(call, async () => {
+      this.host.signal.throwIfAborted();
+      call.signal.throwIfAborted();
+      call.authorize({
+        type: "connection",
+        value: this.config.name,
+        access: `resources.${action}`,
+      });
+      if (action === "subscribe") {
+        this.assertCurrent();
+        const uri = input.uri as string;
+        call.authorize({ type: "resource", value: uri, access: "subscribe" });
+        const member = new ManagedMcpSubscription(
+          this.config.name,
+          uri,
+          (item) => this.#channel(uri, item),
+          async (item, channel) => {
+            channel.members.delete(item);
+            if (!channel.members.size) await channel.stop();
+          },
+        );
+        const ref = await call.resources.register({
+          kind: "mcp.subscription",
+          value: member,
+        });
+        member.attach(ref);
+        try {
+          await member.open();
+          call.signal.throwIfAborted();
+          if (input.background === true) await call.resources.handoff(ref.id);
+          return {
+            subscriptionId: ref.id,
+            uri,
+            background: input.background === true,
+          };
+        } catch (cause) {
+          await member.dispose().catch(() => {});
+          throw cause;
+        }
+      }
+      const ref = await call.resources.get(input.subscriptionId as string);
+      requireCondition(
+        ref.kind === "mcp.subscription" &&
+          ref.value instanceof ManagedMcpSubscription &&
+          ref.value.connection === this.config.name,
+        "mcp_subscription_unavailable",
+        "The resource is not a subscription owned by this original connection.",
+      );
+      call.authorize({
+        type: "resource",
+        value: ref.value.uri,
+        access: action === "get" ? "read" : "unsubscribe",
+      });
+      if (action === "unsubscribe") {
+        await ref.value.dispose();
+        return { subscriptionId: ref.id, state: "closed" };
+      }
+      return {
+        subscriptionId: ref.id,
+        ...(await ref.value.read(
+          (input.cursor as number | undefined) ?? 0,
+          (input.waitMs as number | undefined) ?? 0,
+          call.signal,
+        )),
+      };
+    });
+  }
+  supportsTasks(): boolean {
+    return !!this.#tasks?.capabilities.execution;
+  }
+  taskControl(
+    action: "get" | "cancel" | "list",
+    input: Record<string, unknown>,
+    call: Invocation,
+  ): Promise<unknown> {
+    return this.#withCall(call, async () => {
+      this.host.signal.throwIfAborted();
+      call.signal.throwIfAborted();
+      call.authorize({
+        type: "connection",
+        value: this.config.name,
+        access: `tasks.${action}`,
+      });
+      if (action === "list") {
+        const page = await call.resources.list({
+          kind: "mcp.task",
+          ...(input.limit === undefined
+            ? {}
+            : { limit: input.limit as number }),
+          ...(input.cursor === undefined
+            ? {}
+            : { cursor: input.cursor as string }),
+          ...(input.status === undefined
+            ? {}
+            : { state: input.status as string }),
+        });
+        return {
+          ...page,
+          items: page.items.filter(
+            (item) => item.details.connection === this.config.name,
+          ),
+        };
+      }
+      const ref = await call.resources.get(input.resourceId as string);
+      requireCondition(
+        ref.kind === "mcp.task" &&
+          ref.value instanceof ManagedMcpExecution &&
+          ref.value.connection === this.config.name,
+        "mcp_task_unavailable",
+        "The resource is not a task owned by this original MCP connection.",
+      );
+      if (action === "cancel") {
+        await ref.value.dispose();
+        return { resourceId: ref.id, ...ref.value.facts() };
+      }
+      return { resourceId: ref.id, ...(await ref.value.snapshot(call.signal)) };
+    });
+  }
+  async #invokeTask(
+    tool: Tool,
+    params: Record<string, unknown>,
+    call: Invocation,
+    timeout: number,
+  ): Promise<unknown> {
+    const creation: TaskCreation = {
+      call,
+      maybeStarted: false,
+      awaitingResponse: false,
+      malformedTask: false,
+      stopping: false,
+    };
+    this.#creations.set(call, creation);
+    const controller = new ManagedMcpExecution(
+      this.#tasks!,
+      call,
+      this.config.name,
+      async () => {
+        this.assertCurrent();
+        call.signal.throwIfAborted();
+        return this.#tasks!.callTool(tool.name, params as JsonObject, {
+          declaration: toolDeclarationFromMcpTool(tool),
+          applicationContext: call,
+          signal: this.host.signal,
+          metadata: this.#metadata(call),
+          requestTimeoutMs: timeout,
+        });
+      },
+      () => this.#drainTasks(call),
+      creation,
+      (action) =>
+        this.#cleanupContext.run(true, () => this.#wire.run(call, action)),
+    );
+    const ref = await call.resources.register({
+      kind: "mcp.task",
+      value: controller,
+    });
+    controller.attach(ref);
+    void controller.closed.then(() => {
+      if (creation.taskId && this.#knownTasks.get(creation.taskId) === creation)
+        this.#knownTasks.delete(creation.taskId);
+    });
+    const raw = await controller.execute();
+    if (
+      tool.outputSchema !== undefined &&
+      isPlainRecord(raw) &&
+      raw.isError !== true
+    ) {
+      requireCondition(
+        Object.hasOwn(raw, "structuredContent"),
+        "invalid_mcp_result",
+        "The task result omitted its declared structured content.",
+      );
+      compileMethodSchema(
+        tool.outputSchema,
+        dialect(tool.outputSchema),
+      )(raw.structuredContent);
+    }
+    call.signal.throwIfAborted();
+    this.assertCurrent();
+    return call.output.mcpResult(raw, {
+      connectionResourceId: this.#ref!.id,
+      connection: this.config.name,
     });
   }
   readResource(uri: string, scope: McpReadScope): Promise<unknown> {
@@ -1122,6 +2465,8 @@ class McpConnection implements McpResourceReader {
     this.#dispose = (async () => {
       await this.#control.dispose(reason);
       await this.closed;
+      await this.#tasks?.close();
+      this.#taskPort?.[Symbol.dispose]();
       if (reportFailure) throw reportFailure;
     })();
     void this.#dispose.catch(() => {
@@ -1141,7 +2486,7 @@ export function createMcpAdapter(
   readonly permissions: typeof allPermissions;
   catalog(): McpCatalog | null;
 } {
-  const config = configuration(value),
+  const config = validateMcpConnectionConfig(value),
     limits = optionsSnapshot(options);
   let connection: McpConnection | undefined;
   const factory: ExtensionFactory = async (host) => {
@@ -1223,6 +2568,58 @@ export function createMcpAdapter(
           (input, call) => current.invoke("resources/read", input, call),
         );
       }
+      if (
+        (catalog.capabilities as { resources?: { subscribe?: boolean } })
+          .resources?.subscribe
+      ) {
+        define(
+          "resources/subscribe",
+          ["resources", "subscribe"],
+          "Subscribe to real resource updates; ordinary ownership ends with the run unless explicitly handed off.",
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["uri"],
+            properties: {
+              uri: { type: "string", minLength: 1, maxLength: 1024 },
+              background: { type: "boolean" },
+            },
+          },
+          (input, call) =>
+            current.subscriptionControl("subscribe", input, call),
+        );
+        define(
+          "resources/getSubscription",
+          ["resources", "getSubscription"],
+          "Read bounded subscription notifications using a stable resource identity.",
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["subscriptionId"],
+            properties: {
+              subscriptionId: { type: "string", minLength: 1, maxLength: 256 },
+              cursor: { type: "integer", minimum: 0 },
+              waitMs: { type: "integer", minimum: 0, maximum: 30000 },
+            },
+          },
+          (input, call) => current.subscriptionControl("get", input, call),
+        );
+        define(
+          "resources/unsubscribe",
+          ["resources", "unsubscribe"],
+          "Stop one registered resource subscription and wait for its actual local closure.",
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["subscriptionId"],
+            properties: {
+              subscriptionId: { type: "string", minLength: 1, maxLength: 256 },
+            },
+          },
+          (input, call) =>
+            current.subscriptionControl("unsubscribe", input, call),
+        );
+      }
       if ((catalog.capabilities as { prompts?: unknown }).prompts) {
         define(
           "prompts/list",
@@ -1237,6 +2634,37 @@ export function createMcpAdapter(
           "Read a prompt, preserving message roles and standard media content.",
           getPromptSchema,
           (input, call) => current.invoke("prompts/get", input, call),
+        );
+      }
+      if (current.supportsTasks()) {
+        const resource = { type: "string", minLength: 1, maxLength: 256 };
+        for (const action of ["get", "cancel"] as const)
+          define(
+            `tasks/${action}`,
+            ["tasks", action],
+            `Read or stop a Nexum-managed remote task using its resource identity.`,
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["resourceId"],
+              properties: { resourceId: resource },
+            },
+            (input, call) => current.taskControl(action, input, call),
+          );
+        define(
+          "tasks/list",
+          ["tasks", "list"],
+          "List retained Nexum-managed task resources for this connection.",
+          {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              status: { type: "string", maxLength: 64 },
+              limit: { type: "integer", minimum: 1, maximum: 100 },
+              cursor: { type: "string", maxLength: 8192 },
+            },
+          },
+          (input, call) => current.taskControl("list", input, call),
         );
       }
       return { methods, dispose: () => current.dispose() };

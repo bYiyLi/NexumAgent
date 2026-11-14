@@ -805,3 +805,146 @@ test("non-regular files, catalog redirects and pending redirects cannot become p
   assert.equal(readFileSync(path.join(outside, "untouched"), "utf8"), "keep");
   assert.equal(existsSync(path.join(outside, "resource.json")), false);
 });
+
+test("resource page metadata budget advances only past entries actually delivered", async (t) => {
+  const f = fixture(t),
+    scope = f.scope();
+  for (let index = 0; index < 5; index++)
+    await f.store.register(
+      { data: Buffer.from([index]), name: `资源-${index}.txt` },
+      scope,
+    );
+  const all = (await f.store.list(scope, { limit: 100 })).resources;
+  const one = await f.store.list(scope, { limit: 1 });
+  const maximum = Buffer.byteLength(JSON.stringify(one));
+  const seen = [];
+  let cursor;
+  do {
+    const page = await f.store.list(scope, {
+      limit: 100,
+      maxBytes: maximum,
+      ...(cursor ? { cursor } : {}),
+    });
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) <= maximum);
+    assert.ok(page.resources.length >= 1);
+    seen.push(...page.resources);
+    if (page.nextCursor) {
+      const checkpoint = JSON.parse(
+        Buffer.from(page.nextCursor, "base64url").toString("utf8"),
+      );
+      assert.equal(checkpoint.after, page.resources.at(-1).resourceId);
+    }
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.deepEqual(seen, all);
+  assert.equal(new Set(seen.map((item) => item.resourceId)).size, 5);
+});
+
+test("oversized first resource fails without advancing, truncating its name or exposing denied metadata", async (t) => {
+  const f = fixture(t),
+    owner = f.scope(),
+    name = '表"\\'.repeat(200);
+  const item = await f.store.register(
+    { data: Buffer.from("one"), name },
+    owner,
+  );
+  const page = await f.store.list(owner);
+  const exact = Buffer.byteLength(JSON.stringify(page));
+  await assert.rejects(f.store.list(owner, { maxBytes: exact - 1 }), {
+    code: "resource_list_too_large",
+  });
+  const delivered = await f.store.list(owner, { maxBytes: exact });
+  assert.deepEqual(delivered.resources, [item]);
+  assert.equal(delivered.resources[0].name, name);
+  assert.equal(delivered.nextCursor, null);
+  assert.deepEqual((await f.store.list(owner)).resources, [item]);
+  const hidden = f.scope("hidden");
+  await f.store.register(
+    { data: Buffer.alloc(0), name: "hidden " + "x".repeat(950) },
+    hidden,
+  );
+  const authorized = f.scope("owner", (target) => {
+    if (target.resource && target.resource.ownerKey !== "owner")
+      throw forbidden();
+  });
+  assert.deepEqual(
+    await f.store.list(authorized, { maxBytes: exact }),
+    delivered,
+  );
+});
+
+test("resource page budget validates trusted bounds and includes even an empty page envelope", async (t) => {
+  const f = fixture(t),
+    scope = f.scope();
+  for (const maxBytes of [0, -1, NaN, Infinity, 1.5, "100"])
+    await assert.rejects(f.store.list(scope, { maxBytes }), {
+      code: "invalid_resource_budget",
+    });
+  let coerced = false;
+  await assert.rejects(
+    f.store.list(scope, {
+      maxBytes: {
+        valueOf() {
+          coerced = true;
+          return 1024;
+        },
+      },
+    }),
+    { code: "invalid_resource_budget" },
+  );
+  assert.equal(coerced, false);
+  const empty = await f.store.list(scope);
+  const exact = Buffer.byteLength(JSON.stringify(empty));
+  await assert.rejects(f.store.list(scope, { maxBytes: exact - 1 }), {
+    code: "resource_list_too_large",
+  });
+  assert.deepEqual(await f.store.list(scope, { maxBytes: exact }), empty);
+  await assert.rejects(f.store.list(scope, { limit: 101, maxBytes: 1024 }), {
+    code: "invalid_limit",
+  });
+});
+
+test("resource page byte ceiling remains one MiB even when a trusted caller supplies a higher budget", async (t) => {
+  const f = fixture(t),
+    scope = { ...f.scope(), runId: "run_" + "x".repeat(14_000) };
+  for (let index = 0; index < 80; index++)
+    await f.store.register(
+      { data: Buffer.alloc(0), name: `artifact-${index}` },
+      scope,
+    );
+  const all = await f.store.list(scope, { limit: 100 });
+  assert.ok(Buffer.byteLength(JSON.stringify(all)) > 1024 * 1024);
+  const bounded = await f.store.list(scope, {
+    limit: 100,
+    maxBytes: 2 * 1024 * 1024,
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(bounded)) <= 1024 * 1024);
+  assert.ok(bounded.resources.length > 0 && bounded.resources.length < 80);
+  assert.ok(bounded.nextCursor);
+  const rest = await f.store.list(scope, {
+    limit: 100,
+    cursor: bounded.nextCursor,
+    maxBytes: 1024 * 1024,
+  });
+  assert.deepEqual([...bounded.resources, ...rest.resources], all.resources);
+  assert.equal(rest.nextCursor, null);
+});
+
+test("final resource page may fit when removing its caller-bound cursor makes an earlier prefix larger", async (t) => {
+  const f = fixture(t);
+  const store = new ArtifactStore(f.root, "a", { now: () => 1800000000000 });
+  const scope = { ...f.scope("o".repeat(256)), runId: undefined };
+  for (let index = 0; index < 2; index++)
+    await store.register(
+      { data: Buffer.alloc(0), name: "a", mimeType: "a/b" },
+      scope,
+    );
+  const first = await store.list(scope, { limit: 1 });
+  const full = await store.list(scope, { limit: 100 });
+  const maximum = Buffer.byteLength(JSON.stringify(full));
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) > maximum);
+  assert.deepEqual(
+    await store.list(scope, { limit: 100, maxBytes: maximum }),
+    full,
+  );
+});

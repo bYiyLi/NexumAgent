@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   lstat,
+  mkdir,
   mkdtemp,
   open,
   opendir,
@@ -62,6 +63,7 @@ export interface WorkGitOptions {
   readonly environment: EnvironmentSnapshot;
   readonly timeoutMs?: number;
   readonly now?: () => number;
+  readonly reserve?: (bytes: number) => Promise<{ release(): void }>;
 }
 interface Attempt {
   readonly root: string;
@@ -72,6 +74,7 @@ interface Attempt {
   readonly executable: string;
   readonly environment: Record<string, string>;
   readonly timeoutMs: number;
+  readonly inputBytes: number;
 }
 interface CommandResult {
   readonly code: number | null;
@@ -319,71 +322,81 @@ export class WorkGitMaintenance {
   }
   async #attempt(now: number): Promise<WorkGitResult> {
     let state: string | undefined, empty: string | undefined;
+    let reservation: { release(): void } | undefined;
     let result: WorkGitResult;
     try {
-      const boundary = await this.#boundary();
-      state = path.join(boundary.state, "work-git.json");
-      const stored = await this.#stored(state);
-      if (stored && now < Date.parse(stored.nextCheckAt))
-        return { ...stored, status: "not_due" };
-      const environment = gitEnvironment(this.#options.environment);
-      const executable = await whichExecutable(
-        process.platform === "win32" ? "git.exe" : "git",
-        { ...this.#options.environment, variables: environment },
-        boundary.root,
-      );
-      if (
-        executable.kind !== "native" ||
-        contains(boundary.work, executable.launchPath) ||
-        contains(boundary.work, executable.path)
-      )
-        throw new Skip("unsafe_git_executable");
-      empty = await mkdtemp(path.join(boundary.state, "work-git-"));
-      const attempt: Attempt = {
-        ...boundary,
-        gitDir: path.join(boundary.work, ".git"),
-        empty,
-        executable: executable.path,
-        environment,
-        timeoutMs: this.#options.timeoutMs ?? 10_000,
-      };
-      result = await this.#snapshot(attempt, now);
-    } catch (cause) {
-      const unavailable =
-        cause instanceof AgentError &&
-        ["command_not_found", "command_access_denied"].includes(cause.code);
-      result = this.#result(
-        unavailable
-          ? "unavailable"
-          : cause instanceof Skip
-            ? "skipped"
-            : "failed",
-        unavailable
-          ? "git_unavailable"
-          : cause instanceof Skip || cause instanceof GitFailure
-            ? cause.reason
-            : "maintenance_failed",
-        now,
-      );
-    } finally {
-      if (empty)
-        await rm(empty, { recursive: true, force: true }).catch(() => {});
-    }
-    if (state) {
       try {
-        if ((await exists(state)) && !(await lstat(state)).isFile())
-          return { ...result, stateSaved: false };
-        const saved = { ...result, stateSaved: true };
-        atomicText(
-          state,
-          canonicalJson({ schemaVersion: 1, result: saved }, 16384) + "\n",
+        const boundary = await this.#boundary();
+        state = path.join(boundary.state, "work-git.json");
+        const stored = await this.#stored(state);
+        if (stored && now < Date.parse(stored.nextCheckAt))
+          return { ...stored, status: "not_due" };
+        const budget = await this.#snapshotBudget(boundary.work);
+        reservation = await this.#options.reserve?.(budget.bytes);
+        const environment = gitEnvironment(this.#options.environment);
+        const executable = await whichExecutable(
+          process.platform === "win32" ? "git.exe" : "git",
+          { ...this.#options.environment, variables: environment },
+          boundary.root,
         );
-        return saved;
-      } catch {
-        /* A maintenance record failure cannot invalidate a real commit. */
+        if (
+          executable.kind !== "native" ||
+          contains(boundary.work, executable.launchPath) ||
+          contains(boundary.work, executable.path)
+        )
+          throw new Skip("unsafe_git_executable");
+        empty = await mkdtemp(path.join(boundary.state, "work-git-"));
+        const attempt: Attempt = {
+          ...boundary,
+          gitDir: path.join(boundary.work, ".git"),
+          empty,
+          executable: executable.path,
+          environment,
+          timeoutMs: this.#options.timeoutMs ?? 10_000,
+          inputBytes: budget.inputBytes,
+        };
+        result = await this.#snapshot(attempt, now);
+      } catch (cause) {
+        const unavailable =
+          cause instanceof AgentError &&
+          ["command_not_found", "command_access_denied"].includes(cause.code);
+        result = this.#result(
+          unavailable
+            ? "unavailable"
+            : cause instanceof Skip
+              ? "skipped"
+              : "failed",
+          cause instanceof AgentError && cause.code === "storage_quota_exceeded"
+            ? "storage_quota_exceeded"
+            : unavailable
+              ? "git_unavailable"
+              : cause instanceof Skip || cause instanceof GitFailure
+                ? cause.reason
+                : "maintenance_failed",
+          now,
+        );
+      } finally {
+        if (empty)
+          await rm(empty, { recursive: true, force: true }).catch(() => {});
       }
+      if (state && (!this.#options.reserve || reservation)) {
+        try {
+          if ((await exists(state)) && !(await lstat(state)).isFile())
+            return { ...result, stateSaved: false };
+          const saved = { ...result, stateSaved: true };
+          atomicText(
+            state,
+            canonicalJson({ schemaVersion: 1, result: saved }, 16384) + "\n",
+          );
+          return saved;
+        } catch {
+          /* A maintenance record failure cannot invalidate a real commit. */
+        }
+      }
+      return result;
+    } finally {
+      reservation?.release();
     }
-    return result;
   }
   async #git(
     attempt: Attempt,
@@ -665,6 +678,147 @@ export class WorkGitMaintenance {
       throw new GitFailure("invalid_git_head");
     return hash;
   }
+  async #snapshotBudget(
+    work: string,
+  ): Promise<{ bytes: number; inputBytes: number }> {
+    let entries = 0,
+      inputBytes = 4096,
+      pathBytes = 0;
+    const walk = async (relative: string): Promise<void> => {
+      if (forbidden(relative)) return;
+      if (++entries > 20000) throw new Skip("snapshot_too_large");
+      const file = path.join(work, ...relative.split("/"));
+      let info;
+      try {
+        info = await lstat(file);
+      } catch (cause) {
+        if (missing(cause)) return;
+        throw cause;
+      }
+      if (info.isSymbolicLink()) throw new Skip("unsafe_snapshot_path");
+      if (info.isDirectory()) {
+        const directory = await opendir(file);
+        for await (const child of directory)
+          await walk(`${relative}/${child.name}`);
+      } else if (info.isFile() && selected(relative)) {
+        inputBytes += info.size;
+        pathBytes += Buffer.byteLength(relative) + 128;
+        if (!Number.isSafeInteger(inputBytes))
+          throw new Skip("snapshot_too_large");
+      } else throw new Skip("unsafe_snapshot_path");
+    };
+    for (const root of roots) await walk(root);
+    const index = path.join(work, ".git", "index");
+    const indexBytes = await lstat(index).then(
+      (value) => (value.isFile() ? value.size : 0),
+      (cause) => {
+        if (
+          missing(cause) ||
+          (cause as NodeJS.ErrnoException).code === "ENOTDIR"
+        )
+          return 0;
+        throw cause;
+      },
+    );
+    const bytes =
+      2 * inputBytes + 8 * pathBytes + 2 * indexBytes + 2 * 1024 * 1024;
+    requireCondition(
+      Number.isSafeInteger(bytes),
+      "storage_quota_exceeded",
+      "The work snapshot exceeds the bounded managed-storage budget.",
+    );
+    return { bytes, inputBytes };
+  }
+  async #fixedSnapshot(
+    attempt: Attempt,
+    paths: readonly string[],
+  ): Promise<string> {
+    const directory = path.join(attempt.empty, "snapshot");
+    await mkdir(directory, { mode: 0o700 });
+    let copied = 0;
+    const deadline = Date.now() + attempt.timeoutMs;
+    for (const relative of paths) {
+      const source = path.join(attempt.work, ...relative.split("/")),
+        target = path.join(directory, ...relative.split("/"));
+      let input: Awaited<ReturnType<typeof open>> | undefined,
+        output: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        try {
+          input = await open(
+            source,
+            constants.O_RDONLY |
+              constants.O_NOFOLLOW |
+              (constants.O_NONBLOCK ?? 0),
+          );
+        } catch (cause) {
+          if (missing(cause)) continue;
+          throw cause;
+        }
+        const before = await input.stat();
+        const linked = await lstat(source);
+        if (
+          !before.isFile() ||
+          linked.isSymbolicLink() ||
+          linked.dev !== before.dev ||
+          linked.ino !== before.ino ||
+          (await realpath(source)) !== source ||
+          !contains(attempt.work, source)
+        )
+          throw new Skip("unsafe_snapshot_path");
+        if (before.size > attempt.inputBytes - copied)
+          throw new Skip("snapshot_source_changed");
+        let parent = directory;
+        for (const part of relative.split("/").slice(0, -1)) {
+          parent = path.join(parent, part);
+          if (!(await exists(parent))) await mkdir(parent, { mode: 0o700 });
+          if (
+            !(await lstat(parent)).isDirectory() ||
+            (await realpath(parent)) !== parent
+          )
+            throw new Skip("unsafe_snapshot_path");
+        }
+        output = await open(
+          target,
+          constants.O_WRONLY |
+            constants.O_CREAT |
+            constants.O_EXCL |
+            constants.O_NOFOLLOW,
+          before.mode & 0o100 ? 0o700 : 0o600,
+        );
+        let size = 0;
+        while (true) {
+          if (Date.now() > deadline) throw new Skip("snapshot_copy_timeout");
+          const chunk = Buffer.allocUnsafe(65536),
+            read = await input.read(chunk, 0, chunk.length, null);
+          if (!read.bytesRead) break;
+          copied += read.bytesRead;
+          size += read.bytesRead;
+          if (copied > attempt.inputBytes || size > before.size)
+            throw new Skip("snapshot_source_changed");
+          await output.writeFile(chunk.subarray(0, read.bytesRead));
+        }
+        const after = await input.stat();
+        if (
+          size !== before.size ||
+          before.size !== after.size ||
+          before.ino !== after.ino ||
+          before.dev !== after.dev ||
+          before.mtimeMs !== after.mtimeMs ||
+          before.ctimeMs !== after.ctimeMs ||
+          (await realpath(source)) !== source
+        )
+          throw new Skip("snapshot_source_changed");
+      } finally {
+        const closed = await Promise.allSettled([
+          input?.close(),
+          output?.close(),
+        ]);
+        const failed = closed.find((item) => item.status === "rejected");
+        if (failed?.status === "rejected") throw failed.reason;
+      }
+    }
+    return directory;
+  }
   async #snapshot(attempt: Attempt, now: number): Promise<WorkGitResult> {
     const version = this.#ok(
       await this.#git(attempt, ["--version"], undefined, false),
@@ -690,6 +844,7 @@ export class WorkGitMaintenance {
     await this.#ignore(attempt);
     const paths = await this.#paths(attempt);
     if (!paths.length) return this.#result("unchanged", null, now);
+    const snapshot = await this.#fixedSnapshot(attempt, paths);
     // Recheck immediately before writing the index, then commit only these
     // literal paths. Concurrent unrelated user staging cannot enter this commit.
     await this.#admission(attempt);
@@ -699,7 +854,13 @@ export class WorkGitMaintenance {
     this.#ok(
       await this.#git(
         attempt,
-        ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        [
+          `--work-tree=${snapshot}`,
+          "add",
+          "-A",
+          "--pathspec-from-file=-",
+          "--pathspec-file-nul",
+        ],
         input,
       ),
     );
@@ -736,6 +897,7 @@ export class WorkGitMaintenance {
     const committed = await this.#git(
       attempt,
       [
+        `--work-tree=${snapshot}`,
         "commit",
         "--only",
         "--no-gpg-sign",

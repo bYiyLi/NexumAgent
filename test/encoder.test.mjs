@@ -1033,3 +1033,136 @@ test("native and Blob lower inline budgets reject before actual copies, inspecto
   assert.deepEqual(readdirSync(f.artifacts.directory), []);
   assert.deepEqual((await f.artifacts.list(f.scope())).resources, []);
 });
+
+test("result descriptions retain five content kinds and actual resource coordinates without reading media bytes", async (t) => {
+  const f = await fixture(t);
+  f.source("wire-notes.md", "# complete notes");
+  const saved = await f.encoder.encode(
+    f.output.result({
+      content: [
+        f.output.text("finished"),
+        f.output.image({ data: png() }),
+        f.output.audio({ data: wav() }),
+        f.output.file({ data: Buffer.from([0, 255]), name: "raw.bin" }),
+        f.output.resource("wire-notes.md"),
+      ],
+      structuredContent: { total: 5 },
+    }),
+    f.scope(),
+  );
+  const before = savedJSON(saved);
+  const read = f.artifacts.read,
+    open = f.artifacts.open;
+  f.artifacts.read = async () => {
+    assert.fail("description must not read inline media bytes");
+  };
+  f.artifacts.open = async () => {
+    assert.fail("description must not open a byte transport");
+  };
+  try {
+    const described = await f.encoder.describe(saved, f.scope());
+    assert.deepEqual(
+      described.result.content.map((item) => item.type),
+      ["text", "image", "audio", "resource_link", "resource"],
+    );
+    assert.deepEqual(described.result.data, { total: 5 });
+    assert.deepEqual(described.transfers, []);
+    for (const item of described.result.content) {
+      assert.equal(Object.hasOwn(item, "blob"), false);
+      if (["image", "audio"].includes(item.type)) {
+        assert.equal(Object.hasOwn(item, "data"), false);
+        assert.match(
+          item.resource.uri,
+          /^nexum:\/\/agents\/agent\/resources\/res_/,
+        );
+        assert.match(item.resource.sha256, /^[0-9a-f]{64}$/);
+        assert(item.resource.size > 0);
+      }
+    }
+    assert.deepEqual(savedJSON(saved), before);
+  } finally {
+    f.artifacts.read = read;
+    f.artifacts.open = open;
+  }
+  f.revoke();
+  await assert.rejects(f.encoder.describe(saved, f.scope()), {
+    code: "forbidden",
+  });
+});
+
+test("result descriptions keep a complete large-data fallback and fail closed for asynchronous authority", async (t) => {
+  const f = await fixture(t, { limits: { textBytes: 2048 } });
+  const saved = await f.encoder.encode(
+    f.output.json({ full: "x".repeat(10000) }),
+    f.scope(),
+  );
+  const described = await f.encoder.describe(saved, f.scope());
+  assert.equal(described.result.delivery.complete, false);
+  assert.equal(described.result.delivery.reason, "context_budget");
+  assert(described.result.delivery.dataResource.size > 10000);
+  const original = await f.artifacts.read(
+    described.result.delivery.dataResource.uri,
+    f.scope(),
+    { maxBytes: 20000 },
+  );
+  assert.equal(JSON.parse(original.data.toString()).data.full.length, 10000);
+  await assert.rejects(
+    f.encoder.describe(saved, { ...f.scope(), assertCurrent: async () => {} }),
+    { code: "authorization_configuration" },
+  );
+});
+
+test("a smaller current observation budget moves retained JSON to a readable resource without changing history", async (t) => {
+  const f = await fixture(t);
+  const saved = await f.encoder.encode(
+    f.output.json({ value: "x".repeat(10000) }),
+    f.scope(),
+  );
+  assert.equal(saved.data.value.length, 10000);
+  const before = savedJSON(saved);
+  const projected = await f.encoder.describe(saved, f.scope(), {
+    textBytes: 2048,
+  });
+  assert.equal(projected.result.delivery.complete, false);
+  assert.equal(projected.result.delivery.reason, "context_budget");
+  const full = await f.artifacts.read(
+    projected.result.delivery.dataResource.uri,
+    f.scope(),
+    { maxBytes: 20000 },
+  );
+  assert.equal(JSON.parse(full.data.toString()).data.value.length, 10000);
+  assert.deepEqual(savedJSON(saved), before);
+});
+
+test("a read-only Run projection reports an oversized retained result without allocating a stream or fallback", async (t) => {
+  const f = await fixture(t, { runtime: true });
+  const completed = await f.start('return {value:"x".repeat(10000)};');
+  assert.equal(completed.run.status, "succeeded");
+  const { projectRunView } = await import(
+    new URL("application/run-view.js", dist)
+  );
+  const before = readFileSync(
+    path.join(f.root, completed.run.resultRef),
+    "utf8",
+  );
+  t.mock.method(f.artifacts, "register", () =>
+    assert.fail("inspection cannot materialize new artifacts"),
+  );
+  const inspected = await projectRunView(completed, {
+    encoder: f.encoder,
+    scope: f.scope(),
+    budgets: { textBytes: 2048, controlBytes: 1024 * 1024 },
+    readOnly: true,
+    shipJson: () => assert.fail("inspection cannot open an independent stream"),
+  });
+  assert.equal(inspected.run.runId, completed.run.runId);
+  assert.equal(inspected.run.status, "succeeded");
+  assert.equal(inspected.result, null);
+  assert.equal(inspected.unavailable.code, "retained_result_partial");
+  assert.equal(inspected.transient, undefined);
+  assert.equal(
+    readFileSync(path.join(f.root, completed.run.resultRef), "utf8"),
+    before,
+  );
+  assert.deepEqual(readdirSync(f.artifacts.directory), []);
+});

@@ -1,0 +1,49 @@
+name: Optional browser package
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - packages/browser/**
+      - packages/extension-api/**
+      - scripts/build-extension-api.mjs
+      - src/extension-api.ts
+      - .github/workflows/browser.yml
+  pull_request:
+    paths:
+      - packages/browser/**
+      - packages/extension-api/**
+      - scripts/build-extension-api.mjs
+      - src/extension-api.ts
+      - .github/workflows/browser.yml
+permissions:
+  contents: read
+jobs:
+  browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            packages/browser/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-extension-api.mjs
+      - run: pnpm --dir packages/browser install --frozen-lockfile
+      - run: pnpm --dir packages/browser check
+      - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexum-browser-${{ matrix.os }}-candidate
+          path: ${{ runner.temp }}/browser-package/*.tgz
+          retention-days: 7

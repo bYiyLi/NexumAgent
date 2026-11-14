@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
@@ -19,7 +20,10 @@ import {
   Server,
   SUPPORTED_PROTOCOL_VERSIONS,
   WebStandardStreamableHTTPServerTransport,
+  inputRequired,
 } from "@modelcontextprotocol/server";
+import * as taskV1 from "@modelcontextprotocol/ext-tasks/core/v1";
+import * as taskV2 from "@modelcontextprotocol/ext-tasks/core/v2";
 
 // A separate output directory lets adapter work be checked without mutating
 // another worker's dist. All runtime imports must share that module graph.
@@ -59,6 +63,58 @@ const [
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
 const capabilities = { tools: {}, resources: {}, prompts: {} };
 const fixtureProtocolVersions = ["2026-07-28", ...SUPPORTED_PROTOCOL_VERSIONS];
+const hostCapabilities = { sampling: {}, elicitation: { form: {} }, roots: {} };
+const hostTool = {
+  name: "host-roundtrip",
+  description: "Exercise the original Host port",
+  inputSchema: {
+    type: "object",
+    required: ["value"],
+    additionalProperties: false,
+    properties: { value: { type: "integer" } },
+  },
+};
+const legacyHostTool = {
+  name: "legacy-host",
+  description: "An unassociated reverse stdio request must be rejected",
+  inputSchema: {
+    type: "object",
+    required: ["kind"],
+    additionalProperties: false,
+    properties: { kind: { enum: ["sampling", "elicitation", "roots"] } },
+  },
+};
+const taskTool = {
+  name: "task-tool",
+  description: "A real legacy Tasks execution",
+  execution: { taskSupport: "required" },
+  inputSchema: {
+    type: "object",
+    required: ["value"],
+    additionalProperties: false,
+    properties: {
+      value: { type: "integer" },
+      waitMs: { type: "integer", minimum: 1, maximum: 10000 },
+    },
+  },
+};
+const taskCapabilities = {
+  tools: {},
+  tasks: { requests: { tools: { call: {} } }, cancel: {}, list: {} },
+};
+const notifyTool = {
+  name: "notify-resource",
+  description: "Publish actual resource update notifications",
+  inputSchema: {
+    type: "object",
+    required: ["uri"],
+    additionalProperties: false,
+    properties: {
+      uri: { type: "string" },
+      count: { type: "integer", minimum: 1, maximum: 300 },
+    },
+  },
+};
 const echoInput = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   type: "object",
@@ -126,6 +182,171 @@ const tools = [
 // This function is also serialized into the stdio child. It deliberately uses
 // the official low-level SDK, never a hand-written JSON-RPC implementation.
 function installHandlers(server, options, record) {
+  const tasks = new Map();
+  if (options.taskFixture === "v1") {
+    const get = (request) => {
+      const task = tasks.get(request.params.taskId);
+      if (!task) throw new Error("Unknown fixture task");
+      return task;
+    };
+    server.setRequestHandler("tasks/get", (request) => {
+      const item = get(request);
+      record({
+        method: "tasks/get",
+        taskId: item.task.taskId,
+        status: item.task.status,
+      });
+      return taskV1.GetTaskResultV1Schema.parse(item.task);
+    });
+    server.setRequestHandler("tasks/result", (request) => {
+      const item = get(request);
+      record({ method: "tasks/result", taskId: item.task.taskId });
+      if (item.task.status !== "completed")
+        throw new Error("Fixture task has not completed");
+      return taskV1.CallToolResultV1Schema.parse({
+        content: [{ type: "text", text: `task:${item.value}` }],
+        structuredContent: { value: item.value, taskId: item.task.taskId },
+      });
+    });
+    server.setRequestHandler("tasks/cancel", (request) => {
+      const item = get(request);
+      clearTimeout(item.timer);
+      item.task.status = "cancelled";
+      item.task.lastUpdatedAt = new Date().toISOString();
+      record({
+        method: "tasks/cancel",
+        taskId: item.task.taskId,
+        status: item.task.status,
+      });
+      return taskV1.CancelTaskResultV1Schema.parse(item.task);
+    });
+    server.setRequestHandler("tasks/list", () => ({
+      tasks: [...tasks.values()].map((item) => item.task),
+    }));
+  }
+  if (options.taskFixture === "v2") {
+    const get = (params) => {
+      const item = tasks.get(params.taskId);
+      if (!item) throw new Error("Unknown fixture task");
+      return item;
+    };
+    server.setRequestHandler(
+      "tasks/get",
+      { params: taskV2.GetTaskRequestV2Schema.shape.params },
+      (params) => {
+        const item = get(params);
+        if (options.taskFlow === "input" && item.task.status === "working") {
+          item.task.status = "input_required";
+          item.task.inputRequests = {
+            sample: inputRequired.createMessage({
+              messages: [
+                {
+                  role: "user",
+                  content: { type: "text", text: `task-sample:${item.value}` },
+                },
+              ],
+              maxTokens: 32,
+            }),
+          };
+        }
+        record({
+          method: "tasks/get",
+          taskId: item.task.taskId,
+          status: item.task.status,
+        });
+        return taskV2.GetTaskResultV2Schema.parse({
+          resultType: "complete",
+          ...item.task,
+        });
+      },
+    );
+    // The SDK lifts inputResponses from every request into its public context.
+    // Validate the remaining params first, then restore that documented field
+    // before applying the complete official extension schema.
+    server.setRequestHandler(
+      "tasks/update",
+      {
+        params: taskV2.UpdateTaskRequestV2Schema.shape.params.omit({
+          inputResponses: true,
+        }),
+      },
+      (params, ctx) => {
+        try {
+          const inputResponses = taskV2.UpdateTaskRequestV2Schema.parse({
+            jsonrpc: "2.0",
+            id: ctx.mcpReq.id,
+            method: "tasks/update",
+            params: { ...params, inputResponses: ctx.mcpReq.inputResponses },
+          }).params.inputResponses;
+          const item = get(params);
+          const sampling = taskV2.CreateMessageResultV2Schema.parse(
+            inputResponses.sample,
+          );
+          delete item.task.inputRequests;
+          item.task.status = "completed";
+          item.task.lastUpdatedAt = new Date().toISOString();
+          item.task.result = taskV2.CallToolResultV2Schema.parse({
+            resultType: "complete",
+            content: [{ type: "text", text: `v2-task:${item.value}` }],
+            structuredContent: { value: item.value, sampling },
+          });
+          record({
+            method: "tasks/update",
+            taskId: item.task.taskId,
+            responseKeys: Object.keys(inputResponses),
+            sampling,
+          });
+          return taskV2.UpdateTaskResultV2Schema.parse({
+            resultType: "complete",
+          });
+        } catch (cause) {
+          record({
+            method: "tasks/update-error",
+            message: cause.message,
+            responseKeys: Object.keys(ctx.mcpReq.inputResponses ?? {}),
+          });
+          throw cause;
+        }
+      },
+    );
+    server.setRequestHandler(
+      "tasks/cancel",
+      { params: taskV2.CancelTaskRequestV2Schema.shape.params },
+      (params) => {
+        const item = get(params);
+        record({
+          method: "tasks/cancel",
+          taskId: item.task.taskId,
+          status: item.task.status,
+          acknowledged: true,
+        });
+        if (!options.taskCancelReleaseFile) {
+          delete item.task.inputRequests;
+          item.task.status = "cancelled";
+          item.task.lastUpdatedAt = new Date().toISOString();
+          record({ method: "task-cancelled", taskId: item.task.taskId });
+          return taskV2.CancelTaskResultV2Schema.parse({
+            resultType: "complete",
+          });
+        }
+        const deadline = Date.now() + 30_000;
+        const release = setInterval(() => {
+          if (existsSync(options.taskCancelReleaseFile)) {
+            clearInterval(release);
+            item.task.status = "cancelled";
+            item.task.lastUpdatedAt = new Date().toISOString();
+            record({ method: "task-cancelled", taskId: item.task.taskId });
+          } else if (Date.now() >= deadline) {
+            clearInterval(release);
+            process.exit(23);
+          }
+        }, 10);
+        return taskV2.CancelTaskResultV2Schema.parse({
+          resultType: "complete",
+        });
+      },
+    );
+  }
   const page = (request, items, key, label) => {
     record({
       method: label,
@@ -174,6 +395,202 @@ function installHandlers(server, options, record) {
               }
             : input,
       });
+      if (name === "notify-resource") {
+        for (let index = 0; index < (input.count ?? 1); index++)
+          await server.sendResourceUpdated({ uri: input.uri });
+        record({
+          method: "resource-updated",
+          uri: input.uri,
+          count: input.count ?? 1,
+        });
+        return {
+          content: [],
+          structuredContent: { notified: input.count ?? 1 },
+        };
+      }
+      if (name === "task-tool") {
+        if (options.taskFixture === "v2") {
+          const now = new Date().toISOString();
+          const task = taskV2.TaskV2Schema.parse({
+            taskId: `fixture-v2-${input.value}`,
+            status: "working",
+            createdAt: now,
+            lastUpdatedAt: now,
+            ttlMs: 60000,
+            pollIntervalMs: 20,
+          });
+          tasks.set(task.taskId, { task, value: input.value });
+          record({
+            method: "task-created",
+            taskId: task.taskId,
+            status: task.status,
+            generation: "v2",
+          });
+          if (options.taskCreationReleaseFile)
+            await new Promise((resolve) => {
+              const deadline = Date.now() + 30_000;
+              const release = setInterval(() => {
+                if (existsSync(options.taskCreationReleaseFile)) {
+                  clearInterval(release);
+                  record({
+                    method: "task-creation-replied",
+                    taskId: task.taskId,
+                  });
+                  resolve();
+                } else if (Date.now() >= deadline) {
+                  clearInterval(release);
+                  process.exit(23);
+                }
+              }, 10);
+            });
+          return {
+            content: [],
+            ...taskV2.CreateTaskResultV2Schema.parse({
+              resultType: "task",
+              ...task,
+            }),
+          };
+        }
+        taskV1.CallToolAsTaskRequestV1Schema.parse({
+          jsonrpc: "2.0",
+          id: ctx.mcpReq.id,
+          method: "tools/call",
+          params: request.params,
+        });
+        const now = new Date().toISOString();
+        const task = taskV1.TaskV1Schema.parse({
+          taskId: `fixture-task-${input.value}`,
+          status: "working",
+          createdAt: now,
+          lastUpdatedAt: now,
+          ttl: 60000,
+          pollInterval: 20,
+        });
+        const item = { task, value: input.value };
+        item.timer = setTimeout(() => {
+          task.status = "completed";
+          task.lastUpdatedAt = new Date().toISOString();
+          record({ method: "task-completed", taskId: task.taskId });
+        }, input.waitMs ?? 80);
+        tasks.set(task.taskId, item);
+        record({
+          method: "task-created",
+          taskId: task.taskId,
+          status: task.status,
+          augmented: request.params.task !== undefined,
+        });
+        if (options.malformedTaskCreation) {
+          const { createdAt, ...malformed } = task;
+          return { content: [], task: malformed };
+        }
+        return {
+          content: [],
+          ...taskV1.CreateTaskResultV1Schema.parse({ task }),
+        };
+      }
+      if (name === "host-roundtrip") {
+        const responses = ctx.mcpReq.inputResponses;
+        record({
+          method: "host-roundtrip",
+          value: input.value,
+          wireId: ctx.mcpReq.id,
+          requestState: ctx.mcpReq.requestState() ?? null,
+          responseKeys: Object.keys(responses ?? {}),
+        });
+        if (!responses)
+          return inputRequired({
+            requestState: `opaque:${input.value}`,
+            inputRequests: {
+              sample: inputRequired.createMessage({
+                messages: [
+                  {
+                    role: "user",
+                    content: { type: "text", text: `sample:${input.value}` },
+                  },
+                ],
+                maxTokens: 32,
+              }),
+              question: inputRequired.elicit({
+                message: `confirm:${input.value}`,
+                requestedSchema: {
+                  type: "object",
+                  properties: { approved: { type: "boolean" } },
+                  required: ["approved"],
+                },
+              }),
+              roots: inputRequired.listRoots(),
+            },
+          });
+        return {
+          content: [{ type: "text", text: `host:${input.value}` }],
+          structuredContent: {
+            value: input.value,
+            sampling: responses.sample,
+            elicitation: responses.question,
+            roots: responses.roots,
+            requestState: ctx.mcpReq.requestState(),
+          },
+        };
+      }
+      if (name === "legacy-host") {
+        const requestOptions = {
+          relatedRequestId: ctx.mcpReq.id,
+          signal: ctx.mcpReq.signal,
+          timeout: 1000,
+        };
+        try {
+          let response;
+          if (input.kind === "sampling")
+            response = await server.createMessage(
+              {
+                messages: [
+                  {
+                    role: "user",
+                    content: {
+                      type: "text",
+                      text: "unassociated legacy sample",
+                    },
+                  },
+                ],
+                maxTokens: 32,
+              },
+              requestOptions,
+            );
+          else if (input.kind === "elicitation")
+            response = await server.elicitInput(
+              {
+                message: "unassociated legacy question",
+                requestedSchema: {
+                  type: "object",
+                  properties: { approved: { type: "boolean" } },
+                  required: ["approved"],
+                },
+              },
+              requestOptions,
+            );
+          else response = await server.listRoots({}, requestOptions);
+          return {
+            content: [],
+            structuredContent: { kind: input.kind, rejected: false, response },
+          };
+        } catch (cause) {
+          record({
+            method: "legacy-host-rejected",
+            kind: input.kind,
+            code: cause.code ?? null,
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Unassociated legacy Host request rejected.",
+              },
+            ],
+            structuredContent: { kind: input.kind, rejected: true },
+            isError: true,
+          };
+        }
+      }
       if (input.waitMs) {
         await new Promise((resolve, reject) => {
           const timer = setTimeout(resolve, input.waitMs);
@@ -204,6 +621,29 @@ function installHandlers(server, options, record) {
     });
   }
   if (options.capabilities.resources) {
+    if (options.capabilities.resources.subscribe) {
+      server.setRequestHandler("resources/subscribe", (request) => {
+        record({ method: "resources/subscribe", uri: request.params.uri });
+        return {};
+      });
+      server.setRequestHandler("resources/unsubscribe", async (request) => {
+        record({ method: "resources/unsubscribe", uri: request.params.uri });
+        if (options.unsubscribeReleaseFile)
+          await new Promise((resolve) => {
+            const deadline = Date.now() + 30_000;
+            const release = setInterval(() => {
+              if (existsSync(options.unsubscribeReleaseFile)) {
+                clearInterval(release);
+                resolve();
+              } else if (Date.now() >= deadline) {
+                clearInterval(release);
+                process.exit(23);
+              }
+            }, 10);
+          });
+        return {};
+      });
+    }
     const resources = [1, 2].map((number) => ({
       uri: `fixture://document/${number}`,
       name: `Document ${number}`,
@@ -286,7 +726,55 @@ function events(filename) {
         .map(JSON.parse)
     : [];
 }
-async function fixture(t) {
+function samplingResult(runId) {
+  return {
+    role: "assistant",
+    model: "fixture-host-model",
+    stopReason: "endTurn",
+    content: { type: "text", text: runId },
+  };
+}
+function hostRequestsFor(binding, seen, options = {}) {
+  const current = () => {
+    binding.assertCurrent();
+    options.assertCurrent?.();
+  };
+  const record = (kind, params, requestOptions) => {
+    current();
+    const item = {
+      kind,
+      params,
+      runId: binding.runId,
+      caller: binding.context.caller,
+      signal: requestOptions?.signal ?? binding.signal,
+    };
+    seen.push(item);
+    return item;
+  };
+  return {
+    capabilities: options.capabilities ?? hostCapabilities,
+    assertCurrent: current,
+    async sampling(params, requestOptions) {
+      const item = record("sampling", params, requestOptions);
+      return options.sampling
+        ? options.sampling(item)
+        : samplingResult(binding.runId);
+    },
+    async elicitation(params, requestOptions) {
+      record("elicitation", params, requestOptions);
+      return { action: "accept", content: { approved: true } };
+    },
+    async roots(requestOptions) {
+      record("roots", undefined, requestOptions);
+      return {
+        roots: [
+          { uri: pathToFileURL(options.workDir).href, name: binding.runId },
+        ],
+      };
+    },
+  };
+}
+async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-mcp-adapter-")),
   );
@@ -303,6 +791,7 @@ async function fixture(t) {
   const logs = [],
     policies = [],
     handles = [],
+    runs = [],
     cleanups = [];
   const registry = new ExtensionRegistry(resources, {
     cleanupTimeoutMs: 1500,
@@ -314,6 +803,7 @@ async function fixture(t) {
       logs.push(args);
     },
     progress() {},
+    ...(options.hostRequests ? { hostRequests: options.hostRequests } : {}),
   });
   const scripts = new ScriptCatalog(workDir, "agent", () => []);
   const loader = await ModuleLoader.create(workDir, store.bootId, {
@@ -360,8 +850,17 @@ async function fixture(t) {
       origin.type === "local" ? () => {} : registry.lease(origin),
   });
   t.after(async () => {
-    for (const handle of handles)
-      await registry.disable(handle).catch(() => {});
+    for (const runId of runs) {
+      if (store.getRun(runId).endedAt === null) {
+        engine.cancel(caller, runId);
+        await engine.observe(caller, runId, 1000).catch(() => {});
+      }
+    }
+    for (const handle of handles) {
+      try {
+        await registry.disable(handle);
+      } catch {}
+    }
     for (const cleanup of cleanups) await cleanup();
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -397,13 +896,15 @@ async function fixture(t) {
       handles.push(handle);
       return { adapter, handle, source };
     },
-    start(script, options = {}) {
-      return engine.start(caller, {
+    async start(script, options = {}) {
+      const result = await engine.start(caller, {
         contextId: work.contextId,
         script,
         waitMs: 3000,
         ...options,
       });
+      runs.push(result.run.runId);
+      return result;
     },
     finish: (runId) => engine.observe(caller, runId, 4000),
     render(view) {
@@ -452,8 +953,10 @@ function stdioFixture(t, f, options = {}) {
     `
 import { appendFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { Server, ProtocolError, METHOD_NOT_FOUND } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/server"))};
+import { Server, ProtocolError, METHOD_NOT_FOUND, inputRequired } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/server"))};
 import { StdioServerTransport, serveStdio } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/server/stdio"))};
+import * as taskV1 from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/ext-tasks/core/v1"))};
+import * as taskV2 from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/ext-tasks/core/v2"))};
 const options = ${JSON.stringify(childOptions)};
 const record = (value) => appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ at: Date.now(), ...value }) + "\\n");
 record({ method: "spawn", pid: process.pid });
@@ -463,9 +966,16 @@ if (options.mode === "idle") {
 } else if (options.mode === "exit") {
   process.exit(23);
 } else if (options.mode === "root-exit-with-child") {
-  const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] });
-  record({ method: "child-pid", pid: child.pid });
-  process.exit(23);
+  const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.send({ready:true}); process.disconnect();"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
+  child.once("message", (message) => {
+    if (!message.ready) throw new Error("The descendant must report its actual native readiness.");
+    record({ method: "child-pid", pid: child.pid });
+    const release = setInterval(() => {
+      if (!existsSync(options.rootReleaseFile)) return;
+      clearInterval(release);
+      process.exit(23);
+    }, 10);
+  });
 } else {
   const transport = new StdioServerTransport();
   serveStdio(() => {
@@ -485,7 +995,7 @@ if (options.mode === "idle") {
   }, { transport });
   const receive = transport.onmessage;
   transport.onmessage = (message, ...extra) => {
-    record({ method: "incoming", name: message.method });
+    record({ method: "incoming", name: message.method, id: message.id ?? null, requestId: message.params?.requestId ?? null });
     return receive?.(message, ...extra);
   };
 }
@@ -508,6 +1018,25 @@ if (options.mode === "idle") {
     events: () => events(trace),
     pid: () => events(trace).find((event) => event.method === "spawn")?.pid,
   };
+}
+// These two tests target process cleanup after an initialized native launch,
+// not the developer's login plugins. Keep a real bounded environment probe but
+// give it a fixture-owned OS shell entry; environment.test covers the real user.
+function controlledProbeShell(t, f) {
+  if (process.platform === "win32") return;
+  const shell = path.join(f.root, "sh");
+  writeFileSync(
+    shell,
+    '#!/bin/sh\n[ "$#" -eq 4 ] && [ "$1" = "-i" ] && [ "$2" = "-l" ] && [ "$3" = "-c" ] || exit 64\nexec /bin/sh -c "$4"\n',
+    { mode: 0o700 },
+  );
+  const original = os.userInfo;
+  os.userInfo = (...args) => ({ ...original(...args), shell });
+  syncBuiltinESMExports();
+  t.after(() => {
+    os.userInfo = original;
+    syncBuiltinESMExports();
+  });
 }
 async function httpFixture(t, options = {}) {
   const seen = [];
@@ -567,6 +1096,9 @@ test("MCP configuration rejects unsupported fields and transports before connect
     { ...valid, command: "" },
     { ...valid, env: { TOKEN: 7 } },
     { ...valid, args: [7] },
+    { ...valid, name: "a".repeat(129) },
+    { ...valid, name: "fixture/other" },
+    { ...valid, name: "fixture.other" },
     { name: "fixture", transport: "streamable-http", url: "not a URL" },
     {
       name: "fixture",
@@ -576,6 +1108,8 @@ test("MCP configuration rejects unsupported fields and transports before connect
     },
   ])
     assert.throws(() => createMcpAdapter(config));
+  for (const name of ["$fixture", "_fixture", "a".repeat(128)])
+    assert.doesNotThrow(() => createMcpAdapter({ ...valid, name }));
   assert.throws(() => createMcpAdapter(valid, { requestTimeoutMs: -1 }));
   assert.throws(() => createMcpAdapter(valid, { unknown: true }));
 });
@@ -896,16 +1430,61 @@ test(
   "stdio initialization failure reaps a surviving process group after its root exits",
   { skip: process.platform === "win32" },
   async (t) => {
-    const f = await fixture(t),
-      peer = stdioFixture(t, f, { mode: "root-exit-with-child" });
-    await assert.rejects(f.prepare(peer.config, { connectTimeoutMs: 2500 }));
-    const child = peer
-      .events()
-      .find((event) => event.method === "child-pid")?.pid;
-    assert.ok(
-      child,
-      "The real fixture must start a descendant that inherits stdout",
+    const f = await fixture(t);
+    controlledProbeShell(t, f);
+    const rootReleaseFile = path.join(f.root, "release-root-exit");
+    const peer = stdioFixture(t, f, {
+      mode: "root-exit-with-child",
+      rootReleaseFile,
+    });
+    const registered = [];
+    const preparing = f.prepare(
+      peer.config,
+      { connectTimeoutMs: 30000 },
+      (host) => ({
+        ...host,
+        resources: {
+          ...host.resources,
+          async register(input) {
+            const ref = await host.resources.register(input);
+            registered.push(input.value);
+            return ref;
+          },
+        },
+      }),
     );
+    // Attach the rejection observer before waiting for either native process.
+    const rejected = assert.rejects(preparing);
+    let child;
+    try {
+      child = await until(
+        () => peer.events().find((event) => event.method === "child-pid")?.pid,
+        "The real fixture must start a ready descendant that inherits stdout",
+        15000,
+      );
+      assert.equal(alive(peer.pid()), true);
+      assert.equal(alive(child), true);
+      writeFileSync(rootReleaseFile, "release");
+      await until(() => !alive(peer.pid()), "The MCP root process must exit");
+      assert.equal(alive(child), true);
+      assert.equal(registered.length, 1);
+    } finally {
+      writeFileSync(rootReleaseFile, "release");
+      // An exited root whose descendant still owns stdout does not prove the
+      // transport closed. Stop its real registered initialization resource;
+      // the 30s connect deadline remains only a watchdog for missing readiness.
+      await Promise.all(
+        registered.map((resource) =>
+          resource.dispose(
+            new AgentError(
+              "fixture_initialization_stopped",
+              "Stop the real initialization after its root exited.",
+            ),
+          ),
+        ),
+      );
+      await rejected;
+    }
     await until(() => !alive(peer.pid()), "The MCP root process must exit");
     await until(
       () => !alive(child),
@@ -1052,8 +1631,9 @@ test("external run cancellation waits for real stdio backpressure and a cancelle
 });
 
 test("resource reporting failure cannot escape a native event or prevent actual stdio process cleanup", async (t) => {
-  const f = await fixture(t),
-    peer = stdioFixture(t, f);
+  const f = await fixture(t);
+  controlledProbeShell(t, f);
+  const peer = stdioFixture(t, f);
   let rejectReports = false,
     failures = 0;
   const registered = [];
@@ -1124,4 +1704,907 @@ test("auto negotiation falls back to a real legacy initialize handshake after of
   );
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
   assert.equal(result.result.data.received.value, 81);
+});
+
+test("modern MRTR dispatches sampling, elicitation and roots to the original Host of each concurrent run", async (t) => {
+  const seen = [];
+  let f;
+  f = await fixture(t, {
+    hostRequests: (binding) =>
+      hostRequestsFor(binding, seen, { workDir: f.workDir }),
+  });
+  const peer = stdioFixture(t, f, {
+    capabilities: { tools: {} },
+    tools: [hostTool],
+  });
+  const { handle } = await f.prepare(peer.config, { hostCapabilities });
+  f.registry.publish(handle);
+  const first = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 91 });',
+    { waitMs: 0 },
+  );
+  const second = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 92 });',
+    { waitMs: 0 },
+  );
+  const completed = await Promise.all([
+    f.finish(first.run.runId),
+    f.finish(second.run.runId),
+  ]);
+  for (const [index, result] of completed.entries()) {
+    assert.equal(result.run.status, "succeeded", JSON.stringify(result));
+    assert.equal(result.wait, null);
+    assert.equal(result.result.data.value, 91 + index);
+    assert.equal(result.result.data.sampling.model, "fixture-host-model");
+    assert.equal(result.result.data.sampling.content.text, result.run.runId);
+    assert.deepEqual(result.result.data.elicitation, {
+      action: "accept",
+      content: { approved: true },
+    });
+    assert.equal(result.result.data.roots.roots[0].name, result.run.runId);
+    assert.equal(
+      result.result.data.roots.roots[0].uri,
+      pathToFileURL(f.workDir).href,
+    );
+    assert.equal(result.result.data.requestState, `opaque:${91 + index}`);
+    const owned = seen.filter((item) => item.runId === result.run.runId);
+    assert.deepEqual(owned.map((item) => item.kind).sort(), [
+      "elicitation",
+      "roots",
+      "sampling",
+    ]);
+    for (const item of owned) assert.deepEqual(item.caller, caller);
+    assert.equal(
+      owned.find((item) => item.kind === "sampling").params.messages[0].content
+        .text,
+      `sample:${91 + index}`,
+    );
+  }
+  for (const value of [91, 92]) {
+    const rounds = peer
+      .events()
+      .filter(
+        (event) => event.method === "host-roundtrip" && event.value === value,
+      );
+    assert.equal(rounds.length, 2);
+    assert.notEqual(rounds[0].wireId, rounds[1].wireId);
+    assert.deepEqual(rounds[1].responseKeys.sort(), [
+      "question",
+      "roots",
+      "sample",
+    ]);
+  }
+});
+
+test("cancelling one modern input-required round aborts its actual Host sampling without borrowing another run", async (t) => {
+  const seen = [];
+  let f;
+  f = await fixture(t, {
+    hostRequests: (binding) =>
+      hostRequestsFor(binding, seen, {
+        workDir: f.workDir,
+        sampling(item) {
+          if (item.params.messages[0].content.text !== "sample:101")
+            return samplingResult(item.runId);
+          return new Promise((_, reject) =>
+            item.signal.addEventListener(
+              "abort",
+              () => {
+                seen.push({ kind: "sampling-aborted", runId: item.runId });
+                reject(item.signal.reason);
+              },
+              { once: true },
+            ),
+          );
+        },
+      }),
+  });
+  const peer = stdioFixture(t, f, {
+    capabilities: { tools: {} },
+    tools: [hostTool],
+  });
+  const { handle } = await f.prepare(peer.config, { hostCapabilities });
+  f.registry.publish(handle);
+  const first = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 101 });',
+    { waitMs: 0 },
+  );
+  await until(
+    () =>
+      seen.some(
+        (item) => item.kind === "sampling" && item.runId === first.run.runId,
+      ),
+    "The actual Host sampling must start before cancelling its run",
+  );
+  const second = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 102 });',
+    { waitMs: 0 },
+  );
+  f.engine.cancel(caller, first.run.runId);
+  const cancelled = await f.finish(first.run.runId),
+    completed = await f.finish(second.run.runId);
+  assert.equal(cancelled.run.status, "cancelled", JSON.stringify(cancelled));
+  assert.equal(completed.run.status, "succeeded", JSON.stringify(completed));
+  assert.equal(completed.result.data.sampling.content.text, second.run.runId);
+  assert.equal(
+    seen.some(
+      (item) =>
+        item.kind === "sampling-aborted" && item.runId === first.run.runId,
+    ),
+    true,
+  );
+  assert.equal(
+    seen.some(
+      (item) =>
+        item.kind === "sampling-aborted" && item.runId === second.run.runId,
+    ),
+    false,
+  );
+  assert.equal(alive(peer.pid()), true);
+});
+
+test("Host bridge uses the actual per-call capability intersection and rechecks authority after Host work", async (t) => {
+  const seen = [];
+  let f,
+    actualCapabilities = {},
+    allowed = true,
+    revokeOnSample = false;
+  f = await fixture(t, {
+    hostRequests: (binding) =>
+      hostRequestsFor(binding, seen, {
+        workDir: f.workDir,
+        capabilities: actualCapabilities,
+        assertCurrent() {
+          if (!allowed)
+            throw new AgentError(
+              "forbidden",
+              "The fixture Host authority was revoked.",
+            );
+        },
+        sampling(item) {
+          if (revokeOnSample) allowed = false;
+          return samplingResult(item.runId);
+        },
+      }),
+  });
+  const peer = stdioFixture(t, f, {
+    capabilities: { tools: {} },
+    tools: [hostTool],
+  });
+  const { handle } = await f.prepare(peer.config, { hostCapabilities });
+  f.registry.publish(handle);
+  const unavailable = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 111 });',
+  );
+  assert.equal(unavailable.run.status, "failed", JSON.stringify(unavailable));
+  assert.equal(seen.length, 0);
+  actualCapabilities = { sampling: {}, elicitation: { url: {} }, roots: {} };
+  const incompatibleMode = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 114 });',
+  );
+  assert.equal(
+    incompatibleMode.run.status,
+    "failed",
+    JSON.stringify(incompatibleMode),
+  );
+  assert.equal(
+    seen.length,
+    0,
+    "A URL-only Host must not receive the statically declared form request",
+  );
+  actualCapabilities = hostCapabilities;
+  revokeOnSample = true;
+  const revoked = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 112 });',
+  );
+  assert.equal(revoked.run.status, "failed", JSON.stringify(revoked));
+  assert.equal(revoked.result, null);
+  assert.equal(
+    seen.some(
+      (item) => item.kind === "sampling" && item.runId === revoked.run.runId,
+    ),
+    true,
+  );
+  allowed = true;
+  revokeOnSample = false;
+  const restored = await f.start(
+    'return await mcp.fixture.tools["host-roundtrip"]({ value: 113 });',
+  );
+  assert.equal(restored.run.status, "succeeded", JSON.stringify(restored));
+  assert.equal(restored.result.data.sampling.content.text, restored.run.runId);
+});
+
+test("legacy reverse requests without stdio wire association cannot borrow the active Host invocation", async (t) => {
+  const seen = [];
+  let f;
+  f = await fixture(t, {
+    hostRequests: (binding) =>
+      hostRequestsFor(binding, seen, { workDir: f.workDir }),
+  });
+  const peer = stdioFixture(t, f, {
+    legacyOnly: true,
+    capabilities: { tools: {} },
+    tools: [legacyHostTool],
+  });
+  const { adapter, handle } = await f.prepare(peer.config, {
+    hostCapabilities,
+  });
+  f.registry.publish(handle);
+  assert.match(adapter.catalog().protocolVersion, /^2025-/);
+  for (const kind of ["sampling", "elicitation", "roots"]) {
+    const result = await f.start(
+      `return await mcp.fixture.tools["legacy-host"]({ kind: "${kind}" });`,
+    );
+    assert.equal(result.run.status, "succeeded", JSON.stringify(result));
+    assert.equal(result.result.isError, true);
+    assert.deepEqual(result.result.data, { kind, rejected: true });
+  }
+  assert.equal(seen.length, 0);
+  const rejections = peer
+    .events()
+    .filter((event) => event.method === "legacy-host-rejected");
+  assert.deepEqual(
+    rejections.map((event) => event.kind),
+    ["sampling", "elicitation", "roots"],
+  );
+  assert.ok(
+    rejections.every((event) => Number.isInteger(event.code)),
+    "The peer must receive actual JSON-RPC denials instead of timing out locally",
+  );
+});
+
+test("a required Tasks V1 tool performs real creation, polling and final-result delivery through the ordinary binding", async (t) => {
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      legacyOnly: true,
+      taskFixture: "v1",
+      capabilities: taskCapabilities,
+      tools: [taskTool, tools[0]],
+    });
+  const { adapter, handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  assert.match(adapter.catalog().protocolVersion, /^2025-/);
+  assert.equal(
+    adapter.catalog().tools.find((tool) => tool.name === "task-tool").execution
+      .taskSupport,
+    "required",
+  );
+  const result = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 121 });',
+  );
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result));
+  assert.deepEqual(result.result.data, {
+    value: 121,
+    taskId: "fixture-task-121",
+  });
+  assert.deepEqual((await f.render(result)).content, [
+    { type: "text", text: "task:121" },
+  ]);
+  const trace = peer.events();
+  const created = trace.find(
+    (event) =>
+      event.method === "task-created" && event.taskId === "fixture-task-121",
+  );
+  assert.equal(created?.status, "working");
+  assert.equal(created?.augmented, true);
+  assert.ok(
+    trace.some(
+      (event) =>
+        event.method === "tasks/get" && event.taskId === "fixture-task-121",
+    ),
+  );
+  assert.ok(
+    trace.some(
+      (event) =>
+        event.method === "task-completed" &&
+        event.taskId === "fixture-task-121",
+    ),
+  );
+  assert.ok(
+    trace.some(
+      (event) =>
+        event.method === "tasks/result" && event.taskId === "fixture-task-121",
+    ),
+  );
+});
+
+test("a malformed Tasks V1 creation response cannot confirm closure of its still-working remote task", async (t) => {
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      legacyOnly: true,
+      taskFixture: "v1",
+      malformedTaskCreation: true,
+      capabilities: taskCapabilities,
+      tools: [taskTool],
+    });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const started = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 126, waitMs: 10000 });',
+    { waitMs: 0 },
+  );
+  await until(
+    () =>
+      peer
+        .events()
+        .some(
+          (event) =>
+            event.method === "task-created" &&
+            event.taskId === "fixture-task-126",
+        ),
+    "The malformed reply must follow an actual durable Task creation",
+  );
+  await until(
+    () =>
+      f
+        .history()
+        .some(
+          (item) =>
+            item.kind === "mcp.task" &&
+            item.originRunId === started.run.runId &&
+            item.diagnostic.details.state !== "preparing",
+        ),
+    "The adapter must process the malformed creation response before closure is checked",
+  );
+  const observed = await f.engine.observe(caller, started.run.runId, 200);
+  const row = f
+    .history()
+    .find(
+      (item) =>
+        item.kind === "mcp.task" && item.originRunId === started.run.runId,
+    );
+  assert.ok(row);
+  const actualTerminal = peer
+    .events()
+    .some(
+      (event) =>
+        event.taskId === "fixture-task-126" &&
+        event.at <= row.closedAt &&
+        ((event.method === "tasks/cancel" && event.status === "cancelled") ||
+          event.method === "task-completed"),
+    );
+  assert.ok(
+    row.closedAt === null || actualTerminal,
+    JSON.stringify({ observed, row, trace: peer.events() }),
+  );
+  assert.notEqual(observed.run.status, "succeeded");
+});
+
+test("external run cancellation actually cancels its remote Tasks V1 execution and preserves the shared connection", async (t) => {
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      legacyOnly: true,
+      taskFixture: "v1",
+      capabilities: taskCapabilities,
+      tools: [taskTool, tools[0]],
+    });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const started = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 131, waitMs: 5000 });',
+    { waitMs: 0 },
+  );
+  await until(
+    () =>
+      peer
+        .events()
+        .some(
+          (event) =>
+            event.method === "tasks/get" && event.taskId === "fixture-task-131",
+        ),
+    "The run must own a real working remote task before cancellation",
+  );
+  f.engine.cancel(caller, started.run.runId);
+  const cancelled = await f.finish(started.run.runId);
+  assert.equal(cancelled.run.status, "cancelled", JSON.stringify(cancelled));
+  await until(
+    () =>
+      peer
+        .events()
+        .some(
+          (event) =>
+            event.method === "tasks/cancel" &&
+            event.taskId === "fixture-task-131" &&
+            event.status === "cancelled",
+        ),
+    "Cancellation must reach the remote task lifecycle handler",
+  );
+  assert.equal(
+    peer
+      .events()
+      .some(
+        (event) =>
+          event.method === "tasks/result" &&
+          event.taskId === "fixture-task-131",
+      ),
+    false,
+  );
+  assert.equal(alive(peer.pid()), true);
+  const next = await f.start(
+    'return await mcp.fixture.tools["echo-value"]({ value: 132 });',
+  );
+  assert.equal(next.run.status, "succeeded", JSON.stringify(next));
+  assert.equal(next.result.data.received.value, 132);
+});
+
+test("modern Tasks V2 requests real Host input and updates the task before delivering its final result", async (t) => {
+  const seen = [];
+  let f;
+  f = await fixture(t, {
+    hostRequests: (binding) =>
+      hostRequestsFor(binding, seen, { workDir: f.workDir }),
+  });
+  const peer = stdioFixture(t, f, {
+    taskFixture: "v2",
+    taskFlow: "input",
+    capabilities: {
+      tools: {},
+      extensions: { "io.modelcontextprotocol/tasks": {} },
+    },
+    tools: [taskTool],
+  });
+  const { adapter, handle } = await f.prepare(peer.config, {
+    hostCapabilities,
+  });
+  f.registry.publish(handle);
+  assert.match(adapter.catalog().protocolVersion, /^2026-/);
+  const result = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 141 });',
+  );
+  assert.equal(
+    result.run.status,
+    "succeeded",
+    JSON.stringify({
+      result,
+      trace: peer.events(),
+      hostCalls: seen.map((item) => ({ kind: item.kind, runId: item.runId })),
+    }),
+  );
+  assert.equal(result.result.data.value, 141);
+  assert.equal(result.result.data.sampling.model, "fixture-host-model");
+  assert.equal(result.result.data.sampling.content.text, result.run.runId);
+  assert.deepEqual((await f.render(result)).content, [
+    { type: "text", text: "v2-task:141" },
+  ]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].runId, result.run.runId);
+  assert.deepEqual(seen[0].caller, caller);
+  assert.equal(seen[0].params.messages[0].content.text, "task-sample:141");
+  const trace = peer.events();
+  assert.ok(
+    trace.some(
+      (event) =>
+        event.method === "tasks/get" && event.status === "input_required",
+    ),
+  );
+  assert.ok(
+    trace.some(
+      (event) =>
+        event.method === "tasks/update" &&
+        event.taskId === "fixture-v2-141" &&
+        event.sampling.content.text === result.run.runId,
+    ),
+  );
+  assert.ok(
+    trace.some(
+      (event) => event.method === "tasks/get" && event.status === "completed",
+    ),
+  );
+});
+
+test("cooperative Tasks V2 cancel ACK does not falsely close the run or resource before actual remote cancellation", async (t) => {
+  const f = await fixture(t),
+    taskCancelReleaseFile = path.join(f.root, "task-cancel-release");
+  const peer = stdioFixture(t, f, {
+    taskFixture: "v2",
+    taskFlow: "cancel",
+    taskCancelReleaseFile,
+    capabilities: {
+      tools: {},
+      extensions: { "io.modelcontextprotocol/tasks": {} },
+    },
+    tools: [taskTool, tools[0]],
+  });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const started = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 151 });',
+    { waitMs: 0 },
+  );
+  let row;
+  try {
+    await until(
+      () =>
+        peer
+          .events()
+          .some(
+            (event) =>
+              event.method === "tasks/get" && event.taskId === "fixture-v2-151",
+          ),
+      "The run must own an actual V2 task",
+    );
+    row = f
+      .history()
+      .find(
+        (item) =>
+          item.kind === "mcp.task" && item.originRunId === started.run.runId,
+      );
+    assert.ok(row);
+    f.engine.cancel(caller, started.run.runId);
+    await until(
+      () =>
+        f.store.getResource(row.resourceId).diagnostic.details
+          ?.cancelAcknowledged === true,
+      "A real cancel ACK must be observed before terminal cancellation is released",
+    );
+    assert.equal(
+      peer
+        .events()
+        .some(
+          (event) =>
+            event.method === "tasks/cancel" &&
+            event.taskId === "fixture-v2-151" &&
+            event.status === "working",
+        ),
+      true,
+    );
+    assert.equal(
+      (await f.engine.observe(caller, started.run.runId, 0)).run.status,
+      "cancelling",
+    );
+    const stopping = f.store.getResource(row.resourceId);
+    assert.notEqual(stopping.status, "closed");
+    assert.equal(stopping.closedAt, null);
+    assert.equal(stopping.diagnostic.details.remoteTerminal, false);
+    assert.equal(
+      peer.events().some((event) => event.method === "task-cancelled"),
+      false,
+    );
+  } finally {
+    writeFileSync(taskCancelReleaseFile, "release");
+  }
+  const cancelled = await f.finish(started.run.runId);
+  assert.equal(cancelled.run.status, "cancelled", JSON.stringify(cancelled));
+  assert.equal(f.store.getResource(row.resourceId).status, "closed");
+  assert.equal(
+    peer
+      .events()
+      .some(
+        (event) =>
+          event.method === "task-cancelled" &&
+          event.taskId === "fixture-v2-151",
+      ),
+    true,
+  );
+  const next = await f.start(
+    'return await mcp.fixture.tools["echo-value"]({ value: 152 });',
+  );
+  assert.equal(next.run.status, "succeeded", JSON.stringify(next));
+  assert.equal(next.result.data.received.value, 152);
+});
+
+test("cancelling an already committed Task creation retains its late handle until the actual remote task is stopped", async (t) => {
+  const f = await fixture(t),
+    taskCreationReleaseFile = path.join(f.root, "task-creation-release");
+  const peer = stdioFixture(t, f, {
+    taskFixture: "v2",
+    taskFlow: "creation",
+    taskCreationReleaseFile,
+    capabilities: {
+      tools: {},
+      extensions: { "io.modelcontextprotocol/tasks": {} },
+    },
+    tools: [taskTool],
+  });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const started = await f.start(
+    'return await mcp.fixture.tools["task-tool"]({ value: 161 });',
+    { waitMs: 0 },
+  );
+  let row;
+  try {
+    await until(
+      () =>
+        peer
+          .events()
+          .some(
+            (event) =>
+              event.method === "task-created" &&
+              event.taskId === "fixture-v2-161",
+          ),
+      "The peer must commit the actual Task before its reply is released",
+    );
+    row = f
+      .history()
+      .find(
+        (item) =>
+          item.kind === "mcp.task" && item.originRunId === started.run.runId,
+      );
+    assert.ok(row);
+    f.engine.cancel(caller, started.run.runId);
+    const observed = await f.engine.observe(caller, started.run.runId, 200);
+    assert.equal(
+      observed.run.status,
+      "cancelling",
+      JSON.stringify({
+        observed,
+        history: f.store.getResource(row.resourceId),
+        trace: peer.events(),
+      }),
+    );
+    assert.equal(f.store.getResource(row.resourceId).closedAt, null);
+  } finally {
+    writeFileSync(taskCreationReleaseFile, "release");
+  }
+  const cancelled = await f.finish(started.run.runId);
+  assert.equal(cancelled.run.status, "cancelled", JSON.stringify(cancelled));
+  await until(
+    () =>
+      peer
+        .events()
+        .some(
+          (event) =>
+            event.method === "tasks/cancel" &&
+            event.taskId === "fixture-v2-161",
+        ),
+    "The late Task identity must be retained and actually cancelled",
+  );
+  assert.equal(f.store.getResource(row.resourceId).status, "closed");
+  assert.equal(
+    f.store.getResource(row.resourceId).diagnostic.details.remoteTerminal,
+    true,
+    JSON.stringify({
+      cancelled,
+      row: f.store.getResource(row.resourceId),
+      trace: peer.events(),
+    }),
+  );
+});
+
+test("modern and legacy resource subscriptions share one channel while retaining independent member cursors", async (t) => {
+  for (const legacyOnly of [false, true]) {
+    const f = await fixture(t),
+      peer = stdioFixture(t, f, {
+        legacyOnly,
+        capabilities: { tools: {}, resources: { subscribe: true } },
+        tools: [notifyTool],
+      });
+    const { handle } = await f.prepare(peer.config);
+    f.registry.publish(handle);
+    const result = await f.start(`
+      const first = await mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
+      const second = await mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
+      await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/1" });
+      const firstEvents = await mcp.fixture.resources.getSubscription({ subscriptionId: first.subscriptionId, waitMs: 1000 });
+      const secondEvents = await mcp.fixture.resources.getSubscription({ subscriptionId: second.subscriptionId, waitMs: 1000 });
+      const firstClosed = await mcp.fixture.resources.unsubscribe({ subscriptionId: first.subscriptionId });
+      await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/1" });
+      const later = await mcp.fixture.resources.getSubscription({ subscriptionId: second.subscriptionId, cursor: secondEvents.cursor, waitMs: 1000 });
+      return { first, second, firstEvents, secondEvents, firstClosed, later };
+    `);
+    assert.equal(result.run.status, "succeeded", JSON.stringify(result));
+    const value = result.result.data;
+    assert.notEqual(value.first.subscriptionId, value.second.subscriptionId);
+    assert.equal(value.firstEvents.events.length, 1);
+    assert.equal(value.secondEvents.events.length, 1);
+    assert.equal(value.firstEvents.events[0].cursor, 1);
+    assert.equal(value.secondEvents.events[0].cursor, 1);
+    assert.equal(value.later.events.length, 1);
+    assert.equal(value.later.events[0].cursor, 2);
+    assert.equal(value.later.events[0].uri, "fixture://document/1");
+    assert.equal(value.later.historyLost, false);
+    assert.equal(value.firstClosed.state, "closed");
+    assert.equal(
+      f.store.getResource(value.first.subscriptionId).status,
+      "closed",
+    );
+    assert.equal(
+      f.store.getResource(value.second.subscriptionId).status,
+      "closed",
+    );
+    const trace = peer.events();
+    if (legacyOnly) {
+      assert.equal(
+        trace.filter((event) => event.method === "resources/subscribe").length,
+        1,
+      );
+      assert.equal(
+        trace.filter((event) => event.method === "resources/unsubscribe")
+          .length,
+        1,
+      );
+    } else {
+      const listens = trace.filter(
+        (event) =>
+          event.method === "incoming" && event.name === "subscriptions/listen",
+      );
+      assert.equal(listens.length, 1);
+      assert.equal(
+        trace.filter(
+          (event) =>
+            event.method === "incoming" &&
+            event.name === "notifications/cancelled" &&
+            event.requestId === listens[0].id,
+        ).length,
+        1,
+      );
+    }
+    assert.equal(alive(peer.pid()), true);
+  }
+});
+
+test("subscription lifetime follows the run unless background handoff is explicitly requested", async (t) => {
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      capabilities: { tools: {}, resources: { subscribe: true } },
+      tools: [notifyTool],
+    });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const opened = await f.start(`
+    const owned = await mcp.fixture.resources.subscribe({ uri: "fixture://document/2" });
+    const background = await mcp.fixture.resources.subscribe({ uri: "fixture://document/2", background: true });
+    return { owned, background };
+  `);
+  assert.equal(opened.run.status, "succeeded", JSON.stringify(opened));
+  const owned = opened.result.data.owned,
+    background = opened.result.data.background;
+  assert.equal(owned.background, false);
+  assert.equal(background.background, true);
+  assert.equal(f.store.getResource(owned.subscriptionId).status, "closed");
+  assert.equal(
+    f.store.getResource(background.subscriptionId).status,
+    "registered",
+  );
+  assert.equal(
+    f.store.getResource(background.subscriptionId).lifetime,
+    "background",
+  );
+  const later = await f.start(`
+    await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/2" });
+    return await mcp.fixture.resources.getSubscription({ subscriptionId: "${background.subscriptionId}", waitMs: 1000 });
+  `);
+  assert.equal(later.run.status, "succeeded", JSON.stringify(later));
+  assert.equal(later.result.data.events.length, 1);
+  assert.equal(later.result.data.events[0].uri, "fixture://document/2");
+  const closed = await f.start(
+    `return await mcp.fixture.resources.unsubscribe({ subscriptionId: "${background.subscriptionId}" });`,
+  );
+  assert.equal(closed.run.status, "succeeded", JSON.stringify(closed));
+  assert.equal(closed.result.data.state, "closed");
+  assert.equal(f.store.getResource(background.subscriptionId).status, "closed");
+});
+
+test("cancelling a subscription wait leaves its background subscription and original connection available", async (t) => {
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      capabilities: { tools: {}, resources: { subscribe: true } },
+      tools: [notifyTool],
+    });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const opened = await f.start(
+    'return await mcp.fixture.resources.subscribe({ uri: "fixture://document/1", background: true });',
+  );
+  assert.equal(opened.run.status, "succeeded", JSON.stringify(opened));
+  const id = opened.result.data.subscriptionId;
+  const waiting = await f.start(
+    `return await mcp.fixture.resources.getSubscription({ subscriptionId: "${id}", cursor: 0, waitMs: 30000 });`,
+    { waitMs: 0 },
+  );
+  await until(
+    () =>
+      f.store
+        .operationsForRun(waiting.run.runId)
+        .some((operation) => operation.status === "running"),
+    "The long poll must start before external cancellation",
+  );
+  f.engine.cancel(caller, waiting.run.runId);
+  assert.equal((await f.finish(waiting.run.runId)).run.status, "cancelled");
+  assert.equal(f.store.getResource(id).status, "registered");
+  assert.equal(alive(peer.pid()), true);
+  const next = await f.start(`
+    await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/1" });
+    const notification = await mcp.fixture.resources.getSubscription({ subscriptionId: "${id}", cursor: 0, waitMs: 1000 });
+    await mcp.fixture.resources.unsubscribe({ subscriptionId: "${id}" });
+    return notification;
+  `);
+  assert.equal(next.run.status, "succeeded", JSON.stringify(next));
+  assert.equal(next.result.data.events.length, 1);
+  assert.equal(f.store.getResource(id).status, "closed");
+});
+
+test("subscription capability controls entry publication and retained notification history stays bounded", async (t) => {
+  const absent = await fixture(t),
+    absentPeer = stdioFixture(t, absent, {
+      capabilities: { resources: { subscribe: false } },
+      tools: [],
+    });
+  const { handle: absentHandle } = await absent.prepare(absentPeer.config);
+  absent.registry.publish(absentHandle);
+  const missing = await absent.start(
+    "return [typeof mcp.fixture.resources.subscribe, typeof mcp.fixture.resources.getSubscription, typeof mcp.fixture.resources.unsubscribe];",
+  );
+  assert.equal(missing.run.status, "succeeded", JSON.stringify(missing));
+  assert.deepEqual(missing.result.data, [
+    "undefined",
+    "undefined",
+    "undefined",
+  ]);
+  const f = await fixture(t),
+    peer = stdioFixture(t, f, {
+      capabilities: { tools: {}, resources: { subscribe: true } },
+      tools: [notifyTool],
+    });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const result = await f.start(`
+    const subscription = await mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
+    await mcp.fixture.tools["notify-resource"]({ uri: "fixture://document/1", count: 300 });
+    return await mcp.fixture.resources.getSubscription({ subscriptionId: subscription.subscriptionId, cursor: 0, waitMs: 1000 });
+  `);
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result));
+  assert.equal(result.result.data.cursor, 300);
+  assert.equal(result.result.data.events.length, 256);
+  assert.equal(result.result.data.events[0].cursor, 45);
+  assert.equal(result.result.data.historyLost, true);
+});
+
+test("a new same-URI subscriber cannot join a channel while its last legacy member is unsubscribing", async (t) => {
+  const f = await fixture(t),
+    unsubscribeReleaseFile = path.join(f.root, "unsubscribe-release");
+  const peer = stdioFixture(t, f, {
+    legacyOnly: true,
+    unsubscribeReleaseFile,
+    capabilities: { resources: { subscribe: true } },
+    tools: [],
+  });
+  const { handle } = await f.prepare(peer.config);
+  f.registry.publish(handle);
+  const started = await f.start(
+    `
+    const first = await mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
+    const closing = mcp.fixture.resources.unsubscribe({ subscriptionId: first.subscriptionId });
+    const opening = mcp.fixture.resources.subscribe({ uri: "fixture://document/1" });
+    const replacement = await opening;
+    await closing;
+    const snapshot = await mcp.fixture.resources.getSubscription({ subscriptionId: replacement.subscriptionId });
+    await mcp.fixture.resources.unsubscribe({ subscriptionId: replacement.subscriptionId });
+    return snapshot;
+  `,
+    { waitMs: 0 },
+  );
+  try {
+    await until(
+      () =>
+        peer.events().some((event) => event.method === "resources/unsubscribe"),
+      "The last member's actual unsubscribe must be in flight",
+    );
+    await until(
+      () =>
+        f.history().filter((item) => item.kind === "mcp.subscription")
+          .length === 2,
+      "The replacement subscription must be registered during old-channel shutdown",
+    );
+  } finally {
+    writeFileSync(unsubscribeReleaseFile, "release");
+  }
+  const result = await f.finish(started.run.runId);
+  assert.equal(
+    result.run.status,
+    "succeeded",
+    JSON.stringify({ result, trace: peer.events() }),
+  );
+  assert.equal(result.result.data.state, "subscribed");
+  assert.equal(
+    peer.events().filter((event) => event.method === "resources/subscribe")
+      .length,
+    2,
+  );
+  assert.equal(
+    peer.events().filter((event) => event.method === "resources/unsubscribe")
+      .length,
+    2,
+  );
 });

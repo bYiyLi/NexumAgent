@@ -1,0 +1,73 @@
+{
+  "name": "nexum-browser",
+  "version": "0.1.0-development.0",
+  "private": true,
+  "description": "Nexum 可选浏览器客户端与受管扩展",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "files": [
+    "dist",
+    "browser-extension",
+    "instructions",
+    "docs",
+    "scripts",
+    "skills",
+    "README.md",
+    "implementation.json"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./nexum": {
+      "types": "./dist/extension/index.d.ts",
+      "import": "./dist/extension/index.js"
+    }
+  },
+  "nexum": {
+    "apiVersion": 1,
+    "namespace": "browser",
+    "permissions": [
+      "connection",
+      "path",
+      "resource",
+      "url"
+    ],
+    "instructions": "./instructions/README.md",
+    "docs": "./docs",
+    "scripts": "./scripts",
+    "skills": "./skills"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node browser-extension/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-vm-modules --test test/*.test.mjs",
+    "check": "pnpm typecheck && pnpm build && pnpm test"
+  },
+  "dependencies": {
+    "marked": "18.2.0",
+    "turndown": "7.2.5",
+    "ws": "8.23.0"
+  },
+  "peerDependencies": {
+    "@nexum/extension-api": ">=0.0.1-development.0 <0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@nexum/extension-api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nexum/extension-api": "file:../extension-api",
+    "@types/node": "24.19.2",
+    "@types/turndown": "5.0.6",
+    "@types/ws": "8.18.2",
+    "ajv": "8.20.0",
+    "typescript": "6.0.3"
+  }
+}

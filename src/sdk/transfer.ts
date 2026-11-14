@@ -27,8 +27,8 @@ const download = {
     mimeType: { type: "string", minLength: 1, maxLength: 256 },
   },
   oneOf: [
-    { required: ["path"], not: { required: ["uri"] } },
-    { required: ["uri"], not: { required: ["path"] } },
+    { properties: { path: boundedText }, required: ["path"] },
+    { properties: { uri: boundedText }, required: ["uri"] },
   ],
 };
 const query = {

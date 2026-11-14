@@ -1,0 +1,71 @@
+name: Agent install candidates
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --test test/installer.test.mjs test/service.test.mjs test/extension-package.test.mjs
+      - name: Exercise the actual native user service in an isolated home and unique namespace
+        run: node scripts/native-service-test.mjs
+      - name: Create a disposable candidate signing identity
+        run: |
+          node --input-type=module - <<'JS'
+          import {generateKeyPairSync} from 'node:crypto';
+          import {writeFileSync} from 'node:fs';
+          import path from 'node:path';
+          const key=generateKeyPairSync('ed25519');
+          writeFileSync(path.join(process.env.RUNNER_TEMP,'candidate-private.pem'),key.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});
+          writeFileSync(path.join(process.env.RUNNER_TEMP,'candidate-public.pem'),key.publicKey.export({type:'spki',format:'pem'}));
+          JS
+      - name: Build the platform's actual runtime and production dependencies
+        run: pnpm run build:candidate --out-dir "$RUNNER_TEMP/candidate" --signing-key-file "$RUNNER_TEMP/candidate-private.pem"
+      - name: Verify and install only into a temporary home without service registration
+        run: |
+          node --input-type=module - <<'JS'
+          import {installAgent,cleanupPrograms} from './scripts/install-agent.mjs';
+          import {readdir,mkdir,readFile,rm} from 'node:fs/promises';
+          import {spawnSync} from 'node:child_process';
+          import path from 'node:path';
+          const temp=process.env.RUNNER_TEMP;
+          const output=path.join(temp,'candidate');
+          const archive=path.join(output,(await readdir(output)).find(x=>x.endsWith('.tar.gz')));
+          const sha256=(await readFile(archive+'.sha256','utf8')).split(' ')[0];
+          const home=path.join(temp,'isolated-agent-home');await mkdir(home);
+          const installed=await installAgent({archive,sha256,signatureFile:archive+'.sig',publicKeyFile:path.join(temp,'candidate-public.pem'),home,profile:'development',registerService:false,config:{server_url:'http://127.0.0.1:9/',token:'candidate-fixture-token'}});
+          const node=path.join(installed.programDir,'runtime',process.platform==='win32'?'node.exe':'bin/node');
+          const result=spawnSync(node,['--experimental-vm-modules',path.join(installed.programDir,'app/dist/cli.js'),'--help'],{encoding:'utf8'});
+          if(result.status!==0)throw new Error('The actual packaged CLI did not start.');
+          await cleanupPrograms({profile:'development',home});
+          await rm(home,{recursive:true,force:true});
+          JS
+      - name: Upload reviewable candidate files, never the private signing key
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexum-agent-${{ matrix.os }}-candidate
+          path: |
+            ${{ runner.temp }}/candidate/*.tar.gz
+            ${{ runner.temp }}/candidate/*.sig
+            ${{ runner.temp }}/candidate/*.sha256
+            ${{ runner.temp }}/candidate/installer-kit/**
+            ${{ runner.temp }}/candidate-public.pem
+          retention-days: 7

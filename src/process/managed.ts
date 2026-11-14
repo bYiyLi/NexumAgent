@@ -11,7 +11,7 @@ import type {
   ProcessFacts,
   ProcessStopOptions,
 } from "./backend.js";
-import { ProcessOutputLog } from "./output-log.js";
+import { ProcessOutputLog, type ProcessOutputOptions } from "./output-log.js";
 import type { LaunchInput, PreparedLaunch } from "./launch.js";
 
 const instances = new WeakSet<object>();
@@ -122,6 +122,7 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
     readonly agentRoot: string,
     input: LaunchInput,
     readonly mode: "exec" | "start",
+    readonly outputOptions: ProcessOutputOptions = {},
   ) {
     super();
     this.setMaxListeners(0);
@@ -300,7 +301,11 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
     prepare: (signal: AbortSignal) => Promise<PreparedLaunch>,
   ): Promise<void> {
     const signal = this.#stop.signal;
-    this.#log = new ProcessOutputLog(this.agentRoot, this.#ref!.id);
+    this.#log = new ProcessOutputLog(
+      this.agentRoot,
+      this.#ref!.id,
+      this.outputOptions,
+    );
     this.#log.on("change", this.#changed);
     this.#detach.push(() => this.#log?.off("change", this.#changed));
     this.#publish();

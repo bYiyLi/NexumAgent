@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { MIMEType } from "node:util";
+import { MIMEType, types } from "node:util";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import {
   authorizeCall,
@@ -142,7 +142,8 @@ interface Entry {
   stop?: TransferStop;
   file?: UploadFileReceipt;
   fileCommitted: boolean;
-  cleanupConfirmed: boolean;
+  ioCleanupConfirmed: boolean;
+  channelClosed: boolean;
   failure?: JsonObject;
   fault?: unknown;
 }
@@ -550,7 +551,12 @@ export class TransferServices extends EventEmitter {
   }
   #requestStop(entry: Entry, reason: TransferStop): boolean {
     if (terminal.has(entry.record.status)) return false;
-    if (entry.stop) return entry.stop.kind === reason.kind;
+    if (entry.stop) {
+      // The first stop remains authoritative; an explicit control/cleanup call
+      // can retry only its still-unconfirmed settlement.
+      void this.#settle(entry).catch((cause) => this.#fault(entry, cause));
+      return entry.stop.kind === reason.kind;
+    }
     let accepted = false;
     try {
       const row = this.#refresh(entry);
@@ -589,38 +595,51 @@ export class TransferServices extends EventEmitter {
       // Cancellation can arrive while a channel is still being prepared. Wait
       // until its real binding is known before revoking, never abandon it late.
       await entry.preparing.catch(() => {});
-      const closing = entry.channel
-        ? this.channels.revoke(
-            entry.channel,
-            entry.stop ?? { kind: "failure", code: "transfer_completed" },
-          )
-        : Promise.resolve();
+      const closing =
+        entry.channel && !entry.channelClosed
+          ? Promise.resolve().then(() =>
+              this.channels.revoke(
+                entry.channel!,
+                entry.stop ?? { kind: "failure", code: "transfer_completed" },
+              ),
+            )
+          : Promise.resolve();
       const outcomes = await Promise.allSettled([
         closing,
         entry.active ?? Promise.resolve(),
       ]);
+      entry.channelClosed = outcomes[0]!.status === "fulfilled";
+      if (outcomes[1]!.status === "rejected") entry.ioCleanupConfirmed = false;
       const failedClosure = outcomes.find((item) => item.status === "rejected");
-      if (failedClosure?.status === "rejected") {
-        entry.cleanupConfirmed = false;
+      if (failedClosure?.status === "rejected")
         entry.failure ??= safeError(
           failedClosure.reason,
           "transfer_cleanup_unconfirmed",
         );
-      }
-      if (!entry.cleanupConfirmed) {
-        // Keep physical closure unresolved. ResourceManager will honestly retain
-        // an unconfirmed resource instead of freeing capacity or reporting done.
-        this.#fault(
-          entry,
-          new AgentError(
-            "transfer_cleanup_unconfirmed",
-            "Transfer I/O or channel closure was not confirmed.",
-          ),
-        );
+      if (!entry.ioCleanupConfirmed || !entry.channelClosed) {
+        // A lost revoke observation is retryable control uncertainty, not proof
+        // that local I/O failed or that the SQLite authority failed.
+        this.emit("fault", {
+          transferId: entry.record.transferId,
+          error: safeError(undefined, "transfer_cleanup_unconfirmed"),
+        });
+        this.#changed(entry);
         return;
       }
       entry.closure.resolve();
       await entry.closure.promise; // Manager's already-registered close observer runs first.
+      requireCondition(
+        this.store.getResource(entry.ref.id).closedAt !== null,
+        "transfer_cleanup_unconfirmed",
+        "The resource authority did not confirm physical closure.",
+      );
+      if (entry.reservation) this.#release(entry.reservation);
+      if (entry.fault)
+        throw new AgentError(
+          "transfer_persistence_failed",
+          "The original transfer persistence failure remains unresolved.",
+          { transferId: entry.record.transferId },
+        );
       const row = this.#refresh(entry);
       const status: TransferTerminalStatus =
         entry.stop?.kind === "cancel"
@@ -665,8 +684,13 @@ export class TransferServices extends EventEmitter {
       this.#entries.delete(row.transferId);
       this.#changed(entry);
     };
-    entry.settling = settle();
-    return entry.settling;
+    const attempt = settle();
+    entry.settling = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (entry.settling === attempt) entry.settling = undefined;
+    }
   }
   async #prepare(
     entry: Entry,
@@ -881,19 +905,25 @@ export class TransferServices extends EventEmitter {
     let entry: Entry | undefined;
     const value: ManagedResource = {
       closed: closure.promise,
-      dispose: () => {
+      dispose: async () => {
         stopped.abort(
           new AgentError(
             "transfer_cancelled",
             "The owning resource requested cancellation.",
           ),
         );
-        if (entry)
+        if (entry) {
           this.#requestStop(entry, {
             kind: "cancel",
             code: "transfer_cancelled",
           });
-        else closure.resolve();
+          await this.#settle(entry);
+          requireCondition(
+            entry.ioCleanupConfirmed && entry.channelClosed,
+            "transfer_cleanup_unconfirmed",
+            "Transfer cleanup is still unconfirmed.",
+          );
+        } else closure.resolve();
       },
     };
     const service = this.#instance.bind({
@@ -924,7 +954,8 @@ export class TransferServices extends EventEmitter {
         preparing: Promise.resolve(),
         published: false,
         fileCommitted: false,
-        cleanupConfirmed: true,
+        ioCleanupConfirmed: true,
+        channelClosed: false,
       };
       this.#entries.set(record.transferId, entry);
       ref.signal.addEventListener(
@@ -942,7 +973,7 @@ export class TransferServices extends EventEmitter {
       await entry.preparing;
     } catch (cause) {
       if (entry && !entry.published) {
-        entry.failure = safeError(cause);
+        entry.failure ??= safeError(cause);
         this.#requestStop(entry, {
           kind: "failure",
           code: String(entry.failure.code),
@@ -1269,7 +1300,9 @@ export class TransferServices extends EventEmitter {
     try {
       this.#claimCurrent(entry, scope);
       requireCondition(
-        entry.record.direction === "upload" ? "upload" in io : "download" in io,
+        (entry.record.direction === "upload"
+          ? "upload" in io
+          : "download" in io) && types.isPromise(io.closed),
         "invalid_transfer_channel",
         "The actual binary endpoint must match the channel direction.",
       );
@@ -1289,6 +1322,9 @@ export class TransferServices extends EventEmitter {
       throw cause;
     }
     reservation.consumed = true;
+    // The native transport can reject before file processing reaches its close
+    // await. Observe now without replacing or losing that later outcome.
+    void Promise.prototype.then.call(io.closed, undefined, () => {});
     clearTimeout(reservation.timer);
     clearTimeout(entry.claimTimer);
     this.offers.forget(entry.record.transferId, "consumed");
@@ -1355,7 +1391,7 @@ export class TransferServices extends EventEmitter {
         if (cause instanceof TransferIoError) {
           entry.fileCommitted ||= cause.fileCommitted;
           entry.file ??= cause.file;
-          entry.cleanupConfirmed &&= cause.cleanupConfirmed;
+          entry.ioCleanupConfirmed &&= cause.cleanupConfirmed;
           if (entry.fileCommitted) {
             try {
               const row = this.#refresh(entry);
@@ -1375,7 +1411,13 @@ export class TransferServices extends EventEmitter {
             }
           }
         }
-        entry.failure = safeError(cause);
+        if (
+          !(cause instanceof TransferIoError) &&
+          cause instanceof AgentError &&
+          cause.code === "transfer_cleanup_unconfirmed"
+        )
+          entry.ioCleanupConfirmed = false;
+        entry.failure ??= safeError(cause);
         this.#requestStop(entry, {
           kind: "failure",
           code: String(entry.failure.code),
@@ -1384,10 +1426,14 @@ export class TransferServices extends EventEmitter {
         // closure cannot be turned into a confirmed successful cleanup.
         try {
           await io.closed;
-        } catch {
-          entry.cleanupConfirmed = false;
+        } catch (cause) {
+          if (!(
+            cause instanceof TransferIoError && cause.cleanupConfirmed === true
+          ))
+            entry.ioCleanupConfirmed = false;
         }
       } finally {
+        clearTimeout(entry.activeTimer);
         this.#changed(entry);
       }
     })();
@@ -1397,8 +1443,6 @@ export class TransferServices extends EventEmitter {
     } catch (cause) {
       this.#fault(entry, cause);
       throw cause;
-    } finally {
-      if (entry.cleanupConfirmed) this.#release(reservation);
     }
     return this.#snapshot(this.#refresh(entry));
   }

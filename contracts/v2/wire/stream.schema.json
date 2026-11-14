@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/wire/stream.schema.json",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "profile": {
+      "enum": ["development", "production"]
+    },
+    "bootId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "cloudEnvironment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "connectionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "streamId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "purpose": {
+      "enum": [
+        "resource",
+        "attachment",
+        "transfer",
+        "host-request",
+        "host-response",
+        "result-meta",
+        "maintenance"
+      ]
+    },
+    "direction": {
+      "enum": ["agent-to-cloud", "cloud-to-agent"]
+    },
+    "transferId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "reservationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "required": [
+    "agentId",
+    "profile",
+    "bootId",
+    "cloudEnvironment",
+    "connectionId",
+    "streamId",
+    "purpose",
+    "direction"
+  ],
+  "additionalProperties": false,
+  "dependentRequired": {
+    "transferId": ["reservationId"],
+    "reservationId": ["transferId"]
+  }
+}

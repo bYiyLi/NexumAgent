@@ -1,0 +1,802 @@
+[
+  {
+    "method": "tabs.list",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "tabs.get",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "tabs.new",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "tabs.selected",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "tabs.select",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "tab.title",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.url",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.close",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.goBack",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.forward",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.reload",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.navigate",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "user.openTabs",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "user.claimTab",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "browsers.history",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "browsers.nameSession",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "visibility.get",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "visibility.set",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.windows.list",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.windows.getAll",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.windows.create",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.windows.update",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabs.query",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.tabs.get",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.tabs.move",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabs.update",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabs.group",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabs.ungroup",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabs.close",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabGroups.query",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.tabGroups.get",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.tabGroups.update",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.tabGroups.move",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.bookmarks.search",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.bookmarks.getTree",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "management.bookmarks.create",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.bookmarks.update",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.bookmarks.move",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.bookmarks.remove",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "management.getAuditTrail",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "locator.count",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.allTextContents",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.textContent",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.innerText",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.isVisible",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.isEnabled",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.getAttribute",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.all",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.fill",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.selectOption",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "playwright.domSnapshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "dom.getVisibleTree",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.frame",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.snapshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "frame.snapshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "playwright.elementInfo",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "dom.fill",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.fill",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "frame.fill",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.focus",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.selectOption",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.scroll",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dom.scroll",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.waitFor",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "frame.waitFor",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "clipboard.readText",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "clipboard.read",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "clipboard.write",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "clipboard.writeText",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.contentExport",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "user.getTabContext",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "playwright.waitForTimeout",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.waitFor",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "playwright.waitForURL",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "playwright.waitForLoadState",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.evaluate",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "playwright.evaluate",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.evaluate",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.evaluateAll",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cdp.send",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cdp.cursor",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "cdp.events",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "cdp.readEvents",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.screenshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "playwright.elementScreenshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "viewport.set",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "viewport.reset",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "tab.setViewport",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.resetViewport",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.doubleClick",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.move",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.scroll",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.type",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dom.type",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.keypress",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dom.keypress",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.keyboardDown",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.keyboardUp",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.press",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.press",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.type",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.pressSequentially",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "cua.drag",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.dblclick",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "frame.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dom.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dom.doubleClick",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.hover",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.check",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.uncheck",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "locator.setChecked",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.markHandoff",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.markDeliverable",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.getJsDialog",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "dialogs.accept",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dialogs.dismiss",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "dev.logs",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "waiters.arm",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "waiters.get",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "waiters.cancel",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.downloads",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "downloads.path",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "ax.snapshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "ax.get",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "ax.click",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.drag",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.scroll",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.pressKey",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.typeText",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.setValue",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.selectText",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.performSecondaryAction",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "ax.paste",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "webmcp.listTools",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "webmcp.fetchTools",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "webmcp.invokeTool",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.setFiles",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "fileChoosers.setFiles",
+    "needsTab": true,
+    "mutating": true
+  },
+  {
+    "method": "tab.resumeUserControl",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "pageAssets.list",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tabs.createTemporary",
+    "needsTab": false,
+    "mutating": true
+  },
+  {
+    "method": "tabs.closeTemporary",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "pageAssets.plan",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "pageAssets.download",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "pageAssets.bundle",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "content.plan",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "content.export",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "tab.exportFile",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "content.exportGsuite",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "content.exportYouTubeTranscript",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "cua.downloadMedia",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "dom.downloadMedia",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "locator.downloadMedia",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "capabilities.browserList",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "capabilities.browserGet",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
+    "method": "capabilities.tabList",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
+    "method": "capabilities.tabGet",
+    "needsTab": true,
+    "mutating": false
+  }
+]
