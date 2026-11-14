@@ -212,17 +212,18 @@ test("native descendant Locator and Frame query families retain their actual sco
   });
 });
 
-test("native direct file refs, download aliases and public waiter cancellation use original real identities", async (t) => {
+test("native direct file refs and waiter cancellation keep real identities while download aliases reject unproven local files", async (t) => {
   const f = await nativeFixture(t);
   const result = await f.run(
     select +
       `
     const snapshot=await tab.snapshot(),nodes=[];const visit=node=>{nodes.push(node);for(const child of node.children??[])visit(child);};visit(snapshot.root);const input=nodes.find(node=>node.role==='textbox'&&node.name==='Upload files');if(!input)throw Error('The native file ref was not observed');
     const attachedAction=await tab.setFiles(input.ref,[{name:'direct.txt',mimeType:'text/plain',data:new Uint8Array([78,65,84,73,86,69])}]);const attached=await tab.playwright.evaluate("async()=>{const file=document.querySelector('#upload').files[0];return {name:file.name,size:file.size,text:await file.text()};}");
-    const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole('link',{name:'Download native'}).click();const downloaded=await pending;const path=await downloaded.path();const records=await tab.downloads();const record=records.find(item=>item.url===context.input.base+'download');if(!record)throw Error('The actual download ID was not retained');const saved=await tab.saveDownload(record.id);
+    const reject=async action=>{try{await action();return null;}catch(error){return error.code;}};
+    const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole('link',{name:'Download native'}).click();const downloaded=await pending;const pathError=await reject(()=>downloaded.path());const records=await tab.downloads();const record=records.find(item=>item.url===context.input.base+'download');if(!record)throw Error('The actual download ID was not retained');const saveError=await reject(()=>tab.saveDownload(record.id));
     const target=attachedAction.target;
     const choosing=tab.playwright.waitForFileChooser();await tab.playwright.locator('#upload').click();const chooser=await choosing;await chooser.setFiles([{data:new Uint8Array([65]),name:'alias.txt'}]);const multiple=chooser.isMultiple();const wait=await browser.waiters.arm({target,event:'navigation',timeoutMs:5000});const cancelled=await browser.waiters.cancel({id:wait.id});let error;try{await browser.waiters.get({id:wait.id});}catch(cause){error=cause.code;}
-    return {attached,path,saved,record,multiple,cancelled,error};`,
+    return {attached,pathError,saveError,record,multiple,cancelled,error};`,
     { base: f.base },
   );
   const data = result.result.data;
@@ -231,9 +232,9 @@ test("native direct file refs, download aliases and public waiter cancellation u
     size: 6,
     text: "NATIVE",
   });
-  assert.deepEqual(readFileSync(data.path), f.downloadBytes);
-  assert.deepEqual(readFileSync(data.saved.path), f.downloadBytes);
-  assert.equal(data.record.state, "complete");
+  assert.equal(data.pathError, "CAPABILITY_NOT_ALLOWED");
+  assert.equal(data.saveError, "CAPABILITY_NOT_ALLOWED");
+  assert.ok(["in_progress", "complete"].includes(data.record.state));
   assert.equal(data.multiple, true);
   assert.equal(data.cancelled.cancelled, true);
   assert.equal(data.error, "WAITER_GONE");

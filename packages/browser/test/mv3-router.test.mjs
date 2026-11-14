@@ -1068,7 +1068,7 @@ test("navigation waiter is armed before action, buffers early events, and get do
   );
 });
 
-test("filechooser readiness, early download events, native completion and cancellation preserve original identities", async (t) => {
+test("filechooser readiness, original download events and cancellation keep identity without guessing local files", async (t) => {
   const downloads = [
     {
       id: 12,
@@ -1125,17 +1125,19 @@ test("filechooser readiness, early download events, native completion and cancel
   f.chrome.downloads.onCreated.emit(downloads[0]);
   const started = await f.call("waiters.get", { id: download.id });
   assert.equal(started.downloadId, "download-guid");
-  let complete = false;
-  const path = f
-    .call("downloads.path", { downloadId: started.downloadId })
-    .then((value) => {
-      complete = true;
-      return value;
-    });
-  await delay(5);
-  assert.equal(complete, false);
+  await assert.rejects(
+    f.call("downloads.path", { downloadId: started.downloadId }),
+    { code: "CAPABILITY_NOT_ALLOWED" },
+  );
   downloads[0].state = "complete";
-  assert.equal(await path, "/tmp/actual-download");
+  await assert.rejects(
+    f.call("downloads.path", { downloadId: started.downloadId }),
+    { code: "CAPABILITY_NOT_ALLOWED" },
+  );
+  assert.equal(
+    f.calls.some((call) => call[0] === "downloads.search"),
+    false,
+  );
   const cancelled = await f.call("waiters.arm", {
     event: "download",
     timeoutMs: 1000,
@@ -1147,6 +1149,50 @@ test("filechooser readiness, early download events, native completion and cancel
   assert.deepEqual(await f.call("waiters.cancel", { id: cancelled.id }), {
     cancelled: true,
   });
+});
+
+test("a same-URL native download before or after an owned event never authorizes an unrelated local file", async (t) => {
+  for (const order of ["before", "after"]) {
+    const foreign = {
+      id: 91,
+      url: "https://example.com/private-export",
+      finalUrl: "https://example.com/private-export",
+      startTime: new Date().toISOString(),
+      filename: "/private/unrelated-user-export",
+      state: "complete",
+      exists: true,
+    };
+    const f = fixture(t, { nativeDownloads: [foreign] });
+    f.router.start();
+    f.router.bind(binding);
+    f.open("lease");
+    await f.call("cdp.send", { method: "Page.enable" });
+    if (order === "before") f.chrome.downloads.onCreated.emit(foreign);
+    f.chrome.debugger.onEvent.emit({ tabId: 1 }, "Page.downloadWillBegin", {
+      guid: "owned-original-guid",
+      url: foreign.url,
+      suggestedFilename: "private-export",
+    });
+    if (order === "after") f.chrome.downloads.onCreated.emit(foreign);
+    f.chrome.debugger.onEvent.emit({ tabId: 1 }, "Page.downloadProgress", {
+      guid: "owned-original-guid",
+      state: "completed",
+      receivedBytes: 123,
+      totalBytes: 123,
+    });
+    const rows = await f.call("tab.downloads");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "owned-original-guid");
+    assert.equal(rows[0].state, "complete");
+    assert.equal(Object.hasOwn(rows[0], "filename"), false);
+    await assert.rejects(f.call("downloads.path", { downloadId: rows[0].id }), {
+      code: "CAPABILITY_NOT_ALLOWED",
+    });
+    assert.equal(
+      f.calls.some((call) => call[0] === "downloads.search"),
+      false,
+    );
+  }
 });
 
 test("attachment intent is committed before native attach and worker recovery detaches only journaled native controls", async (t) => {

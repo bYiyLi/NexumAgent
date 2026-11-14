@@ -1510,7 +1510,6 @@ export function createBrowserRouter(
     auditEntries = [],
     waiters = new Map(),
     downloadRecords = new Map(),
-    nativeDownloads = new Map(),
     webMcpPending = new Map(),
     webMcpEarly = new Map();
   let eventSequence = 0,
@@ -1702,33 +1701,6 @@ export function createBrowserRouter(
           pageVersion: version(details.tabId),
         });
   };
-  const bindNativeDownloads = () => {
-    for (const value of downloadRecords.values()) {
-      if (value.nativeId !== undefined || value.ambiguous) continue;
-      const matches = [...nativeDownloads.values()].filter(
-        (item) =>
-          (item.url === value.url || item.finalUrl === value.url) &&
-          Math.abs(Date.parse(item.startTime) - value.startedAt) <= 5000 &&
-          ![...downloadRecords.values()].some(
-            (other) => other !== value && other.nativeId === item.id,
-          ),
-      );
-      if (matches.length > 1) value.ambiguous = true;
-      if (matches.length === 1) {
-        const competitors = [...downloadRecords.values()].filter(
-          (other) =>
-            other !== value &&
-            other.nativeId === undefined &&
-            other.url === value.url &&
-            Math.abs(other.startedAt - value.startedAt) <= 5000,
-        );
-        if (competitors.length) {
-          value.ambiguous = true;
-          for (const other of competitors) other.ambiguous = true;
-        } else value.nativeId = matches[0].id;
-      }
-    }
-  };
   const ownedSnapshot = () =>
     [...leases.values()].flatMap((lease) =>
       [
@@ -1908,29 +1880,6 @@ export function createBrowserRouter(
       on(chrome.webNavigation?.onCompleted, (details) =>
         finishNavigation(details, "load"),
       );
-      on(chrome.downloads?.onCreated, (item) => {
-        nativeDownloads.set(item.id, item);
-        while (nativeDownloads.size > 1024)
-          nativeDownloads.delete(nativeDownloads.keys().next().value);
-        bindNativeDownloads();
-      });
-      on(chrome.downloads?.onChanged, (change) => {
-        const item = nativeDownloads.get(change.id);
-        if (item) {
-          for (const key of [
-            "state",
-            "error",
-            "bytesReceived",
-            "totalBytes",
-            "filename",
-            "exists",
-            "endTime",
-            "finalUrl",
-          ])
-            if (change[key]?.current !== undefined)
-              item[key] = change[key].current;
-        }
-      });
       on(chrome.tabs.onRemoved, (id) => {
         versions.set(String(id), version(id) + 1);
         dialogs.delete(String(id));
@@ -2125,7 +2074,6 @@ export function createBrowserRouter(
           downloadRecords.set(value.id, value);
           while (downloadRecords.size > 1024)
             downloadRecords.delete(downloadRecords.keys().next().value);
-          bindNativeDownloads();
           for (const waiter of waiters.values())
             if (
               !waiter.settled &&
@@ -4740,39 +4688,14 @@ export function createBrowserRouter(
         "FILE_UNAVAILABLE",
         "The original download is not owned by this run target.",
       );
-      let filename;
-      await router.poll(ctx, async () => {
-        bindNativeDownloads();
-        requireValue(
-          !value.ambiguous,
-          "AMBIGUOUS_TARGET",
-          "Multiple native downloads match this original browser event.",
-        );
-        if (value.nativeId === undefined) return false;
-        const results = await chrome.downloads.search({ id: value.nativeId });
-        requireValue(
-          results.length === 1,
-          "FILE_UNAVAILABLE",
-          "The native download no longer exists.",
-        );
-        const item = results[0];
-        requireValue(
-          item.state !== "interrupted",
-          "FILE_UNAVAILABLE",
-          "The native download was interrupted.",
-        );
-        if (item.state !== "complete") return false;
-        requireValue(
-          item.exists !== false &&
-            typeof item.filename === "string" &&
-            item.filename.length > 0,
-          "FILE_UNAVAILABLE",
-          "The completed download has no available browser-local file.",
-        );
-        filename = item.filename;
-        return true;
-      });
-      return filename;
+      // Page's GUID proves the original target; downloads.search exposes a
+      // different integer ID without that GUID. URL/time/name matching cannot
+      // authorize a local file, including a single currently visible match.
+      // Do not read an unrelated user's download or refetch the original URL.
+      throw new BrowserActionError(
+        "CAPABILITY_NOT_ALLOWED",
+        "This browser transport cannot prove the original download's local file identity.",
+      );
     },
     async recoverOwnedControls(records) {
       requireValue(

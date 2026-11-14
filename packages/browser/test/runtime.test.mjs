@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,7 +13,6 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import WebSocket from "ws";
@@ -571,28 +571,24 @@ test("AX state plus actual JPEG bytes cross Registry and the real Core result pi
   assert.equal(f.attached.size, 0);
 });
 
-test("a ready native download is copied into authorized fixed files and an explicit destination before ordinary SDK results return", async (t) => {
+test("repeated original download waiters stay usable while Core never copies a file identified only by URL and time", async (t) => {
   const f = await fixture(t, { nativeDownloads: true });
   const result = await f.start(
     select +
-      'let download;for(let i=0;i<38;i++){const pending=tab.playwright.waitForEvent("download");await tab.cdp.send("Page.navigate",{url:"https://fixture.test/file"});download=await pending;}const savedPath=await download.path();const downloads=await tab.downloads();const artifact=await tab.saveDownload(downloads[0].id,"copied.txt");return {savedPath,artifact};',
+      'let download;for(let i=0;i<38;i++){const pending=tab.playwright.waitForEvent("download");await tab.cdp.send("Page.navigate",{url:"https://fixture.test/file"});download=await pending;}const reject=async action=>{try{await action();return null;}catch(error){return error.code;}};const pathError=await reject(()=>download.path());const downloads=await tab.downloads();const saveError=await reject(()=>tab.saveDownload(downloads[0].id,"copied.txt"));return {pathError,saveError,downloadId:downloads[0].id};',
   );
   assert.equal(
     result.run.status,
     "succeeded",
     JSON.stringify(result.run.error),
   );
-  const { savedPath, artifact } = result.result.data;
-  assert.notEqual(savedPath, f.downloadSource);
-  assert.ok(savedPath.startsWith(path.join(f.work, "tmp", "browser")));
-  assert.deepEqual(readFileSync(savedPath), f.downloadBytes);
-  assert.equal(artifact.path, path.join(f.work, "copied.txt"));
-  assert.equal(artifact.size, f.downloadBytes.length);
-  assert.equal(
-    artifact.sha256,
-    createHash("sha256").update(f.downloadBytes).digest("hex"),
-  );
-  assert.deepEqual(readFileSync(artifact.path), f.downloadBytes);
+  assert.deepEqual(result.result.data, {
+    pathError: "CAPABILITY_NOT_ALLOWED",
+    saveError: "CAPABILITY_NOT_ALLOWED",
+    downloadId: "download-fixture",
+  });
+  assert.equal(existsSync(path.join(f.work, "copied.txt")), false);
+  assert.deepEqual(readFileSync(f.downloadSource), f.downloadBytes);
   assert.equal(f.attached.size, 0);
 });
 

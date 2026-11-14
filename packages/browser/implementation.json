@@ -1655,7 +1655,7 @@
     },
     "core": {
       "test": "test/runtime.test.mjs",
-      "scope": "实际Core PackageLoader/Registry/SQLite/RunEngine五类贡献、运行资源、争用、取消、真实native-fixture detach、AX混合MCP图片、38次等待器、固定下载与排队期限",
+      "scope": "实际Core PackageLoader/Registry/SQLite/RunEngine五类贡献、运行资源、争用、取消、真实native-fixture detach、AX混合MCP图片、38次等待器、拒绝未确证下载文件及排队期限",
       "fixtureCases": 8
     },
     "mv3": {
@@ -1670,6 +1670,7 @@
     }
   },
   "remaining": [
+    "原始浏览器下载GUID与本机文件的可靠身份绑定；当前MV3的path/saveDownload明确不可用，不能按URL/时间猜测或计为正向验收通过",
     "真实Chrome与Edge、macOS/Linux/Windows插件加载和用户环境接入",
     "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
     "高阶资产、导出、用户接管、可视化等尚未接线的受管方法",
