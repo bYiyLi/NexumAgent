@@ -395,7 +395,8 @@
       "id": "B041",
       "target": "tab.screenshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-screenshot-pixels"]
     },
     {
       "id": "B042",
@@ -1707,6 +1708,11 @@
     "正式公共协议包、npm/browser制品发行与端到端Host媒体交付"
   ],
   "nativeScenarios": {
+    "native-screenshot-pixels": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native screenshot maxEdgePx bounds physical JPEG pixels at multiple device scales",
+      "coverage": ["normal", "result", "pixel_dimensions"]
+    },
     "native-organization-state": {
       "file": "test/native-client.acceptance.mjs",
       "test": "native window/tab/group/bookmark management exposes and changes actual isolated browser state",

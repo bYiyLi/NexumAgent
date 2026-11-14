@@ -234,7 +234,11 @@ function fixture(t, config = {}) {
                   ? [{ kind: "ref", ref: "actual-ref", pageVersion: 1 }]
                   : input.args[0].command === "count"
                     ? 3
-                    : null,
+                    : input.args[0].command === "devicePixelRatio"
+                      ? Object.hasOwn(config, "devicePixelRatio")
+                        ? config.devicePixelRatio
+                        : 1
+                      : null,
             },
           },
         ];
@@ -1246,6 +1250,61 @@ test("native screenshot defaults produce byte results, locator collections prese
   );
 });
 
+test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
+  for (const pixelRatio of [0.5, 1, 1.25, 2]) {
+    const f = fixture(t, { devicePixelRatio: pixelRatio });
+    f.router.start();
+    f.router.bind(binding);
+    f.open("lease");
+    await f.call("tab.screenshot", {
+      options: {
+        clip: { x: 0, y: 0, width: 80, height: 60 },
+        maxEdgePx: 120,
+      },
+    });
+    const capture = f.calls.find(
+      (v) =>
+        v[0] === "debugger.sendCommand" && v[2] === "Page.captureScreenshot",
+    )[3];
+    assert.equal(capture.clip.scale, Math.min(1, 120 / (80 * pixelRatio)));
+    const nativeScale = f.calls.find(
+      (v) =>
+        v[0] === "scripting.executeScript" &&
+        v[1].args[0].command === "devicePixelRatio",
+    )[1];
+    assert.equal(nativeScale.world, "ISOLATED");
+  }
+});
+
+test("screenshot pixel preflight accounts for density before native capture", async (t) => {
+  for (const [pixelRatio, width, expected] of [
+    [2, 6000, "OUTPUT_TOO_LARGE"],
+    [0.5, 12000, null],
+    [0, 80, "INVALID_TARGET"],
+    [NaN, 80, "INVALID_TARGET"],
+  ]) {
+    const f = fixture(t, { devicePixelRatio: pixelRatio });
+    f.router.start();
+    f.router.bind(binding);
+    f.open("lease");
+    const capture = f.call("tab.screenshot", {
+      options: {
+        clip: { x: 0, y: 0, width, height: width },
+        maxEdgePx: 16384,
+      },
+    });
+    if (expected) await assert.rejects(capture, { code: expected });
+    else await capture;
+    assert.equal(
+      f.calls.some(
+        (v) =>
+          v[0] === "debugger.sendCommand" && v[2] === "Page.captureScreenshot",
+      ),
+      expected === null,
+    );
+  }
+});
+
 test("binary data crosses exact subviews with bounded chunks, validates hash and rejects out-of-order or unrelated streams", async () => {
   const binding = {
     actionId: "action",
@@ -1919,9 +1978,12 @@ test("native AX indices retain the exact backend node and document and never reb
   assert.ok(
     replacement.nodes.find((node) => node.name === "Save").index > index,
   );
-  assert.equal(
-    f.calls.some((value) => value[0] === "scripting.executeScript"),
-    false,
+  assert.deepEqual(
+    f.calls
+      .filter((value) => value[0] === "scripting.executeScript")
+      .map((value) => value[1].args[0].command),
+    ["devicePixelRatio"],
+    "Only screenshot density is read in the isolated world; AX actions retain native node identity.",
   );
 });
 

@@ -10,6 +10,48 @@ const html = `<!doctype html><html><head><title>Nexum native capabilities</title
 const dimensions = `() => ({width:innerWidth,height:innerHeight})`;
 
 test(
+  "native screenshot maxEdgePx bounds physical JPEG pixels at multiple device scales",
+  { timeout: 60000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: "<!doctype html><title>Owned screenshot bounds</title><style>html,body{margin:0}body{height:2400px;background:linear-gradient(#acf,#fa9)}</style><h1>Owned native screenshots</h1>",
+    });
+    const result = await f.run(
+      select +
+        `
+const facts=[];
+for(const dpr of [1,2,1.25]){
+  await tab.cdp.send('Emulation.setDeviceMetricsOverride',{width:800,height:600,deviceScaleFactor:dpr,mobile:false});
+  // MAIN can spoof this property; the screenshot must use the native isolated world.
+  await tab.playwright.evaluate('() => {Object.defineProperty(window,"devicePixelRatio",{value:99,configurable:true});return true;}');
+  for(const options of [{maxEdgePx:120,quality:0},{fullPage:true,maxEdgePx:120},{clip:{x:0,y:0,width:80,height:60},maxEdgePx:120,quality:100}]){
+    const bytes=await tab.screenshot(options);
+    const dimensions=await tab.playwright.evaluate('async data => {const image=await createImageBitmap(new Blob([new Uint8Array(data)],{type:"image/jpeg"}));const value={width:image.width,height:image.height};image.close();return value;}',Array.from(bytes));
+    facts.push({dpr,options,dimensions,byteLength:bytes.byteLength});
+  }
+}
+return {facts};`,
+      { base: f.base },
+    );
+    const facts = result.result.data.facts;
+    t.diagnostic(JSON.stringify({ facts }));
+    assert.equal(facts.length, 9);
+    for (const fact of facts) {
+      assert.ok(fact.byteLength > 0);
+      assert.ok(fact.dimensions.width > 0 && fact.dimensions.height > 0);
+      assert.ok(
+        Math.max(fact.dimensions.width, fact.dimensions.height) <=
+          fact.options.maxEdgePx,
+        JSON.stringify(fact),
+      );
+      if (fact.options.clip)
+        assert.equal(fact.dimensions.width, Math.min(120, 80 * fact.dpr));
+    }
+    assert.deepEqual(result.run.cleanup.unconfirmed, []);
+  },
+);
+
+test(
   "native run cancellation and expiry close a held browser network request before releasing its lease",
   { timeout: 60000 },
   async (t) => {

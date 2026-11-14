@@ -343,6 +343,13 @@ async function fixture(
       },
     },
   };
+  chrome.scripting = {
+    async executeScript(input) {
+      assert.equal(input.world, "ISOLATED");
+      assert.equal(input.args[0].command, "devicePixelRatio");
+      return [{ frameId: 0, result: { ok: true, value: 1 } }];
+    },
+  };
   chrome.downloads = {
     onCreated: event(),
     onChanged: event(),

@@ -4164,9 +4164,25 @@ export function createBrowserRouter(
           clip.width > 0 &&
           clip.height > 0,
       );
-      const scale = Math.min(1, maxEdgePx / Math.max(clip.width, clip.height));
+      // Read the native scale in our isolated world: the page's main world can
+      // replace window.devicePixelRatio. CDP clip sizes are CSS pixels, while
+      // the limit and decoded-pixel budget apply to the resulting image.
+      const pixelRatio = await router.page(ctx, {
+        command: "devicePixelRatio",
+      });
       requireValue(
-        clip.width * clip.height * scale * scale <= 40000000,
+        Number.isFinite(pixelRatio) && pixelRatio > 0,
+        "INVALID_TARGET",
+        "The native screenshot pixel scale is unavailable.",
+      );
+      const scale = Math.min(
+        1,
+        maxEdgePx / (Math.max(clip.width, clip.height) * pixelRatio),
+      );
+      requireValue(
+        Math.ceil(clip.width * pixelRatio * scale) *
+          Math.ceil(clip.height * pixelRatio * scale) <=
+          40000000,
         "OUTPUT_TOO_LARGE",
         "The screenshot exceeds its decoded-pixel budget.",
       );

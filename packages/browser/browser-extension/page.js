@@ -417,6 +417,9 @@ export async function pageCommand(input) {
       case "readyState":
         value = document.readyState;
         break;
+      case "devicePixelRatio":
+        value = globalThis.devicePixelRatio;
+        break;
       case "mediaSource": {
         let node =
           input.locator || input.ref || input.nodeId
