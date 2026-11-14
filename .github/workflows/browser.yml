@@ -39,7 +39,7 @@ jobs:
             packages/browser/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-extension-api.mjs
-      - run: pnpm --dir packages/browser install --frozen-lockfile
+      - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - run: pnpm --dir packages/browser check
       - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
       - uses: actions/upload-artifact@v4

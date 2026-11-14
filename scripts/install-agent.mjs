@@ -57,11 +57,13 @@ function native(file, args, maxBuffer = 32 * 1024 * 1024) {
   );
   return result.stdout;
 }
-async function directory(filename) {
-  try {
-    await mkdir(filename, { mode: 0o700 });
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
+async function directory(filename, create = true) {
+  if (create) {
+    try {
+      await mkdir(filename, { mode: 0o700 });
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
   }
   const info = await lstat(filename);
   assert(
@@ -255,7 +257,14 @@ export async function verifyArchive({
       "The archive signature does not match the independently trusted publisher key.",
     );
     // Verify the complete archive before invoking its Node or extracting any file.
-    const tar = process.platform === "win32" ? "tar.exe" : "tar";
+    const tar =
+      process.platform === "win32"
+        ? path.join(
+            process.env.SystemRoot || "C:\\Windows",
+            "System32",
+            "tar.exe",
+          )
+        : "tar";
     const listed = native(tar, ["-tzf", archive]);
     assert(
       listed
@@ -410,20 +419,26 @@ export async function installAgent(options) {
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
-      if (exists) await verifyExtracted(destination, checked.manifest);
-      else {
+      if (exists) {
+        await directory(destination, false);
+        await verifyExtracted(destination, checked.manifest);
+      } else {
         staging = path.join(
           root,
           "program",
           `.install-${process.pid}-${checked.sha256.slice(0, 12)}`,
         );
         await mkdir(staging, { mode: 0o700 });
-        native(process.platform === "win32" ? "tar.exe" : "tar", [
-          "-xzf",
-          checked.archive,
-          "-C",
-          staging,
-        ]);
+        native(
+          process.platform === "win32"
+            ? path.join(
+                process.env.SystemRoot || "C:\\Windows",
+                "System32",
+                "tar.exe",
+              )
+            : "tar",
+          ["-xzf", checked.archive, "-C", staging],
+        );
         await verifyExtracted(staging, checked.manifest);
         await writeFile(
           path.join(staging, ".installation.json"),
@@ -528,8 +543,10 @@ export async function cleanupPrograms({ profile, home = homedir() } = {}) {
       profile === "development" ? ".nexum-dev" : ".nexum",
     ),
     program = path.join(root, "program");
-  const versions = path.join(program, "versions"),
-    lock = await open(path.join(program, "install.lock"), "wx", 0o600),
+  const versions = path.join(program, "versions");
+  for (const directoryPath of [home, root, program, versions])
+    await directory(directoryPath, false);
+  const lock = await open(path.join(program, "install.lock"), "wx", 0o600),
     removed = [],
     retained = [];
   try {

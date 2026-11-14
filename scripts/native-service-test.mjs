@@ -245,6 +245,30 @@ try {
   console.error(
     JSON.stringify({ stage: "native-failed", message: error.message, status }),
   );
+  if (plan && process.platform === "linux") {
+    // This runner-only fixture owns its unique unit and never receives private
+    // configuration. Keep its native failure evidence in CI, not product logs.
+    for (const [file, args] of [
+      [
+        "systemctl",
+        [
+          "--user",
+          "--no-pager",
+          "show",
+          plan.label,
+          "--property=LoadState,ActiveState,Result,ExecMainCode,ExecMainStatus,FragmentPath",
+        ],
+      ],
+      [
+        "journalctl",
+        ["--user", "--unit", plan.label, "--no-pager", "--lines=20"],
+      ],
+    ]) {
+      const diagnostic = run(file, args, true);
+      console.error(diagnostic.stdout);
+      console.error(diagnostic.stderr);
+    }
+  }
   throw error;
 } finally {
   const failures = [];

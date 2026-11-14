@@ -63,6 +63,15 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.match(plan.content, /SuccessfulExit<\/key><false\/>/);
       assert.match(plan.content, /&amp;/);
       assert.match(plan.content, /NODE_OPTIONS/);
+      assert.match(
+        plan.content,
+        /StandardOutPath<\/key><string>\/dev\/null<\/string>/,
+      );
+      assert.match(
+        plan.content,
+        /StandardErrorPath<\/key><string>\/dev\/null<\/string>/,
+      );
+      assert.doesNotMatch(plan.content, /service\.(?:stdout|stderr)\.log/);
     }
     if (platform === "linux") {
       assert.match(plan.content, /Restart=on-failure/);
@@ -150,7 +159,7 @@ test(
         process.env.SystemRoot,
         "System32/WindowsPowerShell/v1.0/powershell.exe",
       ),
-      ["-NoProfile", "-NonInteractive", "-Command", script, plan.manifestPath],
+      ["-NoProfile", "-NonInteractive", "-Command", script],
       { encoding: "utf8" },
     );
     assert.equal(result.status, 0, result.stderr);

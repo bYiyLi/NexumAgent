@@ -214,6 +214,56 @@ test(
       config: undefined,
     });
     assert.notEqual(updated.programDir, installed.programDir);
+    const linkType = process.platform === "win32" ? "junction" : "dir",
+      linkedVersionHome = path.join(root, "linked-version-home"),
+      linkedVersions = path.join(
+        linkedVersionHome,
+        ".nexum-dev/program/versions",
+      );
+    await mkdir(linkedVersions, { recursive: true });
+    await symlink(
+      updated.programDir,
+      path.join(linkedVersions, second.sha256),
+      linkType,
+    );
+    await assert.rejects(
+      installAgent(optionsFor(second, keys, linkedVersionHome)),
+      /canonical/,
+    );
+    await assert.rejects(
+      readFile(path.join(linkedVersionHome, ".nexum-dev/program/active.json")),
+      { code: "ENOENT" },
+    );
+    // Every cleanup ancestor must be checked before opening a lock or removing
+    // an authentic older program through a redirected profile path.
+    for (const ancestor of ["home", "profile", "program", "versions"]) {
+      const redirected = path.join(root, "cleanup-link-" + ancestor);
+      if (ancestor === "home") await symlink(home, redirected, linkType);
+      else {
+        const relative = {
+            profile: ".nexum-dev",
+            program: ".nexum-dev/program",
+            versions: ".nexum-dev/program/versions",
+          }[ancestor],
+          link = path.join(redirected, relative);
+        await mkdir(path.dirname(link), { recursive: true });
+        await symlink(path.join(home, relative), link, linkType);
+        if (ancestor === "versions")
+          await cp(
+            path.join(home, ".nexum-dev/program/active.json"),
+            path.join(redirected, ".nexum-dev/program/active.json"),
+          );
+      }
+      await assert.rejects(
+        cleanupPrograms({ profile: "development", home: redirected }),
+        /canonical/,
+      );
+      assert.equal((await lstat(installed.programDir)).isDirectory(), true);
+      await assert.rejects(
+        lstat(path.join(home, ".nexum-dev/program/install.lock")),
+        { code: "ENOENT" },
+      );
+    }
     const cleaned = await cleanupPrograms({ profile: "development", home });
     assert.deepEqual(cleaned.removed, [first.sha256]);
     assert.equal((await lstat(updated.programDir)).isDirectory(), true);

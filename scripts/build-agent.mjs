@@ -290,7 +290,13 @@ export async function buildAgent({
       if (error.code !== "ENOENT") throw error;
     }
     run(
-      process.platform === "win32" ? "tar.exe" : "tar",
+      process.platform === "win32"
+        ? path.join(
+            process.env.SystemRoot || "C:\\Windows",
+            "System32",
+            "tar.exe",
+          )
+        : "tar",
       ["-czf", archive, "-C", temporary, "."],
       root,
     );
