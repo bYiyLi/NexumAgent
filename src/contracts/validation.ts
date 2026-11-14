@@ -87,12 +87,79 @@ function assertValid(validate: ValidateFunction, value: unknown): void {
       "invalid_arguments",
       "The arguments do not match the declared schema.",
       {
-        errors: (validate.errors ?? [])
-          .slice(0, 10)
-          .map((error) => ({
-            path: error.instancePath,
-            keyword: error.keyword,
-          })),
+        errors: (validate.errors ?? []).slice(0, 10).map((error) => ({
+          path: error.instancePath,
+          keyword: error.keyword,
+        })),
       },
     );
+}
+
+export type SchemaDialect = "draft7" | "2020-12";
+export function compileMethodSchema(
+  schema: unknown,
+  dialect?: SchemaDialect,
+  references: readonly unknown[] = [],
+): (value: unknown) => void {
+  canonicalJson({ schema, references });
+  const declared =
+    schema && typeof schema === "object"
+      ? (schema as Record<string, unknown>).$schema
+      : undefined;
+  const identified =
+    declared === undefined
+      ? undefined
+      : declared === "http://json-schema.org/draft-07/schema#" ||
+          declared === "http://json-schema.org/draft-07/schema"
+        ? "draft7"
+        : declared === "https://json-schema.org/draft/2020-12/schema" ||
+            declared === "https://json-schema.org/draft/2020-12/schema#"
+          ? "2020-12"
+          : null;
+  requireCondition(
+    identified !== null &&
+      (!dialect || dialect === "draft7" || dialect === "2020-12") &&
+      (!identified || !dialect || identified === dialect) &&
+      (identified || dialect),
+    "unsupported_schema_dialect",
+    "A method must identify a supported schema dialect without changing its source semantics.",
+  );
+  let validate: ValidateFunction;
+  try {
+    const compiler =
+      (identified ?? dialect) === "2020-12"
+        ? new Ajv2020(options)
+        : new Ajv(options);
+    addFormats(compiler);
+    for (const reference of references)
+      compiler.addSchema(reference as AnySchema);
+    requireCondition(
+      compiler.validateSchema(schema as AnySchema),
+      "invalid_sdk_schema",
+      "The method schema is invalid.",
+    );
+    validate = compiler.compile(schema as AnySchema);
+  } catch (cause) {
+    throw new AgentError(
+      "invalid_sdk_schema",
+      "The method schema or its declared references cannot be compiled.",
+      undefined,
+      { cause },
+    );
+  }
+  return (value: unknown) => {
+    // Native Buffer/Uint8Array and declared opaque parameters reach the actual
+    // validator unchanged. Their type/size checks belong before handler effects.
+    try {
+      assertValid(validate, value);
+    } catch (cause) {
+      if (cause instanceof AgentError) throw cause;
+      throw new AgentError(
+        "invalid_arguments",
+        "The method arguments could not be checked against their declared schema.",
+        undefined,
+        { cause },
+      );
+    }
+  };
 }

@@ -20,6 +20,14 @@ const binding = {
   profile: "development",
   cloudEnvironment: "cloud_test",
 };
+const sdkOrigin = {
+  type: "extension",
+  owner: "@test/operations",
+  namespace: "calls",
+  version: "1",
+  revision: "source",
+  unrelatedSecret: "not-for-operation-history",
+};
 function setup(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-store-")),
@@ -513,5 +521,50 @@ test("Agent restart interrupts old work without replay, keeps dedup/history, and
     );
   } finally {
     restarted.close();
+  }
+});
+
+test("ordinary SDK operations guard run completion, preserve terminal outcomes and recover only as interrupted metadata", (t) => {
+  const { store, work, root } = setup(t);
+  let run = accept(store, work);
+  run = store.transitionRun(run.runId, run.revision, "preparing_inputs");
+  const operation = store.startOperation(run.runId, sdkOrigin, "prepare");
+  assert.equal(operation.callerKey, "caller");
+  assert.doesNotMatch(
+    JSON.stringify(operation),
+    /unrelatedSecret|not-for-operation-history/,
+  );
+  assert.throws(() => store.transitionRun(run.runId, run.revision, "failed"), {
+    code: "run_operations_pending",
+  });
+  assert.throws(() => store.finishOperation(operation.operationId, "running"), {
+    code: "invalid_operation_outcome",
+  });
+  const failed = store.finishOperation(operation.operationId, "failed", {
+    code: "test_failure",
+  });
+  assert.throws(() => store.finishOperation(failed.operationId, "succeeded"), {
+    code: "operation_state_conflict",
+  });
+  const pending = store.startOperation(run.runId, sdkOrigin, "waiting");
+  store.close();
+  const reopened = new SqliteStore(root, binding);
+  try {
+    assert.equal(
+      reopened.getOperation(pending.operationId).status,
+      "interrupted",
+    );
+    assert.equal(
+      reopened.getOperation(pending.operationId).error.code,
+      "agent_restarted",
+    );
+    assert.equal(reopened.getOperation(failed.operationId).status, "failed");
+    assert.equal(reopened.getRun(run.runId).status, "interrupted");
+    assert.throws(
+      () => reopened.finishOperation(pending.operationId, "succeeded"),
+      { code: "operation_state_conflict" },
+    );
+  } finally {
+    reopened.close();
   }
 });

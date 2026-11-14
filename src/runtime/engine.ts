@@ -9,6 +9,7 @@ import { canonicalJson, digest } from "../contracts/json.js";
 import type {
   JsonObject,
   JsonValue,
+  ContributionOrigin,
   RunRecord,
   WaitRecord,
   WorkRecord,
@@ -24,6 +25,7 @@ import { ScriptCatalog, scriptHeader, type ScriptSnapshot } from "./scripts.js";
 import { createHash } from "node:crypto";
 import { atomicText, contains, privateDirectory } from "./paths.js";
 import type { ResourceManager } from "../extensions/resources.js";
+import { RunOperations, type OperationHooks } from "./operations.js";
 import {
   authorizeCall,
   callerKey,
@@ -57,6 +59,13 @@ export interface RunServices {
   assertActive(): void;
   /** Existing operations keep current authority while root admission is closed. */
   assertCurrent(): void;
+  /** Trusted wrappers check script admission, normalize/validate and authorize before this core service. */
+  operation<T>(
+    origin: ContributionOrigin,
+    method: string,
+    action: (operationId: string) => T | Promise<T>,
+    hooks?: OperationHooks<T>,
+  ): T | Promise<T>;
   requestInput(request: InputRequest): Promise<JsonObject>;
 }
 export interface EngineOptions {
@@ -81,12 +90,14 @@ export interface EngineOptions {
   ): Promise<JsonObject[]>;
   capacity?: number;
   resources?: ResourceManager;
+  leaseScript?(origin: ContributionOrigin): () => void;
 }
 export interface RunView {
   run: RunRecord;
   wait: WaitRecord | null;
   result: JsonObject | null;
   unavailable?: JsonObject;
+  operations: { items: JsonObject[]; complete: boolean };
 }
 interface PendingWait {
   record: WaitRecord;
@@ -107,8 +118,10 @@ interface Scope {
   accepting: boolean;
   pending: PendingWait | null;
   deliveries: Set<Promise<void>>;
+  operations: RunOperations;
   timer?: NodeJS.Timeout;
   fatal?: AgentError;
+  logError?: unknown;
 }
 
 function failure(error: unknown, phase: string): JsonObject {
@@ -309,6 +322,13 @@ export class RunEngine extends EventEmitter {
       pending: null,
       deliveries: new Set<Promise<void>>(),
     } as Scope;
+    scope.operations = new RunOperations(
+      this.store,
+      run.runId,
+      () => this.#assertCurrent(scope),
+      (error) => this.#persistenceFailure(scope, error),
+      () => this.#publish(run.runId),
+    );
     scope.services = Object.freeze({
       runId: run.runId,
       signal: scope.controller.signal,
@@ -318,6 +338,12 @@ export class RunEngine extends EventEmitter {
       },
       assertActive: () => this.#assertActive(scope),
       assertCurrent: () => this.#assertCurrent(scope),
+      operation: <T>(
+        origin: ContributionOrigin,
+        method: string,
+        action: (operationId: string) => T | Promise<T>,
+        hooks?: OperationHooks<T>,
+      ) => scope.operations.start(origin, method, action, hooks),
       requestInput: (request: InputRequest) =>
         this.#requestInput(scope, request),
     });
@@ -394,9 +420,17 @@ export class RunEngine extends EventEmitter {
   #assertCurrent(scope: Scope): void {
     this.#checkDeadline(scope);
     scope.controller.signal.throwIfAborted();
+    const run = this.store.getRun(scope.runId);
+    requireCondition(
+      run.bootId === this.store.bootId &&
+        run.endedAt === null &&
+        run.stop === null,
+      "run_stopping",
+      "The originating run no longer admits operation continuations.",
+    );
     this.#authorize(scope.caller, {
       action: "operation",
-      run: this.store.getRun(scope.runId),
+      run,
     });
   }
   #stop(scope: Scope, reason: JsonObject): RunRecord {
@@ -430,6 +464,7 @@ export class RunEngine extends EventEmitter {
       directory = "";
     let result: JsonObject | undefined, error: JsonObject | undefined;
     let resultRef: string | undefined;
+    let releaseScript: (() => void) | undefined;
     const moduleUses = new Map<string, ModuleUse>();
     let modulesIncomplete = false;
     try {
@@ -509,6 +544,7 @@ export class RunEngine extends EventEmitter {
         origin: snapshot.origin,
       });
       this.#assertActive(scope);
+      releaseScript = this.#options.leaseScript?.(snapshot.origin);
       const codeRef = this.#relative(path.join(directory, "code.json"));
       const inputRef = this.#relative(path.join(directory, "input.json"));
       atomicText(path.join(directory, "code.json"), canonicalJson(snapshot));
@@ -594,7 +630,6 @@ export class RunEngine extends EventEmitter {
       );
       atomicText(logsFile, "");
       let log = "";
-      let logError: unknown;
       const stream = new Writable({
         write: (chunk, _encoding, done) => {
           try {
@@ -606,7 +641,7 @@ export class RunEngine extends EventEmitter {
             }
             done();
           } catch (error) {
-            logError = error;
+            scope.logError = error;
             done();
           }
         },
@@ -618,6 +653,7 @@ export class RunEngine extends EventEmitter {
         ignoreErrors: false,
       });
       phase = "compile";
+      await scope.operations.settle();
       const execute = this.loader.compile(
         snapshot.code,
         { ...this.#options.bindings(scope.services), context: scope.context },
@@ -648,8 +684,8 @@ export class RunEngine extends EventEmitter {
       );
       this.#publish(run.runId);
       phase = "execute";
-      const value = await execute();
-      if (logError)
+      const value = await scope.operations.audit.run(execute);
+      if (scope.logError)
         throw new AgentError(
           "run_log_failed",
           "The local run log could not be saved.",
@@ -670,6 +706,13 @@ export class RunEngine extends EventEmitter {
           "The root script returned without awaiting its input request.",
         );
       }
+      phase = "operations";
+      await scope.operations.settle();
+      if (scope.logError)
+        throw new AgentError(
+          "run_log_failed",
+          "The local run log could not be saved.",
+        );
       this.#checkDeadline(scope);
       scope.controller.signal.throwIfAborted();
       phase = "result";
@@ -692,6 +735,18 @@ export class RunEngine extends EventEmitter {
       pending.reject(
         new AgentError("run_closed", "The root execution is closing."),
       );
+    }
+    if (error && !scope.controller.signal.aborted)
+      scope.controller.abort(
+        new AgentError(
+          "run_failed",
+          "The root or its managed work failed; in-flight operations must stop.",
+        ),
+      );
+    try {
+      await scope.operations.settle();
+    } catch (cause) {
+      error ??= failure(cause, "operations");
     }
     await Promise.allSettled([...scope.deliveries]);
     let cleanup: JsonObject = {};
@@ -725,6 +780,27 @@ export class RunEngine extends EventEmitter {
       }
       cleanup = report;
     }
+    if (scope.fatal) {
+      scope.operations.audit.close();
+      return;
+    }
+    try {
+      await scope.operations.settle();
+    } catch (cause) {
+      error ??= failure(cause, "cleanup");
+    }
+    if (scope.fatal) {
+      scope.operations.audit.close();
+      return;
+    }
+    if (scope.logError)
+      error ??= failure(
+        new AgentError(
+          "run_log_failed",
+          "The local run log could not be saved.",
+        ),
+        "cleanup",
+      );
     this.#checkDeadline(scope);
     const run = this.store.getRun(scope.runId);
     const status = run.stop
@@ -734,6 +810,8 @@ export class RunEngine extends EventEmitter {
       : error
         ? "failed"
         : "succeeded";
+    releaseScript?.();
+    releaseScript = undefined;
     this.store.transitionRun(
       run.runId,
       run.revision,
@@ -751,6 +829,7 @@ export class RunEngine extends EventEmitter {
       this.#now(scope),
     );
     clearTimeout(scope.timer);
+    scope.operations.audit.close();
     this.#scopes.delete(scope.runId);
     this.#publish(scope.runId);
   }
@@ -1016,10 +1095,24 @@ export class RunEngine extends EventEmitter {
         };
       }
     }
+    const operations = this.store.operationsForRun(runId, 65);
     return {
       run,
       wait: this.store.activeWait(runId),
       result,
+      operations: {
+        items: operations.slice(0, 64).map((operation) => ({
+          operationId: operation.operationId,
+          namespace: operation.namespace,
+          method: operation.method,
+          source: operation.source,
+          status: operation.status,
+          error: operation.error,
+          createdAt: operation.createdAt,
+          endedAt: operation.endedAt,
+        })),
+        complete: operations.length <= 64,
+      },
       ...(unavailable ? { unavailable } : {}),
     };
   }

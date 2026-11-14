@@ -16,6 +16,8 @@ import {
   type JsonObject,
   type JsonValue,
   type ResourceRecord,
+  type OperationRecord,
+  type ContributionOrigin,
   type RunRecord,
   type RunStatus,
   type SourceKind,
@@ -298,6 +300,113 @@ export class SqliteStore {
       id,
       "resource_not_found",
     );
+  }
+
+  getOperation(id: string): OperationRecord {
+    return this.#get("operations", "operation_id", id, "operation_not_found");
+  }
+
+  startOperation(
+    runId: string,
+    origin: ContributionOrigin,
+    method: string,
+    now = Date.now(),
+  ): OperationRecord {
+    requireCondition(
+      origin.namespace &&
+        origin.owner &&
+        origin.version &&
+        origin.revision &&
+        ["platform", "extension"].includes(origin.type) &&
+        typeof method === "string" &&
+        method.length > 0 &&
+        Buffer.byteLength(method) <= 1024,
+      "invalid_operation",
+      "An SDK operation needs its actual source/version, namespace and method.",
+    );
+    const source = {
+      origin: {
+        type: origin.type,
+        owner: origin.owner,
+        namespace: origin.namespace,
+        version: origin.version,
+        revision: origin.revision,
+      },
+    };
+    return this.#transaction(() => {
+      const run = this.getRun(runId);
+      requireCondition(
+        run.bootId === this.bootId &&
+          ["preparing_inputs", "running", "waiting_input"].includes(
+            run.status,
+          ) &&
+          !run.stop,
+        "run_stopping",
+        "The run no longer admits managed operations.",
+      );
+      const id = newId("op");
+      this.#db
+        .prepare(
+          `INSERT INTO operations(operation_id,origin_run_id,caller_key,boot_id,namespace,method,source_json,status,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,'running',?,?)`,
+        )
+        .run(
+          id,
+          runId,
+          run.callerKey,
+          this.bootId,
+          origin.namespace!,
+          method,
+          canonicalJson(source),
+          now,
+          now,
+        );
+      return this.getOperation(id);
+    });
+  }
+
+  finishOperation(
+    id: string,
+    status: "succeeded" | "failed",
+    error?: JsonObject,
+    now = Date.now(),
+  ): OperationRecord {
+    requireCondition(
+      ["succeeded", "failed"].includes(status) &&
+        !(status === "succeeded" && error !== undefined),
+      "invalid_operation_outcome",
+      "An operation outcome must preserve its actual success or failure.",
+    );
+    return this.#transaction(() => {
+      const operation = this.getOperation(id);
+      requireCondition(
+        operation.bootId === this.bootId &&
+          operation.endedAt === null &&
+          operation.status === "running",
+        "operation_state_conflict",
+        "Only an unsettled operation from this Agent boot may finish.",
+      );
+      this.#db
+        .prepare(
+          "UPDATE operations SET status=?,error_json=?,ended_at=?,updated_at=?,revision=revision+1 WHERE operation_id=? AND ended_at IS NULL",
+        )
+        .run(status, error ? canonicalJson(error) : null, now, now, id);
+      return this.getOperation(id);
+    });
+  }
+
+  operationsForRun(runId: string, limit = 64): OperationRecord[] {
+    requireCondition(
+      Number.isSafeInteger(limit) && limit > 0 && limit <= 1000,
+      "invalid_limit",
+      "An operation query needs a bounded limit.",
+    );
+    return this.#db
+      .prepare(
+        "SELECT * FROM operations WHERE origin_run_id=? ORDER BY created_at DESC,operation_id DESC LIMIT ?",
+      )
+      .all(runId, limit)
+      .map((row) => decode<OperationRecord>(row));
   }
 
   #activeWork(id: string, callerKey: string, now: number): WorkRecord {
@@ -610,6 +719,16 @@ export class SqliteStore {
         requireCondition(
           !this.#db
             .prepare(
+              "SELECT 1 FROM operations WHERE origin_run_id=? AND maintenance_request_id IS NULL AND ended_at IS NULL LIMIT 1",
+            )
+            .get(id),
+          "run_operations_pending",
+          "Managed operations have not actually settled.",
+        );
+      if (ended)
+        requireCondition(
+          !this.#db
+            .prepare(
               "SELECT 1 FROM managed_resources WHERE owner_run_id=? AND closed_at IS NULL LIMIT 1",
             )
             .get(id),
@@ -901,8 +1020,9 @@ export class SqliteStore {
       if (input.runId) {
         const run = this.getRun(input.runId);
         requireCondition(
-          (run.status === "running" || run.status === "waiting_input") &&
-            !run.stop,
+          ["preparing_inputs", "running", "waiting_input"].includes(
+            run.status,
+          ) && !run.stop,
           "run_stopping",
           "This run cannot acquire a new managed resource.",
         );

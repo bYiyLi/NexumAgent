@@ -3,6 +3,30 @@ import { types } from "node:util";
 import { AgentError, requireCondition } from "./errors.js";
 import type { JsonValue } from "./types.js";
 
+export function isPlainRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    types.isProxy(value) ||
+    Array.isArray(value)
+  )
+    return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (types.isProxy(prototype)) return false;
+  if (prototype === Object.prototype || prototype === null) return true;
+  const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor");
+  return (
+    Object.getPrototypeOf(prototype) === null &&
+    !!constructor &&
+    "value" in constructor &&
+    typeof constructor.value === "function" &&
+    Function.prototype.toString.call(constructor.value) ===
+      Function.prototype.toString.call(Object)
+  );
+}
+
 // These budgets bound control data, not media; media stays on the byte data plane.
 export function canonicalJson(value: unknown, maxBytes = 1024 * 1024): string {
   let nodes = 0;

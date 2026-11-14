@@ -110,6 +110,25 @@ export interface ResourceRecord {
   readonly closedAt: number | null;
 }
 
+export interface OperationRecord {
+  readonly operationId: string;
+  readonly originRunId: string | null;
+  readonly callerKey: string;
+  readonly bootId: string;
+  readonly namespace: string;
+  readonly method: string;
+  readonly source: JsonObject;
+  readonly maintenanceRequestId: string | null;
+  readonly approvedRevision: string | null;
+  readonly status: string;
+  readonly revision: number;
+  readonly detailRef: string | null;
+  readonly error: JsonObject | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly endedAt: number | null;
+}
+
 export interface HistoryFilter {
   readonly status?: RunStatus;
   readonly scriptName?: string;
