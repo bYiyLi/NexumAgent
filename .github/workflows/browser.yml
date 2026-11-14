@@ -52,8 +52,10 @@ jobs:
       - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
       - name: Prepare the SHA-256-pinned native Chrome for Testing in runner temp
         run: node scripts/prepare-native-browser.mjs
+      - name: Confirm native page and extension prerequisites
+        run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise actual isolated browser scenarios
-        run: node --experimental-vm-modules --test --test-concurrency=1 packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
+        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
       - name: Exercise real opt-in WebMCP registrations and stale-registration rejection
         env:
           NEXUM_BROWSER_WEBMCP_TESTING: "1"

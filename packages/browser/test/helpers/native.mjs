@@ -293,7 +293,13 @@ export async function nativeFixture(t, options = {}) {
     {
       detached: process.platform !== "win32",
       stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, HOME: home, USERPROFILE: home },
+      // Chrome's --user-data-dir is the browser-profile boundary. On Windows,
+      // retain the real native Known Folder environment instead of fabricating
+      // USERPROFILE while LOCALAPPDATA and the current user token still differ.
+      env:
+        process.platform === "win32"
+          ? process.env
+          : { ...process.env, HOME: home, USERPROFILE: home },
     },
   );
   closed = once(child, "close");
@@ -338,17 +344,22 @@ export async function nativeFixture(t, options = {}) {
       JSON.stringify({
         failure: result.result?.data?.nativeFailure,
         operations: result.operations,
+        stderr: stderr.slice(-4096),
       }),
     );
     return result;
   };
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + 30000;
   let diagnostics = "";
   while (true) {
     const probe = await run(
-      'const {createBrowserClient}=await import("nexum-browser");return {browsers:await createBrowserClient(browser).browsers.list()};',
+      'const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser),browsers=await client.browsers.list();return {browsers,tabs:browsers.length?await(await client.browsers.getDefault()).tabs.list():[]};',
     );
-    if (probe.result.data?.browsers.length) break;
+    if (
+      probe.result.data?.browsers.length &&
+      probe.result.data.tabs.some((tab) => tab.url === base)
+    )
+      break;
     assert.equal(child.exitCode, null, `isolated browser exited: ${stderr}`);
     if (Date.now() >= deadline) {
       try {
@@ -358,9 +369,13 @@ export async function nativeFixture(t, options = {}) {
         const targets = await (
           await fetch(`http://127.0.0.1:${match[1]}/json/list`)
         ).json();
-        diagnostics = JSON.stringify(
-          targets.map((value) => ({ type: value.type, url: value.url })),
-        );
+        diagnostics = JSON.stringify({
+          publicTabs: probe.result.data.tabs,
+          nativeTargets: targets.map((value) => ({
+            type: value.type,
+            url: value.url,
+          })),
+        });
         for (const target of targets.filter(
           (value) =>
             value.type === "service_worker" &&
@@ -439,4 +454,4 @@ export async function nativeFixture(t, options = {}) {
     stderr: () => stderr,
   };
 }
-export const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.getDefault();const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("Actual test page was not discovered");const tab=await selected.tabs.get(item.id);`;
+export const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.getDefault();const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("Actual test page was not discovered: "+JSON.stringify(choices));const tab=await selected.tabs.get(item.id);`;
