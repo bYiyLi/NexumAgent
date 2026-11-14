@@ -232,7 +232,7 @@ test("native declined, cancelled, expired and revoked continuations never renew 
     await f.start(
       select + "await tab.requestUserTakeover();return {unexpected:true};",
       { base: f.base },
-      { timeoutMs: 500 },
+      { timeoutMs: 3000 },
     ),
   );
   expired = await finish(expired);

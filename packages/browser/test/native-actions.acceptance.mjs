@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
-const interactive = `<!doctype html><html><head><title>Native action families</title><style>body{margin:8px}#pad{width:240px;height:70px;background:lightblue}#scroll{width:240px;height:80px;overflow:auto}#inside{height:600px}#spacer{height:1500px}</style></head><body>
+const interactive = `<!doctype html><html><head><title>Native action families</title><style>body{margin:8px}#pad{width:240px;height:70px;background:lightblue;user-select:none}#scroll{width:240px;height:80px;overflow:auto}#inside{height:600px}#spacer{height:1500px}</style></head><body>
 <label for="field">Action field</label><input id="field" value="initial"><button id="button" onclick="this.dataset.clicks=String(Number(this.dataset.clicks||0)+1)" ondblclick="this.dataset.doubles=String(Number(this.dataset.doubles||0)+1)">Action button</button>
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
@@ -26,8 +26,9 @@ test("native AX, CUA and fixed DOM actions change real controls and preserve nat
     const axImage=await tab.ax.get('both');
     await tab.cua.click(await point('#field'));await tab.cua.keypress({keys:['ControlOrMeta','A']});await tab.cua.type({text:'Native CUA'});
     await tab.cua.doubleClick(await point('#button'));
-    const pad=await point('#pad');await tab.cua.drag({path:[{x:pad.x-50,y:pad.y},{x:pad.x,y:pad.y+5},{x:pad.x+50,y:pad.y}]});
-    await tab.ax.drag({x:pad.x-40,y:pad.y},{x:pad.x+40,y:pad.y});
+    const observedDrag=async expected=>{const until=Date.now()+3000;let actual;do{actual=await read("Number(document.querySelector('#pad').dataset.drags||0)");if(actual===expected)return;await tab.playwright.waitForTimeout(10);}while(Date.now()<until);throw Error('The actual native pointer gesture was not observed: '+JSON.stringify({expected,actual}));};
+    const pad=await point('#pad');await tab.cua.drag({path:[{x:pad.x-50,y:pad.y},{x:pad.x,y:pad.y+5},{x:pad.x+50,y:pad.y}]});await observedDrag(1);
+    await tab.ax.drag({x:pad.x-40,y:pad.y},{x:pad.x+40,y:pad.y});await observedDrag(2);
     const cuaValue=await read("document.querySelector('#field').value");
     const tree=await tab.dom.getVisibleTree(),domField=tree.nodes.find(node=>node.role==='textbox'&&node.name==='Action field'),domButton=tree.nodes.find(node=>node.role==='button'&&node.name==='Action button');
     if(!domField||!domButton)throw Error('The actual fixed DOM targets were not observed');

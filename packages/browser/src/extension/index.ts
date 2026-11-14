@@ -15,7 +15,11 @@ import {
   validateLocatorDescription,
   validateTarget,
 } from "../client/serialize.js";
-import { BrowserService, type BrowserPeer } from "./service.js";
+import {
+  BrowserService,
+  type BrowserPeer,
+  type BrowserConnectionDiagnostic,
+} from "./service.js";
 import { BrowserRuntime } from "./scope.js";
 import { collectTabContent } from "./batch.js";
 import { preparePlugin, type PluginBuild } from "./assets.js";
@@ -108,6 +112,21 @@ class BrowserInstallation implements ManagedResource {
         ...(typeof host.config.defaultBrowserId === "string"
           ? { defaultBrowserId: host.config.defaultBrowserId }
           : {}),
+      });
+      this.service.on("diagnostic", (entry: BrowserConnectionDiagnostic) => {
+        try {
+          host.log({
+            level:
+              entry.event === "closed" &&
+              [1000, 1001].includes(entry.closeCode ?? 0)
+                ? "debug"
+                : "warn",
+            message: "browser.connection",
+            data: { ...entry },
+          });
+        } catch {
+          // A diagnostic write cannot prevent actual channel/resource cleanup.
+        }
       });
       this.runtime = new BrowserRuntime(this.service);
       await this.service.start(combined);

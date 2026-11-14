@@ -42,6 +42,14 @@ export interface BrowserServiceOptions {
   extensionVersion: string;
   defaultBrowserId?: string;
 }
+export interface BrowserConnectionDiagnostic {
+  event: "protocol_rejected" | "closed";
+  browserId: string | null;
+  generation: number | null;
+  code: string | null;
+  closeCode: number | null;
+  operationIds: string[];
+}
 interface Pending {
   actionId: string;
   operationId: string;
@@ -315,6 +323,14 @@ export class BrowserService extends EventEmitter {
         this.#message(peer, message);
       })();
       void this.#track(task).catch((cause) => {
+        this.#diagnose(
+          "protocol_rejected",
+          peer,
+          identifier((cause as { code?: unknown })?.code)
+            ? (cause as { code: string }).code
+            : "PROTOCOL_MISMATCH",
+          null,
+        );
         if (socket.readyState === WebSocket.OPEN)
           socket.send(
             control({
@@ -330,11 +346,30 @@ export class BrowserService extends EventEmitter {
         else socket.terminate();
       });
     });
-    socket.once("close", () => {
+    socket.once("close", (code) => {
       clearTimeout(handshake);
       this.#sockets.delete(socket);
+      this.#diagnose("closed", peer, null, code);
       if (peer) this.#offline(peer);
     });
+  }
+  #diagnose(
+    event: BrowserConnectionDiagnostic["event"],
+    peer: BrowserPeer | undefined,
+    code: string | null,
+    closeCode: number | null,
+  ): void {
+    const diagnostic: BrowserConnectionDiagnostic = {
+      event,
+      browserId: peer?.id ?? null,
+      generation: peer?.generation ?? null,
+      code,
+      closeCode,
+      operationIds: [...(peer?.pending.values() ?? [])]
+        .slice(0, 8)
+        .map((pending) => pending.operationId),
+    };
+    this.emit("diagnostic", diagnostic);
   }
   async #hello(
     socket: WebSocket,

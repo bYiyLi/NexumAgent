@@ -112,6 +112,7 @@ export async function nativeFixture(t, options = {}) {
     profile: "development",
     cloudEnvironment: "test",
   });
+  const connectionDiagnostics = [];
   const resources = new ResourceManager(store, { cleanupTimeoutMs: 25 }),
     permissions = new Set(["connection", "path", "resource", "url"]),
     registry = new ExtensionRegistry(resources, {
@@ -120,7 +121,11 @@ export async function nativeFixture(t, options = {}) {
       authorize(...args) {
         options.authorize?.(...args);
       },
-      log() {},
+      log(_origin, entry) {
+        if (entry.message !== "browser.connection") return;
+        connectionDiagnostics.push(entry.data);
+        if (connectionDiagnostics.length > 20) connectionDiagnostics.shift();
+      },
       progress() {},
     });
   const policy = {
@@ -345,6 +350,7 @@ export async function nativeFixture(t, options = {}) {
         failure: result.result?.data?.nativeFailure,
         operations: result.operations,
         stderr: stderr.slice(-4096),
+        connectionDiagnostics,
       }),
     );
     return result;

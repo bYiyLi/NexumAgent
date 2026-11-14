@@ -344,3 +344,41 @@ test("browser identities become visible only after serial durable publication an
     "profile-two": b.browserId,
   });
 });
+
+test("protocol rejection diagnostics retain close identity without recording the rejected payload", async (t) => {
+  const f = await fixture(t);
+  const diagnostics = [];
+  f.service.on("diagnostic", (entry) => diagnostics.push(entry));
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f);
+  const ready = await peer.ready();
+  const closed = once(peer.socket, "close");
+  ready.send({
+    type: "unknown-message",
+    privatePayload: "fixture-private-credential-not-for-logs",
+  });
+  const [closeCode] = await closed;
+  assert.equal(closeCode, 1008);
+  const rejected = diagnostics.find(
+    (entry) => entry.event === "protocol_rejected",
+  );
+  assert.deepEqual(rejected, {
+    event: "protocol_rejected",
+    browserId: ready.browserId,
+    generation: ready.generation,
+    code: "PROTOCOL_MISMATCH",
+    closeCode: null,
+    operationIds: [],
+  });
+  const end = Date.now() + 3000;
+  while (!diagnostics.some((entry) => entry.event === "closed")) {
+    assert.ok(Date.now() < end, "Native connection closure was not observed.");
+    await delay(2);
+  }
+  assert.equal(diagnostics.at(-1).closeCode, 1008);
+  assert.equal(diagnostics.at(-1).browserId, ready.browserId);
+  assert.doesNotMatch(
+    JSON.stringify(diagnostics),
+    /fixture-private-credential/,
+  );
+});
