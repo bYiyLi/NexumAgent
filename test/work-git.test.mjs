@@ -203,7 +203,10 @@ test("initialization creates an independent local snapshot of only the fixed all
     "package.json",
     "scripts/report.js",
   ]);
-  assert.equal(f.git(["rev-parse", "--show-toplevel"]).trim(), f.work);
+  assert.equal(
+    realpathSync.native(f.git(["rev-parse", "--show-toplevel"]).trim()),
+    f.work,
+  );
   assert.equal(f.git(["remote"]).trim(), "");
   assert.equal(
     f.git(["show", "-s", "--format=%an <%ae>"]).trim(),
@@ -356,7 +359,10 @@ test("a parent repository is never reused and retains its actual index and HEAD"
   f.put("scripts/local.js", "local");
   const result = await f.service().initialize();
   assert.equal(result.status, "committed", JSON.stringify(result));
-  assert.equal(f.git(["rev-parse", "--show-toplevel"]).trim(), f.work);
+  assert.equal(
+    realpathSync.native(f.git(["rev-parse", "--show-toplevel"]).trim()),
+    f.work,
+  );
   assert.equal(parentGit(["rev-parse", "HEAD"]), head);
   assert.deepEqual(readFileSync(path.join(f.base, ".git/index")), index);
 });
