@@ -566,7 +566,9 @@ export async function exportContent(ctx, args) {
                 ) &&
                 (plan.format === "csv"
                   ? /^text\/csv(?:;|$)/i.test(file.mimeType)
-                  : /^text\/(?:markdown|plain)(?:;|$)/i.test(file.mimeType)),
+                  : /^text\/(?:markdown|x-markdown|plain)(?:;|$)/i.test(
+                      file.mimeType,
+                    )),
           "FILE_UNAVAILABLE",
           "The browser returned no actual document in the requested Google Workspace format.",
         );

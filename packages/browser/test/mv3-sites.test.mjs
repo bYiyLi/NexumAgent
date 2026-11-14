@@ -409,6 +409,38 @@ test("native Google exports stream multiple chunks and close error or cancelled 
   assert.equal(f.fetches.length, 0);
 });
 
+test("Google Markdown accepts the actual text/x-markdown response while still rejecting an HTML sign-in document", async (t) => {
+  const f = fixture(
+      t,
+      "https://docs.google.com/document/d/markdown_document/edit",
+    ),
+    plan = await f.call("content.plan", {
+      method: "content.exportGsuite",
+      type: "md",
+    });
+  f.responses.set(plan.urls[0], {
+    data: "# Actual Markdown\n",
+    mimeType: "text/x-markdown; charset=utf-8",
+  });
+  const file = await f.call("content.exportGsuite", {
+    planId: plan.id,
+    type: "md",
+  });
+  assert.equal(new TextDecoder().decode(file.data), "# Actual Markdown\n");
+  assert.equal(file.mimeType, "text/markdown");
+  assert.ok(file.name.endsWith(".md"));
+  assert.equal(f.streams.size, 0);
+  f.responses.set(plan.urls[0], {
+    data: "<!doctype html><title>Sign in</title>",
+    mimeType: "text/x-markdown",
+  });
+  await assert.rejects(
+    f.call("content.exportGsuite", { planId: plan.id, type: "md" }),
+    { code: "FILE_UNAVAILABLE" },
+  );
+  assert.equal(f.streams.size, 0);
+});
+
 test("a Google document navigation during a native response read invalidates the result and closes its stream", async (t) => {
   const f = fixture(t, "https://docs.google.com/document/d/original/edit"),
     plan = await f.call("content.plan", {
