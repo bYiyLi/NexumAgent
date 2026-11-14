@@ -1274,14 +1274,15 @@ export class TransferServices extends EventEmitter {
         "The actual binary endpoint must match the channel direction.",
       );
       const row = this.#refresh(entry);
+      const claimedAt = this.#now();
       entry.record = this.store.claimTransfer(
         row.transferId,
         entry.authority.owner,
         {
           revision: row.revision,
-          transferDeadlineAt: this.#now() + this.#activeMs,
+          transferDeadlineAt: claimedAt + this.#activeMs,
         },
-        this.#now(),
+        claimedAt,
       );
     } catch (cause) {
       this.#release(reservation);

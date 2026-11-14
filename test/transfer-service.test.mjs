@@ -42,7 +42,8 @@ const caller = { principalId: "user", clientId: "host", grantId: "grant" };
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 async function until(check) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  const deadline = performance.now() + 5000;
+  while (performance.now() < deadline) {
     const value = await check();
     if (value) return value;
     await delay(5);
@@ -180,6 +181,7 @@ async function fixture(t, options = {}) {
     agentId: binding.agentId,
     profileRoot: root,
     maxEntries: options.offerCapacity ?? 32,
+    ...(options.now ? { now: options.now } : {}),
     authorize: (scope, view) => service.authorizeDelivery(scope, view),
   });
   const streams = new TransferStreamSlots(options.capacity ?? 4);
@@ -410,7 +412,7 @@ test("cancel returns cancelling until actual channel revocation confirms closure
 });
 
 test("pending expiry and claimed active deadline are independent", async (t) => {
-  const f = await fixture(t, { claimTimeoutMs: 80, activeTimeoutMs: 500 }),
+  const f = await fixture(t, { claimTimeoutMs: 500, activeTimeoutMs: 5000 }),
     owner = f.run();
   const unused = await owner.api.createUpload({ path: "unused.bin" });
   const expired = await until(async () => {
@@ -429,7 +431,10 @@ test("pending expiry and claimed active deadline are independent", async (t) => 
     async () =>
       (await owner.api.get(active.transferId)).status === "transferring",
   );
-  await delay(110);
+  // Cross the actual fixed claim cutoff after the HTTP claim is confirmed,
+  // rather than assume an 80 ms Offer survives runner scheduling and disk I/O.
+  await delay(Math.max(0, Date.parse(active.expiresAt) - Date.now() + 50));
+  assert.equal(Date.now() >= Date.parse(active.expiresAt), true);
   assert.equal((await owner.api.get(active.transferId)).status, "transferring");
   request.end("def");
   const [res] = await response;
@@ -456,13 +461,13 @@ test("active timeout aborts real input and releases its permit only after I/O cl
 
 test("a wall-clock rollback cannot extend pending expiry or admit a late claim before timers resume", async (t) => {
   let wall = Date.now();
-  const f = await fixture(t, { now: () => wall, claimTimeoutMs: 120 }),
+  const f = await fixture(t, { now: () => wall, claimTimeoutMs: 500 }),
     owner = f.run();
   const offer = await owner.api.createUpload({ path: "rollback-pending.bin" });
   wall -= 60 * 60_000;
   // Real dense synchronous checks also exercise fractional elapsed time: no
   // timer can run during this turn, so admission itself must detect expiry.
-  const end = performance.now() + 160;
+  const end = performance.now() + 600;
   while (performance.now() < end) {
     try {
       const reservation = f.service.reserveClaim(
