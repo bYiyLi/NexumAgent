@@ -13,6 +13,8 @@ import {
 const windows = process.platform === "win32";
 const moduleUrl = new URL("../dist/process/windows-job.js", import.meta.url)
   .href;
+const descendantSource =
+  'process.stdout.write("descendant-ready\\n"); setTimeout(() => process.exit(0), 14000);';
 const fixtureSource = `
 import { spawn } from 'node:child_process';
 import { getCurrentProcessBirthIdentity } from ${JSON.stringify(moduleUrl)};
@@ -21,7 +23,7 @@ process.on('disconnect', () => process.exit(0));
 process.on('message', message => {
   if (message === 'descendant') {
     const descendant = spawn(process.execPath, ['-e',
-      'process.stdout.write("descendant-ready\\n"); setTimeout(() => process.exit(0), 14000);'
+      ${JSON.stringify(descendantSource)}
     ], { stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true });
     descendant.on('error', () => process.exit(92));
     descendant.on('spawn', () => process.send({ type: 'descendant-started' }));

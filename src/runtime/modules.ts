@@ -291,6 +291,11 @@ export class ModuleLoader {
     return pathToFileURL(actual).href;
   }
 
+  /** Native import-conditions resolution without evaluation or a loaded-version claim. */
+  resolveImport(specifier: string): string {
+    return this.#entry(this.#authorize(specifier), "import");
+  }
+
   compile(
     code: string,
     parameters: Readonly<Record<string, unknown>>,

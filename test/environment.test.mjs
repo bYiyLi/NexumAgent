@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -235,6 +236,24 @@ test("executable lookup uses each call cwd and its fixed PATH rather than Agent 
     ),
   );
   assert.equal(one.kind, windows ? "batch" : "native");
+  assert.equal(
+    one.launchPath,
+    path.join(first, "bin", windows ? "example-tool.cmd" : "example-tool"),
+  );
+  if (!windows) {
+    const alias = path.join(first, "bin", "alias-node");
+    symlinkSync(process.execPath, alias);
+    const resolved = await whichExecutable("alias-node", fixed, first);
+    assert.equal(resolved.path, realpathSync.native(process.execPath));
+    assert.equal(resolved.launchPath, alias);
+    const child = spawnSync(resolved.launchPath, ["-p", "process.argv0"], {
+      cwd: first,
+      env: process.env,
+      encoding: "utf8",
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout.trim(), alias);
+  }
   const child = mergeChildEnvironment(fixed, {
     PATH: path.join(second, "bin"),
     NODE_OPTIONS: "--max-old-space-size=64",
@@ -343,10 +362,13 @@ setInterval(()=>{},1000);`,
     );
     for (const mode of ["timeout", "cancel"]) {
       rmSync(pids, { force: true });
-      const code = `import {existsSync} from 'node:fs';
+      // Advance only the probe's Node timers after a real child exists. A fixed
+      // 500ms OS-startup assumption flakes under the full parallel test suite.
+      const code = `import {existsSync} from 'node:fs';import {mock} from 'node:test';
+mock.timers.enable({apis:['setTimeout']});
 const controller=new AbortController();
-let timer;if(${JSON.stringify(mode)}==='cancel')timer=setInterval(()=>{if(existsSync(${JSON.stringify(pids)})){clearInterval(timer);controller.abort(new Error('controlled-cancellation'));}},5);
-try{await discoverEnvironment({signal:controller.signal,cwd:${JSON.stringify(root)},timeoutMs:500});process.exitCode=1;}catch(error){console.log(JSON.stringify({code:error.code??null,message:error.message}));}finally{clearInterval(timer);}`;
+const timer=setInterval(()=>{if(existsSync(${JSON.stringify(pids)})){clearInterval(timer);if(${JSON.stringify(mode)}==='cancel')controller.abort(new Error('controlled-cancellation'));else mock.timers.tick(500);mock.timers.tick(100);mock.timers.reset();}},5);
+try{await discoverEnvironment({signal:controller.signal,cwd:${JSON.stringify(root)},timeoutMs:500});process.exitCode=1;}catch(error){console.log(JSON.stringify({code:error.code??null,message:error.message}));}finally{clearInterval(timer);mock.timers.reset();}`;
       const result = isolated(shell, code);
       const processIds = existsSync(pids)
         ? JSON.parse(readFileSync(pids, "utf8"))

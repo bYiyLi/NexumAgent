@@ -24,6 +24,8 @@ export interface DiscoverEnvironmentOptions {
 }
 export interface Executable {
   readonly command: string;
+  /** Resolved absolute spelling; preserves executable symlink/argv[0] semantics. */
+  readonly launchPath: string;
   readonly path: string;
   readonly kind: "native" | "batch";
   readonly platform: NodeJS.Platform;
@@ -627,6 +629,7 @@ export async function whichExecutable(
         abort(options.signal);
         return Object.freeze({
           command,
+          launchPath: candidate,
           path: resolved,
           kind:
             windows && /\.(?:cmd|bat)$/i.test(resolved) ? "batch" : "native",

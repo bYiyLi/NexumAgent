@@ -102,6 +102,40 @@ test("direct imports and require use native conditions; transitive package depen
   );
 });
 
+test("static import resolution uses current native conditions without evaluating or pinning a package version", async (t) => {
+  const { loader, pkg, packages } = await fixture(t);
+  writeFileSync(
+    path.join(pkg, "index.mjs"),
+    'throw new Error("must not evaluate during inspection");',
+  );
+  assert.equal(
+    loader.resolveImport("fixture"),
+    pathToFileURL(path.join(pkg, "index.mjs")).href,
+  );
+  assert.throws(() => loader.resolveImport("fixture/private.mjs"), {
+    code: "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  });
+  packages.delete("fixture");
+  assert.throws(() => loader.resolveImport("fixture"), {
+    code: "module_not_allowed",
+  });
+  packages.set("fixture", "2.0.0");
+  writeFileSync(
+    path.join(pkg, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "2.0.0",
+      type: "module",
+      exports: { import: "./index.mjs", require: "./index.cjs" },
+    }),
+  );
+  writeFileSync(path.join(pkg, "index.mjs"), 'export const version="2.0.0";');
+  assert.equal(
+    await loader.execute('return (await import("fixture")).version;', {}),
+    "2.0.0",
+  );
+});
+
 test("fresh execution scopes preserve the one npm cache but expose no previous globals, private host locals or global cwd change", async (t) => {
   const { loader, work } = await fixture(t);
   const before = process.cwd();
