@@ -148,14 +148,15 @@ test(
         `
       const visibility=await selected.capabilities.get('visibility'),viewport=await selected.capabilities.get('viewport');
       const originalVisibility=await visibility.get(),baseline=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
+      const measured=async expected=>{const until=Date.now()+5000;while(true){const actual=await tab.playwright.evaluate(${JSON.stringify(dimensions)});if(actual.width===expected.width&&actual.height===expected.height)return actual;if(Date.now()>=until)throw new Error('Native viewport did not reach '+JSON.stringify(expected)+': '+JSON.stringify(actual));await tab.playwright.waitForTimeout(10);}};
       const explicit=await viewport.set({tabId:tab.id,width:611,height:433});
-      const first=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
+      const first=await measured({width:611,height:433});
       const alias=await tab.setViewport({width:723,height:487});
-      const second=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
-      const aliasReset=await tab.resetViewport(),third=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
+      const second=await measured({width:723,height:487});
+      const aliasReset=await tab.resetViewport(),third=await measured(baseline);
       await selected.viewport.set({tabId:tab.id,width:805,height:519});
-      const fourth=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
-      const reset=await selected.viewport.reset(tab.id),restored=await tab.playwright.evaluate(${JSON.stringify(dimensions)});
+      const fourth=await measured({width:805,height:519});
+      const reset=await selected.viewport.reset(tab.id),restored=await measured(baseline);
       await visibility.set(false);
       const hiddenFollow=await visibility.get();
       const other=await selected.tabs.new(context.input.base+'?follow-target',{active:false});

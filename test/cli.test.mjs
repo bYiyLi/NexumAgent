@@ -31,7 +31,9 @@ function invoke(...args) {
     return spawnSync(process.execPath, [cli, ...args], {
       env: { ...process.env, HOME: home, USERPROFILE: home },
       encoding: "utf8",
-      timeout: 10_000,
+      // Loading the actual CLI competes with the complete native Core matrix.
+      // Its readiness is the assertion; this is not a startup-latency benchmark.
+      timeout: 60_000,
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -71,7 +73,15 @@ test("CLI refuses unknown commands and missing or ambiguous profiles", () => {
 
 test("a missing VM launch flag stops permanently before configuration or network access", () => {
   const result = invoke("run", "--profile", "development");
-  assert.equal(result.status, 0);
+  assert.equal(
+    result.status,
+    0,
+    JSON.stringify({
+      error: result.error?.code,
+      signal: result.signal,
+      stderr: result.stderr,
+    }),
+  );
   assert.match(result.stderr, /vm_modules_required/);
 });
 
@@ -184,9 +194,10 @@ test(
     });
     child.once("exit", (code, signal) => exited.resolve({ code, signal }));
     async function until(condition) {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 60000;
       while (!condition()) {
         assert.equal(child.exitCode, null, stderr);
+        assert.equal(child.signalCode, null, stderr);
         assert.ok(
           Date.now() < deadline,
           stderr || "The actual CLI did not become ready.",

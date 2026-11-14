@@ -218,10 +218,10 @@ test("native direct file refs, download aliases and public waiter cancellation u
     select +
       `
     const snapshot=await tab.snapshot(),nodes=[];const visit=node=>{nodes.push(node);for(const child of node.children??[])visit(child);};visit(snapshot.root);const input=nodes.find(node=>node.role==='textbox'&&node.name==='Upload files');if(!input)throw Error('The native file ref was not observed');
-    await tab.setFiles(input.ref,[{name:'direct.txt',mimeType:'text/plain',data:new Uint8Array([78,65,84,73,86,69])}]);const attached=await tab.playwright.evaluate("async()=>{const file=document.querySelector('#upload').files[0];return {name:file.name,size:file.size,text:await file.text()};}");
+    const attachedAction=await tab.setFiles(input.ref,[{name:'direct.txt',mimeType:'text/plain',data:new Uint8Array([78,65,84,73,86,69])}]);const attached=await tab.playwright.evaluate("async()=>{const file=document.querySelector('#upload').files[0];return {name:file.name,size:file.size,text:await file.text()};}");
     const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole('link',{name:'Download native'}).click();const downloaded=await pending;const path=await downloaded.path();const records=await tab.downloads();const record=records.find(item=>item.url===context.input.base+'download');if(!record)throw Error('The actual download ID was not retained');const saved=await tab.saveDownload(record.id);
-    const peer=(await client.browsers.list()).find(peer=>peer.id===selected.browserId),target={browserId:peer.id,bootId:peer.bootId,browserSessionId:peer.browserSessionId,generation:peer.generation,tabId:tab.id};
-    const choosing=tab.playwright.waitForFileChooser();await tab.playwright.locator('#upload').click();const chooser=await choosing;await chooser.setFiles([{data:new Uint8Array([65]),name:'alias.txt'}]);const multiple=chooser.isMultiple();const wait=await browser.waiters.arm({target,event:'navigation',timeoutMs:5000});const cancelled=await browser.waiters.cancel({target,id:wait.id});let error;try{await browser.waiters.get({target,id:wait.id});}catch(cause){error=cause.code;}
+    const target=attachedAction.target;
+    const choosing=tab.playwright.waitForFileChooser();await tab.playwright.locator('#upload').click();const chooser=await choosing;await chooser.setFiles([{data:new Uint8Array([65]),name:'alias.txt'}]);const multiple=chooser.isMultiple();const wait=await browser.waiters.arm({target,event:'navigation',timeoutMs:5000});const cancelled=await browser.waiters.cancel({id:wait.id});let error;try{await browser.waiters.get({id:wait.id});}catch(cause){error=cause.code;}
     return {attached,path,saved,record,multiple,cancelled,error};`,
     { base: f.base },
   );
