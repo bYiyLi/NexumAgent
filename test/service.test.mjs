@@ -86,7 +86,10 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.match(plan.content, /<ExecutionTimeLimit>PT0S/);
       assert.match(plan.content, /<Count>255/);
       assert.match(plan.content, /<MultipleInstancesPolicy>IgnoreNew/);
-      assert.ok(plan.launcher.includes("exit $LASTEXITCODE"));
+      assert.ok(plan.launcher.includes("$nexumAttempt -le 255"));
+      assert.ok(plan.launcher.includes("$nexumExit -eq 0"));
+      assert.ok(plan.launcher.includes("exit $nexumExit"));
+      assert.ok(plan.launcher.includes("Start-Sleep -Seconds 10"));
       assert.ok(plan.launcher.includes("Remove-Item Env:NODE_OPTIONS"));
     }
   }

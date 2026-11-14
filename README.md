@@ -80,7 +80,7 @@ owner 可直接在所选 profile 的 `config.json` 中添加可选 `storage` 和
 
 ## 本地安装候选与原生用户服务
 
-安装组件使用固定 Node `24.22.1`、`--experimental-vm-modules` 和明确的 `run --profile development|production`。macOS 使用用户 LaunchAgent，Linux 使用 `systemd --user`，Windows 使用当前用户 `InteractiveToken` 任务。它们不提权、不保存用户密码；登录会话与无人登录启动不同，安装器不会自动启用 Linux linger。Windows 原生失败重试有 255 次上限，不宣称无限重启。正式 Agent 诊断统一写入 profile 内有界的 `logs/agent.log`；macOS LaunchAgent 将 stdout/stderr 指向 `/dev/null`，避免重复生成无界服务日志。Linux stdout/stderr 由 journald 管理，Windows 任务不另写服务日志。
+安装组件使用固定 Node `24.22.1`、`--experimental-vm-modules` 和明确的 `run --profile development|production`。macOS 使用用户 LaunchAgent，Linux 使用 `systemd --user`，Windows 使用当前用户 `InteractiveToken` 任务。它们不提权、不保存用户密码；登录会话与无人登录启动不同，安装器不会自动启用 Linux linger。Windows 任务负责登录启动与启停，现有启动器对 Agent 非零退出每次等待 10 秒、至多重试 255 次；退出 0 立即停止，不能仅靠 Task Scheduler 的启动失败重试承诺程序退出后重启。正式 Agent 诊断统一写入 profile 内有界的 `logs/agent.log`；macOS LaunchAgent 将 stdout/stderr 指向 `/dev/null`，避免重复生成无界服务日志。Linux stdout/stderr 由 journald 管理，Windows 任务不另写服务日志。
 
 公开扩展类型由单一源码生成，不需要把 Agent 的运行服务安装到扩展项目中：
 
@@ -117,6 +117,6 @@ node scripts/install-agent.mjs \
 
 已有选定版本时，`--no-register` 只准备新程序与独立预览，保留原 `active.json`、配置及服务启动文件；它不能与更换既有配置混用。Windows 预览使用单独的 `service-preview-launch.ps1`，不会改变原任务下次启动的目标。清理仍保护原选定版本；正式切换需执行常规安装更新。
 
-选定程序目录下的 `scripts/service.mjs` 提供 `install/start/stop/status/remove --profile ...`。`stop` 同时关闭以后自动启动；`start` 重新启用。退出码 `0` 停止，不自动重启；已验证更新请求使用 `75`，其它非零故障交原生 supervisor 的有界重启策略。安装入口的 `--cleanup --profile ...` 只清理有安装凭据且不再 active 的旧程序版本，不删除工作资料、运行记录或凭据，不执行旧 Node，也不接管旧 PID。
+选定程序目录下的 `scripts/service.mjs` 提供 `install/start/stop/status/remove --profile ...`。`stop` 同时关闭以后自动启动；`start` 重新启用。退出码 `0` 停止，不自动重启；需要重启使用 `75`，其它非零故障按各平台的有界策略重启，Windows 沿上面的任务及启动器分工。安装入口的 `--cleanup --profile ...` 只清理有安装凭据且不再 active 的旧程序版本，不删除工作资料、运行记录或凭据，不执行旧 Node，也不接管旧 PID。
 
 `Agent install candidates` 是手动触发的三平台候选构建、临时安装与原生用户服务生命周期工作流。服务测试使用临时 home 和含路径 hash 的唯一标签，实际验证 0/75/故障退出、停止、恢复及注销，不使用真实用户的 Agent profile；Linux 仅在受守卫的 GitHub-hosted 临时 runner 中按需准备当前 UID 的 user manager，不启用 linger，不启动第二个 manager，也不退出已有 manager。其中签名密钥为一次性测试身份，不能当作正式发布信任锚。`Optional browser package` 独立检查可选包，不成为 Agent 默认安装或测试的依赖。这些工作流定义不代表对应提交已经 CI 通过，也不代表用户服务的真实登录、登出、重启和上线已完成验收。

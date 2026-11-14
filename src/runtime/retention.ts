@@ -1,5 +1,5 @@
 import path from "node:path";
-import { constants, type Dir, type Stats } from "node:fs";
+import { constants, type Dir, type BigIntStats } from "node:fs";
 import { lstat, open, opendir, realpath, rm, rmdir } from "node:fs/promises";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import type { MaterialRetention } from "./material-retention.js";
@@ -93,7 +93,8 @@ const managedFiles = [
   "work/GEMINI.md",
   "work/CONTEXT.md",
 ] as const;
-const workTemporaryFile = /^(?:\.configuration-[0-9a-f]{48}|(?:package\.json|package-lock\.json)\.tmp_[0-9a-f]{32}|\.write_[0-9a-f]{32})$/;
+const workTemporaryFile =
+  /^(?:\.configuration-[0-9a-f]{48}|(?:package\.json|package-lock\.json)\.tmp_[0-9a-f]{32}|\.write_[0-9a-f]{32})$/;
 const resourcePattern = /^res_[0-9a-f]{32}$/;
 const runPattern = /^run_[0-9a-f]{32}$/;
 const absent = (cause: unknown): boolean =>
@@ -121,7 +122,7 @@ export class ProfileRetention {
   #pendingAdmissions = 0;
   #reserved = 0;
   #artifactDirectory?: Dir;
-  #artifactIdentity?: Stats;
+  #artifactIdentity?: BigIntStats;
   #materialFirst = true;
   #inputs: RetentionFile[] = [];
   #inputCursor?: {
@@ -199,7 +200,7 @@ export class ProfileRetention {
       "The Agent profile root cannot redirect elsewhere.",
     );
   }
-  async #directory(directory: string): Promise<Stats | null> {
+  async #directory(directory: string): Promise<BigIntStats | null> {
     await this.#root();
     let current = this.root;
     for (const part of path.relative(this.root, directory).split(path.sep)) {
@@ -209,9 +210,9 @@ export class ProfileRetention {
         "Cleanup must stay in its fixed managed directory.",
       );
       current = path.join(current, part);
-      let stats: Stats;
+      let stats: BigIntStats;
       try {
-        stats = await lstat(current);
+        stats = await lstat(current, { bigint: true });
       } catch (cause) {
         if (absent(cause)) return null;
         throw cause;
@@ -227,7 +228,7 @@ export class ProfileRetention {
       "storage_path_escape",
       "A managed directory cannot redirect elsewhere.",
     );
-    return await lstat(directory);
+    return await lstat(directory, { bigint: true });
   }
   async open(): Promise<void> {
     this.#admit();
@@ -290,25 +291,47 @@ export class ProfileRetention {
       scanned = 0,
       complete = true;
     const identities = new Set<string>();
-    const countFile = (stats: Stats): void => {
+    const countFile = (stats: BigIntStats): void => {
+      // NTFS file identities may exceed the exact integer range of a Number.
+      // Round only bounded byte counts, never the identity used for hard-link deduplication.
       const identity = `${stats.dev}:${stats.ino}`;
       if (!identities.has(identity)) {
+        const size = Number(stats.size);
+        requireCondition(
+          Number.isSafeInteger(size) && Number.isSafeInteger(bytes + size),
+          "storage_measurement_invalid",
+          "The managed byte count exceeds its exact integer range.",
+        );
         identities.add(identity);
-        bytes += stats.size;
+        bytes += size;
         files++;
       }
     };
     const inspectFile = async (filename: string): Promise<void> => {
       if (!complete) return;
-      if (++scanned > scanLimit) { complete = false; return; }
+      if (++scanned > scanLimit) {
+        complete = false;
+        return;
+      }
       const parent = path.dirname(filename);
-      if (parent !== this.root && !await this.#directory(parent)) return;
+      if (parent !== this.root && !(await this.#directory(parent))) return;
       await this.#root();
-      let stats: Stats;
-      try { stats = await lstat(filename); }
-      catch (cause) { if (absent(cause)) return; throw cause; }
-      if (stats.isSymbolicLink()) { symlinks++; return; }
-      requireCondition(stats.isFile(), "storage_measurement_invalid", "A fixed managed record must remain a regular file.");
+      let stats: BigIntStats;
+      try {
+        stats = await lstat(filename, { bigint: true });
+      } catch (cause) {
+        if (absent(cause)) return;
+        throw cause;
+      }
+      if (stats.isSymbolicLink()) {
+        symlinks++;
+        return;
+      }
+      requireCondition(
+        stats.isFile(),
+        "storage_measurement_invalid",
+        "A fixed managed record must remain a regular file.",
+      );
       countFile(stats);
     };
     const walk = async (directory: string, depth: number): Promise<void> => {
@@ -339,9 +362,9 @@ export class ProfileRetention {
             )
           )
             continue;
-          let stats: Stats;
+          let stats: BigIntStats;
           try {
-            stats = await lstat(filename);
+            stats = await lstat(filename, { bigint: true });
           } catch (cause) {
             if (absent(cause)) continue;
             throw cause;
@@ -373,19 +396,29 @@ export class ProfileRetention {
       }
       if (!complete) break;
     }
-    for (const relative of managedFiles) await inspectFile(path.join(this.root, relative));
+    for (const relative of managedFiles)
+      await inspectFile(path.join(this.root, relative));
     // Only these Core-owned siblings are inspected at work's top level. Never
     // recurse through arbitrary projects, package dependencies or raw work files.
     const work = path.join(this.root, "work");
-    if (complete && await this.#directory(work)) {
+    if (complete && (await this.#directory(work))) {
       const directory = await opendir(work);
       try {
         for await (const entry of directory) {
-          if (++scanned > scanLimit) { complete = false; break; }
-          if (workTemporaryFile.test(entry.name)) await inspectFile(path.join(work, entry.name));
+          if (++scanned > scanLimit) {
+            complete = false;
+            break;
+          }
+          if (workTemporaryFile.test(entry.name))
+            await inspectFile(path.join(work, entry.name));
           if (!complete) break;
         }
-      } finally { await directory.close().catch(cause => { if ((cause as NodeJS.ErrnoException).code !== "ERR_DIR_CLOSED") throw cause; }); }
+      } finally {
+        await directory.close().catch((cause) => {
+          if ((cause as NodeJS.ErrnoException).code !== "ERR_DIR_CLOSED")
+            throw cause;
+        });
+      }
     }
     return Object.freeze({
       bytes,
@@ -427,7 +460,10 @@ export class ProfileRetention {
         "storage_measurement_incomplete",
         "The managed usage scan could not finish within its safety budget.",
       );
-      if (bytes > maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved)) {
+      if (
+        bytes >
+        maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved)
+      ) {
         await this.sweep();
         reservedAtScanStart = this.#reserved;
         usage = await this.measure();
@@ -438,7 +474,8 @@ export class ProfileRetention {
         "The managed usage scan could not finish within its safety budget.",
       );
       requireCondition(
-        bytes <= maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved),
+        bytes <=
+          maximum - usage.bytes - Math.max(reservedAtScanStart, this.#reserved),
         "storage_quota_exceeded",
         "Managed storage is full after eligible expired data cleanup.",
       );

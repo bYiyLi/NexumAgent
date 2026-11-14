@@ -3,14 +3,14 @@
   "packageVersion": "0.1.0-development.0",
   "status": "in_progress",
   "published": false,
-  "browserInstallation": "not_performed",
-  "nativeBrowserAcceptance": "not_run",
+  "browserInstallation": "test_profiles_only",
+  "nativeBrowserAcceptance": "in_progress",
   "baseline": {
     "interfaces": 22,
     "members": 148,
     "extraMembers": 102
   },
-  "interpretation": "公开签名、受管路由和fixture证据分开记录。下列250项均未完成真实Chrome/Edge逐项验收，不因方法存在或返回capability=true而视为完成。",
+  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前250项仍未逐项完成该矩阵，局部原生通过不将其标为通过。",
   "registeredNativeRoutes": [
     "tabs.list",
     "tabs.get",

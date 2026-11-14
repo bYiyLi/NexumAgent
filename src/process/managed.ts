@@ -374,15 +374,9 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
     const work = (async () => {
       if (this.#flow) await this.#flow.catch(() => {});
       if (this.#backend?.failure) this.#failure ??= this.#backend.failure;
-      if (
-        this.#backend?.failure &&
-        safeErrorData(this.#backend.failure, {
-          code: "process_failed",
-          message: "The process backend failed.",
-        }).code === "process_output_failed"
-      )
-        this.#outputFailed = true;
       const facts = this.#backend?.facts() ?? initialFacts;
+      if (this.#backend?.failure && facts.closed && !facts.outputComplete)
+        this.#outputFailed = true;
       if (
         this.#backend &&
         (!facts.closed ||
@@ -393,8 +387,8 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
           "process_cleanup_unconfirmed",
           "The process backend has not confirmed actual tree and output closure.",
         );
-      // A known output-consumer failure keeps the outcome incomplete, but must
-      // not retain a physically closed process after its log handle also closes.
+      // Known backend failure with settled native readers keeps output incomplete,
+      // but cannot retain a physically closed process after its log also closes.
       // Unknown incomplete output still cannot establish resource closure.
       if (this.#preparationUnconfirmed) {
         await this.#log?.close();

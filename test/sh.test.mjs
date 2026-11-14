@@ -1222,3 +1222,68 @@ test(
     }
   },
 );
+
+test(
+  "Windows native helper loss closes the actual managed resource without inventing complete output",
+  { skip: process.platform !== "win32", timeout: 30000 },
+  async (t) => {
+    const f = await fixture(t),
+      start = ManagedProcess.prototype.start;
+    let managed;
+    ManagedProcess.prototype.start = async function (...args) {
+      managed = this;
+      return await start.apply(this, args);
+    };
+    let processId;
+    try {
+      processId = data(
+        await observeSameRun(
+          f,
+          f.start("return await sh.start(context.input);", {
+            input: command(
+              "process.stdout.write(JSON.stringify({pid:process.pid,parent:process.ppid}));setInterval(()=>{},1000);",
+              { background: true },
+            ),
+          }),
+        ),
+      ).processId;
+    } finally {
+      ManagedProcess.prototype.start = start;
+    }
+    const ready = await until(
+      () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
+      (value) => {
+        try {
+          return Number.isSafeInteger(JSON.parse(text(data(value))).parent);
+        } catch {
+          return false;
+        }
+      },
+    );
+    const identity = JSON.parse(text(data(ready)));
+    assert.equal(identity.pid, managed.facts().pid);
+    assert.ok(Number.isSafeInteger(identity.parent) && identity.parent > 0);
+    assert.notEqual(identity.parent, process.pid);
+    // This fixed business child reports its own still-live private helper parent.
+    // No OS-wide PID search or user process is involved.
+    process.kill(identity.parent, "SIGKILL");
+    await within(
+      managed.closed,
+      "Actual helper loss left a physically closed managed process pending.",
+    );
+    const row = f.store.getResource(processId);
+    assert.notEqual(row.closedAt, null);
+    assert.equal(row.diagnostic.details.closed, true);
+    assert.equal(row.diagnostic.details.treeStopped, true);
+    assert.equal(row.diagnostic.details.outputComplete, false);
+    assert.equal(
+      row.diagnostic.details.failure.code,
+      "windows_helper_unexpected_exit",
+    );
+    assert.equal(f.retention.reservedBytes, 0);
+    assert.equal(existsSync(`${managed.log.path}.complete`), false);
+    const retained = data(await observeSameRun(f, f.get(processId)));
+    assert.equal(retained.outputComplete, false);
+    assert.equal(retained.controlAvailable, false);
+  },
+);

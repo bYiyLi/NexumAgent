@@ -159,7 +159,7 @@ try {
   ledger = path.join(home, "ledger.json");
   control = path.join(home, "control.json");
   await command(null);
-  const code = `import fs from 'node:fs';const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
+  const code = `import fs from 'node:fs';const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};process.stderr.write('native-service-fixture-started\\n');fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
   await writeFile(path.join(program, "app/dist/cli.js"), code);
   plan = servicePlan({
     profile: "development",
@@ -184,6 +184,11 @@ try {
   await serviceAction(plan, "start", { isolatedHome: true });
   await waitFor(async () => alive((await readLedger()).pid), "first startup");
   let record = await readLedger();
+  assert.equal(
+    record.boots.length,
+    1,
+    "Startup must not create duplicate native leaders.",
+  );
   assert.deepEqual(record.boots.at(-1).args, [
     "run",
     "--profile",
@@ -200,6 +205,7 @@ try {
       return (
         current.boots.length > count &&
         current.pid !== pid &&
+        !alive(pid) &&
         alive(current.pid)
       );
     }, `restart after ${exitCode}`);
@@ -247,7 +253,7 @@ try {
   );
   if (plan && process.platform === "win32") {
     // Read only this fixture's actual Task Scheduler settings and timestamps.
-    // The original failure remains a failure even if the separate owned probe works.
+    // Keep read-back settings on a failed candidate; never retry the test action here.
     const name = "'" + plan.label.replaceAll("'", "''") + "'";
     const diagnostic = run(
       path.join(
@@ -265,61 +271,6 @@ try {
     );
     console.error(diagnostic.stdout);
     console.error(diagnostic.stderr);
-    if (
-      error.message === "Native service did not confirm restart after 75." &&
-      status?.state === "Ready" &&
-      status.lastResult === 75 &&
-      !(await readLedger()).boots.some((boot) => alive(boot.pid))
-    ) {
-      // Demand-start and scheduled-start retry behavior must be measured on the
-      // actual OS, before changing the product's startup path. This modifies
-      // only the unique task already owned by this ephemeral CI fixture.
-      try {
-        const before = (await readLedger()).boots.length;
-        const probe = run(
-          path.join(
-            process.env.SystemRoot || "C:\\Windows",
-            "System32/WindowsPowerShell/v1.0/powershell.exe",
-          ),
-          [
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName ${name};$once=New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5);$once.Id='NexumOwnedRestartProbe';Set-ScheduledTask -TaskName ${name} -Trigger @(@($t.Triggers)+$once)|Out-Null`,
-          ],
-        );
-        assert.equal(probe.status, 0);
-        await waitFor(async () => {
-          const current = await readLedger();
-          return current.boots.length > before && alive(current.pid);
-        }, "owned scheduled probe startup");
-        const count = (await readLedger()).boots.length;
-        await command(75);
-        await waitFor(
-          async () => {
-            const current = await readLedger();
-            return current.boots.length > count && alive(current.pid);
-          },
-          "owned scheduled probe automatic retry",
-          120000,
-        );
-        console.error(
-          JSON.stringify({
-            stage: "scheduled-restart-probe",
-            automaticRetry: true,
-          }),
-        );
-      } catch (probeError) {
-        console.error(
-          JSON.stringify({
-            stage: "scheduled-restart-probe",
-            automaticRetry: false,
-            message: probeError.message,
-          }),
-        );
-      }
-    }
   }
   if (plan && process.platform === "linux") {
     // This runner-only fixture owns its unique unit and never receives private

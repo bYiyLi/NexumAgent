@@ -168,7 +168,9 @@ export function servicePlan({
     state,
     preview ? "service-preview-launch.ps1" : "service-launch.ps1",
   );
-  const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\n& ${ps(node)} ${args.map(ps).join(" ")}\nexit $LASTEXITCODE\n`;
+  // Task Scheduler retries failure to start an action, not a completed app's
+  // nonzero exit. Keep app retries here, bounded, under that same user task.
+  const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\nfor ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {\n  $global:LASTEXITCODE = $null\n  $nexumExit = 1\n  try {\n    & ${ps(node)} ${args.map(ps).join(" ")}\n    if ($LASTEXITCODE -is [int]) { $nexumExit = $LASTEXITCODE }\n  } catch { $nexumExit = 1 }\n  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }\n  Start-Sleep -Seconds 10\n}\n`;
   const executable = p.join(
     process.env.SystemRoot || "C:\\Windows",
     "System32",

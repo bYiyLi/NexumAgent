@@ -47,13 +47,13 @@ jobs:
           import {cleanupPrograms} from './scripts/install-agent.mjs';
           import {childEnvironment} from './scripts/service.mjs';
           import {readdir,mkdir,readFile,rm} from 'node:fs/promises';
-          import {spawnSync} from 'node:child_process';
+          import {spawnSync,execFileSync} from 'node:child_process';
           import path from 'node:path';
           const temp=process.env.RUNNER_TEMP;
           const output=path.join(temp,'candidate');
           const archive=path.join(output,(await readdir(output)).find(x=>x.endsWith('.tar.gz')));
           const sha256=(await readFile(archive+'.sha256','utf8')).split(' ')[0];
-          const home=path.join(temp,'isolated-agent-home');await mkdir(home);
+          const home=path.join(temp,'isolated-agent-home 空格 & $ %');await mkdir(home);
           const installer=path.join(output,'installer-kit',process.platform==='win32'?'install.ps1':'install.sh');
           const args=['--archive',archive,'--sha256',sha256,'--signature-file',archive+'.sig','--public-key-file',path.join(temp,'candidate-public.pem'),'--home',home,'--profile','development','--no-register'];
           const bootstrap=spawnSync(process.platform==='win32'?path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'):'/bin/sh',process.platform==='win32'?['-NoLogo','-NoProfile','-NonInteractive','-File',installer,...args]:[installer,...args],{encoding:'utf8',env:childEnvironment(),input:JSON.stringify({server_url:'http://127.0.0.1:9/',token:'candidate-fixture-token'}),timeout:180000});
@@ -62,6 +62,7 @@ jobs:
           const node=path.join(installed.programDir,'runtime',process.platform==='win32'?'node.exe':'bin/node');
           const result=spawnSync(node,['--experimental-vm-modules',path.join(installed.programDir,'app/dist/cli.js'),'--help'],{encoding:'utf8'});
           if(result.status!==0)throw new Error('The actual packaged CLI did not start.');
+          execFileSync(process.execPath,['scripts/native-installed-agent-test.mjs','--home',home,'--program-dir',installed.programDir],{env:childEnvironment(),stdio:'inherit',timeout:300000});
           await cleanupPrograms({profile:'development',home});
           await rm(home,{recursive:true,force:true});
           JS

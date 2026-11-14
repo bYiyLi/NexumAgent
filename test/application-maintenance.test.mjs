@@ -100,6 +100,7 @@ async function fixture(t) {
       draft: 0,
       oauthStart: 0,
       oauthComplete: 0,
+      oauthCleanup: 0,
     },
     sockets = new Set();
   const nativeOAuth = [];
@@ -406,13 +407,15 @@ async function fixture(t) {
       scope.assertCurrent();
       calls.oauthStart++;
       if (oauthBodyGate) {
-        const res = await fetch(`${serverUrl}/oauth-native`, {
-          signal: scope.signal,
-        });
+        let res;
         try {
+          res = await fetch(`${serverUrl}/oauth-native`, {
+            signal: scope.signal,
+          });
           await res.text();
         } finally {
-          await res.body?.cancel().catch(() => {});
+          await res?.body?.cancel().catch(() => {});
+          calls.oauthCleanup++;
           if (oauthCleanupGate) await oauthCleanupGate.promise;
         }
       }
@@ -886,7 +889,10 @@ test("shutdown joins a real OAuth body and its backend cleanup before closing SQ
       () => f.nativeOAuth[0].closed,
       "Shutdown must abort the real OAuth HTTP socket",
     );
-    await delay(10);
+    await until(
+      () => f.calls.oauthCleanup === 1,
+      "The admitted OAuth backend must reach its actual cleanup barrier",
+    );
     assert.equal(
       finished,
       false,
