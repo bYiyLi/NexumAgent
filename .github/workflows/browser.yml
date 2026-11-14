@@ -6,6 +6,8 @@ on:
       - packages/browser/**
       - packages/extension-api/**
       - scripts/build-extension-api.mjs
+      - scripts/prepare-native-browser.mjs
+      - scripts/service.mjs
       - src/extension-api.ts
       - .github/workflows/browser.yml
   pull_request:
@@ -13,6 +15,8 @@ on:
       - packages/browser/**
       - packages/extension-api/**
       - scripts/build-extension-api.mjs
+      - scripts/prepare-native-browser.mjs
+      - scripts/service.mjs
       - src/extension-api.ts
       - .github/workflows/browser.yml
 permissions:
@@ -46,6 +50,21 @@ jobs:
       - run: node --experimental-vm-modules --test --test-timeout=120000 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/ci-test-events.mjs --test-reporter-destination=stdout "test/*.test.mjs"
         working-directory: packages/browser
       - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
+      - name: Prepare the SHA-256-pinned native Chrome for Testing in runner temp
+        run: node scripts/prepare-native-browser.mjs
+      - name: Exercise actual isolated browser scenarios
+        run: node --experimental-vm-modules --test --test-concurrency=1 packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
+      - name: Exercise real opt-in WebMCP registrations and stale-registration rejection
+        env:
+          NEXUM_BROWSER_WEBMCP_TESTING: "1"
+        run: node --experimental-vm-modules --test --test-name-pattern="native WebMCP" packages/browser/test/native-capabilities.acceptance.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nexum-browser-native-${{ matrix.os }}
+          path: ${{ runner.temp }}/nexum-browser-native-*/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: nexum-browser-${{ matrix.os }}-candidate
