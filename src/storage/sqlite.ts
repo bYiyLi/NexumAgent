@@ -1,5 +1,11 @@
 import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHmac,
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { AgentError, requireCondition } from "../contracts/errors.js";
@@ -24,7 +30,7 @@ import {
   type WaitRecord,
   type WorkRecord,
 } from "../contracts/types.js";
-import { migration1, migration2, schemaVersion } from "./schema.js";
+import { migration1, migration2, migration3, schemaVersion } from "./schema.js";
 
 const terminalSql = "'succeeded','failed','cancelled','interrupted'";
 const transitions: Record<RunStatus, readonly RunStatus[]> = {
@@ -62,6 +68,19 @@ export interface AcceptRun {
   requestId?: string;
   intentDigest?: string;
   capacity?: number;
+}
+export interface ResourceHistoryFilter {
+  readonly owner: string;
+  readonly namespace: string;
+  readonly type: ContributionOrigin["type"];
+  readonly kind?: string;
+  readonly status?: string;
+  readonly state?: string;
+  readonly runId?: string;
+  readonly contextId?: string;
+}
+export interface ResourceHistoryRecord extends ResourceRecord {
+  readonly contextId: string | null;
 }
 
 export class SqliteStore {
@@ -151,6 +170,7 @@ export class SqliteStore {
           this.#db.exec(migration1);
         }
         if (version < 2) this.#db.exec(migration2);
+        if (version < 3) this.#db.exec(migration3);
         this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
@@ -1179,6 +1199,146 @@ export class SqliteStore {
       )
       .all(...(limit === undefined ? [runId] : [runId, limit]))
       .map((row) => decode<ResourceRecord>(row));
+  }
+
+  resourceHistory(id: string): ResourceHistoryRecord {
+    const row = this.#db
+      .prepare(
+        `SELECT m.*, r.context_id FROM managed_resources m
+      LEFT JOIN runs r ON r.run_id=m.origin_run_id WHERE m.resource_id=?`,
+      )
+      .get(id);
+    requireCondition(
+      row,
+      "resource_not_found",
+      "The resource history does not exist.",
+    );
+    return decode<ResourceHistoryRecord>(row);
+  }
+
+  /** Internal bounded scan. Per-row cursors let the manager filter authority without skipping rows. */
+  scanResourceHistory(
+    filter: ResourceHistoryFilter,
+    caller: string,
+    limit = 100,
+    cursor?: string,
+  ): {
+    items: { record: ResourceHistoryRecord; cursor: string }[];
+    more: boolean;
+  } {
+    requireCondition(
+      Number.isSafeInteger(limit) && limit > 0 && limit <= 1000,
+      "invalid_limit",
+      "A resource history scan must contain between 1 and 1000 rows.",
+    );
+    const query = digest({
+      mode: "resource-history",
+      binding: this.binding,
+      caller,
+      filter: Object.fromEntries(
+        Object.entries(filter).filter(([, value]) => value !== undefined),
+      ),
+    });
+    const where = [
+      "json_extract(m.source_json,'$.owner')=?",
+      "json_extract(m.source_json,'$.namespace')=?",
+      "json_extract(m.source_json,'$.type')=?",
+    ];
+    const values: SQLInputValue[] = [
+      filter.owner,
+      filter.namespace,
+      filter.type,
+    ];
+    for (const [field, expression] of [
+      ["kind", "m.kind"],
+      ["status", "m.status"],
+      ["state", "json_extract(m.diagnostic_json,'$.details.state')"],
+      ["runId", "m.origin_run_id"],
+      ["contextId", "r.context_id"],
+    ] as const) {
+      if (filter[field] !== undefined) {
+        if (field === "state")
+          where.push("json_type(m.diagnostic_json,'$.details.state')='text'");
+        where.push(`${expression}=?`);
+        values.push(filter[field]!);
+      }
+    }
+    if (cursor !== undefined) {
+      try {
+        requireCondition(
+          typeof cursor === "string" &&
+            cursor.length > 0 &&
+            cursor.length <= 4096 &&
+            /^[A-Za-z0-9_-]+$/.test(cursor),
+          "invalid_cursor",
+          "The resource history cursor is invalid.",
+        );
+        const envelope = Buffer.from(cursor, "base64url");
+        requireCondition(
+          envelope.length > 28,
+          "invalid_cursor",
+          "The resource history cursor is invalid.",
+        );
+        const decipher = createDecipheriv(
+          "aes-256-gcm",
+          this.#cursorKey,
+          envelope.subarray(0, 12),
+        );
+        decipher.setAAD(Buffer.from(query));
+        decipher.setAuthTag(envelope.subarray(-16));
+        const page = JSON.parse(
+          Buffer.concat([
+            decipher.update(envelope.subarray(12, -16)),
+            decipher.final(),
+          ]).toString("utf8"),
+        ) as { time: number; id: string };
+        requireCondition(
+          Number.isSafeInteger(page.time) &&
+            page.time >= 0 &&
+            typeof page.id === "string" &&
+            /^res_[0-9a-f]{32}$/.test(page.id),
+          "invalid_cursor",
+          "The resource history cursor has no valid position.",
+        );
+        where.push("(m.created_at<? OR (m.created_at=? AND m.resource_id<?))");
+        values.push(page.time, page.time, page.id);
+      } catch (cause) {
+        throw new AgentError(
+          "invalid_cursor",
+          "The resource history cursor is invalid or belongs to another caller, source or filter.",
+          undefined,
+          { cause },
+        );
+      }
+    }
+    const rows = this.#db
+      .prepare(
+        `SELECT m.*, r.context_id FROM managed_resources m
+      LEFT JOIN runs r ON r.run_id=m.origin_run_id WHERE ${where.join(" AND ")}
+      ORDER BY m.created_at DESC,m.resource_id DESC LIMIT ?`,
+      )
+      .all(...values, limit + 1);
+    return {
+      more: rows.length > limit,
+      items: rows.slice(0, limit).map((row) => {
+        const record = decode<ResourceHistoryRecord>(row);
+        const iv = randomBytes(12),
+          cipher = createCipheriv("aes-256-gcm", this.#cursorKey, iv);
+        cipher.setAAD(Buffer.from(query));
+        const ciphertext = Buffer.concat([
+          cipher.update(
+            JSON.stringify({ time: record.createdAt, id: record.resourceId }),
+          ),
+          cipher.final(),
+        ]);
+        return {
+          record,
+          cursor: Buffer.concat([iv, ciphertext, cipher.getAuthTag()]).toString(
+            "base64url",
+          ),
+        };
+      }),
+    };
   }
 
   scriptUsage(callerKey: string): {

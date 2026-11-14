@@ -1,14 +1,14 @@
 import { once, EventEmitter } from "node:events";
 import { types } from "node:util";
 import { AgentError, requireCondition } from "../contracts/errors.js";
-import { canonicalJson, newId } from "../contracts/json.js";
+import { canonicalJson, isPlainRecord, newId } from "../contracts/json.js";
 import { authorizeCall } from "../contracts/caller.js";
 import type {
   ContributionOrigin,
   JsonObject,
   ResourceRecord,
 } from "../contracts/types.js";
-import { SqliteStore } from "../storage/sqlite.js";
+import { SqliteStore, type ResourceHistoryRecord } from "../storage/sqlite.js";
 
 /** Extension-side control objects. Neither these nor ResourceRef cross the script/wire boundary. */
 export interface ManagedResource {
@@ -32,11 +32,44 @@ export interface ResourceService {
     id: string,
   ): Promise<ResourceRef<T>>;
   handoff(id: string): Promise<ResourceRecord>;
+  /** Call-bound, read-only retained history; never returns a live controller. */
+  describe(id: string): Promise<ResourceSnapshot>;
+  list(query?: ResourceQuery): Promise<ResourcePage>;
 }
+export interface ResourceSnapshot extends JsonObject {
+  readonly id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly lifetime: ResourceRecord["lifetime"];
+  readonly originRunId: string | null;
+  readonly contextId: string | null;
+  readonly origin: ContributionOrigin;
+  readonly createdAt: number;
+  readonly closedAt: number | null;
+  readonly handedOffAt: number | null;
+  readonly details: JsonObject;
+  readonly controlAvailable: boolean;
+}
+export interface ResourceQuery {
+  readonly kind?: string;
+  readonly status?: string;
+  /** Exact reported details.state, independently of physical closure/status. */
+  readonly state?: string;
+  readonly runId?: string;
+  readonly contextId?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+export interface ResourcePage {
+  /** Byte/scan budgets may shorten a page; nextCursor preserves the remaining position. */
+  readonly items: readonly ResourceSnapshot[];
+  readonly nextCursor: string | null;
+}
+type ResourceAction = "register" | "get" | "handoff" | "describe" | "list";
 export interface ResourceBinding {
   readonly signal: AbortSignal;
   /** The current invocation policy, including ownership/path/connection restrictions. */
-  authorize(action: "register" | "get" | "handoff", id?: string): void;
+  authorize(action: ResourceAction, id?: string): void;
   /** Check admission/current invocation before resource side effects. */
   assertActive(): void;
   readonly runId?: string;
@@ -74,6 +107,52 @@ export interface ResourceInstance {
   bind(binding: ResourceBinding): ResourceService;
   busy(): boolean;
   stop(reason?: unknown): Promise<CleanupReport>;
+}
+const readDenials = new Set([
+  "forbidden",
+  "permission_denied",
+  "access_denied",
+  "resource_forbidden",
+  "path_not_allowed",
+  "unauthorized",
+]);
+function permissionDenied(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object" || types.isProxy(cause)) return false;
+  // A source/policy configuration failure must remain actionable even if it
+  // happens to carry an otherwise familiar access-denied code.
+  let prototype: object | null = cause;
+  for (let depth = 0; prototype && depth < 16; depth++) {
+    if (types.isProxy(prototype)) return false;
+    const name = Object.getOwnPropertyDescriptor(prototype, "name");
+    const constructor = Object.getOwnPropertyDescriptor(
+      prototype,
+      "constructor",
+    );
+    const className =
+      constructor &&
+      "value" in constructor &&
+      typeof constructor.value === "function" &&
+      !types.isProxy(constructor.value)
+        ? Object.getOwnPropertyDescriptor(constructor.value, "name")
+        : undefined;
+    if (
+      (name && "value" in name && name.value === "SourceConfigError") ||
+      (className &&
+        "value" in className &&
+        className.value === "SourceConfigError")
+    )
+      return false;
+    prototype = Object.getPrototypeOf(prototype);
+  }
+  const code = Object.getOwnPropertyDescriptor(cause, "code");
+  return !!code && "value" in code && readDenials.has(code.value);
+}
+function resourceId(value: unknown): asserts value is string {
+  requireCondition(
+    typeof value === "string" && /^res_[0-9a-f]{32}$/.test(value),
+    "invalid_resource_id",
+    "A resource history identity must be an actual resource id.",
+  );
 }
 
 /** One manager per live Agent/profile, backed by that profile's existing resource rows. */
@@ -168,7 +247,7 @@ export class ResourceManager extends EventEmitter {
   #active(
     owner: Owner,
     binding: ResourceBinding,
-    action: "register" | "get" | "handoff",
+    action: ResourceAction,
     id?: string,
   ): void {
     requireCondition(
@@ -201,8 +280,189 @@ export class ResourceManager extends EventEmitter {
     );
     return row;
   }
+  #historyCaller(binding: ResourceBinding): string {
+    requireCondition(
+      binding.runId,
+      "resource_history_requires_call",
+      "Resource history must be read through a current call with a verified caller.",
+    );
+    return this.store.getRun(binding.runId).callerKey;
+  }
+  #snapshot(owner: Owner, row: ResourceHistoryRecord): ResourceSnapshot {
+    requireCondition(
+      row.source.owner === owner.origin.owner &&
+        row.source.namespace === owner.origin.namespace &&
+        row.source.type === owner.origin.type,
+      "resource_owner_mismatch",
+      "The retained resource belongs to another source namespace.",
+    );
+    const source = row.source;
+    requireCondition(
+      ["local", "platform", "extension"].includes(source.type as string) &&
+        typeof source.owner === "string" &&
+        typeof source.namespace === "string" &&
+        (source.version === null || typeof source.version === "string") &&
+        typeof source.revision === "string",
+      "invalid_resource_history",
+      "The resource source metadata is invalid.",
+    );
+    const details = row.diagnostic.details ?? {};
+    requireCondition(
+      isPlainRecord(details),
+      "invalid_resource_history",
+      "The retained resource facts must be an ordinary data object.",
+    );
+    const entry = this.#entries.get(row.resourceId);
+    return JSON.parse(
+      canonicalJson(
+        {
+          id: row.resourceId,
+          kind: row.kind,
+          status: row.status,
+          lifetime: row.lifetime,
+          originRunId: row.originRunId,
+          contextId: row.contextId,
+          origin: {
+            type: source.type,
+            owner: source.owner,
+            namespace: source.namespace,
+            version: source.version,
+            revision: source.revision,
+          },
+          createdAt: row.createdAt,
+          closedAt: row.closedAt,
+          handedOffAt: row.handedOffAt,
+          details,
+          controlAvailable:
+            row.closedAt === null &&
+            row.bootId === this.store.bootId &&
+            row.source.instanceId === owner.id &&
+            entry?.owner === owner &&
+            !entry.persistenceError,
+        },
+        32768,
+      ),
+    ) as ResourceSnapshot;
+  }
   #facade(owner: Owner, binding: ResourceBinding): ResourceService {
     return Object.freeze({
+      describe: async (id: string) => {
+        this.#active(owner, binding, "describe");
+        this.#historyCaller(binding);
+        resourceId(id);
+        this.#active(owner, binding, "describe", id);
+        return this.#snapshot(owner, this.store.resourceHistory(id));
+      },
+      list: async (query: ResourceQuery = {}) => {
+        this.#active(owner, binding, "list");
+        const caller = this.#historyCaller(binding);
+        const input = JSON.parse(canonicalJson(query, 8192)) as ResourceQuery;
+        requireCondition(
+          isPlainRecord(input) &&
+            Object.keys(input).every((key) =>
+              [
+                "kind",
+                "status",
+                "state",
+                "runId",
+                "contextId",
+                "limit",
+                "cursor",
+              ].includes(key),
+            ),
+          "invalid_resource_query",
+          "Resource history accepts only the documented equality filters and pagination fields.",
+        );
+        for (const field of [
+          "kind",
+          "status",
+          "state",
+          "runId",
+          "contextId",
+        ] as const)
+          requireCondition(
+            input[field] === undefined ||
+              (typeof input[field] === "string" &&
+                input[field]!.length > 0 &&
+                Buffer.byteLength(input[field]!) <= 1024 &&
+                !/[\0\r\n]/.test(input[field]!)),
+            "invalid_resource_query",
+            "Resource history filters must be bounded text.",
+          );
+        const limit = input.limit ?? 20;
+        requireCondition(
+          typeof limit === "number" &&
+            Number.isSafeInteger(limit) &&
+            limit > 0 &&
+            limit <= 100,
+          "invalid_limit",
+          "Resource history page size must be between 1 and 100.",
+        );
+        requireCondition(
+          input.cursor === undefined ||
+            (typeof input.cursor === "string" &&
+              input.cursor.length > 0 &&
+              input.cursor.length <= 4096),
+          "invalid_cursor",
+          "The resource history cursor is invalid.",
+        );
+        const { limit: _limit, cursor: _cursor, ...filters } = input;
+        const filter = {
+          ...filters,
+          owner: owner.origin.owner,
+          namespace: owner.origin.namespace!,
+          type: owner.origin.type,
+        };
+        const items: ResourceSnapshot[] = [];
+        let cursor = input.cursor,
+          scanned = 0,
+          pageBytes = 0;
+        while (scanned < 1000) {
+          this.#active(owner, binding, "list");
+          const page = this.store.scanResourceHistory(
+            filter,
+            caller,
+            Math.min(100, 1000 - scanned),
+            cursor,
+          );
+          for (let index = 0; index < page.items.length; index++) {
+            const item = page.items[index]!;
+            const previous = cursor;
+            scanned++;
+            cursor = item.cursor;
+            try {
+              this.#active(owner, binding, "list", item.record.resourceId);
+            } catch (cause) {
+              if (permissionDenied(cause)) continue;
+              throw cause;
+            }
+            const result = this.#snapshot(owner, item.record);
+            const bytes = Buffer.byteLength(canonicalJson(result));
+            // Leave space for cursor/envelope. The candidate remains unread in
+            // the returned position when it would exceed this page's budget.
+            if (pageBytes + bytes > 60 * 1024) {
+              this.#active(owner, binding, "list");
+              return { items, nextCursor: previous ?? null };
+            }
+            pageBytes += bytes;
+            items.push(result);
+            if (items.length === limit) {
+              this.#active(owner, binding, "list");
+              return {
+                items,
+                nextCursor:
+                  index < page.items.length - 1 || page.more ? cursor : null,
+              };
+            }
+          }
+          if (!page.more) {
+            this.#active(owner, binding, "list");
+            return { items, nextCursor: null };
+          }
+        }
+        this.#active(owner, binding, "list");
+        return { items, nextCursor: cursor ?? null };
+      },
       register: async <T extends ManagedResource>({
         kind,
         value,

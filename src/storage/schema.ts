@@ -1,5 +1,5 @@
-// Schema version 1. Runtime migrations own the executable DDL.
-export const schemaVersion = 2;
+// Runtime migrations own the executable DDL.
+export const schemaVersion = 3;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -193,4 +193,14 @@ CREATE INDEX close_expiry ON close_receipts(expires_at);
 // a newly-created value using a recycled version.
 export const migration2 = `
 ALTER TABLE agent_state ADD COLUMN deleted_at INTEGER;
+`;
+
+// Source-scoped keyset history uses the same equality prefix and ordering.
+export const migration3 = `
+CREATE INDEX resources_history ON managed_resources(
+  json_extract(source_json,'$.owner'),
+  json_extract(source_json,'$.namespace'),
+  json_extract(source_json,'$.type'),
+  created_at DESC, resource_id DESC
+);
 `;

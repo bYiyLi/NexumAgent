@@ -475,6 +475,9 @@ export class ExtensionRegistry {
       get: async <T extends ManagedResource>(id: string) =>
         protect(await inner.get<T>(id)),
       handoff: (id: string) => inner.handoff(id),
+      describe: (id: string) => inner.describe(id),
+      list: (query?: Parameters<ResourceService["list"]>[0]) =>
+        inner.list(query),
     });
     entry.protected.add(api);
     return api;
