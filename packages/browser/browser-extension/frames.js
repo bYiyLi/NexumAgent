@@ -48,6 +48,26 @@ export function frameHitTest(input) {
   return this.isConnected && (node === this || this.contains(node));
 }
 
+/** Let visible frame scrolls reach native input routing before reading the map. */
+export function frameOwnerReadyForInput() {
+  if (!this.isConnected) return false;
+  // Inactive documents do not run animation frames. Preserve their existing
+  // native layout route instead of turning background input into a paint wait.
+  if (document.visibilityState === "hidden") return true;
+  return new Promise((resolve) => {
+    let frame, timer;
+    const finish = (ready) => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      resolve(ready && this.isConnected);
+    };
+    timer = setTimeout(() => finish(false), 250);
+    frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => finish(true));
+    });
+  });
+}
+
 function mappedPoint(point, owners) {
   let result = { x: point.x, y: point.y };
   for (const owner of [...owners].reverse())
@@ -162,6 +182,24 @@ export async function framePage(ctx, payload, selectors, execute) {
       // scrollIntoView in the resolved descendant can scroll every native ancestor.
       // Coordinates read during traversal are no longer an observation of this input target.
       for (const owner of owners) {
+        const ready = await ctx.router.frameSend(
+          ctx,
+          owner.frameId,
+          "Runtime.callFunctionOn",
+          {
+            objectId: owner.objectId,
+            functionDeclaration: frameOwnerReadyForInput.toString(),
+            awaitPromise: true,
+            returnByValue: true,
+          },
+        );
+        ctx.signal?.throwIfAborted();
+        requireValue(
+          !ready.exceptionDetails && typeof ready.result?.value === "boolean",
+          "STALE_REF",
+          "The ancestor frame's current rendering state is unavailable.",
+        );
+        if (!ready.result.value) return null;
         const geometry = await ctx.router.frameSend(
           ctx,
           owner.frameId,

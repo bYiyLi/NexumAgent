@@ -24,12 +24,18 @@ test(
     const f = await nativeFixture(t);
     const opened = await f.run(
       select +
-        `await tab.navigate(context.input.url,{waitUntil:'domcontentloaded',timeoutMs:30000});return {id:tab.id,url:await tab.url()};`,
+        `await tab.navigate(context.input.url,{waitUntil:'domcontentloaded',timeoutMs:30000});return {id:tab.id,url:await tab.url(),title:await tab.title()};`,
       { base: f.base, url: source },
     );
+    const arrived = new URL(opened.result.data.url);
     assert.equal(
-      new URL(opened.result.data.url).searchParams.get("v"),
+      arrived.searchParams.get("v"),
       videoId,
+      JSON.stringify({
+        page: arrived.origin + arrived.pathname,
+        videoId: arrived.searchParams.get("v"),
+        title: opened.result.data.title,
+      }),
     );
     const id = opened.result.data.id;
     const facts = `(()=>{const player=document.querySelector('#movie_player')?.getPlayerResponse?.()??globalThis.ytInitialPlayerResponse;return {videoId:document.querySelector('ytd-watch-flexy')?.getAttribute('video-id')??null,playerVideoId:player?.videoDetails?.videoId??null,urlVideoId:new URL(location.href).searchParams.get('v'),readyState:document.readyState,metadata:document.querySelectorAll('ytd-watch-metadata').length,expands:Array.from(document.querySelectorAll('ytd-watch-metadata #description-inline-expander #expand')).map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return {visible:s.display!=='none'&&s.visibility!=='hidden'&&r.width>0&&r.height>0};}),segments:document.querySelectorAll('transcript-segment-view-model,ytd-transcript-segment-renderer').length};})()`;

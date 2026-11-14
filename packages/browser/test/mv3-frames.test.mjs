@@ -35,6 +35,15 @@ function fixture(t) {
     scrollAncestors = false,
     scrolled = false;
   const backendNodes = new Map();
+  const paintCallbacks = new Map();
+  let holdPaint = false,
+    paintSequence = 0;
+  const paint = (id) => {
+    const callback = paintCallbacks.get(id);
+    if (!callback) return;
+    paintCallbacks.delete(id);
+    callback(performance.now());
+  };
   class Element {
     constructor(tagName, doc, contents = "") {
       this.tagName = tagName;
@@ -109,6 +118,15 @@ function fixture(t) {
       TextDecoder,
       Uint8Array,
       Element,
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame(callback) {
+        const id = ++paintSequence;
+        paintCallbacks.set(id, callback);
+        if (!holdPaint) setTimeout(() => paint(id), 0);
+        return id;
+      },
+      cancelAnimationFrame: (id) => paintCallbacks.delete(id),
       scrollBy({ left, top }) {
         document.scrollX = (document.scrollX ?? 0) + left;
         document.scrollY = (document.scrollY ?? 0) + top;
@@ -403,6 +421,18 @@ function fixture(t) {
     scrollAncestors: () => {
       scrollAncestors = true;
     },
+    holdPaint: () => {
+      holdPaint = true;
+    },
+    resumePaint: () => {
+      holdPaint = false;
+      for (const id of paintCallbacks.keys()) setTimeout(() => paint(id), 0);
+    },
+    pendingPaint: () => paintCallbacks.size,
+    hideDocuments: () => {
+      for (const world of worlds.values())
+        world.document.visibilityState = "hidden";
+    },
     emitNative: (...args) => onEvent.emit(...args),
     scrollPosition: () => ({
       x: parentDoc.scrollX ?? 0,
@@ -557,6 +587,85 @@ test("nested native input remaps every owner after descendant scrollIntoView mov
   );
   assert.equal(pressed.params.x, 214);
   assert.equal(pressed.params.y, 111);
+  assert.equal(f.objects.size, 0);
+});
+
+test("native frame input waits for visible ancestor rendering after scroll and releases its paint callbacks before dispatch", async (t) => {
+  const f = fixture(t);
+  f.scrollAncestors();
+  f.holdPaint();
+  const pending = f.call("locator.click", {
+    locator: {
+      target: f.target,
+      framePath: ["iframe", "#nested"],
+      query: { kind: "selector", selector: "button" },
+    },
+  });
+  void pending.catch(() => {});
+  try {
+    await delay(10);
+    assert.equal(
+      f.calls.some(({ method }) => method === "Input.dispatchMouseEvent"),
+      false,
+    );
+    assert.equal(f.pendingPaint(), 1);
+    f.resumePaint();
+    await pending;
+    assert.equal(f.pendingPaint(), 0);
+    const pressed = f.calls.find(
+      ({ method, params }) =>
+        method === "Input.dispatchMouseEvent" && params.type === "mousePressed",
+    );
+    assert.equal(pressed.params.x, 214);
+    assert.equal(pressed.params.y, 111);
+    assert.equal(f.objects.size, 0);
+  } finally {
+    f.resumePaint();
+    await pending.catch(() => {});
+  }
+});
+
+test("inactive frame documents retain native input without waiting for animation frames that cannot run", async (t) => {
+  const f = fixture(t);
+  f.scrollAncestors();
+  f.holdPaint();
+  f.hideDocuments();
+  await f.call("locator.click", {
+    locator: {
+      target: f.target,
+      framePath: ["iframe", "#nested"],
+      query: { kind: "selector", selector: "button" },
+    },
+  });
+  const pressed = f.calls.find(
+    ({ method, params }) =>
+      method === "Input.dispatchMouseEvent" && params.type === "mousePressed",
+  );
+  assert.equal(pressed.params.x, 214);
+  assert.equal(pressed.params.y, 111);
+  assert.equal(f.pendingPaint(), 0);
+  assert.equal(f.objects.size, 0);
+});
+
+test("an unrendered visible frame times out without native input or retained animation callbacks and handles", async (t) => {
+  const f = fixture(t);
+  f.scrollAncestors();
+  f.holdPaint();
+  await assert.rejects(
+    f.call("locator.click", {
+      locator: {
+        target: f.target,
+        framePath: ["iframe", "#nested"],
+        query: { kind: "selector", selector: "button" },
+      },
+    }),
+    { code: "TIMEOUT" },
+  );
+  assert.equal(
+    f.calls.some(({ method }) => method === "Input.dispatchMouseEvent"),
+    false,
+  );
+  assert.equal(f.pendingPaint(), 0);
   assert.equal(f.objects.size, 0);
 });
 

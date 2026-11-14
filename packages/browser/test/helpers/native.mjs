@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -268,6 +269,14 @@ export async function nativeFixture(t, options = {}) {
   });
   await services.enable("nexum-browser");
   const extension = path.join(work, ".nexum-browser", "extension");
+  for (const name of readdirSync(extension)) {
+    if (!name.endsWith(".js") || name === "profile.js") continue;
+    assert.deepEqual(
+      readFileSync(path.join(extension, name)),
+      readFileSync(path.join(packageRoot, "browser-extension", name)),
+      `The native fixture would run stale ${name}; rebuild the browser package before acceptance.`,
+    );
+  }
   child = spawn(
     binary,
     [

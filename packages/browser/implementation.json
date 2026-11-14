@@ -147,7 +147,8 @@
       "id": "B001",
       "target": "client.browsers",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B002",
@@ -159,25 +160,29 @@
       "id": "B003",
       "target": "client.browsers.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B004",
       "target": "client.browsers.getDefault",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B005",
       "target": "client.browsers.getForUrl",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B006",
       "target": "client.browsers.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B007",
@@ -195,7 +200,8 @@
       "id": "B009",
       "target": "selectedBrowser.tabs",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B010",
@@ -249,13 +255,15 @@
       "id": "B018",
       "target": "selectedBrowser.tabs.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B019",
       "target": "selectedBrowser.tabs.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B020",
@@ -1708,6 +1716,11 @@
       "file": "test/native-client.acceptance.mjs",
       "test": "native organization mutations cannot alter a window or group whose member is controlled by another run",
       "coverage": ["scope_conflict"]
+    },
+    "native-independent-profiles": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native independent browser profiles keep control, conflicts and offline identities isolated",
+      "coverage": ["normal", "scope_conflict", "peer_offline"]
     }
   }
 }

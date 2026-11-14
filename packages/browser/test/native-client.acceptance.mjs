@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
@@ -17,6 +19,171 @@ const html = `<!doctype html><html><head><title>Nexum native client</title></hea
 <input type="file" id="uploads" aria-label="Native attachments" multiple><output id="uploaded" data-testid="uploaded">No attachments</output>
 <script>document.querySelector('#keyboard').addEventListener('input',event=>document.querySelector('[data-testid=keyboard-value]').textContent=event.target.value);document.querySelector('#pick').addEventListener('change',event=>document.querySelector('[data-testid=options-value]').textContent=JSON.stringify([...event.target.selectedOptions].map(option=>option.value)));document.querySelector('#uploads').addEventListener('change',async(event)=>{const files=await Promise.all([...event.target.files].map(async(file)=>({name:file.name,size:file.size,type:file.type,length:(await file.text()).length})));document.querySelector('#uploaded').textContent=JSON.stringify(files);});</script>
 </body></html>`;
+
+test(
+  "native independent browser profiles keep control, conflicts and offline identities isolated",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await nativeFixture(t, { html });
+    const discovery = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const peers=await client.browsers.list();return await Promise.all(peers.map(async peer=>({peer,tabs:await(await client.browsers.get(peer.id)).tabs.list()})));`;
+    const initial = (await f.run(discovery)).result.data;
+    assert.equal(initial.length, 1);
+    const original = initial[0].peer;
+    const firstTab = initial[0].tabs.find((tab) => tab.url === f.base);
+    assert.ok(firstTab);
+    const secondUrl = f.base + "second-profile";
+    const secondHome = path.join(f.root, "second-home");
+    mkdirSync(secondHome);
+    const extension = path.join(f.work, ".nexum-browser", "extension");
+    const child = spawn(
+      process.env.NEXUM_BROWSER_NATIVE_BINARY,
+      [
+        `--user-data-dir=${path.join(f.root, "second-browser-profile")}`,
+        `--load-extension=${extension}`,
+        `--disable-extensions-except=${extension}`,
+        ...(process.env.NEXUM_BROWSER_NATIVE_HEADFUL === "1"
+          ? []
+          : ["--headless=new"]),
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-sync",
+        "--use-mock-keychain",
+        "--password-store=basic",
+        secondUrl,
+      ],
+      {
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "ignore", "pipe"],
+        env:
+          process.platform === "win32"
+            ? process.env
+            : { ...process.env, HOME: secondHome, USERPROFILE: secondHome },
+      },
+    );
+    const closed = once(child, "close");
+    let stderr = "",
+      held;
+    child.stderr.on("data", (bytes) => {
+      stderr = (stderr + bytes.toString()).slice(-4096);
+    });
+    child.on("error", () => {});
+    try {
+      let profiles;
+      const readyUntil = performance.now() + 30000;
+      do {
+        profiles = (await f.run(discovery)).result.data;
+        if (
+          profiles.length === 2 &&
+          profiles.some((item) =>
+            item.tabs.some((tab) => tab.url === secondUrl),
+          )
+        )
+          break;
+        assert.equal(child.exitCode, null, stderr);
+        await delay(50);
+      } while (performance.now() < readyUntil);
+      assert.equal(profiles.length, 2, JSON.stringify({ profiles, stderr }));
+      const second = profiles.find((item) => item.peer.id !== original.id);
+      const secondTab = second.tabs.find((tab) => tab.url === secondUrl);
+      assert.ok(secondTab, JSON.stringify({ profiles, stderr }));
+      assert.equal(second.peer.bootId, original.bootId);
+      assert.notEqual(second.peer.browserSessionId, original.browserSessionId);
+      t.diagnostic(
+        JSON.stringify({
+          actualProfiles: profiles.length,
+          equalNativeTabIds: secondTab.id === firstTab.id,
+        }),
+      );
+      const target = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser),selected=await client.browsers.get(context.input.browserId),tab=await selected.tabs.get(context.input.tabId);`;
+      held = await f.start(
+        target +
+          `await tab.playwright.getByLabel('Keyboard field',{exact:true}).fill('profile one');await tab.playwright.waitForURL(context.input.base+'never-arrived',{timeoutMs:45000});`,
+        { browserId: original.id, tabId: firstTab.id, base: f.base },
+      );
+      const heldUntil = performance.now() + 5000;
+      do {
+        held = await f.observe(held.run.runId, 50);
+        if (
+          held.operations.items.some(
+            (item) => item.method === "playwright.waitForURL",
+          )
+        )
+          break;
+        await delay(10);
+      } while (performance.now() < heldUntil);
+      assert.ok(
+        held.operations.items.some(
+          (item) => item.method === "playwright.waitForURL",
+        ),
+        JSON.stringify(held),
+      );
+      const independent = await f.run(
+        target +
+          `await tab.playwright.getByLabel('Keyboard field',{exact:true}).fill('profile two');return {value:await tab.playwright.getByTestId('keyboard-value').innerText()};`,
+        { browserId: second.peer.id, tabId: secondTab.id },
+      );
+      assert.equal(independent.result.data.value, "profile two");
+      const conflict = await f.run(
+        target +
+          `let code=null;try{await tab.playwright.getByLabel('Keyboard field',{exact:true}).fill('must not replace');}catch(error){code=error.code;}return {code};`,
+        { browserId: original.id, tabId: firstTab.id },
+      );
+      assert.equal(conflict.result.data.code, "TAB_ALREADY_CLAIMED");
+      f.cancel(held.run.runId);
+      const stoppedUntil = performance.now() + 5000;
+      do {
+        held = await f.observe(held.run.runId, 50);
+        if (held.run.endedAt !== null) break;
+      } while (performance.now() < stoppedUntil);
+      assert.equal(held.run.status, "cancelled", JSON.stringify(held));
+      assert.deepEqual(held.run.cleanup.unconfirmed, []);
+      const values = await f.run(
+        `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const values=[];for(const target of context.input.targets){const selected=await client.browsers.get(target.browserId),tab=await selected.tabs.get(target.tabId);values.push(await tab.playwright.getByTestId('keyboard-value').innerText());}return {values,defaultId:(await client.browsers.getDefault()).browserId,byUrl:(await client.browsers.getForUrl(context.input.url)).browserId};`,
+        {
+          targets: [
+            { browserId: original.id, tabId: firstTab.id },
+            { browserId: second.peer.id, tabId: secondTab.id },
+          ],
+          url: secondUrl,
+        },
+      );
+      assert.deepEqual(values.result.data.values, [
+        "profile one",
+        "profile two",
+      ]);
+      assert.equal(
+        values.result.data.defaultId,
+        [original.id, second.peer.id].sort()[0],
+      );
+      assert.equal(values.result.data.byUrl, second.peer.id);
+    } finally {
+      if (held?.run.endedAt === null) f.cancel(held.run.runId);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        await Promise.race([closed, delay(4000)]);
+        if (child.exitCode === null && child.signalCode === null) {
+          if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+          await closed;
+        }
+      }
+    }
+    let remaining;
+    const offlineUntil = performance.now() + 5000;
+    do {
+      remaining = (await f.run(discovery)).result.data;
+      if (remaining.length === 1) break;
+      await delay(25);
+    } while (performance.now() < offlineUntil);
+    assert.equal(remaining.length, 1, JSON.stringify(remaining));
+    assert.equal(remaining[0].peer.id, original.id);
+    assert.equal(remaining[0].peer.browserSessionId, original.browserSessionId);
+    assert.equal(remaining[0].peer.generation, original.generation);
+  },
+);
 
 test(
   "native Locator queries, combinations, keyboard, checkbox and selection change actual DOM state",

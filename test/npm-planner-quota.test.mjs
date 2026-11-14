@@ -229,7 +229,8 @@ async function fixture(t, fundingBytes = 0) {
   };
   const backend = new NpmMaintenanceBackend(options),
     observedLockSizes = [],
-    controller = new AbortController();
+    controller = new AbortController(),
+    signal = AbortSignal.any([controller.signal, t.signal]);
   const observe = () => {
     const directory = path.join(root, "state", "maintenance", "npm");
     if (!existsSync(directory)) return;
@@ -241,16 +242,19 @@ async function fixture(t, fundingBytes = 0) {
   const scope = {
     caller: { principalId: "owner", clientId: "planner", grantId: "grant" },
     operationId: "op_" + "1".repeat(32),
-    signal: controller.signal,
+    signal,
     assertCurrent() {
-      controller.signal.throwIfAborted();
+      signal.throwIfAborted();
       observe();
     },
     authorize() {
-      controller.signal.throwIfAborted();
+      signal.throwIfAborted();
     },
   };
   t.after(async () => {
+    controller.abort(new Error("The owned npm fixture is closing."));
+    const stopped = await resources.shutdown(new Error("Npm fixture cleanup."));
+    assert.deepEqual(stopped.unconfirmed, []);
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     store.close();
@@ -292,127 +296,158 @@ async function fixture(t, fundingBytes = 0) {
   };
 }
 
-test("official npm configuration/auth and in-memory Arborist produce a >1MiB valid lock; only the parent saves it and actual approved install runs once", async (t) => {
-  const f = await fixture(t, 2 * MiB),
-    intent = f.intent();
-  const before = readFileSync(path.join(f.work, "package.json"), "utf8"),
-    plan = await f.backend.prepare(intent, f.scope);
-  assert.ok(Buffer.byteLength(plan.payload.lock) > MiB);
-  assert.ok(Buffer.byteLength(plan.payload.lock) < 32 * MiB);
-  assert.equal(
-    plan.payload.npmSource.npmVersion,
-    JSON.parse(
-      readFileSync(path.resolve(path.dirname(cli), "../package.json"), "utf8"),
-    ).version,
-  );
-  assert.match(plan.payload.npmSource.revision, /^[0-9a-f]{64}$/);
-  assert.equal(JSON.stringify(plan.summary).includes(token), false);
-  assert.equal(readFileSync(path.join(f.work, "package.json"), "utf8"), before);
-  assert.equal(existsSync(path.join(f.work, "package-lock.json")), false);
-  assert.equal(existsSync(f.marker), false);
-  assert.equal(
-    JSON.parse(plan.payload.manifest).description,
-    "保留非依赖业务字段😀",
-  );
-  assert.equal(JSON.parse(plan.payload.manifest)._id, undefined);
-  assert.ok(f.observedLockSizes.some((size) => size > MiB));
-  assert.equal(f.outstanding, 0);
-  const result = await f.backend.apply(intent, plan, f.scope);
-  assert.equal(result.package.installedVersion, "1.0.0");
-  assert.equal(readFileSync(f.marker, "utf8"), "installed\n");
-  assert.equal(
-    readFileSync(path.join(f.work, "package-lock.json"), "utf8"),
-    plan.payload.lock,
-  );
-  assert.equal(f.requests, f.authenticated);
-  assert.equal(f.outstanding, 0);
-});
+test(
+  "official npm configuration/auth and in-memory Arborist produce a >1MiB valid lock; only the parent saves it and actual approved install runs once",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await fixture(t, 2 * MiB),
+      intent = f.intent();
+    const before = readFileSync(path.join(f.work, "package.json"), "utf8"),
+      plan = await f.backend.prepare(intent, f.scope);
+    assert.ok(Buffer.byteLength(plan.payload.lock) > MiB);
+    assert.ok(Buffer.byteLength(plan.payload.lock) < 32 * MiB);
+    assert.equal(
+      plan.payload.npmSource.npmVersion,
+      JSON.parse(
+        readFileSync(
+          path.resolve(path.dirname(cli), "../package.json"),
+          "utf8",
+        ),
+      ).version,
+    );
+    assert.match(plan.payload.npmSource.revision, /^[0-9a-f]{64}$/);
+    assert.equal(JSON.stringify(plan.summary).includes(token), false);
+    assert.equal(
+      readFileSync(path.join(f.work, "package.json"), "utf8"),
+      before,
+    );
+    assert.equal(existsSync(path.join(f.work, "package-lock.json")), false);
+    assert.equal(existsSync(f.marker), false);
+    assert.equal(
+      JSON.parse(plan.payload.manifest).description,
+      "保留非依赖业务字段😀",
+    );
+    assert.equal(JSON.parse(plan.payload.manifest)._id, undefined);
+    assert.ok(f.observedLockSizes.some((size) => size > MiB));
+    assert.equal(f.outstanding, 0);
+    const result = await f.backend.apply(intent, plan, f.scope);
+    assert.equal(result.package.installedVersion, "1.0.0");
+    assert.equal(readFileSync(f.marker, "utf8"), "installed\n");
+    assert.equal(
+      readFileSync(path.join(f.work, "package-lock.json"), "utf8"),
+      plan.payload.lock,
+    );
+    assert.equal(f.requests, f.authenticated);
+    assert.equal(f.outstanding, 0);
+  },
+);
 
-test("a real registry graph producing a >32MiB root lock is rejected before a generated lock reaches managed disk, and its native work actually settles", async (t) => {
-  const f = await fixture(t, 33 * MiB),
-    before = readFileSync(path.join(f.work, "package.json"), "utf8");
-  await assert.rejects(f.backend.prepare(f.intent(), f.scope), (error) => {
-    assert.equal(error.code, "npm_plan_too_large");
-    assert.equal(JSON.stringify(error).includes(token), false);
-    return true;
-  });
-  // assertCurrent is called after the actual native child close, before the
-  // parent's failure/finally cleanup. An unbounded native lock save is visible here.
-  assert.ok(f.observedLockSizes.every((size) => size <= 32 * MiB));
-  assert.equal(existsSync(path.join(f.work, "package-lock.json")), false);
-  assert.equal(existsSync(f.marker), false);
-  assert.equal(readFileSync(path.join(f.work, "package.json"), "utf8"), before);
-  assert.deepEqual(
-    readdirSync(path.join(f.root, "state", "maintenance", "npm")),
-    [],
-  );
-  assert.equal(f.outstanding, 0);
-  assert.ok(f.acceptedBytes > 0);
-  assert.ok(f.authenticated > 0);
-});
+test(
+  "a real registry graph producing a >32MiB root lock is rejected before a generated lock reaches managed disk, and its native work actually settles",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await fixture(t, 33 * MiB),
+      before = readFileSync(path.join(f.work, "package.json"), "utf8");
+    await assert.rejects(f.backend.prepare(f.intent(), f.scope), (error) => {
+      assert.equal(error.code, "npm_plan_too_large");
+      assert.equal(JSON.stringify(error).includes(token), false);
+      return true;
+    });
+    // assertCurrent is called after the actual native child close, before the
+    // parent's failure/finally cleanup. An unbounded native lock save is visible here.
+    assert.ok(f.observedLockSizes.every((size) => size <= 32 * MiB));
+    assert.equal(existsSync(path.join(f.work, "package-lock.json")), false);
+    assert.equal(existsSync(f.marker), false);
+    assert.equal(
+      readFileSync(path.join(f.work, "package.json"), "utf8"),
+      before,
+    );
+    assert.deepEqual(
+      readdirSync(path.join(f.root, "state", "maintenance", "npm")),
+      [],
+    );
+    assert.equal(f.outstanding, 0);
+    assert.ok(f.acceptedBytes > 0);
+    assert.ok(f.authenticated > 0);
+  },
+);
 
-test("native global/prefix configuration cannot move planning or approved installation outside the bound work", async (t) => {
-  const f = await fixture(t),
-    outside = path.join(f.root, "outside-prefix"),
-    intent = f.intent();
-  mkdirSync(outside);
-  f.env.npm_config_global = "true";
-  f.env.npm_config_prefix = outside;
-  f.env.npm_config_workspaces = "true";
-  const plan = await f.backend.prepare(intent, f.scope);
-  assert.deepEqual(readdirSync(outside), []);
-  assert.equal(existsSync(f.marker), false);
-  assert.equal(existsSync(path.join(f.work, "node_modules")), false);
-  const result = await f.backend.apply(intent, plan, f.scope);
-  assert.equal(result.package.installedVersion, "1.0.0");
-  assert.equal(readFileSync(f.marker, "utf8"), "installed\n");
-  assert.equal(
-    JSON.parse(
-      readFileSync(path.join(f.work, "node_modules", name, "package.json")),
-    ).version,
-    "1.0.0",
-  );
-  assert.deepEqual(readdirSync(outside), []);
-  assert.equal(f.requests, f.authenticated);
-  assert.equal(f.outstanding, 0);
-});
+test(
+  "native global/prefix configuration cannot move planning or approved installation outside the bound work",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await fixture(t),
+      outside = path.join(f.root, "outside-prefix"),
+      intent = f.intent();
+    mkdirSync(outside);
+    f.env.npm_config_global = "true";
+    f.env.npm_config_prefix = outside;
+    f.env.npm_config_workspaces = "true";
+    const plan = await f.backend.prepare(intent, f.scope);
+    assert.deepEqual(readdirSync(outside), []);
+    assert.equal(existsSync(f.marker), false);
+    assert.equal(existsSync(path.join(f.work, "node_modules")), false);
+    const result = await f.backend.apply(intent, plan, f.scope);
+    assert.equal(result.package.installedVersion, "1.0.0");
+    assert.equal(readFileSync(f.marker, "utf8"), "installed\n");
+    assert.equal(
+      JSON.parse(
+        readFileSync(path.join(f.work, "node_modules", name, "package.json")),
+      ).version,
+      "1.0.0",
+    );
+    assert.deepEqual(readdirSync(outside), []);
+    assert.equal(f.requests, f.authenticated);
+    assert.equal(f.outstanding, 0);
+  },
+);
 
-test("approval evidence binds the actual npm distribution, and a distribution without its supported planning API fails explicitly", async (t) => {
-  const f = await fixture(t),
-    intent = f.intent(),
-    plan = await f.backend.prepare(intent, f.scope);
-  const copied = path.join(f.root, "another-npm"),
-    npmRoot = path.resolve(path.dirname(cli), "..");
-  cpSync(npmRoot, copied, { recursive: true });
-  const other = new NpmMaintenanceBackend({
-    ...f.options,
-    npmCli: path.join(copied, "bin", "npm-cli.js"),
-  });
-  const before = readFileSync(path.join(f.work, "package.json"), "utf8");
-  await assert.rejects(other.apply(intent, plan, f.scope), {
-    code: "maintenance_precondition_changed",
-  });
-  assert.equal(readFileSync(path.join(f.work, "package.json"), "utf8"), before);
-  assert.equal(existsSync(f.marker), false);
-  assert.equal(f.outstanding, 0);
-  const entry = path.join(
-    copied,
-    "node_modules",
-    "@npmcli",
-    "arborist",
-    "lib",
-    "arborist",
-    "index.js",
-  );
-  writeFileSync(
-    entry,
-    readFileSync(entry, "utf8") +
-      "\ndelete module.exports.prototype.lockfileString;\n",
-  );
-  await assert.rejects(other.prepare(intent, f.scope), {
-    code: "npm_planner_unsupported",
-  });
-  assert.equal(readFileSync(path.join(f.work, "package.json"), "utf8"), before);
-  assert.equal(existsSync(f.marker), false);
-  assert.equal(f.outstanding, 0);
-});
+test(
+  "approval evidence binds the actual npm distribution, and a distribution without its supported planning API fails explicitly",
+  { timeout: 120000 },
+  async (t) => {
+    const f = await fixture(t),
+      intent = f.intent(),
+      plan = await f.backend.prepare(intent, f.scope);
+    const copied = path.join(f.root, "another-npm"),
+      npmRoot = path.resolve(path.dirname(cli), "..");
+    cpSync(npmRoot, copied, { recursive: true });
+    const other = new NpmMaintenanceBackend({
+      ...f.options,
+      npmCli: path.join(copied, "bin", "npm-cli.js"),
+    });
+    const before = readFileSync(path.join(f.work, "package.json"), "utf8");
+    await assert.rejects(other.apply(intent, plan, f.scope), {
+      code: "maintenance_precondition_changed",
+    });
+    assert.equal(
+      readFileSync(path.join(f.work, "package.json"), "utf8"),
+      before,
+    );
+    assert.equal(existsSync(f.marker), false);
+    assert.equal(f.outstanding, 0);
+    const entry = path.join(
+      copied,
+      "node_modules",
+      "@npmcli",
+      "arborist",
+      "lib",
+      "arborist",
+      "index.js",
+    );
+    writeFileSync(
+      entry,
+      readFileSync(entry, "utf8") +
+        "\ndelete module.exports.prototype.lockfileString;\n",
+    );
+    await assert.rejects(other.prepare(intent, f.scope), {
+      code: "npm_planner_unsupported",
+    });
+    assert.equal(
+      readFileSync(path.join(f.work, "package.json"), "utf8"),
+      before,
+    );
+    assert.equal(existsSync(f.marker), false);
+    assert.equal(f.outstanding, 0);
+  },
+);
