@@ -123,8 +123,25 @@ async function fixture(t, options = {}) {
       registry.publish(handle);
       return handle;
     },
-    start: (script, input = {}) =>
-      engine.start(caller, { contextId: work.contextId, script, input }),
+    async start(script, input = {}) {
+      let view = await engine.start(caller, {
+        contextId: work.contextId,
+        script,
+        input,
+        waitMs: 0,
+      });
+      const runId = view.run.runId;
+      const deadline = performance.now() + 30000;
+      while (view.run.endedAt === null) {
+        assert.ok(
+          performance.now() < deadline,
+          `The original transfer-provider Run did not settle: ${JSON.stringify(view.run)}`,
+        );
+        view = await engine.observe(caller, runId, 1000);
+        assert.equal(view.run.runId, runId);
+      }
+      return view;
+    },
     revoke: () => {
       allowed = false;
     },
