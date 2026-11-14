@@ -444,7 +444,9 @@ test("v2 migration preserves state/resource history and restart readers cannot r
   store.deleteState("deleted", 1);
   store.close();
   let db = new DatabaseSync(filename);
-  db.exec("DROP INDEX resources_history; PRAGMA user_version=2");
+  db.exec(
+    "DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; PRAGMA user_version=2",
+  );
   db.close();
   assert.throws(
     () => new SqliteStore(root, { ...binding, profile: "production" }),
@@ -452,6 +454,13 @@ test("v2 migration preserves state/resource history and restart readers cannot r
   );
   db = new DatabaseSync(filename);
   assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(
+    db
+      .prepare("PRAGMA table_info(runs)")
+      .all()
+      .some((column) => column.name === "admission_class"),
+    false,
+  );
   assert.equal(
     db
       .prepare(

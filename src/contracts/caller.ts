@@ -5,6 +5,8 @@ import { AgentError } from "./errors.js";
 export interface Caller {
   readonly principalId: string;
   readonly clientId: string;
+  /** Verified Cloud Grant binding; never populated from script inputs. */
+  readonly grantId?: string;
   readonly host?: string;
   readonly model?: string;
 }
@@ -14,6 +16,7 @@ export function fixedCaller(caller: Caller): Caller {
   return Object.freeze({
     principalId: caller.principalId,
     clientId: caller.clientId,
+    ...(caller.grantId === undefined ? {} : { grantId: caller.grantId }),
     ...(caller.host === undefined ? {} : { host: caller.host }),
     ...(caller.model === undefined ? {} : { model: caller.model }),
   });

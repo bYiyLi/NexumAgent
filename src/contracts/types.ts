@@ -29,6 +29,8 @@ export const terminalStatuses: ReadonlySet<RunStatus> = new Set([
   "interrupted",
 ]);
 export type SourceKind = "inline" | "script" | "replay";
+export type AdmissionClass = "ordinary" | "control";
+export const DEFAULT_CONTROL_CAPACITY = 2;
 export type Profile = "development" | "production";
 
 export interface Binding {
@@ -61,6 +63,7 @@ export interface RunRecord {
   readonly status: RunStatus;
   readonly revision: number;
   readonly sourceKind: SourceKind;
+  readonly admissionClass: AdmissionClass;
   readonly scriptName: string | null;
   readonly source: JsonObject;
   readonly codeRef: string | null;

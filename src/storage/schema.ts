@@ -1,5 +1,5 @@
 // Runtime migrations own the executable DDL.
-export const schemaVersion = 3;
+export const schemaVersion = 4;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -203,4 +203,10 @@ CREATE INDEX resources_history ON managed_resources(
   json_extract(source_json,'$.type'),
   created_at DESC, resource_id DESC
 );
+`;
+
+// Slot identity is immutable run admission, not mutable preparation/source metadata.
+export const migration4 = `
+ALTER TABLE runs ADD COLUMN admission_class TEXT NOT NULL DEFAULT 'ordinary'
+  CHECK (admission_class IN ('ordinary','control'));
 `;

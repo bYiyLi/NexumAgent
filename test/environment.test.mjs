@@ -32,7 +32,7 @@ function snapshot(variables, platform = process.platform) {
   return Object.freeze({
     platform,
     variables: Object.freeze(variables),
-    shell: windows ? "powershell.exe" : "/bin/sh",
+    shell: windows ? null : "/bin/sh",
     source: windows ? "windows-user" : "login-shell",
     discoveredAt: Date.now(),
     cwd: process.cwd(),
@@ -64,7 +64,8 @@ test("real user environment discovery fixes cwd and a frozen fresh snapshot with
   assert.equal(value.platform, process.platform);
   assert.equal(value.cwd, root);
   assert.equal(value.source, windows ? "windows-user" : "login-shell");
-  assert.equal(path.isAbsolute(value.shell), true);
+  if (windows) assert.equal(value.shell, null);
+  else assert.equal(path.isAbsolute(value.shell), true);
   assert.equal(Object.isFrozen(value), true);
   assert.equal(Object.isFrozen(value.variables), true);
   assert.equal(

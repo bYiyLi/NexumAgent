@@ -510,10 +510,12 @@ test("private controls cannot escape as success values, hidden properties, gette
     };
   });
   f.registry.publish(handle);
-  const result = await f.start({
+  const accepted = await f.start({
     script:
       'const errors=[];for(const kind of ["host","call","ref","raw","map","set","hidden","symbol","getter","class","arrayPrototype","datePrototype","hiddenPrototype","cause","throw"]){try{await demo.leak({kind});errors.push("escaped");}catch(e){errors.push(e.code);}}for(const name of ["sync","normalize"]){try{demo[name]();errors.push("escaped");}catch(e){errors.push(e.code);}}const native=demo.native();return {errors,nativeCount:native.length};',
   });
+  // An observation budget is not an execution deadline, including on a busy CI host.
+  const result = await f.finish(accepted.run.runId);
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(
     result.result.data.errors,

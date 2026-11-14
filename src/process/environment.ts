@@ -6,12 +6,13 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { isPlainRecord } from "../contracts/json.js";
+import { readWindowsUserEnvironment } from "./environment-windows.js";
 
 export interface EnvironmentSnapshot {
   readonly platform: NodeJS.Platform;
   readonly variables: Readonly<Record<string, string>>;
-  /** The user-environment probe shell, not sh.shellCommand's default shell. */
-  readonly shell: string;
+  /** The POSIX environment probe shell; null for native Windows user discovery. */
+  readonly shell: string | null;
   readonly source: "login-shell" | "windows-user";
   readonly discoveredAt: number;
   readonly cwd: string;
@@ -169,56 +170,6 @@ async function directory(value: string, signal?: AbortSignal): Promise<string> {
       { cause },
     );
   }
-}
-
-/** Fixed Win32 registry/environment probe; it never executes a user command or profile. */
-function windowsProbe(marker: string): string {
-  return `
-$ErrorActionPreference = 'Stop'
-$values = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
-$expand = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-$volatile = @('SystemRoot','SystemDrive','COMPUTERNAME','ComSpec','USERPROFILE','HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','USERDOMAIN_ROAMINGPROFILE','LOGONSERVER','LOCALAPPDATA','APPDATA','TEMP','TMP','ProgramData','ProgramFiles','ProgramFiles(x86)','ProgramW6432','CommonProgramFiles','CommonProgramFiles(x86)','CommonProgramW6432','OS','PROCESSOR_ARCHITECTURE','PROCESSOR_IDENTIFIER','PROCESSOR_LEVEL','PROCESSOR_REVISION','NUMBER_OF_PROCESSORS')
-foreach ($item in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) { if ($volatile -contains [string]$item.Key) { $values[[string]$item.Key] = [string]$item.Value } }
-$machinePath = $null; $userPath = $null; $machineExpand = $false; $userExpand = $false
-foreach ($location in @('machine','user')) {
-  if ($location -eq 'machine') { $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment') }
-  else { $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment') }
-  if ($null -eq $key) { continue }
-  try {
-    foreach ($entry in $key.GetValueNames()) {
-      $kind = $key.GetValueKind($entry)
-      if (($kind -ne [Microsoft.Win32.RegistryValueKind]::String) -and ($kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString)) { throw 'Unsupported environment value' }
-      $value = [string]$key.GetValue($entry, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-      if ($entry -ieq 'Path') {
-        if ($location -eq 'machine') { $machinePath = $value; $machineExpand = $kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString }
-        else { $userPath = $value; $userExpand = $kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString }
-      } else {
-        $values[$entry] = $value
-        if ($kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) { [void]$expand.Add($entry) } else { [void]$expand.Remove($entry) }
-      }
-    }
-  } finally { $key.Dispose() }
-}
-foreach ($entry in @($values.Keys)) { [Environment]::SetEnvironmentVariable($entry, $values[$entry], 'Process') }
-# Never expand fresh registry values against the background Agent's old PATH.
-[Environment]::SetEnvironmentVariable('Path', $null, 'Process')
-if ($null -ne $machinePath -or $null -ne $userPath) {
-  if ($machineExpand) { $machinePath = [Environment]::ExpandEnvironmentVariables($machinePath) }
-  [Environment]::SetEnvironmentVariable('Path', $machinePath, 'Process')
-  if ($userExpand) { $userPath = [Environment]::ExpandEnvironmentVariables($userPath) }
-  $parts = @(); if ($null -ne $machinePath -and $machinePath.Length -gt 0) { $parts += $machinePath }; if ($null -ne $userPath -and $userPath.Length -gt 0) { $parts += $userPath }
-  $values['Path'] = $parts -join ';'
-  [Environment]::SetEnvironmentVariable('Path', $values['Path'], 'Process')
-}
-# Use the OS's expansion semantics once, rather than inventing a recursive DSL.
-foreach ($entry in @($expand)) { $values[$entry] = [Environment]::ExpandEnvironmentVariables($values[$entry]); [Environment]::SetEnvironmentVariable($entry, $values[$entry], 'Process') }
-$output = [ordered]@{}
-foreach ($entry in ($values.Keys | Sort-Object)) { $output[$entry] = $values[$entry] }
-$body = $output | ConvertTo-Json -Compress -Depth 3
-$encoder = [Text.UTF8Encoding]::new($false)
-$bytes = $encoder.GetBytes([char]0 + '${marker}_start' + [char]0 + $body + [char]0 + '${marker}_end' + [char]0)
-$stream = [Console]::OpenStandardOutput(); $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
-`;
 }
 
 async function probe(
@@ -390,26 +341,23 @@ export async function discoverEnvironment(
   let shell: string;
   let args: string[];
   if (windows) {
-    const systemRoot = field(parentEnvironment(), "SystemRoot", true);
-    requireCondition(
-      systemRoot && path.isAbsolute(systemRoot),
-      "environment_shell_unavailable",
-      "The Windows system environment probe is unavailable.",
+    const variables = clean(
+      await readWindowsUserEnvironment({
+        signal: options.signal,
+        timeoutMs,
+        maxBytes,
+      }),
+      true,
     );
-    shell = path.join(
-      systemRoot,
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe",
-    );
-    args = [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      Buffer.from(windowsProbe(marker), "utf16le").toString("base64"),
-    ];
+    abort(options.signal);
+    return Object.freeze({
+      platform: process.platform,
+      variables: Object.freeze(variables),
+      shell: null,
+      source: "windows-user",
+      discoveredAt: Date.now(),
+      cwd,
+    });
   } else {
     const configured = userInfo().shell;
     requireCondition(
@@ -472,18 +420,7 @@ export async function discoverEnvironment(
     bytes.subarray(from + start.length, until),
   );
   let variables: Record<string, string>;
-  if (windows) {
-    try {
-      variables = clean(JSON.parse(body), true);
-    } catch (cause) {
-      throw new AgentError(
-        "invalid_environment",
-        "The Windows environment snapshot is not valid bounded data.",
-        undefined,
-        { cause },
-      );
-    }
-  } else {
+  {
     const values = Object.create(null) as Record<string, string>;
     requireCondition(
       body.endsWith("\0"),

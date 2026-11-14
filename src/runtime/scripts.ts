@@ -162,7 +162,7 @@ export class ScriptCatalog {
     this.#sources = sources;
   }
 
-  #registered(): ScriptSource[] {
+  #registered(targetNamespace?: string): ScriptSource[] {
     const namespaces = new Set<string>();
     const result = [...this.#sources()];
     for (const source of result) {
@@ -195,7 +195,10 @@ export class ScriptCatalog {
         "script_source_invalid",
         "A script source must have an absolute directory.",
       );
-      if (source.type === "extension") {
+      if (
+        source.type === "extension" &&
+        (targetNamespace === undefined || source.namespace === targetNamespace)
+      ) {
         const modules = realpathSync.native(
           path.join(this.work, "node_modules"),
         );
@@ -270,7 +273,7 @@ export class ScriptCatalog {
     );
     const filename = parts.at(-1)!;
     scriptFilename(filename);
-    const sources = this.#registered();
+    const sources = this.#registered(parts.length === 2 ? parts[0] : "");
     let snapshot: ScriptSnapshot;
     if (parts.length === 1)
       snapshot = this.#read(this.local, filename, this.#localOrigin());

@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { atomicText, contains, privateDirectory } from "./paths.js";
 import type { ResourceManager } from "../extensions/resources.js";
 import { RunOperations, type OperationHooks } from "./operations.js";
+import { qualifyControlScript } from "./control-scripts.js";
 import {
   authorizeCall,
   callerKey,
@@ -90,6 +91,7 @@ export interface EngineOptions {
     services: RunServices,
   ): Promise<JsonObject[]>;
   capacity?: number;
+  controlCapacity?: number;
   resources?: ResourceManager;
   leaseScript?(origin: ContributionOrigin): () => void;
 }
@@ -261,8 +263,46 @@ export class RunEngine extends EventEmitter {
     caller = fixedCaller(caller);
     this.#authorize(caller, { action: "start" });
     const { waitMs: _wait, attachments: _attachments, ...intent } = input;
+    const key = callerKey(caller);
+    const intentDigest = digest({
+      ...intent,
+      ...(input.attachments === undefined
+        ? {}
+        : { attachments: attachmentIntent(input.attachments) }),
+    });
+    const original = input.requestId
+      ? this.store.findMatchingSubmission(key, input.requestId, intentDigest)
+      : null;
+    if (original) {
+      this.#authorize(caller, { action: "get", run: original });
+      return await this.observe(
+        caller,
+        original.runId,
+        input.waitMs ?? 1000,
+        observationSignal,
+      );
+    }
+    let pinned: ScriptSnapshot | undefined;
+    try {
+      if (input.scriptName !== undefined)
+        pinned = qualifyControlScript(this.scripts, input.scriptName);
+    } catch (cause) {
+      // A source resolver can call trusted services reentrantly. A submission
+      // accepted since the first lookup still owns its original identity.
+      const concurrent = input.requestId
+        ? this.store.findMatchingSubmission(key, input.requestId, intentDigest)
+        : null;
+      if (!concurrent) throw cause;
+      this.#authorize(caller, { action: "get", run: concurrent });
+      return await this.observe(
+        caller,
+        concurrent.runId,
+        input.waitMs ?? 1000,
+        observationSignal,
+      );
+    }
     const accepted = this.store.acceptRun({
-      callerKey: callerKey(caller),
+      callerKey: key,
       contextId: input.contextId,
       sourceKind:
         input.script !== undefined
@@ -283,13 +323,10 @@ export class RunEngine extends EventEmitter {
         : { scriptName: input.scriptName }),
       timeoutMs: input.timeoutMs,
       requestId: input.requestId,
-      intentDigest: digest({
-        ...intent,
-        ...(input.attachments === undefined
-          ? {}
-          : { attachments: attachmentIntent(input.attachments) }),
-      }),
+      intentDigest,
       capacity: this.#options.capacity,
+      controlCapacity: this.#options.controlCapacity,
+      controlEligible: pinned !== undefined,
     });
     if (accepted.duplicate)
       this.#authorize(caller, { action: "get", run: accepted.run });
@@ -297,11 +334,15 @@ export class RunEngine extends EventEmitter {
       const scope = this.#scope(accepted.run, caller);
       this.#scopes.set(scope.runId, scope);
       this.#scheduleDeadline(scope);
-      queueMicrotask(() => {
-        void this.#drive(scope, input).catch((error) =>
+      const begin = () => {
+        void this.#drive(scope, input, pinned).catch((error) =>
           this.#persistenceFailure(scope, error),
         );
-      });
+      };
+      // Fixed code already has a known source. Acquire its lease before the
+      // caller can synchronously stop/replace that source after start returns.
+      if (pinned) begin();
+      else queueMicrotask(begin);
     }
     return await this.observe(
       caller,
@@ -462,7 +503,11 @@ export class RunEngine extends EventEmitter {
     return stopped.run;
   }
 
-  async #drive(scope: Scope, input: StartInput): Promise<void> {
+  async #drive(
+    scope: Scope,
+    input: StartInput,
+    pinned?: ScriptSnapshot,
+  ): Promise<void> {
     let phase = "prepare",
       directory = "";
     let result: JsonObject | undefined, error: JsonObject | undefined;
@@ -473,6 +518,15 @@ export class RunEngine extends EventEmitter {
     try {
       this.#assertActive(scope);
       let run = this.store.getRun(scope.runId);
+      if (pinned) {
+        this.#authorize(scope.caller, {
+          action: "script",
+          run,
+          origin: pinned.origin,
+        });
+        this.#assertActive(scope);
+        releaseScript = this.#options.leaseScript?.(pinned.origin);
+      }
       run = this.store.transitionRun(
         run.runId,
         run.revision,
@@ -500,7 +554,7 @@ export class RunEngine extends EventEmitter {
       if (input.script !== undefined)
         snapshot = this.scripts.enroll(input.script).snapshot;
       else if (input.scriptName !== undefined)
-        snapshot = this.scripts.resolve(input.scriptName);
+        snapshot = pinned ?? this.scripts.resolve(input.scriptName);
       else {
         const previous = this.#run(scope.caller, input.replayRunId!, "replay");
         const saved = JSON.parse(this.#read(previous.inputRef)) as JsonObject;
@@ -547,7 +601,7 @@ export class RunEngine extends EventEmitter {
         origin: snapshot.origin,
       });
       this.#assertActive(scope);
-      releaseScript = this.#options.leaseScript?.(snapshot.origin);
+      if (!pinned) releaseScript = this.#options.leaseScript?.(snapshot.origin);
       const codeRef = this.#relative(path.join(directory, "code.json"));
       const inputRef = this.#relative(path.join(directory, "input.json"));
       atomicText(path.join(directory, "code.json"), canonicalJson(snapshot));

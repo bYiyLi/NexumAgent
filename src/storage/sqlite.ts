@@ -17,6 +17,7 @@ import {
 } from "../contracts/json.js";
 import {
   terminalStatuses,
+  DEFAULT_CONTROL_CAPACITY,
   type Binding,
   type HistoryFilter,
   type JsonObject,
@@ -27,10 +28,17 @@ import {
   type RunRecord,
   type RunStatus,
   type SourceKind,
+  type AdmissionClass,
   type WaitRecord,
   type WorkRecord,
 } from "../contracts/types.js";
-import { migration1, migration2, migration3, schemaVersion } from "./schema.js";
+import {
+  migration1,
+  migration2,
+  migration3,
+  migration4,
+  schemaVersion,
+} from "./schema.js";
 
 const terminalSql = "'succeeded','failed','cancelled','interrupted'";
 const transitions: Record<RunStatus, readonly RunStatus[]> = {
@@ -68,6 +76,9 @@ export interface AcceptRun {
   requestId?: string;
   intentDigest?: string;
   capacity?: number;
+  /** Internal verdict from the fixed platform-code qualifier; never a tool argument. */
+  controlEligible?: boolean;
+  controlCapacity?: number;
 }
 export interface ResourceHistoryFilter {
   readonly owner: string;
@@ -171,6 +182,7 @@ export class SqliteStore {
         }
         if (version < 2) this.#db.exec(migration2);
         if (version < 3) this.#db.exec(migration3);
+        if (version < 4) this.#db.exec(migration4);
         this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
@@ -572,6 +584,53 @@ export class SqliteStore {
     });
   }
 
+  #matchingSubmission(
+    callerKey: string,
+    requestId: string,
+    intentDigest: string,
+  ): RunRecord | null {
+    const previous = this.#db
+      .prepare("SELECT * FROM run_requests WHERE caller_key=? AND request_id=?")
+      .get(callerKey, requestId);
+    if (!previous) return null;
+    requireCondition(
+      previous.intent_digest === intentDigest,
+      "submission_conflict",
+      "The submission identifier belongs to a different intent.",
+    );
+    try {
+      return this.getRun(previous.run_id as string);
+    } catch (cause) {
+      throw new AgentError(
+        "submission_unknown",
+        "The original accepted run is unavailable.",
+        undefined,
+        { cause },
+      );
+    }
+  }
+
+  /** Read before any current-source inspection; acceptRun rechecks atomically. */
+  findMatchingSubmission(
+    callerKey: string,
+    requestId: string,
+    intentDigest: string,
+    now = Date.now(),
+  ): RunRecord | null {
+    requireCondition(
+      !this.#closed,
+      "storage_closed",
+      "The local store is closed.",
+    );
+    requestWindow(requestId, now);
+    requireCondition(
+      typeof intentDigest === "string" && intentDigest.length > 0,
+      "invalid_submission",
+      "A submission requires its fixed intent digest.",
+    );
+    return this.#matchingSubmission(callerKey, requestId, intentDigest);
+  }
+
   acceptRun(
     input: AcceptRun,
     now = Date.now(),
@@ -596,52 +655,56 @@ export class SqliteStore {
     );
     return this.#transaction(() => {
       if (input.requestId) {
-        const previous = this.#db
-          .prepare(
-            "SELECT * FROM run_requests WHERE caller_key=? AND request_id=?",
-          )
-          .get(input.callerKey, input.requestId);
-        if (previous) {
-          requireCondition(
-            previous.intent_digest === input.intentDigest,
-            "submission_conflict",
-            "The submission identifier belongs to a different intent.",
-          );
-          try {
-            return {
-              run: this.getRun(previous.run_id as string),
-              duplicate: true,
-            };
-          } catch (error) {
-            throw new AgentError(
-              "submission_unknown",
-              "The original accepted run is unavailable.",
-              undefined,
-              { cause: error },
-            );
-          }
-        }
+        const previous = this.#matchingSubmission(
+          input.callerKey,
+          input.requestId,
+          input.intentDigest!,
+        );
+        if (previous) return { run: previous, duplicate: true };
       }
       const work = this.#activeWork(input.contextId, input.callerKey, now);
       const capacity = input.capacity ?? 256;
+      const controlCapacity = input.controlCapacity ?? DEFAULT_CONTROL_CAPACITY;
       requireCondition(
-        Number.isInteger(capacity) && capacity > 0,
+        Number.isSafeInteger(capacity) &&
+          capacity > 0 &&
+          Number.isSafeInteger(controlCapacity) &&
+          controlCapacity >= 0 &&
+          (input.controlEligible === undefined ||
+            typeof input.controlEligible === "boolean") &&
+          (!input.controlEligible ||
+            (input.sourceKind === "script" &&
+              typeof input.scriptName === "string")),
         "invalid_capacity",
         "The configured run capacity is invalid.",
       );
       const active = this.#db
-        .prepare("SELECT count(*) n FROM runs WHERE ended_at IS NULL")
-        .get()?.n as number;
+        .prepare(
+          `SELECT
+        count(*) FILTER (WHERE admission_class='ordinary') ordinary,
+        count(*) FILTER (WHERE admission_class='control') control
+        FROM runs WHERE ended_at IS NULL`,
+        )
+        .get() as { ordinary: number; control: number };
+      const admissionClass: AdmissionClass =
+        active.ordinary < capacity ? "ordinary" : "control";
       requireCondition(
-        active < capacity,
+        admissionClass === "ordinary" ||
+          (input.controlEligible && active.control < controlCapacity),
         "runtime_busy",
-        "The Agent has no free run slot.",
+        "The Agent has no free run slot for this submission.",
+        {
+          ordinaryCapacity: capacity,
+          controlCapacity,
+          ordinaryActive: active.ordinary,
+          controlActive: active.control,
+        },
       );
       const runId = newId("run");
       this.#db
         .prepare(
           `INSERT INTO runs(run_id,caller_key,context_id,project_id,boot_id,status,source_kind,script_name,
-        source_json,accepted_at,deadline_at,updated_at) VALUES(?,?,?,?,?,'accepted',?,?,?,?,?,?)`,
+        source_json,accepted_at,deadline_at,updated_at,admission_class) VALUES(?,?,?,?,?,'accepted',?,?,?,?,?,?,?)`,
         )
         .run(
           runId,
@@ -655,6 +718,7 @@ export class SqliteStore {
           now,
           now + timeout,
           now,
+          admissionClass,
         );
       if (request)
         this.#db
