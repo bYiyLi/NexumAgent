@@ -273,8 +273,16 @@ export class BrowserService extends EventEmitter {
           socket.terminate();
           continue;
         }
-        if (socket.readyState === WebSocket.OPEN)
-          socket.send(control({ v: 1, type: "ping", at: now }));
+        if (peer && socket.readyState === WebSocket.OPEN)
+          socket.send(
+            control({
+              v: 1,
+              type: "ping",
+              at: now,
+              connectionId: peer.connectionId,
+              generation: peer.generation,
+            }),
+          );
       }
     }, 20000);
   }

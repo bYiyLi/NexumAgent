@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
 const html = `<!doctype html><html><head><title>Nexum native capabilities</title></head><body>
@@ -135,6 +136,22 @@ test(
       new Set(data.history.map((item) => item.url)).size,
       data.history.length,
     );
+    // Cross a real native 20-second heartbeat interval. Reconnecting is not a
+    // substitute for preserving the original connection and its later actions.
+    await delay(21000);
+    const after = await f.run(
+      select +
+        `await tab.playwright.locator('#native-button').click();return {peers:await client.browsers.list(),text:await tab.playwright.locator('#native-button').innerText()};`,
+      { base: f.base },
+    );
+    const current = after.result.data.peers.find((item) => item.id === peer.id);
+    assert.ok(
+      current,
+      "The same native browser must remain discoverable after its heartbeat.",
+    );
+    for (const key of ["bootId", "browserSessionId", "generation"])
+      assert.equal(current[key], peer[key]);
+    assert.equal(after.result.data.text, "Native action applied");
   },
 );
 

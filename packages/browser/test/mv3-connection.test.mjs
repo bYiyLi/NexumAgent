@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
-import { WebSocketServer } from "ws";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import WebSocket, { WebSocketServer } from "ws";
+import { BrowserService } from "../dist/extension/service.js";
 import { createExtensionConnection } from "../browser-extension/connection.js";
 import {
   transportLimits,
@@ -30,7 +34,12 @@ async function until(predicate) {
 function fixture(
   t,
   dispatch = async (input) => ({ method: input.method, input: input.args }),
-  { WebSocket: NativeSocket, pingMs = 20000, offlineMs = 60000 } = {},
+  {
+    WebSocket: NativeSocket,
+    pingMs = 20000,
+    offlineMs = 60000,
+    extensionId = "extension",
+  } = {},
 ) {
   const sockets = [],
     calls = [],
@@ -84,7 +93,7 @@ function fixture(
     }
   }
   const chrome = {
-    runtime: { id: "extension", onStartup: event() },
+    runtime: { id: extensionId, onStartup: event() },
     alarms: { onAlarm: event(), create() {}, async clear() {} },
     action: { async setBadgeText() {}, async setTitle() {} },
     storage: Object.fromEntries(
@@ -318,6 +327,90 @@ for (const mode of ["protocol rejection", "silent peer expiry"])
       else assert.ok(f.snapshots() > 0);
     },
   );
+
+test("actual service and MV3 heartbeats retain their connection binding and a later action remains usable", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const work = realpathSync.native(
+      mkdtempSync(path.join(tmpdir(), "nexum-browser-heartbeat-")),
+    ),
+    extensionId = "a".repeat(32),
+    service = new BrowserService({
+      work,
+      port: 0,
+      profile: "development",
+      extensionId,
+      extensionVersion: "0.1.0",
+    }),
+    incoming = [],
+    outgoing = [];
+  let f;
+  t.after(async () => {
+    await f?.connection.dispose();
+    await service.dispose();
+    await service.closed;
+    rmSync(work, { recursive: true, force: true });
+  });
+  await service.start(new AbortController().signal);
+  class ServiceSocket extends WebSocket {
+    constructor(url) {
+      assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+      super(`ws://127.0.0.1:${service.address.port}/nexum-browser/v1`, {
+        origin: `chrome-extension://${extensionId}`,
+      });
+      this.on("message", (raw, binary) => {
+        if (!binary) incoming.push(JSON.parse(raw));
+      });
+    }
+    send(data, ...args) {
+      if (typeof data === "string") outgoing.push(JSON.parse(data));
+      return super.send(data, ...args);
+    }
+  }
+  f = fixture(t, undefined, { WebSocket: ServiceSocket, extensionId });
+  await f.connection.start();
+  await until(() => f.bound() && service.get(f.bound().browserId).tabsReady);
+  const ready = f.bound(),
+    peer = service.get(ready.browserId);
+  for (let cycle = 1; cycle <= 2; cycle++) {
+    t.mock.timers.tick(20000);
+    await until(
+      () => outgoing.filter((value) => value.type === "pong").length === cycle,
+    );
+    await until(
+      () => incoming.filter((value) => value.type === "pong").length === cycle,
+    );
+    for (const message of incoming.filter((value) =>
+      ["ping", "pong"].includes(value.type),
+    )) {
+      assert.equal(message.connectionId, ready.connectionId);
+      assert.equal(message.generation, ready.generation);
+    }
+    assert.equal(f.connection.state().connected, true);
+    assert.equal(service.get(ready.browserId), peer);
+  }
+  const value = await service.action(peer, {
+    method: "tab.title",
+    args: { observation: "after-heartbeats" },
+    target: {
+      bootId: ready.bootId,
+      browserId: ready.browserId,
+      browserSessionId: ready.browserSessionId,
+      generation: ready.generation,
+      tabId: "1",
+    },
+    runId: "run-heartbeat",
+    operationId: "operation-heartbeat",
+    leaseId: "lease-heartbeat",
+    budgetMs: 1000,
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(value, {
+    method: "tab.title",
+    input: { observation: "after-heartbeats" },
+  });
+  assert.equal(f.calls.filter((entry) => entry[0] === "dispatch").length, 1);
+  assert.equal(f.connection.state().generation, ready.generation);
+});
 
 test("a pending binary action can be cancelled; its late stream is discarded while another action remains usable", async (t) => {
   const f = fixture(t),
