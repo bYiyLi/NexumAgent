@@ -524,7 +524,11 @@ export class TransferOfferDelivery {
 }
 
 /** Only for existing synchronous JSON log/progress branches, not arbitrary URL redaction. */
-export function transferSafeJSON(value: unknown, maxBytes = 16384): string {
+export function transferSafeJSON(
+  value: unknown,
+  maxBytes = 16384,
+  project?: (value: unknown) => JsonObject | null,
+): string {
   requireCondition(
     Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= 1024 * 1024,
     "invalid_transfer_delivery",
@@ -539,6 +543,8 @@ export function transferSafeJSON(value: unknown, maxBytes = 16384): string {
       "data_too_large",
       "Transfer-safe log data exceeds its bounded graph budget.",
     );
+    const projected = project?.(input);
+    if (projected) return visit(projected, depth + 1);
     const branded = transferOffer(input);
     if (branded) return visit(branded.snapshot, depth + 1);
     if (typeof input === "string") {

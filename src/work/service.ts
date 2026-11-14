@@ -305,14 +305,17 @@ export class WorkService {
       4 * 1024 * 1024,
     ) as unknown as PublishedMaterials;
     this.#validatePublished(published);
-    const docs = await this.#catalog.refresh(published.docs, signal);
-    signal.throwIfAborted();
     const usage =
       this.#options.scriptUsage?.(caller) ?? this.#store.scriptUsage(key);
     const canUse = (origin: ContributionOrigin) =>
       this.#options.canUseScript?.(caller, origin) ?? true;
-    const scripts = this.#scripts.select(usage, canUse, 128 * 1024);
     const library = this.#scripts.discover(canUse);
+    const scripts = this.#scripts.select(usage, canUse, 128 * 1024, library);
+    // Capture all contribution discovery synchronously. Catalog I/O may yield
+    // while another work enables/disables a source; its versioned manual must
+    // still describe this same captured instruction/Skill/script generation.
+    const docs = await this.#catalog.refresh(published.docs, signal, library);
+    signal.throwIfAborted();
     const directory = privateDirectory(
       this.#scripts.work,
       "tmp",

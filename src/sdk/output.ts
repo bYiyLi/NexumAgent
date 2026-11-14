@@ -5,6 +5,16 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import { transferOffer } from "../transfer/offers.js";
+import {
+  bindMcpSource,
+  wrapMcpResult,
+  wrapMcpResourceResult,
+  mcpResult,
+  type McpOutputBinding,
+  type McpResultOptions,
+  type McpMethod,
+} from "../results/mcp.js";
+import type { JsonObject } from "../contracts/types.js";
 
 // Intents are in-process values, not an authority supplied by an object's keys
 // or prototype. Copying a descriptor cannot turn ordinary business data into media.
@@ -64,6 +74,11 @@ export interface OutputResult {
   isError?: boolean;
 }
 export interface OutputAPI {
+  mcpResult(value: unknown, options: McpResultOptions): JsonObject;
+  mcpResourceResult(
+    value: unknown,
+    options: Omit<McpResultOptions, "method">,
+  ): JsonObject;
   text(value: string, options?: OutputOptions): OutputIntent;
   json(value: unknown): OutputIntent;
   image(source: string | OutputSource, options?: OutputOptions): OutputIntent;
@@ -296,7 +311,11 @@ function normalizeOptions(value: unknown): Readonly<OutputOptions> {
   if (copy.annotations) Object.freeze(copy.annotations);
   return Object.freeze(copy);
 }
-export function createOutput(pwd: string, current: () => void): OutputAPI {
+export function createOutput(
+  pwd: string,
+  current: () => void,
+  mcpBinding?: McpOutputBinding,
+): OutputAPI {
   requireCondition(
     typeof pwd === "string" && path.isAbsolute(pwd),
     "invalid_output_context",
@@ -388,6 +407,10 @@ export function createOutput(pwd: string, current: () => void): OutputAPI {
         "Output content exceeds its depth or item budget.",
       );
       const known = outputIntent(value);
+      if (mcpResult(value)) {
+        result.push(value);
+        return;
+      }
       if (transferOffer(value)) {
         result.push(value);
         return;
@@ -514,6 +537,28 @@ export function createOutput(pwd: string, current: () => void): OutputAPI {
     return Object.freeze(result);
   }
   const api: OutputAPI = {
+    mcpResult(value, options) {
+      current();
+      const fields = record(
+        options,
+        new Set(["connectionResourceId", "connection", "method"]),
+        "invalid_mcp_source",
+      );
+      return wrapMcpResult(
+        value,
+        bindMcpSource(mcpBinding, fields),
+        (fields.method ?? "tools/call") as McpMethod,
+      );
+    },
+    mcpResourceResult(value, options) {
+      current();
+      const fields = record(
+        options,
+        new Set(["connectionResourceId", "connection"]),
+        "invalid_mcp_source",
+      );
+      return wrapMcpResourceResult(value, bindMcpSource(mcpBinding, fields));
+    },
     text(value, options) {
       requireCondition(
         typeof value === "string",

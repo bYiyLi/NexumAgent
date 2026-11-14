@@ -28,6 +28,8 @@ export interface ExtensionHost {
   readonly config: Readonly<JsonObject>;
   readonly signal: AbortSignal;
   readonly resources: ResourceService;
+  /** Current instance authority, independent of any particular run/caller. */
+  authorize(target: AccessTarget): void;
   log(entry: LogEntry): void;
 }
 export interface Invocation {

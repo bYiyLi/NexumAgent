@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { ModulePolicy } from "../runtime/modules.js";
-import { ScriptCatalog } from "../runtime/scripts.js";
+import { ScriptCatalog, type ScriptDiscovery } from "../runtime/scripts.js";
 import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
 import { boundedFile } from "./discovery.js";
 
@@ -67,8 +67,14 @@ export class DocumentCatalog {
     );
   }
 
-  async refresh(links: readonly DocLink[] = [], signal?: AbortSignal) {
+  async refresh(
+    links: readonly DocLink[] = [],
+    signal?: AbortSignal,
+    capturedScripts?: ScriptDiscovery,
+  ) {
     signal?.throwIfAborted();
+    const scripts = capturedScripts ?? this.scripts.discover();
+    const scriptText = this.scripts.indexText(scripts);
     const approved = new Map(this.policy.approvedPackages());
     const builtinFamilies = [...this.policy.builtins()];
     const docs = privateDirectory(this.work, "docs");
@@ -189,11 +195,8 @@ export class DocumentCatalog {
         )
         .join("\n\n") +
       "\n";
-    this.scripts.refreshIndex();
+    this.scripts.refreshIndex(scripts);
     signal?.throwIfAborted();
-    const scriptText = (
-      await boundedFile(path.join(docs, "scripts.md"), 8 * 1024 * 1024, signal)
-    ).bytes.toString("utf8");
     for (const link of links) {
       const actual = realpathSync.native(link.path);
       requireCondition(

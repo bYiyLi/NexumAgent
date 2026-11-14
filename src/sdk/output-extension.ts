@@ -2,7 +2,11 @@ import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
 import type { OutputAPI } from "./output.js";
 
-const descriptions: Record<keyof OutputAPI, string> = {
+type ScriptOutputMethod = Exclude<
+  keyof OutputAPI,
+  "mcpResult" | "mcpResourceResult"
+>;
+const descriptions: Record<ScriptOutputMethod, string> = {
   text: "返回文本内容。",
   json: "明确返回结构化业务数据，不将同形对象转换为媒体。",
   image: "预览一张真实图片。",
@@ -19,7 +23,7 @@ const descriptions: Record<keyof OutputAPI, string> = {
 /** The script facade is registered by the same factory protocol as any npm extension. */
 export const outputExtension: ExtensionFactory = () => {
   const methods: Record<string, MethodDefinition> = {};
-  for (const name of Object.keys(descriptions) as (keyof OutputAPI)[]) {
+  for (const name of Object.keys(descriptions) as ScriptOutputMethod[]) {
     const one = name === "json" || name === "result";
     methods[name] = {
       description: descriptions[name],

@@ -29,6 +29,15 @@ import {
   type IssuedTransferSnapshot,
 } from "../transfer/offers.js";
 import { parseArtifactUri } from "./artifacts.js";
+import {
+  mcpResult,
+  mcpSource,
+  copyMcpJSON,
+  mcpMetaSize,
+  McpResultResources,
+  type McpSourceIdentity,
+  type McpProtocolMeta,
+} from "./mcp.js";
 
 export interface ResultScope extends ArtifactScope {
   readonly grantId?: string;
@@ -46,6 +55,7 @@ export interface ResultLimits {
   readonly inlineBytes?: number;
   readonly responseBytes?: number;
   readonly maxDataBytes?: number;
+  readonly metaBytes?: number;
 }
 export interface RenderOptions {
   readonly textFallback?: boolean;
@@ -180,6 +190,7 @@ export class ResultEncoder {
     readonly artifacts: ArtifactStore,
     limits: ResultLimits = {},
     readonly offers?: TransferOfferDelivery,
+    readonly mcp?: McpResultResources,
   ) {
     requireCondition(
       !offers ||
@@ -187,6 +198,13 @@ export class ResultEncoder {
           offers.profileRoot === artifacts.root),
       "result_profile_mismatch",
       "Transfer delivery must belong to this actual Agent/profile artifact store.",
+    );
+    requireCondition(
+      !mcp ||
+        (mcp.agentId === artifacts.agentId &&
+          mcp.profileRoot === artifacts.root),
+      "result_profile_mismatch",
+      "Remote result routing must belong to this actual Agent/profile.",
     );
     this.limits = Object.freeze({
       textBytes: limits.textBytes ?? 64 * KiB,
@@ -196,6 +214,7 @@ export class ResultEncoder {
       responseBytes: limits.responseBytes ?? 128 * MiB,
       maxDataBytes:
         limits.maxDataBytes ?? Math.min(artifacts.maxFileBytes, 256 * MiB),
+      metaBytes: limits.metaBytes ?? 16 * MiB,
     });
     requireCondition(
       Object.values(this.limits).every(
@@ -211,12 +230,20 @@ export class ResultEncoder {
       "invalid_result_options",
       "Result budgets must fit the actual Agent resource and response policy.",
     );
+    requireCondition(
+      this.limits.metaBytes <= 128 * MiB,
+      "invalid_result_options",
+      "Host-only metadata requires a bounded encoded budget.",
+    );
   }
 
   async encode(value: unknown, scope: ResultScope): Promise<StoredResult> {
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
     const result: StoredResult = { content: [] };
+    const remoteResults: JsonObject[] = [],
+      remoteSeen = new WeakMap<object, number>();
+    let remoteMetaBytes = 2;
     const transfers = new Map<string, StoredTransfer>(),
       transferLinks = new Set<string>();
     let transferBytes = 2;
@@ -434,6 +461,7 @@ export class ResultEncoder {
     const append = async (input: unknown): Promise<JsonObject> => {
       scope.assertCurrent();
       scope.signal?.throwIfAborted();
+      if (mcpResult(input)) return await resolveMcp(input, true);
       if (transferOffer(input)) return await resolveOffer(input);
       const intent = outputIntent(input);
       if (intent?.kind === "collection") {
@@ -614,6 +642,107 @@ export class ResultEncoder {
         size: resource.size,
       };
     };
+    const resolveMcp = async (
+      input: unknown,
+      explicit = false,
+    ): Promise<JsonObject> => {
+      const known = mcpResult(input);
+      requireCondition(
+        known && this.mcp,
+        "mcp_source_unavailable",
+        "Source-aware remote result routing is not configured.",
+      );
+      await this.mcp.resolve(known.source, scope);
+      const previous = remoteSeen.get(input as object);
+      if (previous !== undefined) return { mcpResult: previous };
+      const slot = remoteResults.length;
+      requireCondition(
+        slot < 1000,
+        "mcp_result_too_large",
+        "The result contains too many remote result components.",
+      );
+      remoteMetaBytes +=
+        mcpMetaSize(
+          { source: known.source, meta: known.meta },
+          this.limits.metaBytes,
+        ) + 1;
+      requireCondition(
+        remoteMetaBytes <= this.limits.metaBytes,
+        "mcp_meta_too_large",
+        "Remote Host-only metadata exceeds its separate budget.",
+      );
+      remoteSeen.set(input as object, slot);
+      remoteResults.push({
+        source: known.source as unknown as JsonValue,
+        meta: known.meta as unknown as JsonValue,
+        method: known.method,
+      });
+      const blocks: JsonObject[] =
+        known.kind === "resources"
+          ? (known.model.contents as JsonObject[]).map((resource) => ({
+              type: "resource",
+              resource,
+            }))
+          : (known.model.content as JsonObject[]);
+      for (let sourceIndex = 0; sourceIndex < blocks.length; sourceIndex++) {
+        const block = blocks[sourceIndex]!,
+          start = result.content.length;
+        if (block.type === "resource_link") {
+          // A remote coordinate is not evidence of a downloaded local artifact.
+          requireCondition(
+            start < 10000,
+            "result_content_too_large",
+            "The result exceeds its content-item budget.",
+          );
+          result.content.push({
+            ...(copyMcpJSON(block) as JsonObject),
+            remote: {
+              source: known.source as unknown as JsonValue,
+              uri: block.uri!,
+            },
+          });
+        } else await append(block);
+        for (let index = start; index < result.content.length; index++) {
+          const stored = result.content[index]!;
+          stored.mcp = { slot, index: sourceIndex };
+          if (block.type === "resource")
+            stored.remote = {
+              source: known.source as unknown as JsonValue,
+              uri: (block.resource as JsonObject).uri!,
+            };
+        }
+      }
+      const association: JsonObject = {
+        mcpResult: slot,
+        contentIndices: result.content.flatMap((item, index) =>
+          (item.mcp as JsonObject | undefined)?.slot === slot ? [index] : [],
+        ),
+        ...(Object.hasOwn(known.model, "structuredContent")
+          ? { structuredContent: known.model.structuredContent! }
+          : {}),
+        ...(known.model.isError === undefined
+          ? {}
+          : { isError: known.model.isError }),
+        ...(known.model.resultType === undefined
+          ? {}
+          : { resultType: known.model.resultType }),
+      };
+      if (known.model.isError === true) result.isError = true;
+      result.mcpResults ??= [] as JsonValue[];
+      if (explicit) {
+        const normalized = await normalizeData(association, {
+          mode: "data",
+          maxBytes: this.limits.maxDataBytes,
+          assertCurrent: () => scope.assertCurrent(),
+        });
+        (result.mcpResults as JsonValue[]).push(normalized.data);
+      } else
+        (result.mcpResults as JsonValue[]).push({
+          mcpResult: slot,
+          contentIndices: association.contentIndices!,
+        });
+      return association;
+    };
     const data = async (input: unknown, pure = false) => {
       const normalized = await normalizeData(input, {
         mode: pure ? "data" : "auto",
@@ -622,13 +751,23 @@ export class ResultEncoder {
         assertCurrent: () => scope.assertCurrent(),
         resolveContent: (value) => append(value),
         resolveTransferOffer: resolveOffer,
+        resolveMcpResult: (value) => resolveMcp(value),
       });
       result.data = normalized.data;
       if (normalized.conversions.length)
         result.conversions = normalized.conversions;
     };
-    const intent = outputIntent(value);
-    if (intent?.kind === "result") {
+    const intent = outputIntent(value),
+      remote = mcpResult(value);
+    if (remote) {
+      await resolveMcp(value);
+      if (Object.hasOwn(remote.model, "structuredContent"))
+        await data(remote.model.structuredContent, true);
+      if (remote.model.isError !== undefined)
+        result.isError = remote.model.isError;
+      if (remote.model.resultType !== undefined)
+        result.resultType = remote.model.resultType;
+    } else if (intent?.kind === "result") {
       const body = intent.value as {
         content: readonly unknown[];
         structuredContent?: unknown;
@@ -659,7 +798,7 @@ export class ResultEncoder {
         if (
           !item ||
           !("value" in item) ||
-          !contentValue(item.value, scope.pwd)
+          !(mcpResult(item.value) || contentValue(item.value, scope.pwd))
         ) {
           all = false;
           break;
@@ -671,7 +810,9 @@ export class ResultEncoder {
     } else await data(value);
     if (transfers.size)
       result.transferOffers = [...transfers.values()] as unknown as JsonValue;
+    if (remoteResults.length) result.mcpSources = remoteResults;
     await this.#fit(result, scope);
+    await this.#authorizeMcp(result, scope);
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
     return result;
@@ -689,6 +830,19 @@ export class ResultEncoder {
           text: item.text!,
           ...(item.annotations ? { annotations: item.annotations } : {}),
         };
+      const remote = item.remote as JsonObject | undefined;
+      if (item.type === "resource_link" && remote) {
+        requireCondition(
+          this.mcp,
+          "mcp_source_unavailable",
+          "Remote resource routing is unavailable.",
+        );
+        const { remote: _remote, mcp: _mcp, ...link } = item;
+        return {
+          ...link,
+          uri: this.mcp.uri(mcpSource(remote.source), remote.uri as string),
+        };
+      }
       const resource = record(item.resource);
       const meta = {
         ...(item.annotations ? { annotations: item.annotations } : {}),
@@ -706,7 +860,7 @@ export class ResultEncoder {
         return {
           type: "resource",
           resource: {
-            uri: resource.uri,
+            uri: remote ? this.mcpUri(remote) : resource.uri,
             mimeType: item.mimeType ?? resource.mimeType,
             ...(item.encoding === "text" ? { text: "" } : { blob: "" }),
           },
@@ -737,6 +891,18 @@ export class ResultEncoder {
       run,
       ...(Object.hasOwn(result, "data") ? { data: result.data! } : {}),
       ...(result.conversions ? { conversions: result.conversions } : {}),
+      ...(result.mcpResults
+        ? {
+            mcpResults: (result.mcpResults as JsonObject[]).map((entry) => ({
+              ...entry,
+              contentIndices: result.content.flatMap((item, index) =>
+                (item.mcp as JsonObject | undefined)?.slot === entry.mcpResult
+                  ? [index]
+                  : [],
+              ),
+            })),
+          }
+        : {}),
       ...(Object.keys(delivery).length ? { delivery } : {}),
     };
     if (fallback) {
@@ -752,7 +918,126 @@ export class ResultEncoder {
       content: content as JsonValue[],
       structuredContent,
       ...(result.isError === undefined ? {} : { isError: result.isError }),
+      ...(result.resultType === undefined
+        ? {}
+        : { resultType: result.resultType }),
     };
+  }
+  private mcpUri(remote: JsonObject): string {
+    requireCondition(
+      this.mcp,
+      "mcp_source_unavailable",
+      "Remote resource routing is unavailable.",
+    );
+    return this.mcp.uri(mcpSource(remote.source), remote.uri as string);
+  }
+  #mcpSources(result: StoredResult): {
+    source: McpSourceIdentity;
+    meta: readonly McpProtocolMeta[];
+    method: string;
+  }[] {
+    if (result.mcpSources === undefined) return [];
+    requireCondition(
+      Array.isArray(result.mcpSources) && result.mcpSources.length <= 1000,
+      "invalid_saved_result",
+      "Saved remote results require bounded provenance.",
+    );
+    let bytes = 2;
+    return result.mcpSources.map((value) => {
+      requireCondition(
+        value &&
+          !Array.isArray(value) &&
+          typeof value === "object" &&
+          Array.isArray(value.meta) &&
+          typeof value.method === "string",
+        "invalid_saved_result",
+        "Saved remote result provenance is invalid.",
+      );
+      const source = mcpSource(value.source),
+        meta = copyMcpJSON(
+          value.meta,
+          this.limits.metaBytes,
+        ) as unknown as McpProtocolMeta[];
+      bytes += mcpMetaSize({ source, meta }, this.limits.metaBytes) + 1;
+      requireCondition(
+        bytes <= this.limits.metaBytes &&
+          meta.every(
+            (item) =>
+              item &&
+              ["result", "content", "resource", "entry", "message"].includes(
+                item.target,
+              ) &&
+              item.meta &&
+              !Array.isArray(item.meta) &&
+              typeof item.meta === "object",
+          ),
+        "mcp_meta_too_large",
+        "Saved Host-only metadata exceeds its separate budget or is malformed.",
+      );
+      return { source, meta, method: value.method };
+    });
+  }
+  async #authorizeMcp(result: StoredResult, scope: ResultScope): Promise<void> {
+    for (const entry of this.#mcpSources(result)) {
+      if (!entry.meta.length) continue;
+      requireCondition(
+        this.mcp,
+        "mcp_source_unavailable",
+        "The original remote result source is unavailable.",
+      );
+      // Received fixed bytes remain historical artifacts after the connection closes.
+      // Host-only metadata still needs this caller's current connection authority.
+      const authority = this.mcp.authority(scope, entry.source);
+      authority.assertCurrent();
+      authority.authorizeConnection(
+        entry.source.connection,
+        undefined,
+        "result",
+      );
+    }
+    for (const item of result.content)
+      if (item.type === "resource_link" && item.remote) {
+        const remote = item.remote as JsonObject;
+        requireCondition(
+          this.mcp && typeof remote.uri === "string",
+          "invalid_saved_result",
+          "A saved remote coordinate is invalid.",
+        );
+        await this.mcp.resolve(
+          mcpSource(remote.source),
+          scope,
+          "resources.read",
+          remote.uri,
+        );
+      }
+  }
+  #applyMcpMeta(result: StoredResult, response: JsonObject): void {
+    const sources = this.#mcpSources(result);
+    if (!sources.some((source) => source.meta.length)) return;
+    const slots = sources.map((entry, slot) => ({
+      slot,
+      connection: entry.source.connection,
+      extensionId: entry.source.extensionId,
+      revision: entry.source.origin.revision,
+      method: entry.method,
+      contentIndices: result.content.flatMap((item, index) =>
+        (item.mcp as JsonObject | undefined)?.slot === slot
+          ? [{ index, sourceIndex: (item.mcp as JsonObject).index! }]
+          : [],
+      ),
+      protocolMeta: entry.meta as unknown as JsonValue,
+    }));
+    const root =
+      sources.length === 1
+        ? sources[0]!.meta.find((item) => item.target === "result")?.meta
+        : undefined;
+    const hostMeta: JsonObject = { ...(root ?? {}) };
+    let key = "io.nexum/mcp",
+      suffix = 0;
+    while (Object.hasOwn(hostMeta, key)) key = `io.nexum/mcp/${++suffix}`;
+    hostMeta[key] = { results: slots };
+    response._meta = hostMeta;
+    mcpMetaSize(response._meta, this.limits.metaBytes);
   }
   #transfers(result: StoredResult): StoredTransfer[] {
     if (result.transferOffers === undefined) return [];
@@ -799,9 +1084,12 @@ export class ResultEncoder {
     });
   }
   async #fit(result: StoredResult, scope: ArtifactScope): Promise<void> {
-    const dataText = Object.hasOwn(result, "data")
+    const hasData =
+      Object.hasOwn(result, "data") || Object.hasOwn(result, "mcpResults");
+    const dataText = hasData
       ? JSON.stringify({
-          data: result.data,
+          ...(Object.hasOwn(result, "data") ? { data: result.data } : {}),
+          ...(result.mcpResults ? { mcpResults: result.mcpResults } : {}),
           ...(result.conversions ? { conversions: result.conversions } : {}),
         })
       : undefined;
@@ -831,7 +1119,7 @@ export class ResultEncoder {
     // Keep the whole normalized JSON or text in an actual resource and make the incomplete model view explicit.
     const summary: JsonObject[] = [];
     let changed = false;
-    if (Object.hasOwn(result, "data")) {
+    if (hasData) {
       const resource = await this.artifacts.register(
         {
           data: Buffer.from(dataText!),
@@ -842,6 +1130,7 @@ export class ResultEncoder {
       );
       delete result.data;
       delete result.conversions;
+      delete result.mcpResults;
       changed = true;
       summary.push({
         type: "resource_link",
@@ -938,8 +1227,17 @@ export class ResultEncoder {
     scope.signal?.throwIfAborted();
     // Only normalized saved JSON is accepted; caller-supplied functions/accessors never reach the protocol boundary.
     result = JSON.parse(
-      canonicalJson(result, Math.max(this.limits.textBytes * 4, 1024 * 1024)),
+      JSON.stringify(
+        copyMcpJSON(
+          result,
+          Math.min(
+            128 * MiB,
+            Math.max(this.limits.textBytes * 4, MiB) + this.limits.metaBytes,
+          ),
+        ),
+      ),
     ) as StoredResult;
+    await this.#authorizeMcp(result, scope);
     const response = this.#projection(
       result,
       asJson(run),
@@ -983,6 +1281,11 @@ export class ResultEncoder {
       }
     };
     applyTransfers();
+    this.#applyMcpMeta(result, response);
+    const hostMetaBytes =
+      response._meta === undefined
+        ? 0
+        : mcpMetaSize(response._meta, this.limits.metaBytes) + 10;
     let inlineBytes = 0,
       encodedBinaryBytes = 0;
     for (let i = 0; i < result.content.length; i++) {
@@ -995,6 +1298,7 @@ export class ResultEncoder {
         "The saved content type is unsupported.",
       );
       if (item.type === "text") continue;
+      if (item.type === "resource_link" && item.remote) continue;
       const source = record(item.resource),
         kind = item.type;
       const actual = await this.artifacts.metadata(source.uri, scope);
@@ -1029,7 +1333,9 @@ export class ResultEncoder {
       if (!(kind === "resource" && item.encoding === "text")) {
         encodedBinaryBytes += Math.ceil(source.size / 3) * 4;
         requireCondition(
-          encodedBinaryBytes + Buffer.byteLength(JSON.stringify(control)) <=
+          encodedBinaryBytes +
+            Buffer.byteLength(JSON.stringify(control)) +
+            hostMetaBytes <=
             maximum,
           "mcp_response_too_large",
           "Encoded media exceeds the actual transport/Host budget.",
@@ -1080,6 +1386,7 @@ export class ResultEncoder {
     // Resource I/O may yield long enough for a channel to be claimed, expire or
     // lose authority. Re-project current delivery immediately before returning.
     applyTransfers();
+    await this.#authorizeMcp(result, scope);
     requireCondition(
       Buffer.byteLength(JSON.stringify(control)) <= this.limits.textBytes,
       "result_context_too_large",
@@ -1121,7 +1428,15 @@ export class ResultEncoder {
   }
 
   /** Standard resources/read uses text/blob bodies, never image/audio tool blocks. */
-  async readResource(uri: string, scope: ArtifactScope): Promise<JsonObject> {
+  async readResource(uri: string, scope: ResultScope): Promise<JsonObject> {
+    if (/^nexum:\/\/agents\/[^/]+\/mcp\//.test(uri)) {
+      requireCondition(
+        this.mcp,
+        "mcp_source_unavailable",
+        "Remote resource routing is unavailable.",
+      );
+      return await this.mcp.readResource(uri, scope, this.limits);
+    }
     const resource = await this.artifacts.metadata(uri, scope);
     const text = textMime(resource.mimeType),
       essence = new MIMEType(resource.mimeType).essence;

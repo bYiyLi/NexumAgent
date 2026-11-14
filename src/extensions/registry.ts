@@ -33,6 +33,16 @@ import { unavailableState, type StateService } from "./state.js";
 import { unavailableTransfer, type TransferService } from "./transfer.js";
 import { snapshotBlob } from "../results/artifacts.js";
 import {
+  mcpResult,
+  rebuildMcpResult,
+  mcpLogSnapshot,
+  type McpSourceIdentity,
+  type McpReadScope,
+  type McpResourceReader,
+  type McpResolvedReader,
+  type McpAccess,
+} from "../results/mcp.js";
+import {
   transferOffer,
   rebuildTransferOffer,
   transferSafeJSON,
@@ -273,7 +283,7 @@ interface ResultSnapshot {
   internalOnly: Set<object>;
   bytes: number;
   nodes: number;
-  safeOffers?: boolean;
+  diagnostic?: boolean;
 }
 // Match the largest supported inline byte budget; transport/encoder still
 // applies the configured media limits and counts repeated delivery occurrences.
@@ -298,6 +308,7 @@ export class ExtensionRegistry {
   #options: RegistryOptions;
   #entries = new Set<Entry>();
   #handles = new WeakMap<ExtensionHandle, Entry>();
+  #preparationFailures = new WeakMap<object, ExtensionHandle>();
   constructor(resources: ResourceManager, options: RegistryOptions) {
     this.resources = resources;
     this.#options = { ...options, permissions: new Set(options.permissions) };
@@ -390,12 +401,15 @@ export class ExtensionRegistry {
       if (previous.state === "failed") {
         if (!previous.recovery) {
           const recovery = this.#cleanup(previous).then((cleanup) => {
-            requireCondition(
-              cleanup.status === "disabled",
-              "extension_cleanup_pending",
-              "The failed instance must finish cleanup before another initialization.",
-              { extensionId: previous.handle.id, cleanup },
-            );
+            if (cleanup.status !== "disabled") {
+              const failure = new AgentError(
+                "extension_cleanup_pending",
+                "The failed instance must finish cleanup before another initialization.",
+                { extensionId: previous.handle.id, cleanup },
+              );
+              this.#preparationFailures.set(failure, previous.handle);
+              throw failure;
+            }
             this.#entries.delete(previous);
             return this.prepare(source, factory);
           });
@@ -556,6 +570,27 @@ export class ExtensionRegistry {
       config: json(entry.source.config ?? {}),
       signal: entry.controller.signal,
       resources: this.#protectResources(entry, entry.resources.resources),
+      authorize: (target: AccessTarget) => {
+        this.#instance(entry);
+        const fixed = json(target) as unknown as AccessTarget;
+        requireCondition(
+          Object.keys(fixed).every((key) =>
+            ["type", "value", "access"].includes(key),
+          ) &&
+            ["path", "url", "resource", "connection"].includes(fixed.type) &&
+            segment(fixed.value) &&
+            segment(fixed.access),
+          "invalid_access_target",
+          "Instance authorization needs an explicit path, URL, resource or connection target.",
+        );
+        this.#authorize({
+          origin: entry.source.origin,
+          action: "resource",
+          permissions: entry.source.permissions,
+          target: fixed,
+        });
+        this.#instance(entry);
+      },
       log: (value: LogEntry) => this.#log(entry, value),
     });
     entry.protected.add(host);
@@ -727,12 +762,15 @@ export class ExtensionRegistry {
       );
       const cleanup = await this.#cleanup(entry).catch(() => null);
       if (cleanup?.status === "disabled") this.#entries.delete(entry);
-      throw new AgentError(
+      const failure = new AgentError(
         "extension_initialization_failed",
         "The extension's factory or declared method table could not be prepared.",
         { extensionId: entry.handle.id, ...(cleanup ? { cleanup } : {}) },
         { cause },
       );
+      if (this.#entries.has(entry))
+        this.#preparationFailures.set(failure, entry.handle);
+      throw failure;
     } finally {
       audit.close();
     }
@@ -746,7 +784,159 @@ export class ExtensionRegistry {
     );
     return entry;
   }
-  publish(handle: ExtensionHandle): void {
+  /** Core-only identity proof for retrying this exact failed initialization. */
+  preparationFailure(
+    cause: unknown,
+    expectedSource?: ExtensionSource,
+  ): ExtensionHandle | null {
+    if (typeof cause !== "object" || cause === null) return null;
+    const handle = this.#preparationFailures.get(cause);
+    const entry = handle ? this.#handles.get(handle) : undefined;
+    return entry &&
+      this.#entries.has(entry) &&
+      (expectedSource === undefined ||
+        entry.key === digest(json(expectedSource))) &&
+      (entry.state === "failed" || entry.state === "stopping")
+      ? handle!
+      : null;
+  }
+  /** Whether this exact unpublished instance still needs a Core cleanup decision. */
+  preparationRetained(handle: ExtensionHandle): boolean {
+    const entry = this.#handles.get(handle);
+    return !!(
+      entry &&
+      this.#entries.has(entry) &&
+      ["ready", "failed", "stopping"].includes(entry.state)
+    );
+  }
+  /** Core Resources bridge; never exposed through host, Invocation or script bindings. */
+  async resolveMcpResource(
+    source: McpSourceIdentity,
+    scope: McpReadScope,
+  ): Promise<McpResolvedReader> {
+    requireCondition(
+      source.agentId === this.resources.store.binding.agentId &&
+        source.profileRoot === this.resources.store.root,
+      "mcp_profile_mismatch",
+      "The MCP resource must target this actual Agent/profile.",
+    );
+    const entry = [...this.#entries].find(
+      (candidate) => candidate.handle.id === source.extensionId,
+    );
+    requireCondition(
+      entry &&
+        canonicalJson(entry.source.origin) === canonicalJson(source.origin),
+      "mcp_source_unavailable",
+      "The original MCP extension instance is no longer available.",
+    );
+    const current = () => {
+      scope.signal?.throwIfAborted();
+      authorizeCall(() => scope.assertCurrent());
+      this.#instance(entry);
+      requireCondition(
+        entry.state === "published",
+        "mcp_source_unavailable",
+        "The MCP source is not admitting new resource reads.",
+      );
+      authorizeCall(() =>
+        scope.authorizeConnection(source.connection, undefined, "result"),
+      );
+      this.#authorize({
+        origin: entry.source.origin,
+        action: "resource",
+        permissions: entry.source.permissions,
+        target: {
+          type: "resource",
+          value: source.connectionResourceId,
+          access: "get",
+        },
+      });
+    };
+    current();
+    // Standard Resources requests do not have a JS run. Use the exact original
+    // instance's resource facade after fresh request authorization; never forge
+    // a runId or relax the run-bound facade contract.
+    const ref = await entry.resources.resources.get<McpResourceReader>(
+      source.connectionResourceId,
+    );
+    current();
+    requireCondition(
+      ref.kind === "mcp.connection" &&
+        ref.value.connection === source.connection &&
+        typeof ref.value.assertCurrent === "function" &&
+        typeof ref.value.readResource === "function",
+      "mcp_source_unavailable",
+      "The original resource is not a live MCP connection reader.",
+    );
+    const reader = ref.value;
+    const invoke = async <T>(
+      authority: McpReadScope,
+      access: McpAccess,
+      uri: string | undefined,
+      action: () => Promise<T>,
+    ): Promise<T> => {
+      requireCondition(
+        authority === scope,
+        "mcp_authorization_configuration",
+        "A resource reader cannot replace the current request authority.",
+      );
+      entry.calls++;
+      try {
+        current();
+        authorizeCall(() =>
+          scope.authorizeConnection(source.connection, uri, access),
+        );
+        const result = await action();
+        current();
+        authorizeCall(() =>
+          scope.authorizeConnection(source.connection, uri, access),
+        );
+        return result;
+      } finally {
+        entry.calls--;
+      }
+    };
+    return Object.freeze({
+      connection: reader.connection,
+      assertCurrent: () => {
+        current();
+        authorizeCall(() => reader.assertCurrent());
+        current();
+      },
+      readResource: (uri: string, authority: McpReadScope) =>
+        invoke(authority, "resources.read", uri, () =>
+          reader.readResource(uri, authority),
+        ),
+      ...(reader.listResources
+        ? {
+            listResources: (authority: McpReadScope, cursor?: string) =>
+              invoke(authority, "resources.list", undefined, () =>
+                reader.listResources!(authority, cursor),
+              ),
+          }
+        : {}),
+    });
+  }
+  #commitContributions(commit?: () => void): void {
+    if (commit === undefined) return;
+    requireCondition(
+      typeof commit === "function" &&
+        !types.isProxy(commit) &&
+        !types.isAsyncFunction(commit),
+      "extension_publication_configuration",
+      "Core contribution publication must be a synchronous commit.",
+    );
+    const result = commit();
+    if (types.isPromise(result))
+      void Promise.prototype.then.call(result, undefined, () => {});
+    requireCondition(
+      result === undefined,
+      "extension_publication_configuration",
+      "Core contribution publication must finish synchronously.",
+    );
+  }
+  /** Core-only collaboration: commit prepared discovery indexes after all admission checks. */
+  publish(handle: ExtensionHandle, commitContributions?: () => void): void {
     const entry = this.#entry(handle);
     this.#instance(entry);
     this.#authorize({
@@ -759,6 +949,9 @@ export class ExtensionRegistry {
       "extension_not_ready",
       "Only a completely prepared extension may be published.",
     );
+    // The supplied Core commit only changes already-prepared indexes. There is
+    // no await or extension callback between it and the SDK visibility change.
+    this.#commitContributions(commitContributions);
     entry.state = "published";
   }
   bindings(services: RunServices): Readonly<Record<string, unknown>> {
@@ -960,7 +1153,12 @@ export class ExtensionRegistry {
             signal: services.signal,
             deadline: services.deadlineAt,
             resources,
-            output: createOutput(services.context.pwd as string, current),
+            output: createOutput(services.context.pwd as string, current, {
+              agentId: this.resources.store.binding.agentId,
+              profileRoot: this.resources.store.root,
+              extensionId: entry.handle.id,
+              origin: entry.source.origin,
+            }),
             state,
             transfer,
             log: (value: LogEntry) => {
@@ -970,7 +1168,7 @@ export class ExtensionRegistry {
             progress: (value: JsonObject) => {
               current();
               const data = frozen(
-                JSON.parse(transferSafeJSON(value, 16384)),
+                JSON.parse(transferSafeJSON(value, 16384, mcpLogSnapshot)),
               ) as JsonObject;
               canonicalJson(data, 16384);
               this.#options.progress(
@@ -997,7 +1195,11 @@ export class ExtensionRegistry {
             value = this.#result(entry, value);
             if (method.output) {
               const result = outputIntent(value);
-              if (result?.kind === "result") {
+              const remote = mcpResult(value);
+              if (remote) {
+                if (Object.hasOwn(remote.model, "structuredContent"))
+                  method.output(remote.model.structuredContent);
+              } else if (result?.kind === "result") {
                 const payload = result.value as {
                   isError?: boolean;
                   structuredContent?: unknown;
@@ -1024,6 +1226,7 @@ export class ExtensionRegistry {
     }
   }
   #media(value: unknown): boolean {
+    if (mcpResult(value)) return true;
     if (transferOffer(value)) return true;
     if (outputIntent(value)) return true;
     if (Array.isArray(value))
@@ -1051,7 +1254,7 @@ export class ExtensionRegistry {
         internalOnly: new Set(),
         bytes: 0,
         nodes: 0,
-        safeOffers: true,
+        diagnostic: true,
       });
     } catch {
       return new AgentError(
@@ -1159,6 +1362,19 @@ export class ExtensionRegistry {
     );
     const existing = snapshot.copies.get(value);
     if (existing) return existing;
+    const remote = mcpResult(value);
+    if (remote) {
+      const data = this.#result(
+        entry,
+        snapshot.diagnostic ? mcpLogSnapshot(value) : remote.model,
+        snapshot,
+        false,
+        depth + 1,
+      );
+      const copy = snapshot.diagnostic ? data : rebuildMcpResult(value, data);
+      snapshot.copies.set(value, copy as object);
+      return copy;
+    }
     const offer = transferOffer(value);
     if (offer) {
       const data = this.#result(
@@ -1168,7 +1384,7 @@ export class ExtensionRegistry {
         false,
         depth + 1,
       );
-      const copy = snapshot.safeOffers
+      const copy = snapshot.diagnostic
         ? (data as object)
         : rebuildTransferOffer(value, data);
       snapshot.copies.set(value, copy);
@@ -1398,7 +1614,9 @@ export class ExtensionRegistry {
     runId?: string,
     operationId?: string,
   ): void {
-    const data = frozen(JSON.parse(transferSafeJSON(value, 16384))) as LogEntry;
+    const data = frozen(
+      JSON.parse(transferSafeJSON(value, 16384, mcpLogSnapshot)),
+    ) as LogEntry;
     requireCondition(
       ["debug", "info", "warn", "error"].includes(data.level) &&
         typeof data.message === "string",
@@ -1441,15 +1659,21 @@ export class ExtensionRegistry {
       }
     };
   }
-  disable(handle: ExtensionHandle): Promise<JsonObject> {
+  /** Core-only withdrawal occurs before abort/dispose can invoke extension callbacks. */
+  disable(
+    handle: ExtensionHandle,
+    withdrawContributions?: () => void,
+  ): Promise<JsonObject> {
     const entry = this.#entry(handle);
     this.#authorize({
       origin: entry.source.origin,
       action: "disable",
       permissions: entry.source.permissions,
     });
-    if (entry.state === "disabled")
+    if (entry.state === "disabled") {
+      this.#commitContributions(withdrawContributions);
       return Promise.resolve({ status: "disabled" });
+    }
     requireCondition(
       entry.state !== "preparing" &&
         entry.calls === 0 &&
@@ -1459,6 +1683,7 @@ export class ExtensionRegistry {
       "Calls, active source scripts or independent business resources still use this version.",
     );
     if (entry.disposal) return entry.disposal;
+    this.#commitContributions(withdrawContributions);
     entry.state = "stopping";
     entry.controller.abort(
       new AgentError(

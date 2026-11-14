@@ -64,6 +64,10 @@ export interface ScriptEntry extends ScriptMetadata {
   path: string;
   origin: ScriptOrigin;
 }
+export interface ScriptDiscovery {
+  readonly entries: readonly ScriptEntry[];
+  readonly warnings: readonly ScriptDiagnostic[];
+}
 
 const maxCodeBytes = 1024 * 1024;
 const sha = (code: string) => createHash("sha256").update(code).digest("hex");
@@ -363,10 +367,9 @@ export class ScriptCatalog {
     }
   }
 
-  discover(canUse: (origin: ScriptOrigin) => boolean = () => true): {
-    entries: ScriptEntry[];
-    warnings: ScriptDiagnostic[];
-  } {
+  discover(
+    canUse: (origin: ScriptOrigin) => boolean = () => true,
+  ): ScriptDiscovery {
     const sources = [
       { directory: this.local, ...this.#localOrigin() },
       ...this.#registered(),
@@ -438,10 +441,8 @@ export class ScriptCatalog {
     return { entries, warnings };
   }
 
-  refreshIndex(): void {
-    // Re-check the generated directory; it is writable by the same OS user.
-    privateDirectory(this.work, "docs");
-    const { entries, warnings } = this.discover();
+  indexText(discovery: ScriptDiscovery = this.discover()): string {
+    const { entries, warnings } = discovery;
     const blocks = entries.map(
       (entry) =>
         `## ${entry.scriptName}\n\n${entry.scriptDesc}\n\n适用：${entry.scriptWhenUse}\n\n来源：${entry.origin.owner}；版本：${entry.origin.version ?? "本地"}；修订：${entry.origin.revision}；默认展示：${entry.scriptOpenDefault}\n\n源文件：${entry.path}\n\n\`\`\`json\n${JSON.stringify(entry.scriptInputSchema, null, 2)}\n\`\`\``,
@@ -464,15 +465,24 @@ export class ScriptCatalog {
       "script_index_too_large",
       "The generated script manual exceeds its budget.",
     );
-    atomicText(path.join(this.docs, "scripts.md"), text);
+    return text;
+  }
+
+  refreshIndex(discovery?: ScriptDiscovery): void {
+    // Re-check the generated directory; it is writable by the same OS user.
+    privateDirectory(this.work, "docs");
+    atomicText(path.join(this.docs, "scripts.md"), this.indexText(discovery));
   }
 
   select(
     usage: readonly ScriptUsage[],
     canUse: (origin: ScriptOrigin) => boolean = () => true,
     maxBytes = 256 * 1024,
+    discovery?: ScriptDiscovery,
   ) {
-    const { entries, warnings } = this.discover(canUse);
+    const { entries, warnings: discoveredWarnings } =
+      discovery ?? this.discover(canUse);
+    const warnings = [...discoveredWarnings];
     const defaults = entries.filter((entry) => entry.scriptOpenDefault);
     const selected: (ScriptEntry & {
       reason: "default" | "frequency";

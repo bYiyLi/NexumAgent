@@ -5,6 +5,7 @@ import { AgentError } from "../contracts/errors.js";
 import { isPlainRecord } from "../contracts/json.js";
 import type { JsonObject, JsonValue } from "../contracts/types.js";
 import { transferOffer } from "../transfer/offers.js";
+import { mcpResult } from "./mcp.js";
 import {
   createOutput,
   outputIntent,
@@ -18,6 +19,8 @@ export interface NormalizeOptions {
   resolveContent?(value: unknown, position: string): Promise<JsonValue>;
   /** Issued Offers use this same walk/budget, including explicit pure data. */
   resolveTransferOffer?(value: unknown): Promise<JsonValue>;
+  /** Trusted remote protocol results use this same bounded data walk. */
+  resolveMcpResult?(value: unknown): Promise<JsonValue>;
   assertCurrent?(): void;
   maxDepth?: number;
   maxNodes?: number;
@@ -453,6 +456,18 @@ export async function normalizeData(
       );
     ancestors.add(input);
     try {
+      if (mcpResult(input)) {
+        if (!options.resolveMcpResult)
+          problem(
+            "result_mcp_resolver_required",
+            "A trusted MCP result needs its source-aware resolver.",
+            position,
+          );
+        const data = await options.resolveMcpResult(input);
+        options.assertCurrent?.();
+        converted(position, "McpResult", "content-association");
+        return await visit(data, position, depth, true);
+      }
       if (transferOffer(input)) {
         if (!options.resolveTransferOffer)
           problem(

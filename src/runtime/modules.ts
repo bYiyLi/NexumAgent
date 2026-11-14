@@ -55,6 +55,13 @@ interface Bridge {
   fromWork: (specifier: string, options?: object) => Promise<object>;
   resolveFromWork: (specifier: string) => string;
 }
+interface EvaluatedModule {
+  version: string;
+  root?: string;
+  /** Absent for ordinary imports whose whole-package source was not inspected. */
+  revision?: string;
+}
+
 interface AuthorizedModule {
   specifier: string;
   kind: ModuleUse["kind"];
@@ -62,6 +69,10 @@ interface AuthorizedModule {
   version: string | null;
   packageName?: string;
 }
+
+// Node's canonical-URL cache survives loader/bridge recreation within this process.
+// Share only evaluation evidence by profile; actual namespaces remain exclusively in Node.
+const evaluatedByWork = new Map<string, Map<string, EvaluatedModule>>();
 
 const bridgeSource = [
   "export const fromWork = (specifier, options) => import(specifier, options);",
@@ -92,13 +103,17 @@ export class ModuleLoader {
   readonly #policy: ModulePolicy;
   readonly #require: NodeJS.Require;
   readonly #bridge: Bridge;
-  readonly #loaded = new Map<string, string>();
+  readonly #loaded: Map<string, EvaluatedModule>;
 
   private constructor(work: string, policy: ModulePolicy, bridge: Bridge) {
     this.work = work;
     this.#policy = policy;
     this.#require = createRequire(path.join(work, "package.json"));
     this.#bridge = bridge;
+    const loaded =
+      evaluatedByWork.get(work) ?? new Map<string, EvaluatedModule>();
+    evaluatedByWork.set(work, loaded);
+    this.#loaded = loaded;
   }
 
   static async create(
@@ -200,7 +215,8 @@ export class ModuleLoader {
         "sha256:" +
         createHash("sha256").update(readFileSync(actual)).digest("hex");
       requireCondition(
-        !this.#loaded.has(entry) || this.#loaded.get(entry) === version,
+        !this.#loaded.has(entry) ||
+          this.#loaded.get(entry)?.version === version,
         "module_restart_required",
         "This file module changed after loading; restart is required for new imports.",
       );
@@ -261,7 +277,9 @@ export class ModuleLoader {
       "The installed package differs from the approved version.",
     );
     requireCondition(
-      !this.#loaded.has(name) || this.#loaded.get(name) === approved,
+      !this.#loaded.has(name) ||
+        (this.#loaded.get(name)?.version === approved &&
+          this.#loaded.get(name)?.root === root),
       "module_restart_required",
       "A different version of this package is already loaded; restart is required.",
     );
@@ -296,6 +314,95 @@ export class ModuleLoader {
     return this.#entry(this.#authorize(specifier), "import");
   }
 
+  #remember(
+    authorized: AuthorizedModule,
+    entry: string,
+    revision?: string,
+  ): void {
+    if (!authorized.version || authorized.kind === "builtin") return;
+    const key = authorized.packageName ?? entry;
+    const previous = this.#loaded.get(key);
+    requireCondition(
+      revision === undefined || !previous || previous.revision === revision,
+      "module_restart_required",
+      "This package was evaluated with a different or unknown source revision; restart is required.",
+      { packageName: authorized.packageName ?? key, needsRestart: true },
+    );
+    this.#loaded.set(key, {
+      version: authorized.version,
+      ...(authorized.root ? { root: authorized.root } : {}),
+      ...((revision ?? previous?.revision)
+        ? { revision: revision ?? previous?.revision }
+        : {}),
+    });
+  }
+
+  #extension(input: { packageName: string; entry: string; revision: string }): {
+    authorized: AuthorizedModule;
+    entry: string;
+  } {
+    requireCondition(
+      typeof input.packageName === "string" &&
+        typeof input.entry === "string" &&
+        typeof input.revision === "string" &&
+        /^sha256:[0-9a-f]{64}$/.test(input.revision),
+      "invalid_extension_source",
+      "An extension import needs its fixed package, native entry and own-file revision.",
+    );
+    const authorized = this.#authorize(`${input.packageName}/nexum`);
+    requireCondition(
+      authorized.kind === "npm" && authorized.packageName === input.packageName,
+      "invalid_extension_package",
+      "Use the actual npm package name for the extension entry.",
+    );
+    const entry = this.#entry(authorized, "import");
+    requireCondition(
+      entry === input.entry,
+      "extension_package_changed",
+      "The approved native extension entry changed before evaluation.",
+    );
+    const previous = this.#loaded.get(input.packageName);
+    requireCondition(
+      !previous || previous.revision === input.revision,
+      "module_restart_required",
+      "This package was evaluated with a different or unknown source revision; restart is required.",
+      { packageName: input.packageName, needsRestart: true },
+    );
+    return { authorized, entry };
+  }
+
+  /** Check current authority and known native-cache revision without evaluating or claiming a load. */
+  assertExtension(input: {
+    packageName: string;
+    entry: string;
+    revision: string;
+  }): void {
+    this.#extension(input);
+  }
+
+  /** Core-only extension evaluation; shares native Node cache with ordinary script imports. */
+  async importExtension(input: {
+    packageName: string;
+    entry: string;
+    revision: string;
+  }): Promise<object> {
+    const { authorized, entry } = this.#extension(input);
+    // Pin before invoking Node: rejected and pending top-level await still leave native cache state.
+    this.#remember(authorized, entry, input.revision);
+    const value = await this.#bridge.fromWork(entry);
+    const current = this.#authorize(`${input.packageName}/nexum`);
+    requireCondition(
+      current.root === authorized.root &&
+        current.version === authorized.version &&
+        this.#entry(current, "import") === entry,
+      "module_restart_required",
+      "The extension's installed source changed during native evaluation; restart is required.",
+      { packageName: input.packageName, needsRestart: true },
+    );
+    this.#remember(current, entry, input.revision);
+    return value;
+  }
+
   compile(
     code: string,
     parameters: Readonly<Record<string, unknown>>,
@@ -306,8 +413,7 @@ export class ModuleLoader {
     } = {},
   ): () => Promise<unknown> {
     const record = (authorized: AuthorizedModule, entry: string) => {
-      if (authorized.version && authorized.kind !== "builtin")
-        this.#loaded.set(authorized.packageName ?? entry, authorized.version);
+      this.#remember(authorized, entry);
       options.onModule?.({
         specifier: authorized.specifier,
         kind: authorized.kind,
@@ -333,9 +439,8 @@ export class ModuleLoader {
     const guardedRequire = Object.assign(
       (specifier: string) => {
         const { authorized, entry, native } = resolve(specifier);
-        const value = this.#require(native);
         record(authorized, entry);
-        return value;
+        return this.#require(native);
       },
       { resolve: (specifier: string) => resolve(specifier).native },
     );
@@ -366,10 +471,10 @@ export class ModuleLoader {
         importModuleDynamically: async (specifier, _referrer, attributes) => {
           const authorized = this.#authorize(specifier);
           const filename = this.#entry(authorized, "import");
+          record(authorized, filename);
           const value = await this.#bridge.fromWork(filename, {
             with: attributes,
           });
-          record(authorized, filename);
           // Node accepts an actual ESM namespace here; @types/node only lists vm.Module.
           // Returning that native namespace preserves live bindings and Node's cache.
           return value as vm.Module;
