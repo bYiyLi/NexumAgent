@@ -528,7 +528,8 @@
       "id": "B063",
       "target": "tab.cua.move",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-background-cursor"]
     },
     {
       "id": "B064",
@@ -1708,6 +1709,11 @@
     "正式公共协议包、npm/browser制品发行与端到端Host媒体交付"
   ],
   "nativeScenarios": {
+    "native-background-cursor": {
+      "file": "test/native-visual.acceptance.mjs",
+      "test": "native background cursor movement settles without a paint callback and leaves no control after run cleanup",
+      "coverage": ["normal", "background", "cleanup", "result"]
+    },
     "native-screenshot-pixels": {
       "file": "test/native-capabilities.acceptance.mjs",
       "test": "native screenshot maxEdgePx bounds physical JPEG pixels at multiple device scales",

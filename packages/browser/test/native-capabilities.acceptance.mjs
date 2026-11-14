@@ -304,6 +304,8 @@ test(
     for (const key of ["bootId", "browserSessionId", "generation"])
       assert.equal(current[key], peer[key]);
     assert.equal(after.result.data.text, "Native action applied");
+    const cleanup = await f.cleanupFacts();
+    assert.deepEqual(cleanup.owned, [], JSON.stringify(cleanup));
   },
 );
 

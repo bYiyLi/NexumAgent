@@ -18,7 +18,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { on, once } from "node:events";
 import WebSocket from "ws";
 import { extensionId } from "../../browser-extension/build.mjs";
 
@@ -322,7 +322,7 @@ export async function nativeFixture(t, options = {}) {
     stderr = (stderr + data.toString()).slice(-65536);
   });
   child.on("error", () => {});
-  // Failure-only, read-only inspection of this fixture's own MV3 worker. Never
+  // Read-only failure/cleanup inspection of this fixture's own MV3 worker. Never
   // inspect a user profile or print journal keys, clipboard values or page data.
   const cleanupFacts = async () => {
     let socket;
@@ -349,24 +349,33 @@ export async function nativeFixture(t, options = {}) {
       socket = new WebSocket(worker.webSocketDebuggerUrl);
       socket.on("error", () => {});
       await once(socket, "open", { signal: AbortSignal.timeout(2000) });
-      socket.send(
-        JSON.stringify({
-          id: 1,
-          method: "Runtime.evaluate",
-          params: {
-            expression: `(async()=>{const state=await chrome.storage.session.get(['nexumOwnedControls','nexumClosedLeases','nexumVisualMarkers']),targets=await chrome.debugger.getTargets();return {id:chrome.runtime.id,owned:(state.nexumOwnedControls??[]).map(item=>({tabId:item.tabId,runId:item.runId,attached:targets.some(target=>target.tabId===item.tabId&&target.attached),keys:item.keys?.length??0,buttons:item.buttons?.length??0,streams:item.streams?.length??0,viewport:item.viewport,attachmentIntent:item.attachmentIntent})),closedReceipts:state.nexumClosedLeases?.length??0,visualMarkers:state.nexumVisualMarkers?.length??0};})()`,
-            awaitPromise: true,
-            returnByValue: true,
-          },
-        }),
-      );
-      const [bytes] = await once(socket, "message", {
+      // DevTools can publish unsolicited events before the command reply.
+      // Subscribe before sending and correlate by request id rather than
+      // mistaking the first native message for our failure diagnostic.
+      const replies = on(socket, "message", {
         signal: AbortSignal.timeout(2000),
       });
-      const reply = JSON.parse(bytes);
-      assert.equal(reply.id, 1);
-      assert.equal(reply.result?.result?.value?.id, expectedId);
-      return reply.result.result.value;
+      try {
+        socket.send(
+          JSON.stringify({
+            id: 1,
+            method: "Runtime.evaluate",
+            params: {
+              expression: `(async()=>{const state=await chrome.storage.session.get(['nexumOwnedControls','nexumClosedLeases','nexumVisualMarkers']),targets=await chrome.debugger.getTargets();return {id:chrome.runtime.id,owned:(state.nexumOwnedControls??[]).map(item=>({tabId:item.tabId,runId:item.runId,attached:targets.some(target=>target.tabId===item.tabId&&target.attached),keys:item.keys?.length??0,buttons:item.buttons?.length??0,streams:item.streams?.length??0,viewport:item.viewport,attachmentIntent:item.attachmentIntent})),closedReceipts:state.nexumClosedLeases?.length??0,visualMarkers:state.nexumVisualMarkers?.length??0};})()`,
+              awaitPromise: true,
+              returnByValue: true,
+            },
+          }),
+        );
+        for await (const [bytes] of replies) {
+          const reply = JSON.parse(bytes);
+          if (reply.id !== 1) continue;
+          assert.equal(reply.result?.result?.value?.id, expectedId);
+          return reply.result.result.value;
+        }
+      } finally {
+        await replies.return();
+      }
     } catch (error) {
       return { unavailable: String(error.message) };
     } finally {
@@ -518,6 +527,7 @@ export async function nativeFixture(t, options = {}) {
     encoder,
     resultScope,
     downloadBytes,
+    cleanupFacts,
     stderr: () => stderr,
   };
 }

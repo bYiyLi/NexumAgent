@@ -3,6 +3,68 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
+test(
+  "native background cursor movement settles without a paint callback and leaves no control after run cleanup",
+  { timeout: 90000 },
+  async (t) => {
+    const facts = [];
+    const f = await nativeFixture(t, {
+      html: `<!doctype html><title>Native background animation</title><style>body{margin:0;min-height:900px}</style><h1>Owned native animation</h1><script>window.nativeMoves=[];addEventListener('mousemove',event=>nativeMoves.push({x:event.clientX,y:event.clientY,trusted:event.isTrusted}));</script>`,
+      handleRequest(request, response) {
+        if (request.url !== "/visual-idle-state") return false;
+        let body = "";
+        request.on("data", (data) => {
+          body += data;
+        });
+        request.on("end", () => {
+          facts.push(JSON.parse(body));
+          response.writeHead(204);
+          response.end();
+        });
+        return true;
+      },
+    });
+    let result;
+    try {
+      result = await f.run(
+        select +
+          `
+const url=context.input.base+'?background-animation';
+const other=await selected.tabs.new(url,{active:false});await other.playwright.waitForURL(url);
+await selected.tabs.select(tab.id);await selected.visibility.set(false);
+const observed=await other.playwright.evaluate('() => new Promise(resolve=>{let painted=false;const frame=requestAnimationFrame(()=>{painted=true;});setTimeout(()=>{cancelAnimationFrame(frame);resolve({visibility:document.visibilityState,painted});},150);})');
+await other.playwright.evaluate('async value=>{await fetch("/visual-idle-state",{method:"POST",body:JSON.stringify(value)});return true;}',observed);
+await other.cua.move({x:180,y:140});
+const actual=await other.playwright.evaluate('() => {const layer=document.querySelector("[data-nexum-visual-layer]");return {visibility:document.visibilityState,transform:layer?.style.transform,state:layer?.getAttribute("data-nexum-visual-state"),moves:window.nativeMoves};}');
+const selectedId=(await selected.tabs.selected())?.id;await selected.visibility.set(true);
+return {observed,actual,selectedId,originalId:tab.id};`,
+        { base: f.base },
+      );
+    } finally {
+      t.diagnostic(JSON.stringify({ pageFacts: facts }));
+    }
+    const data = result.result.data;
+    assert.equal(data.observed.visibility, "hidden");
+    assert.equal(data.actual.visibility, "hidden");
+    assert.equal(data.selectedId, data.originalId);
+    assert.equal(data.actual.state, "thinking");
+    assert.match(data.actual.transform, /180px/);
+    assert.match(data.actual.transform, /140px/);
+    assert.ok(
+      data.actual.moves.some(
+        (move) => move.trusted && move.x === 180 && move.y === 140,
+      ),
+    );
+    assert.deepEqual(result.run.cleanup.unconfirmed, []);
+    const native = await f.cleanupFacts();
+    assert.deepEqual(native.owned, [], JSON.stringify(native));
+    const next = await f.run(select + "return {title:await tab.title()};", {
+      base: f.base,
+    });
+    assert.equal(next.result.data.title, "Native background animation");
+  },
+);
+
 test("native visual feedback preserves user groups, follows only when enabled and releases the real result marker on tab activation", async (t) => {
   const events = [];
   const f = await nativeFixture(t, {

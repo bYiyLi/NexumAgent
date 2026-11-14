@@ -180,6 +180,7 @@ export async function visualPage(input) {
     distance = Math.hypot(dx, dy);
   const duration =
     globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+    document.visibilityState === "hidden" ||
     distance < 80
       ? 0
       : Math.min(180, Math.max(0, input.deadline - Date.now() - 8));
@@ -195,9 +196,20 @@ export async function visualPage(input) {
   }
   const started = performance.now();
   return await new Promise((resolve) => {
+    let completed = false,
+      frame,
+      timer;
+    const finish = (value) => {
+      if (completed) return;
+      completed = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      resolve(value);
+    };
     const step = () => {
+      if (completed) return;
       if (!valid() || current.sequence !== sequence) {
-        resolve({ ok: false, reason: "VISUAL_MOVE_SUPERSEDED" });
+        finish({ ok: false, reason: "VISUAL_MOVE_SUPERSEDED" });
         return;
       }
       const t = Math.min(1, (performance.now() - started) / duration),
@@ -210,10 +222,17 @@ export async function visualPage(input) {
       if (t === 1) {
         move(input.point.x, input.point.y);
         layer.setAttribute("data-nexum-visual-state", "thinking");
-        resolve({ ok: true, arrived: true });
-      } else requestAnimationFrame(step);
+        finish({ ok: true, arrived: true });
+      } else frame = requestAnimationFrame(step);
     };
-    requestAnimationFrame(step);
+    // Hidden or occluded documents can stop producing animation frames while
+    // their task queue remains live. Settle the real injected Promise too:
+    // an outer wait timeout cannot prove that its native execution has ended.
+    timer = setTimeout(
+      () => finish({ ok: false, reason: "VISUAL_TIMEOUT" }),
+      Math.max(1, input.deadline - Date.now()),
+    );
+    frame = requestAnimationFrame(step);
   });
 }
 

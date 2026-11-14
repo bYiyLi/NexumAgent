@@ -339,8 +339,14 @@ test("result favicon records use actual documents, survive control release and c
   await f.controller.dispose();
 });
 
-function pageFixture({ reduced = true, iconBytes = 0 } = {}) {
+function pageFixture({
+  reduced = true,
+  iconBytes = 0,
+  pausedFrames = false,
+  visibility = "visible",
+} = {}) {
   const calls = { fetch: [], cancel: 0, bitmap: 0 };
+  const frames = new Map();
   class Node {
     constructor(tag) {
       this.tagName = tag;
@@ -387,13 +393,15 @@ function pageFixture({ reduced = true, iconBytes = 0 } = {}) {
   original.href = "https://public-icon.test/favicon.png";
   head.append(original);
   const document = {
+    visibilityState: visibility,
     head,
     documentElement: root,
     createElement: (tag) => new Node(tag),
     querySelectorAll: () =>
       head.children.filter((node) => node.tagName === "link"),
   };
-  let tick = 0;
+  let tick = 0,
+    nextFrame = 0;
   const sandbox = vm.createContext({
     document,
     Blob,
@@ -408,11 +416,18 @@ function pageFixture({ reduced = true, iconBytes = 0 } = {}) {
     setTimeout,
     clearTimeout,
     matchMedia: () => ({ matches: reduced }),
-    requestAnimationFrame: (fn) =>
-      setTimeout(() => {
-        tick += 16;
-        fn(tick);
-      }, 0),
+    requestAnimationFrame: (fn) => {
+      const id = ++nextFrame;
+      frames.set(id, fn);
+      if (!pausedFrames)
+        setTimeout(() => {
+          if (!frames.delete(id)) return;
+          tick += 16;
+          fn(tick);
+        }, 0);
+      return id;
+    },
+    cancelAnimationFrame: (id) => frames.delete(id),
     fetch: async (value, options) => {
       calls.fetch.push({ value, options });
       let sent = false;
@@ -444,8 +459,55 @@ function pageFixture({ reduced = true, iconBytes = 0 } = {}) {
       `(${visualPage.toString()})(${JSON.stringify(input)})`,
       sandbox,
     );
-  return { execute, document, root, head, original, calls };
+  return { execute, document, root, head, original, calls, frames };
 }
+
+test("a hidden native page completes its cursor move without scheduling paused paint callbacks", async () => {
+  const f = pageFixture({
+    reduced: false,
+    pausedFrames: true,
+    visibility: "hidden",
+  });
+  const moved = await Promise.race([
+    f.execute({
+      token: "hidden-native-move",
+      deadline: Date.now() + 50,
+      command: "move",
+      point: { x: 180, y: 140 },
+      moveSequence: 1,
+    }),
+    delay(500).then(() => "pending"),
+  ]);
+  assert.equal(moved.arrived, true);
+  assert.equal(f.frames.size, 0);
+  assert.equal(
+    f.root.children[0].style.transform,
+    "translate3d(180px,140px,0)",
+  );
+});
+
+test("a visible native page whose paint callbacks stop settles its actual move Promise and cancels late rendering", async () => {
+  const f = pageFixture({ reduced: false, pausedFrames: true });
+  const moving = f.execute({
+    token: "paused-native-move",
+    deadline: Date.now() + 50,
+    command: "move",
+    point: { x: 180, y: 140 },
+    moveSequence: 1,
+  });
+  const late = [...f.frames.values()][0];
+  const result = await Promise.race([moving, delay(500).then(() => "pending")]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    ok: false,
+    reason: "VISUAL_TIMEOUT",
+  });
+  assert.equal(f.frames.size, 0);
+  const layer = f.root.children[0],
+    before = layer.style.transform;
+  late();
+  assert.equal(layer.style.transform, before);
+  assert.equal(f.frames.size, 0);
+});
 
 test("serialized native page visuals draw a non-interactive cursor, preserve original icons and reject released/out-of-order moves", async () => {
   const f = pageFixture({ reduced: false, iconBytes: 128 }),
