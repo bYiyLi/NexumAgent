@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {
+import fs, {
   existsSync,
   mkdtempSync,
   realpathSync,
@@ -13,6 +13,7 @@ import {
   renameSync,
   lstatSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -204,6 +205,42 @@ test("actual managed measurement excludes dependencies, raw work files and proje
   assert.equal(usage.files - baseline.files, 1);
   assert.equal(usage.symlinks, 1);
   assert.equal(readFileSync(project).length, 400000);
+});
+
+test("managed admission tolerates an actual maintenance directory disappearing between native checks and reads", async (t) => {
+  for (const method of ["realpath", "opendir"]) {
+    await t.test(method, async (t) => {
+      const f = await fixture(t),
+        retiring = path.join(f.root, "state", "work-git-retiring");
+      mkdirSync(retiring, { recursive: true });
+      const native = fs.promises[method];
+      let removed = false;
+      // Hold only this native I/O boundary. The directory is really removed,
+      // and the original syscall produces the same ENOENT as concurrent Git cleanup.
+      const intercepted = t.mock.method(
+        fs.promises,
+        method,
+        async (...args) => {
+          if (args[0] === retiring && !removed) {
+            removed = true;
+            rmSync(retiring, { recursive: true });
+          }
+          return await Reflect.apply(native, fs.promises, args);
+        },
+      );
+      syncBuiltinESMExports();
+      try {
+        const reservation = await f.retention.reserve(65536);
+        assert.equal(removed, true);
+        assert.equal(f.retention.reservedBytes, 65536);
+        reservation.release();
+        assert.equal(f.retention.reservedBytes, 0);
+      } finally {
+        intercepted.mock.restore();
+        syncBuiltinESMExports();
+      }
+    });
+  }
 });
 
 test("persistent local scripts, skills and Core work Git data are measured without counting external home skills", async (t) => {

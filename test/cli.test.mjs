@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocketServer } from "ws";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
@@ -181,9 +181,33 @@ test(
       await new Promise((resolve) => server.close(resolve));
       rmSync(home, { recursive: true, force: true });
     });
+    // Execute the real CLI and delegate to its original application dispatch.
+    // The test-only wrapper records and rethrows the same exception before
+    // wire sanitization, using only this fixture home and synthetic authority.
+    const diagnostics = path.join(home, "invoke-diagnostics.mjs");
+    writeFileSync(
+      diagnostics,
+      `import {AgentRuntime} from ${JSON.stringify(new URL("../dist/application/runtime.js", import.meta.url).href)};
+const dispatch=AgentRuntime.prototype.dispatch;
+AgentRuntime.prototype.dispatch=async function(...args){
+  try{return await Reflect.apply(dispatch,this,args);}
+  catch(cause){
+    try{process.stderr.write('native_cli_invoke_failed '+JSON.stringify({operation:args[0]?.operation,error:{code:typeof cause?.code==='string'?cause.code:null,name:typeof cause?.name==='string'?cause.name:null,message:typeof cause?.message==='string'?cause.message.slice(0,4096):null,stack:typeof cause?.stack==='string'?cause.stack.slice(0,8192):null}})+String.fromCharCode(10));}catch{}
+    throw cause;
+  }
+};\n`,
+    );
     child = spawn(
       process.execPath,
-      ["--experimental-vm-modules", cli, "run", "--profile", "development"],
+      [
+        "--experimental-vm-modules",
+        "--import",
+        pathToFileURL(diagnostics).href,
+        cli,
+        "run",
+        "--profile",
+        "development",
+      ],
       {
         env: { ...process.env, HOME: home, USERPROFILE: home },
         stdio: ["ignore", "pipe", "pipe"],
@@ -207,7 +231,7 @@ test(
     }
     await until(() => stderr.includes("agent_connected"));
     let sequence = 0;
-    async function invokeNative(operation, input) {
+    async function invokeNative(operation, input, expected = "result") {
       const id = `inv_cli_${++sequence}`;
       const context = {
         caller: {
@@ -229,8 +253,12 @@ test(
       );
       await until(() => received.has(id));
       const response = received.get(id);
-      assert.equal(response.type, "result", JSON.stringify(response));
-      return response.output;
+      assert.equal(
+        response.type,
+        expected,
+        JSON.stringify({ operation, response, stderr: stderr.slice(-16384) }),
+      );
+      return expected === "result" ? response.output : response.error;
     }
     const opened = await invokeNative("agent.open", { agentId: "cli-agent" });
     assert.equal(opened.pwd, path.join(root, "work"));
@@ -270,6 +298,30 @@ test(
       assert.equal(snapshot.status, "unavailable", JSON.stringify(snapshot));
       assert.equal(snapshot.reason, "git_unavailable");
     }
+    await invokeNative("agent.close", { contextId: opened.contextId });
+    const denied = await invokeNative(
+      "agent.run.start",
+      { contextId: opened.contextId, script: "return 1;", waitMs: 0 },
+      "error",
+    );
+    assert.equal(denied.code, "context_closed");
+    assert.equal(denied.message, "The Agent operation failed.");
+    await until(() => {
+      const offset = stderr.indexOf("native_cli_invoke_failed ");
+      return offset >= 0 && stderr.slice(offset).includes("\n");
+    });
+    const originalFailure = stderr
+      .split("\n")
+      .find((line) => line.startsWith("native_cli_invoke_failed "));
+    assert.ok(
+      originalFailure,
+      "The original CLI exception diagnostic was lost.",
+    );
+    const diagnostic = JSON.parse(
+      originalFailure.slice("native_cli_invoke_failed ".length),
+    );
+    assert.equal(diagnostic.operation, "agent.run.start");
+    assert.equal(diagnostic.error.code, "context_closed");
     child.kill("SIGTERM");
     const exit = await exited.promise;
     assert.deepEqual(exit, { code: 0, signal: null }, stderr);

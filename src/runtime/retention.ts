@@ -223,12 +223,28 @@ export class ProfileRetention {
         "A managed directory cannot be a symbolic link or another file type.",
       );
     }
-    requireCondition(
-      (await realpath(directory)) === directory,
-      "storage_path_escape",
-      "A managed directory cannot redirect elsewhere.",
-    );
-    return await lstat(directory, { bigint: true });
+    try {
+      requireCondition(
+        (await realpath(directory)) === directory,
+        "storage_path_escape",
+        "A managed directory cannot redirect elsewhere.",
+      );
+      return await lstat(directory, { bigint: true });
+    } catch (cause) {
+      if (absent(cause)) return null;
+      throw cause;
+    }
+  }
+  async #openDirectory(directory: string): Promise<Dir | null> {
+    if (!(await this.#directory(directory))) return null;
+    try {
+      return await opendir(directory);
+    } catch (cause) {
+      // Native Git/material cleanup can remove its own temporary directory
+      // after validation. Missing bytes are gone; other I/O/safety errors remain fatal.
+      if (absent(cause)) return null;
+      throw cause;
+    }
   }
   async open(): Promise<void> {
     this.#admit();
@@ -340,10 +356,10 @@ export class ProfileRetention {
         complete = false;
         return;
       }
-      if (!(await this.#directory(directory))) return;
-      const dir = await opendir(directory);
+      const dir = await this.#openDirectory(directory);
+      if (!dir) return;
       try {
-        await this.#directory(directory);
+        if (!(await this.#directory(directory))) return;
         for await (const entry of dir) {
           if (++scanned > scanLimit) {
             complete = false;
@@ -401,17 +417,19 @@ export class ProfileRetention {
     // Only these Core-owned siblings are inspected at work's top level. Never
     // recurse through arbitrary projects, package dependencies or raw work files.
     const work = path.join(this.root, "work");
-    if (complete && (await this.#directory(work))) {
-      const directory = await opendir(work);
+    const directory = complete ? await this.#openDirectory(work) : null;
+    if (directory) {
       try {
-        for await (const entry of directory) {
-          if (++scanned > scanLimit) {
-            complete = false;
-            break;
+        if (await this.#directory(work)) {
+          for await (const entry of directory) {
+            if (++scanned > scanLimit) {
+              complete = false;
+              break;
+            }
+            if (workTemporaryFile.test(entry.name))
+              await inspectFile(path.join(work, entry.name));
+            if (!complete) break;
           }
-          if (workTemporaryFile.test(entry.name))
-            await inspectFile(path.join(work, entry.name));
-          if (!complete) break;
         }
       } finally {
         await directory.close().catch((cause) => {
