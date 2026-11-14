@@ -200,12 +200,22 @@ async function fixture(t) {
     }),
     instances = [];
   const start = async (script, input, projectId = "project-a") => {
-    const result = await engine.start(caller, {
+    let result = await engine.start(caller, {
       contextId: contexts[projectId].contextId,
       script,
       input,
       waitMs: 3000,
     });
+    const runId = result.run.runId,
+      deadline = Date.now() + 30000;
+    while (result.run.endedAt === null) {
+      assert.ok(
+        Date.now() < deadline,
+        "The same accepted process Run did not finish.",
+      );
+      result = await engine.observe(caller, runId, 1000);
+      assert.equal(result.run.runId, runId);
+    }
     assert.equal(
       result.run.status,
       "succeeded",
@@ -440,15 +450,20 @@ test("only current-boot built-in resource identities are accepted and private Co
   const nextBoot = "boot_" + "b".repeat(32),
     newStore = new SqliteStore(f.root, f.store.binding, Date.now(), nextBoot),
     newManager = new ResourceManager(newStore);
-  t.after(() => newStore.close());
-  const after = new ApplicationProcesses(newManager, { authorize() {} });
-  assert.throws(() => after.get(owner, { processId: current.ref.id }), {
-    code: "resource_unavailable",
-  });
-  await assert.rejects(after.stop(owner, { processId: current.ref.id }), {
-    code: "resource_unavailable",
-  });
-  assert.deepEqual(after.list(owner).items, []);
+  try {
+    const after = new ApplicationProcesses(newManager, { authorize() {} });
+    assert.throws(() => after.get(owner, { processId: current.ref.id }), {
+      code: "resource_unavailable",
+    });
+    await assert.rejects(after.stop(owner, { processId: current.ref.id }), {
+      code: "resource_unavailable",
+    });
+    assert.deepEqual(after.list(owner).items, []);
+  } finally {
+    // The fixture's earlier cleanup removes this directory; close this second
+    // connection first instead of relying on the ordering of t.after hooks.
+    newStore.close();
+  }
 });
 
 test("history pagination obeys whole-page bytes, current denials and opaque caller/filter binding", async (t) => {

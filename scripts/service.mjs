@@ -42,10 +42,13 @@ export function windowsArgument(value) {
   );
 }
 export function childEnvironment(source = process.env) {
+  // These fixed installer/service commands use Windows PowerShell 5.1. When
+  // launched through Node under pwsh, its inherited PS7 path bypasses PowerShell's
+  // direct-child compatibility cleanup and can load incompatible system modules.
   return Object.fromEntries(
     Object.entries(source).filter(
       ([key]) =>
-        !/^(?:NODE_OPTIONS|NODE_PATH|NODE_REPL_EXTERNAL_MODULE|NEXUM(?:_.*|$)|npm_config_.*auth.*|.*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION|API_?KEY|PRIVATE_?KEY).*)$/i.test(
+        !/^(?:NODE_OPTIONS|NODE_PATH|NODE_REPL_EXTERNAL_MODULE|PSModulePath|NEXUM(?:_.*|$)|npm_config_.*auth.*|.*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION|API_?KEY|PRIVATE_?KEY).*)$/i.test(
           key,
         ),
     ),

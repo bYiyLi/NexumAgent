@@ -180,7 +180,10 @@ async function fixture(
       JSON.parse(readFileSync(path.join(root, item.snapshotRef), "utf8")),
     encodeResult: (value, services) =>
       encoder.encode(value, resultScope(services)),
-    bindings: (scope) => registry.bindings(scope),
+    bindings: (scope) => ({
+      ...registry.bindings(scope),
+      nativeCommandReady: () => commandStarted.promise,
+    }),
     resources,
     leaseScript: (origin) =>
       origin.type === "local" ? () => {} : registry.lease(origin),
@@ -193,6 +196,7 @@ async function fixture(
   const attached = new Set(),
     detachGate = Promise.withResolvers(),
     commandGate = Promise.withResolvers(),
+    commandStarted = Promise.withResolvers(),
     counts = { attach: 0, detach: 0, removed: 0, commands: 0, handoff: 0 };
   const tabs = [
     {
@@ -293,6 +297,7 @@ async function fixture(
       },
       sendCommand: async (_source, method) => {
         counts.commands++;
+        commandStarted.resolve();
         if (gateCommand) await commandGate.promise;
         if (method === "Page.navigate" && nativeDownloads) {
           const url = "https://fixture.test/file";
@@ -664,7 +669,7 @@ test("handoff reaches the nonblocking control plane while a native command is pe
   const f = await fixture(t, { gateCommand: true });
   let result = await f.start(
     select +
-      'const first=tab.cdp.send("Runtime.enable").then(()=>null,error=>({code:error.code}));await new Promise(resolve=>setTimeout(resolve,15));await tab.markHandoff();const initial=await first;let after;try{const again=await selected.tabs.get(tabs[0].id);await again.title();}catch(error){after=error.code;}return {initial,after};',
+      'const first=tab.cdp.send("Runtime.enable").then(()=>null,error=>({code:error.code}));await nativeCommandReady();await tab.markHandoff();const initial=await first;let after;try{const again=await selected.tabs.get(tabs[0].id);await again.title();}catch(error){after=error.code;}return {initial,after};',
     { waitMs: 0 },
   );
   const deadline = Date.now() + 3000;

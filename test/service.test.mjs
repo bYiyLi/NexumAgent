@@ -202,6 +202,7 @@ test("service/build child environment strips Agent credentials and Node preloads
     PATH: "/usr/bin",
     NODE_OPTIONS: "--require private.js",
     NODE_PATH: "/private",
+    PSModulePath: "C:\\Program Files\\PowerShell\\7\\Modules",
     NEXUM_AGENT_TOKEN: "secret",
     OTHER_TOKEN: "secret",
     OPENAI_API_KEY: "secret",
@@ -213,6 +214,11 @@ test("service/build child environment strips Agent credentials and Node preloads
   assert.equal(copy.PATH, environment.PATH);
   assert.equal(copy.HOME, environment.HOME);
   assert.equal(copy.NODE_OPTIONS, undefined);
+  assert.equal(copy.PSModulePath, undefined);
+  assert.equal(
+    environment.PSModulePath,
+    "C:\\Program Files\\PowerShell\\7\\Modules",
+  );
   assert.equal(copy.NEXUM_AGENT_TOKEN, undefined);
   assert.equal(copy.OPENAI_API_KEY, undefined);
   assert.equal(copy.npm_config__auth, undefined);

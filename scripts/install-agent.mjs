@@ -59,7 +59,7 @@ function native(file, args, { cwd, inputFile } = {}) {
     });
     assert(
       !result.error && result.status === 0,
-      "A native installer command failed; inspect actual state before repeating it.",
+      `A native installer command failed (${path.basename(file)}; exit=${result.status ?? "unknown"}; system=${/^[A-Z0-9_]{1,64}$/.test(result.error?.code ?? "") ? result.error.code : "none"}); inspect actual state before repeating it.`,
     );
     return result.stdout;
   } finally {

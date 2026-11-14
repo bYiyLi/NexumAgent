@@ -101,7 +101,7 @@ async function fixture(t) {
     npm_config_globalconfig: globalConfig,
     npm_config_update_notifier: "false",
     npm_config_fetch_retries: "0",
-    NEXUM_NPM_TEST_MARKER: marker,
+    NPM_FIXTURE_INSTALL_MARKER: marker,
   };
   const archives = new Map();
   const controlKey = `native-maintenance-${randomUUID()}`,
@@ -143,7 +143,7 @@ async function fixture(t) {
     );
     write(
       path.join(source, "install.js"),
-      `import {appendFileSync,writeFileSync} from 'node:fs';import {spawn} from 'node:child_process';appendFileSync(process.env.NEXUM_NPM_TEST_MARKER,${JSON.stringify(version + "\n")});if(process.env.NEXUM_NPM_TEST_HOLD){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});writeFileSync(process.env.NEXUM_NPM_TEST_HOLD,String(child.pid));setInterval(()=>{},1000);}`,
+      `import {appendFileSync,writeFileSync} from 'node:fs';import {spawn} from 'node:child_process';appendFileSync(process.env.NPM_FIXTURE_INSTALL_MARKER,${JSON.stringify(version + "\n")});if(process.env.NPM_FIXTURE_INSTALL_HOLD){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});writeFileSync(process.env.NPM_FIXTURE_INSTALL_HOLD,String(child.pid));setInterval(()=>{},1000);}`,
     );
     write(
       path.join(source, "extension.js"),
@@ -504,7 +504,7 @@ test("native npm cancellation waits for the actual install-script descendant tre
   const f = await fixture(t),
     candidate = await f.prepare("packages.install"),
     pidFile = path.join(f.root, "install-child.pid");
-  f.env.NEXUM_NPM_TEST_HOLD = pidFile;
+  f.env.NPM_FIXTURE_INSTALL_HOLD = pidFile;
   const pending = f.apply("packages.install", candidate);
   void pending.catch(() => {});
   const deadline = Date.now() + 5000;

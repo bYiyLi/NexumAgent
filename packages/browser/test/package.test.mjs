@@ -86,9 +86,17 @@ void extension;void example;`,
 
 test("the actual private candidate tarball contains its own five contributions and matched plugins without archives, installed dependencies or local state", (t) => {
   const destination = temporary(t);
+  // Invoke the actual bundled CLI; Windows npm.cmd is not a native executable.
+  const npm = path.resolve(
+    path.dirname(process.execPath),
+    process.platform === "win32"
+      ? "node_modules/npm/bin/npm-cli.js"
+      : "../lib/node_modules/npm/bin/npm-cli.js",
+  );
   const packed = spawnSync(
-    "npm",
+    process.execPath,
     [
+      npm,
       "pack",
       "--offline",
       "--ignore-scripts",
@@ -98,6 +106,7 @@ test("the actual private candidate tarball contains its own five contributions a
     ],
     { cwd: source, env, encoding: "utf8", maxBuffer: 1024 * 1024 },
   );
+  assert.ifError(packed.error);
   assert.equal(packed.status, 0, packed.stdout + packed.stderr);
   const [result] = JSON.parse(packed.stdout);
   assert.match(result.shasum, /^[0-9a-f]{40}$/);

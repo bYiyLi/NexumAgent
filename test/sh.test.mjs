@@ -181,11 +181,13 @@ function data(result) {
 }
 async function observeSameRun(f, pending) {
   const initial = await pending;
-  const result =
-    initial.run.endedAt === null
-      ? await f.engine.observe(caller, initial.run.runId, 10000)
-      : initial;
-  assert.equal(result.run.runId, initial.run.runId);
+  let result = initial;
+  const deadline = Date.now() + 30000;
+  while (result.run.endedAt === null) {
+    assert.ok(Date.now() < deadline, "The same accepted Run did not finish.");
+    result = await f.engine.observe(caller, initial.run.runId, 1000);
+    assert.equal(result.run.runId, initial.run.runId);
+  }
   return result;
 }
 async function within(operation, message) {
@@ -274,13 +276,14 @@ function text(result) {
 
 test("real sh exec preserves argv/cwd, consumes input through EOF and retains nonzero outcomes", async (t) => {
   const f = await fixture(t);
+  const start = (script, more) => observeSameRun(f, f.start(script, more));
   const input = command(
     'let chunks=[];process.stdin.on("data",d=>chunks.push(d));process.stdin.on("end",()=>{process.stdout.write(JSON.stringify({args:process.argv.slice(1),pwd:process.cwd(),input:Buffer.concat(chunks).toString()}));process.stderr.write("stderr-tail");});',
   );
   input.args.push("a b", 'quote"value', "literal;$dollar");
   input.input = "hello input";
   const result = data(
-    await f.start("return await sh.exec(context.input);", { input }),
+    await start("return await sh.exec(context.input);", { input }),
   );
   assert.match(result.processId, /^res_[a-f0-9]{32}$/);
   assert.equal(result.outputComplete, true);
@@ -296,7 +299,7 @@ test("real sh exec preserves argv/cwd, consumes input through EOF and retains no
   assert.match(text(result), /stderr-tail/);
   assert.equal(result.exitCode, 0);
   const raw = data(
-    await f.start(
+    await start(
       'const result=await sh.get({processId:context.input,encoding:null});return {native:result.output.every(item=>item.data.constructor.name==="Buffer"),bytes:result.output.map(item=>({stream:item.stream,bytes:Array.from(item.data)}))};',
       { input: result.processId },
     ),
@@ -310,7 +313,7 @@ test("real sh exec preserves argv/cwd, consumes input through EOF and retains no
     ),
   );
   const failed = data(
-    await f.start("return await sh.exec(context.input);", {
+    await start("return await sh.exec(context.input);", {
       input: command(
         'process.stdout.write("failure-output");process.exitCode=7;',
       ),
@@ -319,7 +322,7 @@ test("real sh exec preserves argv/cwd, consumes input through EOF and retains no
   assert.equal(failed.exitCode, 7);
   assert.match(text(failed), /failure-output/);
   const checked = data(
-    await f.start(
+    await start(
       "try{await sh.exec(context.input);}catch(e){return {code:e.code,processId:e.details.processId,exitCode:e.details.exitCode};}",
       { input: command("process.exitCode=9;", { check: true }) },
     ),
@@ -328,14 +331,14 @@ test("real sh exec preserves argv/cwd, consumes input through EOF and retains no
   assert.equal(checked.exitCode, 9);
   assert.match(checked.processId, /^res_/);
   const eof = data(
-    await f.start("return await sh.exec(context.input);", {
+    await start("return await sh.exec(context.input);", {
       input: command(
         'process.stdin.on("end",()=>process.stdout.write("EOF"));process.stdin.resume();',
       ),
     }),
   );
   assert.match(text(eof), /EOF/);
-  const missing = await f.start("return await sh.exec(context.input);", {
+  const missing = await start("return await sh.exec(context.input);", {
     input: { command: "nexum_missing_executable_for_sh_test_8bc2d1", args: [] },
   });
   assert.equal(missing.run.status, "failed");
@@ -529,21 +532,29 @@ test("successful background handoff survives a failure to return the subsequent 
 
 test("local process deadline retains its reason independently of a completed background creator", async (t) => {
   const f = await fixture(t);
-  const created = await f.start("return await sh.start(context.input);", {
-    input: command("setInterval(()=>{},1000);", {
-      background: true,
-      timeoutMs: 1500,
+  // The absolute resource deadline also covers native environment preparation.
+  // Allow that real startup to finish before testing the independent background deadline.
+  const created = await observeSameRun(
+    f,
+    f.start("return await sh.start(context.input);", {
+      input: command("setInterval(()=>{},1000);", {
+        background: true,
+        timeoutMs: 10000,
+      }),
     }),
-  });
+  );
   const processId = data(created).processId;
+  assert.ok(f.store.getResource(processId).diagnostic.details.pid > 0);
+  assert.notEqual(created.run.endedAt, null);
   const ended = await until(
-    () => f.get(processId, { waitMs: 100 }),
+    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
     (value) => data(value).closedAt !== null,
-    6000,
+    15000,
   );
   assert.equal(data(ended).details.stopReason.code, "process_timeout");
   assert.equal(data(ended).outputComplete, true);
   assert.equal(f.store.getRun(created.run.runId).status, "succeeded");
+  assert.ok(data(ended).closedAt > created.run.endedAt);
 });
 
 test("a log finish failure releases a physically closed process only after actual log close", async (t) => {
@@ -1106,10 +1117,9 @@ test("real PTY supports terminal input/resize while pipe EOF is explicitly rejec
   data(
     await observeSameRun(
       f,
-      f.start(
-        'return await sh.write({processId:context.input,data:"q"});',
-        { input: processId },
-      ),
+      f.start('return await sh.write({processId:context.input,data:"q"});', {
+        input: processId,
+      }),
     ),
   );
   const ended = await until(
@@ -1119,73 +1129,96 @@ test("real PTY supports terminal input/resize while pipe EOF is explicitly rejec
   assert.equal(data(ended).outputComplete, true);
 });
 
-test("forced PTY stop joins actual closure and releases storage while retaining an incomplete Windows tail", { timeout: 30000 }, async (t) => {
-  const f = await fixture(t);
-  const module = await import(
-    new URL(
-      `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pty"}.js`,
-      import.meta.url,
-    ).href
-  );
-  const Backend = process.platform === "win32"
-    ? module.WindowsProcessBackend
-    : module.PtyProcessBackend;
-  const facts = Backend.prototype.facts,
-    start = ManagedProcess.prototype.start;
-  let backend, managed;
-  Backend.prototype.facts = function () {
-    backend = this;
-    return facts.call(this);
-  };
-  ManagedProcess.prototype.start = async function (...args) {
-    managed = this;
-    return await start.apply(this, args);
-  };
-  let processId;
-  try {
-    processId = data(await observeSameRun(f, f.start(
-      "return await sh.start(context.input);",
-      { input: command(
-        'process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on("data",()=>{});process.stdout.write("force-ready\\n");setInterval(()=>{},1000);',
-        { tty: true, background: true },
-      ) },
-    ))).processId;
-  } finally {
-    Backend.prototype.facts = facts;
-    ManagedProcess.prototype.start = start;
-  }
-  assert.ok(backend);
-  assert.ok(managed);
-  assert.equal(managed.facts().pid, facts.call(backend).pid);
-  await until(
-    () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
-    (result) => text(data(result)).includes("force-ready"),
-  );
-  assert.equal(f.retention.reservedBytes, 16 * 1024 * 1024 + 1024);
-  const stopped = data(await observeSameRun(f, f.start(
-    "return await sh.stop({processId:context.input,graceMs:0,forceMs:4000});",
-    { input: processId },
-  )));
-  await within(backend.closed, "The original native PTY did not actually close.");
-  assert.equal(facts.call(backend).treeStopped, true);
-  assert.equal(facts.call(backend).closed, true);
-  assert.equal(facts.call(backend).forceRequested, true);
-  await within(managed.closed, "The original managed PTY did not finish its native and log cleanup.");
-  assert.equal(stopped.confirmed, true);
-  const row = f.store.getResource(processId);
-  assert.notEqual(row.closedAt, null);
-  assert.equal(row.diagnostic.details.closed, true);
-  assert.equal(row.diagnostic.details.treeStopped, true);
-  assert.equal(f.retention.reservedBytes, 0);
-  const retained = data(await observeSameRun(f, f.get(processId)));
-  if (process.platform === "win32") {
-    assert.equal(backend.failure.code, "process_output_failed");
-    assert.equal(row.diagnostic.details.failure.code, "process_output_failed");
-    assert.equal(stopped.facts.outputComplete, false);
-    assert.equal(retained.outputComplete, false);
-    assert.equal(existsSync(`${managed.log.path}.complete`), false);
-  } else {
-    assert.equal(stopped.facts.outputComplete, true);
-    assert.equal(retained.outputComplete, true);
-  }
-});
+test(
+  "forced PTY stop joins actual closure and releases storage while retaining an incomplete Windows tail",
+  { timeout: 30000 },
+  async (t) => {
+    const f = await fixture(t);
+    const module = await import(
+      new URL(
+        `../dist/process/${process.platform === "win32" ? "windows-pipes" : "pty"}.js`,
+        import.meta.url,
+      ).href
+    );
+    const Backend =
+      process.platform === "win32"
+        ? module.WindowsProcessBackend
+        : module.PtyProcessBackend;
+    const facts = Backend.prototype.facts,
+      start = ManagedProcess.prototype.start;
+    let backend, managed;
+    Backend.prototype.facts = function () {
+      backend = this;
+      return facts.call(this);
+    };
+    ManagedProcess.prototype.start = async function (...args) {
+      managed = this;
+      return await start.apply(this, args);
+    };
+    let processId;
+    try {
+      processId = data(
+        await observeSameRun(
+          f,
+          f.start("return await sh.start(context.input);", {
+            input: command(
+              'process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on("data",()=>{});process.stdout.write("force-ready\\n");setInterval(()=>{},1000);',
+              { tty: true, background: true },
+            ),
+          }),
+        ),
+      ).processId;
+    } finally {
+      Backend.prototype.facts = facts;
+      ManagedProcess.prototype.start = start;
+    }
+    assert.ok(backend);
+    assert.ok(managed);
+    assert.equal(managed.facts().pid, facts.call(backend).pid);
+    await until(
+      () => observeSameRun(f, f.get(processId, { waitMs: 100 })),
+      (result) => text(data(result)).includes("force-ready"),
+    );
+    assert.equal(f.retention.reservedBytes, 16 * 1024 * 1024 + 1024);
+    const stopped = data(
+      await observeSameRun(
+        f,
+        f.start(
+          "return await sh.stop({processId:context.input,graceMs:0,forceMs:4000});",
+          { input: processId },
+        ),
+      ),
+    );
+    await within(
+      backend.closed,
+      "The original native PTY did not actually close.",
+    );
+    assert.equal(facts.call(backend).treeStopped, true);
+    assert.equal(facts.call(backend).closed, true);
+    assert.equal(facts.call(backend).forceRequested, true);
+    await within(
+      managed.closed,
+      "The original managed PTY did not finish its native and log cleanup.",
+    );
+    assert.equal(stopped.confirmed, true);
+    const row = f.store.getResource(processId);
+    assert.notEqual(row.closedAt, null);
+    assert.equal(row.diagnostic.details.closed, true);
+    assert.equal(row.diagnostic.details.treeStopped, true);
+    assert.equal(f.retention.reservedBytes, 0);
+    const retained = data(await observeSameRun(f, f.get(processId)));
+    if (process.platform === "win32") {
+      assert.equal(backend.failure.code, "process_output_failed");
+      assert.equal(
+        row.diagnostic.details.failure.code,
+        "process_output_failed",
+      );
+      assert.equal(stopped.facts.outputComplete, false);
+      assert.equal(retained.outputComplete, false);
+      assert.equal(existsSync(`${managed.log.path}.complete`), false);
+    } else {
+      assert.equal(stopped.facts.outputComplete, true);
+      assert.equal(retained.outputComplete, true);
+    }
+  },
+);

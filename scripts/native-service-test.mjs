@@ -247,7 +247,7 @@ try {
   );
   if (plan && process.platform === "win32") {
     // Read only this fixture's actual Task Scheduler settings and timestamps.
-    // A failed candidate remains failed; no new trigger or restart is injected.
+    // The original failure remains a failure even if the separate owned probe works.
     const name = "'" + plan.label.replaceAll("'", "''") + "'";
     const diagnostic = run(
       path.join(
@@ -259,12 +259,67 @@ try {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName ${name};$i=Get-ScheduledTaskInfo -TaskName ${name};@{stage='native-task-settings';state=[string]$t.State;lastResult=$i.LastTaskResult;lastRun=$i.LastRunTime.ToString('o');nextRun=$i.NextRunTime.ToString('o');missedRuns=$i.NumberOfMissedRuns;restartCount=$t.Settings.RestartCount;restartInterval=[string]$t.Settings.RestartInterval;allowDemandStart=$t.Settings.AllowDemandStart;unifiedEngine=$t.Settings.UseUnifiedSchedulingEngine;triggerTypes=@($t.Triggers|ForEach-Object{$_.CimClass.CimClassName})}|ConvertTo-Json -Compress`,
+        `$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName ${name};$i=Get-ScheduledTaskInfo -TaskName ${name};@{stage='native-task-settings';state=[string]$t.State;lastResult=$i.LastTaskResult;lastRun=$(if($null -ne $i.LastRunTime){$i.LastRunTime.ToString('o')});nextRun=$(if($null -ne $i.NextRunTime){$i.NextRunTime.ToString('o')});missedRuns=$i.NumberOfMissedRuns;restartCount=$t.Settings.RestartCount;restartInterval=[string]$t.Settings.RestartInterval;allowDemandStart=$t.Settings.AllowDemandStart;unifiedEngine=$t.Settings.UseUnifiedSchedulingEngine;triggerTypes=@($t.Triggers|ForEach-Object{$_.CimClass.CimClassName})}|ConvertTo-Json -Compress`,
       ],
       true,
     );
     console.error(diagnostic.stdout);
     console.error(diagnostic.stderr);
+    if (
+      error.message === "Native service did not confirm restart after 75." &&
+      status?.state === "Ready" &&
+      status.lastResult === 75 &&
+      !(await readLedger()).boots.some((boot) => alive(boot.pid))
+    ) {
+      // Demand-start and scheduled-start retry behavior must be measured on the
+      // actual OS, before changing the product's startup path. This modifies
+      // only the unique task already owned by this ephemeral CI fixture.
+      try {
+        const before = (await readLedger()).boots.length;
+        const probe = run(
+          path.join(
+            process.env.SystemRoot || "C:\\Windows",
+            "System32/WindowsPowerShell/v1.0/powershell.exe",
+          ),
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName ${name};$once=New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5);$once.Id='NexumOwnedRestartProbe';Set-ScheduledTask -TaskName ${name} -Trigger @(@($t.Triggers)+$once)|Out-Null`,
+          ],
+        );
+        assert.equal(probe.status, 0);
+        await waitFor(async () => {
+          const current = await readLedger();
+          return current.boots.length > before && alive(current.pid);
+        }, "owned scheduled probe startup");
+        const count = (await readLedger()).boots.length;
+        await command(75);
+        await waitFor(
+          async () => {
+            const current = await readLedger();
+            return current.boots.length > count && alive(current.pid);
+          },
+          "owned scheduled probe automatic retry",
+          120000,
+        );
+        console.error(
+          JSON.stringify({
+            stage: "scheduled-restart-probe",
+            automaticRetry: true,
+          }),
+        );
+      } catch (probeError) {
+        console.error(
+          JSON.stringify({
+            stage: "scheduled-restart-probe",
+            automaticRetry: false,
+            message: probeError.message,
+          }),
+        );
+      }
+    }
   }
   if (plan && process.platform === "linux") {
     // This runner-only fixture owns its unique unit and never receives private

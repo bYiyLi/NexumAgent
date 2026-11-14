@@ -95,7 +95,7 @@ async function fixture(t, fundingBytes = 0) {
     npm_config_cache: path.join(root, "cache"),
     npm_config_userconfig: userconfig,
     npm_config_globalconfig: globalconfig,
-    NEXUM_NPM_TEST_MARKER: marker,
+    NPM_FIXTURE_INSTALL_MARKER: marker,
   };
   put(path.join(source, "package.json"), {
     name,
@@ -106,7 +106,7 @@ async function fixture(t, fundingBytes = 0) {
   put(path.join(source, "index.cjs"), "module.exports = 17;\n");
   put(
     path.join(source, "install.cjs"),
-    "require('node:fs').appendFileSync(process.env.NEXUM_NPM_TEST_MARKER,'installed\\n');\n",
+    "require('node:fs').appendFileSync(process.env.NPM_FIXTURE_INSTALL_MARKER,'installed\\n');\n",
   );
   const packed = await execute(
     process.execPath,
