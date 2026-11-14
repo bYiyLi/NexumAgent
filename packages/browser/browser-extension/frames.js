@@ -179,10 +179,7 @@ export async function framePage(ctx, payload, selectors, execute) {
         );
         owner.geometry = geometry.result.value;
       }
-      let point = {
-        x: result.value.rect.x + result.value.rect.width / 2,
-        y: result.value.rect.y + result.value.rect.height / 2,
-      };
+      let point = result.value.point;
       for (const owner of [...owners].reverse()) {
         point = {
           x: owner.geometry.x + point.x * owner.geometry.scaleX,
@@ -206,6 +203,7 @@ export async function framePage(ctx, payload, selectors, execute) {
         );
         if (!hit.result.value) return null;
       }
+      result.value.point = point;
       result.value.rect = mappedRect(result.value.rect, owners);
     }
     if (input.command === "elementInfo" && Array.isArray(result.value))

@@ -8,6 +8,65 @@ const interactive = `<!doctype html><html><head><title>Native action families</t
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
 
+test("native requested click positions are hit-tested at the dispatched point and cannot click an overlay", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Native requested click position</title><style>body{margin:0}#target{position:absolute;left:100px;top:100px;width:200px;height:100px;border:0;padding:0}#corner{position:absolute;left:100px;top:100px;width:50px;height:40px;z-index:2}#center{position:absolute;left:175px;top:135px;width:50px;height:30px;z-index:2}</style><button id="target">Observed positioned target</button><button id="corner">Corner cover</button><button id="center" hidden>Center cover</button><script>
+      window.receipt={target:0,cover:0,doubles:0};
+      document.querySelector('#target').onclick=event=>{const r=event.currentTarget.getBoundingClientRect();receipt.target++;receipt.x=event.clientX-r.x;receipt.y=event.clientY-r.y;receipt.trusted=event.isTrusted;};
+      document.querySelector('#target').ondblclick=()=>receipt.doubles++;
+      for(const cover of document.querySelectorAll('#corner,#center'))cover.onclick=()=>receipt.cover++;
+    </script>`,
+  });
+  const blocked = await f.run(
+    select +
+      `let code=null;try{await tab.playwright.locator('#target').click({position:{x:20,y:20},timeoutMs:350});}catch(error){code=error.code;}return {code,receipt:await tab.evaluate('window.receipt')};`,
+    { base: f.base },
+  );
+  assert.deepEqual(blocked.result.data, {
+    code: "TIMEOUT",
+    receipt: { target: 0, cover: 0, doubles: 0 },
+  });
+  const free = await f.run(
+    select +
+      `await tab.evaluate("()=>{document.querySelector('#corner').hidden=true;document.querySelector('#center').hidden=false;return true;}");const target=tab.playwright.locator('#target');await target.click({position:{x:20,y:20},timeoutMs:2000});await target.dblclick({position:{x:20,y:20},timeoutMs:2000});const nodes=[(await tab.snapshot()).root];let ref;while(nodes.length){const node=nodes.shift();if(node.name==='Observed positioned target'&&node.role==='button')ref=node.ref;nodes.push(...node.children??[]);}if(!ref)throw Error('The actual positioned target ref was not observed');await tab.click(ref,{position:{x:20,y:20},timeoutMs:2000});const errors=[];for(const position of [{x:-1,y:20},{x:200,y:20},{x:20,y:100}]){let code=null;try{await target.click({position,timeoutMs:350});}catch(error){code=error.code;}errors.push(code);}return {receipt:await tab.evaluate('window.receipt'),errors};`,
+    { base: f.base },
+  );
+  assert.deepEqual(free.result.data, {
+    receipt: { target: 4, cover: 0, doubles: 1, x: 20, y: 20, trusted: true },
+    errors: ["INVALID_ARGUMENT", "INVALID_ARGUMENT", "INVALID_ARGUMENT"],
+  });
+});
+
+test("native scaled frame click positions preserve child CSS offsets through a cross-site nested frame", async (t) => {
+  const f = await nativeFixture(t, {
+    handleRequest(req, res) {
+      const url = new URL(req.url, "http://localhost");
+      let html;
+      if (url.pathname === "/") {
+        const port = new URL("http://" + req.headers.host).port;
+        html = `<!doctype html><title>Native scaled outer frame</title><style>body{margin:0}#outer{position:absolute;left:80px;top:60px;width:360px;height:220px;border:4px solid black;padding:6px;transform:scale(1.5,1.25);transform-origin:top left}</style><iframe id="outer" src="http://localhost:${port}/child"></iframe>`;
+      } else if (url.pathname === "/child")
+        html = `<!doctype html><style>body{margin:0}#inner{position:absolute;left:40px;top:40px;width:260px;height:160px;border:2px solid black;padding:4px;transform:scale(.8,1.1);transform-origin:top left}</style><iframe id="inner" src="/nested"></iframe>`;
+      else if (url.pathname === "/nested")
+        html = `<!doctype html><style>body{margin:0}#target{position:absolute;left:20px;top:10px;width:150px;height:80px;border:0;padding:0}</style><button id="target">Nested positioned target</button><script>window.receipt={clicks:0};document.querySelector('#target').onclick=event=>{const r=event.currentTarget.getBoundingClientRect();receipt={clicks:receipt.clicks+1,x:event.clientX-r.x,y:event.clientY-r.y,trusted:event.isTrusted};};</script>`;
+      else return false;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(html);
+      return true;
+    },
+  });
+  const result = await f.run(
+    select +
+      `const frame=tab.playwright.frameLocator('#outer').frameLocator('#inner'),target=frame.locator('#target');await target.waitFor({state:'visible',timeoutMs:5000});await target.click({position:{x:24,y:18},timeoutMs:5000});return await target.evaluate('element=>window.receipt');`,
+    { base: f.base },
+  );
+  const receipt = result.result.data;
+  assert.equal(receipt.clicks, 1);
+  assert.equal(receipt.trusted, true);
+  assert.ok(Math.abs(receipt.x - 24) <= 1, JSON.stringify(receipt));
+  assert.ok(Math.abs(receipt.y - 18) <= 1, JSON.stringify(receipt));
+});
+
 test("native navigation follows actual HTTP redirects for commit, DOMContentLoaded and load without repeating the request", async (t) => {
   const requests = [];
   const f = await nativeFixture(t, {

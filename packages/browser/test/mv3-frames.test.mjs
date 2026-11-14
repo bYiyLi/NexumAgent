@@ -30,6 +30,7 @@ function fixture(t) {
     documentSequence = 1,
     frameExists = true,
     parentBlocked = false,
+    parentBlockedPoint,
     unblockAfterHit = false,
     scrollAncestors = false,
     scrolled = false;
@@ -86,8 +87,12 @@ function fixture(t) {
   });
   parentDoc.querySelectorAll = (selector) =>
     selector === "iframe" && frameExists ? [owner] : [];
-  parentDoc.elementFromPoint = () => {
-    const blocked = parentBlocked;
+  parentDoc.elementFromPoint = (x, y) => {
+    const blocked =
+      parentBlocked ||
+      (parentBlockedPoint &&
+        x === parentBlockedPoint.x &&
+        y === parentBlockedPoint.y);
     if (unblockAfterHit) {
       parentBlocked = false;
       unblockAfterHit = false;
@@ -388,6 +393,9 @@ function fixture(t) {
     blockParent: () => {
       parentBlocked = true;
     },
+    blockParentAt: (point) => {
+      parentBlockedPoint = point;
+    },
     blockParentOnce: () => {
       parentBlocked = true;
       unblockAfterHit = true;
@@ -485,6 +493,25 @@ test("a transient ancestor overlay is observed again before one native click and
         method === "Input.dispatchMouseEvent" && params.type === "mousePressed",
     ).length,
     1,
+  );
+  assert.equal(f.objects.size, 0);
+});
+
+test("a parent overlay at the requested frame point cannot be bypassed by an unobstructed center", async (t) => {
+  const f = fixture(t),
+    locator = {
+      target: f.target,
+      framePath: ["iframe"],
+      query: { kind: "selector", selector: "button" },
+    };
+  f.blockParentAt({ x: 117, y: 77 });
+  await assert.rejects(
+    f.call("locator.click", { locator, options: { position: { x: 5, y: 5 } } }),
+    { code: "TIMEOUT" },
+  );
+  assert.equal(
+    f.calls.some(({ method }) => method === "Input.dispatchMouseEvent"),
+    false,
   );
   assert.equal(f.objects.size, 0);
 });

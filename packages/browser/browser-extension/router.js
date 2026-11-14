@@ -1106,14 +1106,7 @@ async function resolveActionTarget(ctx, args) {
 }
 async function locatorClick(ctx, args, double = false) {
   const found = await resolveActionTarget(ctx, args);
-  const r = found.rect,
-    position = options(args).position;
-  const x = r.x + (position?.x ?? r.width / 2),
-    y = r.y + (position?.y ?? r.height / 2);
-  requireValue(
-    x >= r.x && y >= r.y && x <= r.x + r.width && y <= r.y + r.height,
-  );
-  return click(ctx, { ...options(args), x, y }, double);
+  return click(ctx, { ...options(args), ...found.point }, double);
 }
 route("locator.click", (ctx, args) => locatorClick(ctx, args), {
   needsTab: true,
@@ -1141,8 +1134,7 @@ route(
     const node = await resolveActionTarget(ctx, args);
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
-      x: node.rect.x + node.rect.width / 2,
-      y: node.rect.y + node.rect.height / 2,
+      ...node.point,
     });
     return ctx.router.actionResult(ctx);
   },

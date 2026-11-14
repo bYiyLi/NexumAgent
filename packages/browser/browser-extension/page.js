@@ -278,6 +278,42 @@ export async function pageCommand(input) {
       if (input.nodeId) return [getRef(input.nodeId)];
       return query(root, input.locator?.query ?? input.query);
     };
+    const actionGeometry = (node, pending = false) => {
+      if (pending && !(visible(node) && enabled(node))) return null;
+      check(
+        visible(node) && enabled(node),
+        "INVALID_TARGET",
+        "The current element is not visible and enabled.",
+      );
+      node.scrollIntoView({
+        block: "center",
+        inline: "center",
+        behavior: "instant",
+      });
+      const r = rect(node),
+        position = input.command === "resolve" ? input.position : undefined;
+      const x = position?.x ?? r.width / 2,
+        y = position?.y ?? r.height / 2;
+      check(
+        Number.isFinite(x) &&
+          Number.isFinite(y) &&
+          x >= 0 &&
+          y >= 0 &&
+          x < r.width &&
+          y < r.height,
+        "INVALID_ARGUMENT",
+        "The requested position must be inside the current element rectangle.",
+      );
+      const point = { x: r.x + x, y: r.y + y };
+      const top = node.ownerDocument.elementFromPoint(point.x, point.y);
+      if (pending && !(top === node || node.contains(top))) return null;
+      check(
+        top === node || node.contains(top),
+        "INVALID_TARGET",
+        "Another element blocks the action target.",
+      );
+      return { rect: r, point };
+    };
     const unique = (action = false, pending = false) => {
       const found = all();
       if (pending && found.length === 0) return null;
@@ -287,28 +323,7 @@ export async function pageCommand(input) {
         "The locator must resolve to exactly one current element.",
       );
       const node = found[0];
-      if (action) {
-        if (pending && !(visible(node) && enabled(node))) return null;
-        check(
-          visible(node) && enabled(node),
-          "INVALID_TARGET",
-          "The current element is not visible and enabled.",
-        );
-        node.scrollIntoView({
-          block: "center",
-          inline: "center",
-          behavior: "instant",
-        });
-        const r = node.getBoundingClientRect(),
-          point = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        const top = node.ownerDocument.elementFromPoint(point.x, point.y);
-        if (pending && !(top === node || node.contains(top))) return null;
-        check(
-          top === node || node.contains(top),
-          "INVALID_TARGET",
-          "Another element blocks the action target.",
-        );
-      }
+      if (action) actionGeometry(node);
       return node;
     };
     const rect = (node) => {
@@ -532,9 +547,10 @@ export async function pageCommand(input) {
         bounded(value);
         break;
       case "resolve": {
-        const node = unique(true, true);
-        value = node
-          ? { ...describe(node), rect: rect(node), tagName: node.tagName }
+        const node = unique(false, true),
+          geometry = node && actionGeometry(node, true);
+        value = geometry
+          ? { ...describe(node), ...geometry, tagName: node.tagName }
           : null;
         break;
       }
