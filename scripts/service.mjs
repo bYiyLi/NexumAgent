@@ -28,6 +28,63 @@ const xml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 const ps = (value) => "'" + clean(value).replaceAll("'", "''") + "'";
+// The current-user Task Scheduler stops its PowerShell action, not necessarily
+// that action's Node child. An unnamed native Job belongs to this launcher for
+// its entire lifetime; Windows closes the handle and kills inherited children
+// when the launcher exits. No PID-file lookup or separate resident is involved.
+const windowsServiceJob = String.raw`
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace NexumAgentService {
+  public static class JobOwner {
+    [StructLayout(LayoutKind.Sequential)]
+    struct BasicLimits {
+      public long ProcessTime, JobTime;
+      public uint Flags;
+      public UIntPtr MinWorkingSet, MaxWorkingSet;
+      public uint ActiveProcesses;
+      public UIntPtr Affinity;
+      public uint Priority, Scheduling;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct IoCounters {
+      public ulong Reads, Writes, Other, ReadBytes, WriteBytes, OtherBytes;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct Limits {
+      public BasicLimits Basic;
+      public IoCounters Io;
+      public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
+    }
+    [DllImport("kernel32.dll", EntryPoint="CreateJobObjectW", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool SetInformationJobObject(IntPtr job, int kind, ref Limits limits, uint size);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool CloseHandle(IntPtr handle);
+    public static IntPtr Bind() {
+      var job = CreateJobObject(IntPtr.Zero, null);
+      if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+      var limits = new Limits();
+      limits.Basic.Flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+      if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(Limits))) ||
+          !AssignProcessToJobObject(job, GetCurrentProcess())) {
+        var error = Marshal.GetLastWin32Error();
+        CloseHandle(job);
+        throw new Win32Exception(error);
+      }
+      // Do not close a successful handle here: its owner is this process, which
+      // is itself a member. Native process teardown owns the final handle close.
+      return job;
+    }
+  }
+}
+`;
 const unit = (value) =>
   '"' +
   clean(value)
@@ -170,7 +227,7 @@ export function servicePlan({
   );
   // Task Scheduler retries failure to start an action, not a completed app's
   // nonzero exit. Keep app retries here, bounded, under that same user task.
-  const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\nfor ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {\n  $global:LASTEXITCODE = $null\n  $nexumExit = 1\n  try {\n    & ${ps(node)} ${args.map(ps).join(" ")}\n    if ($LASTEXITCODE -is [int]) { $nexumExit = $LASTEXITCODE }\n  } catch { $nexumExit = 1 }\n  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }\n  Start-Sleep -Seconds 10\n}\n`;
+  const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\nAdd-Type -TypeDefinition @'\n${windowsServiceJob}\n'@\n$nexumJob = [NexumAgentService.JobOwner]::Bind()\nfor ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {\n  $global:LASTEXITCODE = $null\n  $nexumExit = 1\n  try {\n    & ${ps(node)} ${args.map(ps).join(" ")}\n    if ($LASTEXITCODE -is [int]) { $nexumExit = $LASTEXITCODE }\n  } catch { $nexumExit = 1 }\n  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }\n  Start-Sleep -Seconds 10\n}\n`;
   const executable = p.join(
     process.env.SystemRoot || "C:\\Windows",
     "System32",

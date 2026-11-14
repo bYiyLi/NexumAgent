@@ -247,7 +247,7 @@ async function invoke(peer, operation, input) {
         connection: peer.binding,
         authorization: {
           agentId: "native-service-agent",
-          allowedRoots: [],
+          allowedRoots: [home],
           budgets: {},
           revision: "one",
           expiresAt: new Date(Date.now() + 30000).toISOString(),
@@ -285,27 +285,74 @@ try {
   assert.equal(opened.agent.runtime.nodeVersion, "v" + NODE_VERSION);
   assert.equal(opened.pwd, path.join(root, "work"));
   const firstPid = await leader();
+  const node = path.join(
+    program,
+    "runtime",
+    process.platform === "win32" ? "node.exe" : "bin/node",
+  );
   let result = await invoke(first, "agent.run.start", {
     contextId: opened.contextId,
     waitMs: 0,
-    script: `const fs=await import('node:fs/promises'),path=await import('node:path');const file=path.join(context.pwd,'native-service-count.txt');let count=0;try{count=Number(await fs.readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}await fs.writeFile(file,String(++count));return {answer:42,count};`,
+    input: { node },
+    script: `const fs=await import('node:fs/promises'),path=await import('node:path');const file=path.join(context.pwd,'native-service-count.txt');let count=0;try{count=Number(await fs.readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}await fs.writeFile(file,String(++count));const native=await sh.exec({command:context.input.node,args:['-e','process.stdout.write("native-managed-service");']});return {answer:42,count,exitCode:native.exitCode,output:native.output.map(item=>item.data).join('')};`,
   });
   const runId = result.run.runId;
+  const terminal = new Set([
+    "succeeded",
+    "failed",
+    "cancelled",
+    "timed_out",
+    "interrupted",
+  ]);
   await until(async () => {
-    if (result.run.endedAt !== null) return true;
+    if (terminal.has(result.run.status)) return true;
     result = await invoke(first, "agent.run.get", {
       agentId: "native-service-agent",
       runId,
       waitMs: 1000,
     });
-    return result.run.endedAt !== null;
+    assert.equal(result.run.runId, runId);
+    return terminal.has(result.run.status);
   }, "The accepted installed-Agent Run did not finish.");
   assert.equal(result.run.status, "succeeded");
-  assert.deepEqual(result.result.data, { answer: 42, count: 1 });
+  const expected = {
+    answer: 42,
+    count: 1,
+    exitCode: 0,
+    output: "native-managed-service",
+  };
+  assert.deepEqual(result.result.data, expected);
+  let background = await invoke(first, "agent.run.start", {
+    contextId: opened.contextId,
+    waitMs: 0,
+    input: { node },
+    script: `const process=await sh.start({command:context.input.node,args:['-e','setInterval(()=>{},1000);'],background:true});return {processId:process.processId,pid:process.details.pid};`,
+  });
+  const backgroundRunId = background.run.runId;
+  await until(async () => {
+    if (terminal.has(background.run.status)) return true;
+    background = await invoke(first, "agent.run.get", {
+      agentId: "native-service-agent",
+      runId: backgroundRunId,
+      waitMs: 1000,
+    });
+    assert.equal(background.run.runId, backgroundRunId);
+    return terminal.has(background.run.status);
+  }, "The installed SDK did not hand off its real background resource.");
+  assert.equal(background.run.status, "succeeded");
+  const backgroundPid = background.result.data.pid;
+  assert.match(background.result.data.processId, /^res_[0-9a-f]{32}$/);
+  assert.ok(
+    Number.isSafeInteger(backgroundPid) &&
+      backgroundPid > 0 &&
+      alive(backgroundPid),
+  );
+  assert.notEqual(backgroundPid, firstPid);
+  leaders.add(backgroundPid);
   await serviceAction(plan, "stop", { isolatedHome: true });
   await until(
-    () => first.closed && !alive(firstPid),
-    "The actual installed CLI did not close after native stop.",
+    () => first.closed && !alive(firstPid) && !alive(backgroundPid),
+    "The actual installed CLI and SDK background child did not close after native stop.",
   );
   await serviceAction(plan, "start", { isolatedHome: true });
   await until(
@@ -320,7 +367,7 @@ try {
     waitMs: 0,
   });
   assert.equal(history.run.status, "succeeded");
-  assert.deepEqual(history.result.data, { answer: 42, count: 1 });
+  assert.deepEqual(history.result.data, expected);
   assert.equal(
     await readFile(path.join(root, "work", "native-service-count.txt"), "utf8"),
     "1",

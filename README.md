@@ -80,7 +80,7 @@ owner 可直接在所选 profile 的 `config.json` 中添加可选 `storage` 和
 
 ## 本地安装候选与原生用户服务
 
-安装组件使用固定 Node `24.22.1`、`--experimental-vm-modules` 和明确的 `run --profile development|production`。macOS 使用用户 LaunchAgent，Linux 使用 `systemd --user`，Windows 使用当前用户 `InteractiveToken` 任务。它们不提权、不保存用户密码；登录会话与无人登录启动不同，安装器不会自动启用 Linux linger。Windows 任务负责登录启动与启停，现有启动器对 Agent 非零退出每次等待 10 秒、至多重试 255 次；退出 0 立即停止，不能仅靠 Task Scheduler 的启动失败重试承诺程序退出后重启。正式 Agent 诊断统一写入 profile 内有界的 `logs/agent.log`；macOS LaunchAgent 将 stdout/stderr 指向 `/dev/null`，避免重复生成无界服务日志。Linux stdout/stderr 由 journald 管理，Windows 任务不另写服务日志。
+安装组件使用固定 Node `24.22.1`、`--experimental-vm-modules` 和明确的 `run --profile development|production`。macOS 使用用户 LaunchAgent，Linux 使用 `systemd --user`，Windows 使用当前用户 `InteractiveToken` 任务。它们不提权、不保存用户密码；登录会话与无人登录启动不同，安装器不会自动启用 Linux linger。Windows 任务负责登录启动与启停，启动器以原生 Job 约束自身及继承的进程树，任务退出时由系统关闭 Job，避免只停启动器而留下 Node。现有启动器对 Agent 非零退出每次等待 10 秒、至多重试 255 次；退出 0 立即停止，不能仅靠 Task Scheduler 的启动失败重试承诺程序退出后重启。正式 Agent 诊断统一写入 profile 内有界的 `logs/agent.log`；macOS LaunchAgent 将 stdout/stderr 指向 `/dev/null`，避免重复生成无界服务日志。Linux stdout/stderr 由 journald 管理，Windows 任务不另写服务日志。
 
 公开扩展类型由单一源码生成，不需要把 Agent 的运行服务安装到扩展项目中：
 
