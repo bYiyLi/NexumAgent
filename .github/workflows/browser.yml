@@ -66,6 +66,12 @@ jobs:
           NEXUM_BROWSER_PUBLIC_DOC_URL: https://docs.google.com/document/d/1RVbtvklXUg9QCNvMT0r-1qDwJNeQFGoTCOD1Ur9mDa4/edit
           NEXUM_BROWSER_PUBLIC_DOC_TEXT: Guest View MPArch Migration
         run: node --experimental-vm-modules --test packages/browser/test/native-sites.acceptance.mjs
+      - name: Exercise anonymous public YouTube transcript through the actual browser
+        env:
+          # Public Google IFrame API example video; no account or copied cookies.
+          NEXUM_BROWSER_PUBLIC_YOUTUBE_URL: https://www.youtube.com/watch?v=M7lc1UVf-VE
+          NEXUM_BROWSER_PUBLIC_YOUTUBE_TEXT: YouTube
+        run: node --experimental-vm-modules --test packages/browser/test/native-youtube.acceptance.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

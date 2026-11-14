@@ -60,18 +60,37 @@ export function observeSiteSource(input) {
       page.pathname.match(/^\/(?:shorts|live)\/([A-Za-z0-9_-]+)/)?.[1];
     if (!videoId || !/^[A-Za-z0-9_-]{6,64}$/.test(videoId))
       return fail("The current YouTube document has no video identity.");
-    const segments = [
-      ...document.querySelectorAll("ytd-transcript-segment-renderer"),
+    const response =
+      document.querySelector("#movie_player")?.getPlayerResponse?.() ??
+      globalThis.ytInitialPlayerResponse;
+    if (
+      response?.videoDetails?.videoId &&
+      response.videoDetails.videoId !== videoId
+    )
+      return fail("The player response belongs to an earlier video.");
+    const layouts = [
+      {
+        selector: "transcript-segment-view-model",
+        timestamp: ".ytwTranscriptSegmentViewModelTimestamp",
+        text: '.ytAttributedStringHost[role="text"]',
+      },
+      {
+        selector: "ytd-transcript-segment-renderer",
+        timestamp: ".segment-timestamp",
+        text: ".segment-text",
+      },
     ];
-    if (segments.length) {
+    for (const layout of layouts) {
+      const segments = [...document.querySelectorAll(layout.selector)];
+      if (!segments.length) continue;
       if (segments.length > 20000)
         return fail("The rendered transcript exceeds its segment budget.");
       const transcript = segments
         .map((node) => {
           const stamp = node
-              .querySelector(".segment-timestamp")
+              .querySelector(layout.timestamp)
               ?.textContent?.trim(),
-            body = node.querySelector(".segment-text")?.textContent?.trim();
+            body = node.querySelector(layout.text)?.textContent?.trim();
           return body ? `${stamp ? `[${stamp}] ` : ""}${body}` : "";
         })
         .filter(Boolean)
@@ -91,14 +110,6 @@ export function observeSiteSource(input) {
           },
         };
     }
-    const response =
-      globalThis.ytInitialPlayerResponse ??
-      document.querySelector("#movie_player")?.getPlayerResponse?.();
-    if (
-      response?.videoDetails?.videoId &&
-      response.videoDetails.videoId !== videoId
-    )
-      return fail("The player response belongs to an earlier video.");
     const tracks =
       response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
     if (!Array.isArray(tracks) || !tracks.length || tracks.length > 64)

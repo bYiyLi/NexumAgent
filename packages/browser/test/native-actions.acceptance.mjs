@@ -8,6 +8,108 @@ const interactive = `<!doctype html><html><head><title>Native action families</t
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
 
+test(
+  "native clicks wait for unobstructed input, time out behind persistent overlays and never dispatch after cancellation",
+  { timeout: 60000 },
+  async (t) => {
+    const blocked = Promise.withResolvers();
+    const f = await nativeFixture(t, {
+      html: `<!doctype html><title>Native click readiness</title><style>body{margin:0}#spacer{height:1800px}#cover{position:fixed;inset:0;z-index:999;background:white}#target{width:200px;height:50px}</style><div id="cover"></div><div id="spacer"></div><button id="target">Observed target</button><script>
+      const target=document.querySelector('#target');target.onclick=event=>{target.dataset.clicks=String(Number(target.dataset.clicks||0)+1);target.dataset.trusted=String(event.isTrusted);};
+      addEventListener('scroll',()=>setTimeout(()=>{document.querySelector('#cover').remove();target.dataset.released='true';},350),{once:true});
+      window.prepareBlockedClick=()=>{const cover=document.createElement('div');cover.id='cover';document.body.append(cover);window.scrollTo({top:0,behavior:'instant'});};
+      window.observeBlockedClick=()=>addEventListener('scroll',()=>fetch('/blocked-preflight'),{once:true});
+    </script>`,
+      handleRequest(req, res) {
+        if (req.url !== "/blocked-preflight") return false;
+        res.writeHead(204);
+        res.end();
+        blocked.resolve();
+        return true;
+      },
+    });
+    const successful = await f.run(
+      select +
+        `await tab.playwright.locator('#target').click({timeoutMs:5000});return await tab.evaluate("({...document.querySelector('#target').dataset})");`,
+      { base: f.base },
+    );
+    assert.deepEqual(successful.result.data, {
+      clicks: "1",
+      trusted: "true",
+      released: "true",
+    });
+    const timeout = await f.run(
+      select +
+        `await tab.evaluate("window.prepareBlockedClick()");let code=null;try{await tab.playwright.locator('#target').click({timeoutMs:500});}catch(error){code=error.code;}return {code,clicks:await tab.evaluate("Number(document.querySelector('#target').dataset.clicks)")};`,
+      { base: f.base },
+    );
+    assert.deepEqual(timeout.result.data, { code: "TIMEOUT", clicks: 1 });
+    // Observe a native scroll from the pending preflight before cancelling its Run.
+    await f.run(
+      select +
+        `await tab.evaluate("async()=>{window.scrollTo({top:0,behavior:'instant'});await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);window.observeBlockedClick();return true;}");return null;`,
+      { base: f.base },
+    );
+    let pending = await f.start(
+      select +
+        `await tab.playwright.locator('#target').click({timeoutMs:15000});return {unexpected:true};`,
+      { base: f.base },
+    );
+    await blocked.promise;
+    f.cancel(pending.run.runId);
+    const until = performance.now() + 10000;
+    while (pending.run.endedAt === null) {
+      assert.ok(
+        performance.now() < until,
+        "Cancelled native click did not settle.",
+      );
+      pending = await f.observe(pending.run.runId);
+    }
+    assert.equal(pending.run.status, "cancelled");
+    const after = await f.run(
+      select +
+        `await tab.evaluate("async()=>{document.querySelector('#cover').remove();await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);return true;}");return await tab.evaluate("Number(document.querySelector('#target').dataset.clicks)");`,
+      { base: f.base },
+    );
+    assert.equal(after.result.data, 1);
+  },
+);
+
+test("native role queries exclude hidden layout copies and inaccessible subtrees while preserving visible descendants and layoutless roles", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Native role accessibility</title><main>
+      <button id="actual" data-role-candidate onclick="document.querySelector('#status').textContent='Actual native action'">Execute native action</button>
+      <span role="button" data-role-candidate style="visibility:hidden">Execute native action</span>
+      <div aria-hidden="true"><button data-role-candidate>Execute native action</button></div>
+      <div style="display:none"><button data-role-candidate>Execute native action</button></div>
+      <div inert><button data-role-candidate>Execute native action</button></div>
+      <button hidden data-role-candidate>Execute native action</button>
+      <div style="visibility:hidden"><button style="visibility:visible">Override native visibility</button></div>
+      <span style="display:contents" role="button" aria-label="Layoutless native role"><span>Layoutless role content</span></span>
+      <output id="status">Untouched</output></main>`,
+  });
+  const result = await f.run(
+    select +
+      `
+    const observed=await tab.ax.snapshot();
+    const action=tab.playwright.getByRole('button',{name:'Execute native action',exact:true});
+    const count=await action.count(),scoped=await tab.playwright.locator('main').getByRole('button',{name:'Execute native action',exact:true}).count();
+    const axCount=observed.nodes.filter(n=>n.role==='button'&&n.name==='Execute native action').length;
+    if(count===1)await action.click();
+    return {count,scoped,axCount,cssCount:await tab.playwright.locator('[data-role-candidate]').count(),override:await tab.playwright.getByRole('button',{name:'Override native visibility',exact:true}).count(),layoutless:await tab.playwright.getByRole('button',{name:'Layoutless native role',exact:true}).count(),value:await tab.evaluate("document.querySelector('#status').textContent")};`,
+    { base: f.base },
+  );
+  assert.deepEqual(result.result.data, {
+    count: 1,
+    scoped: 1,
+    axCount: 1,
+    cssCount: 6,
+    override: 1,
+    layoutless: 1,
+    value: "Actual native action",
+  });
+});
+
 test("native AX, CUA and fixed DOM actions change real controls and preserve native input semantics", async (t) => {
   const f = await nativeFixture(t, { html: interactive });
   const result = await f.run(

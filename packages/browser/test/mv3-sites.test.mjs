@@ -61,7 +61,8 @@ function fixture(t, url) {
     commands = [],
     streams = new Map(),
     attached = new Set(),
-    segments = [];
+    segments = [],
+    modernSegments = [];
   let streamSequence = 0;
   const document = {
     title: "Actual document",
@@ -69,7 +70,9 @@ function fixture(t, url) {
     querySelectorAll(selector) {
       return selector === "ytd-transcript-segment-renderer"
         ? segments
-        : [image];
+        : selector === "transcript-segment-view-model"
+          ? modernSegments
+          : [image];
     },
     querySelector() {
       return null;
@@ -239,6 +242,7 @@ function fixture(t, url) {
     image,
     location,
     segments,
+    modernSegments,
     responses,
     fetches,
     nativeCalls,
@@ -526,6 +530,74 @@ test("YouTube exports an actually rendered transcript or the fixed observed trac
     f.call("content.plan", { method: "content.exportYouTubeTranscript" }),
     { code: "FILE_UNAVAILABLE" },
   );
+});
+
+test("current YouTube transcript view models export only caption text and one timestamp per segment", async (t) => {
+  const f = fixture(t, "https://www.youtube.com/watch?v=actualVideo1");
+  f.main.ytInitialPlayerResponse = {
+    videoDetails: { videoId: "actualVideo1" },
+  };
+  for (const [stamp, body] of [
+    ["0:00", "First actual rendered cue"],
+    ["0:04", "Second actual rendered cue"],
+  ]) {
+    f.modernSegments.push({
+      querySelector(selector) {
+        if (selector === ".ytwTranscriptSegmentViewModelTimestamp")
+          return { textContent: stamp };
+        if (selector === '.ytAttributedStringHost[role="text"]')
+          return { textContent: body };
+        return null;
+      },
+    });
+  }
+  const plan = await f.call("content.plan", {
+    method: "content.exportYouTubeTranscript",
+  });
+  assert.deepEqual(plan.urls, []);
+  const file = await f.call("content.exportYouTubeTranscript", {
+    planId: plan.id,
+  });
+  assert.equal(
+    file.text,
+    "[0:00] First actual rendered cue\n[0:04] Second actual rendered cue",
+  );
+  assert.equal(f.fetches.length, 0);
+});
+
+test("rendered captions cannot mask a known mismatched video, while the current player supersedes an initial SPA response", async (t) => {
+  const f = fixture(t, "https://www.youtube.com/watch?v=actualVideo1");
+  f.segments.push({
+    querySelector(selector) {
+      return {
+        textContent:
+          selector === ".segment-timestamp" ? "0:03" : "Current rendered words",
+      };
+    },
+  });
+  f.main.ytInitialPlayerResponse = {
+    videoDetails: { videoId: "previousVideo" },
+  };
+  await assert.rejects(
+    f.call("content.plan", { method: "content.exportYouTubeTranscript" }),
+    { code: "FILE_UNAVAILABLE" },
+  );
+  f.document.querySelector = (selector) =>
+    selector === "#movie_player"
+      ? {
+          getPlayerResponse: () => ({
+            videoDetails: { videoId: "actualVideo1" },
+          }),
+        }
+      : null;
+  const plan = await f.call("content.plan", {
+    method: "content.exportYouTubeTranscript",
+  });
+  const file = await f.call("content.exportYouTubeTranscript", {
+    planId: plan.id,
+  });
+  assert.equal(file.text, "[0:03] Current rendered words");
+  assert.equal(f.fetches.length, 0);
 });
 
 test("coordinate, fixed-node and Locator media use their actual native source and cannot rebind after preflight", async (t) => {

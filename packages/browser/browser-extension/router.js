@@ -1090,12 +1090,22 @@ route(
   },
   { needsTab: true, mutating: true },
 );
-async function locatorClick(ctx, args, double = false) {
-  const found = await ctx.router.page(ctx, {
-    ...args,
-    ...options(args),
-    command: "resolve",
+async function resolveActionTarget(ctx, args) {
+  let found;
+  // Only repeat the pre-input observation. Native pointer dispatch happens once
+  // after an unobstructed current target is observed, never after a failed action.
+  await ctx.router.poll(ctx, async () => {
+    found = await ctx.router.page(ctx, {
+      ...args,
+      ...options(args),
+      command: "resolve",
+    });
+    return found !== null;
   });
+  return found;
+}
+async function locatorClick(ctx, args, double = false) {
+  const found = await resolveActionTarget(ctx, args);
   const r = found.rect,
     position = options(args).position;
   const x = r.x + (position?.x ?? r.width / 2),
@@ -1128,11 +1138,7 @@ aliases(
 route(
   "tab.hover",
   async (ctx, args) => {
-    const node = await ctx.router.page(ctx, {
-      ...args,
-      ...options(args),
-      command: "resolve",
-    });
+    const node = await resolveActionTarget(ctx, args);
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x: node.rect.x + node.rect.width / 2,

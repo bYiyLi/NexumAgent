@@ -200,10 +200,11 @@ export async function framePage(ctx, payload, selectors, execute) {
           },
         );
         requireValue(
-          !hit.exceptionDetails && hit.result?.value === true,
-          "INVALID_TARGET",
-          "Another element blocks an ancestor frame's native action target.",
+          !hit.exceptionDetails && typeof hit.result?.value === "boolean",
+          "STALE_REF",
+          "The ancestor frame's native hit test is no longer available.",
         );
+        if (!hit.result.value) return null;
       }
       result.value.rect = mappedRect(result.value.rect, owners);
     }

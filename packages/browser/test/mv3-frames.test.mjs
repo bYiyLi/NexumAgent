@@ -30,6 +30,7 @@ function fixture(t) {
     documentSequence = 1,
     frameExists = true,
     parentBlocked = false,
+    unblockAfterHit = false,
     scrollAncestors = false,
     scrolled = false;
   const backendNodes = new Map();
@@ -85,7 +86,14 @@ function fixture(t) {
   });
   parentDoc.querySelectorAll = (selector) =>
     selector === "iframe" && frameExists ? [owner] : [];
-  parentDoc.elementFromPoint = () => (parentBlocked ? {} : owner);
+  parentDoc.elementFromPoint = () => {
+    const blocked = parentBlocked;
+    if (unblockAfterHit) {
+      parentBlocked = false;
+      unblockAfterHit = false;
+    }
+    return blocked ? {} : owner;
+  };
   const realm = (document, url) => {
     document.getElementById = () => null;
     return vm.createContext({
@@ -380,6 +388,10 @@ function fixture(t) {
     blockParent: () => {
       parentBlocked = true;
     },
+    blockParentOnce: () => {
+      parentBlocked = true;
+      unblockAfterHit = true;
+    },
     scrollAncestors: () => {
       scrollAncestors = true;
     },
@@ -449,11 +461,30 @@ test("child-document replacement preserves query locators while old fixed refs c
   });
   f.blockParent();
   await assert.rejects(f.call("locator.click", { locator }), {
-    code: "INVALID_TARGET",
+    code: "TIMEOUT",
   });
   assert.equal(
     f.calls.some(({ method }) => method === "Input.dispatchMouseEvent"),
     false,
+  );
+  assert.equal(f.objects.size, 0);
+});
+
+test("a transient ancestor overlay is observed again before one native click and releases every frame handle", async (t) => {
+  const f = fixture(t),
+    locator = {
+      target: f.target,
+      framePath: ["iframe"],
+      query: { kind: "selector", selector: "button" },
+    };
+  f.blockParentOnce();
+  await f.call("locator.click", { locator });
+  assert.equal(
+    f.calls.filter(
+      ({ method, params }) =>
+        method === "Input.dispatchMouseEvent" && params.type === "mousePressed",
+    ).length,
+    1,
   );
   assert.equal(f.objects.size, 0);
 });

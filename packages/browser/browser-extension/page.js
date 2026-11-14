@@ -66,6 +66,19 @@ export async function pageCommand(input) {
     };
     const enabled = (node) =>
       !node.disabled && node.getAttribute("aria-disabled") !== "true";
+    const roleExposed = (node) => {
+      const style = getComputedStyle(node);
+      if (["hidden", "collapse"].includes(style.visibility)) return false;
+      for (let current = node; current; current = current.parentElement) {
+        if (
+          current.getAttribute("aria-hidden")?.toLowerCase() === "true" ||
+          current.inert ||
+          getComputedStyle(current).display === "none"
+        )
+          return false;
+      }
+      return true;
+    };
     const role = (node) =>
       node.getAttribute("role") ||
       {
@@ -162,6 +175,7 @@ export async function pageCommand(input) {
           result = elements(root).filter(
             (n) =>
               role(n) === ast.role &&
+              roleExposed(n) &&
               (!ast.name ||
                 matcher(
                   name(n),
@@ -264,8 +278,9 @@ export async function pageCommand(input) {
       if (input.nodeId) return [getRef(input.nodeId)];
       return query(root, input.locator?.query ?? input.query);
     };
-    const unique = (action = false) => {
+    const unique = (action = false, pending = false) => {
       const found = all();
+      if (pending && found.length === 0) return null;
       check(
         found.length === 1,
         found.length > 1 ? "AMBIGUOUS_TARGET" : "INVALID_TARGET",
@@ -273,6 +288,7 @@ export async function pageCommand(input) {
       );
       const node = found[0];
       if (action) {
+        if (pending && !(visible(node) && enabled(node))) return null;
         check(
           visible(node) && enabled(node),
           "INVALID_TARGET",
@@ -286,6 +302,7 @@ export async function pageCommand(input) {
         const r = node.getBoundingClientRect(),
           point = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
         const top = node.ownerDocument.elementFromPoint(point.x, point.y);
+        if (pending && !(top === node || node.contains(top))) return null;
         check(
           top === node || node.contains(top),
           "INVALID_TARGET",
@@ -514,13 +531,13 @@ export async function pageCommand(input) {
         value = unique().getAttribute(input.name);
         bounded(value);
         break;
-      case "resolve":
-        value = {
-          ...describe(unique(true)),
-          rect: rect(unique()),
-          tagName: unique().tagName,
-        };
+      case "resolve": {
+        const node = unique(true, true);
+        value = node
+          ? { ...describe(node), rect: rect(node), tagName: node.tagName }
+          : null;
         break;
+      }
       case "fill":
         setValue(unique(true), input.value ?? input.text);
         value = null;
