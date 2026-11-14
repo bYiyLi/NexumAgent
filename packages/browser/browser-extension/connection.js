@@ -252,7 +252,7 @@ export function createExtensionConnection({
         queueMicrotask(
           () =>
             void snapshots().catch(() =>
-              socket?.close(1002, "snapshot failure"),
+              socket?.close(4002, "snapshot failure"),
             ),
         );
       }
@@ -441,7 +441,7 @@ export function createExtensionConnection({
       if (expected === socket && ready && sameBinding(message, ready))
         send(reply, expected);
     })().catch(() => {
-      if (expected === socket) expected.close(1002, "protocol failure");
+      if (expected === socket) expected.close(4002, "protocol failure");
     });
   };
   const receive = async (event, expected) => {
@@ -741,7 +741,7 @@ export function createExtensionConnection({
       keepAlive = setInterval(() => {
         if (expected !== socket || expected.readyState !== Socket.OPEN) return;
         if (Date.now() - lastMessage >= offlineMs) {
-          expected.close(1001, "peer offline");
+          expected.close(4001, "peer offline");
           return;
         }
         if (ready) send(bound({ type: "ping" }), expected);
@@ -749,7 +749,7 @@ export function createExtensionConnection({
     });
     expected.addEventListener("message", (event) => {
       void receive(event, expected).catch(() => {
-        if (expected === socket) expected.close(1002, "protocol failure");
+        if (expected === socket) expected.close(4002, "protocol failure");
       });
     });
     expected.addEventListener("close", () => {
@@ -833,7 +833,7 @@ export function createExtensionConnection({
     publish(event) {
       if (!ready || !socket || stopped) return;
       if (event.type === "tabs_changed") {
-        void snapshots().catch(() => socket?.close(1002, "snapshot failure"));
+        void snapshots().catch(() => socket?.close(4002, "snapshot failure"));
         return;
       }
       send(bound({ ...event, sequence: ++sequence }));

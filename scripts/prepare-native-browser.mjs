@@ -122,6 +122,12 @@ try {
   assert.ok((await lstat(binary)).isFile());
   assert.doesNotMatch(binary, /[\0\r\n]/);
   const variables = [`NEXUM_BROWSER_NATIVE_BINARY=${binary}`];
+  if (process.platform === "win32") {
+    // Chrome's AppContainer must be able to read/execute its public program
+    // files. Grant only that access in this owned, hash-verified release tree;
+    // the separate test profiles and every user directory stay outside it.
+    run("icacls", [root, "/grant", "*S-1-15-2-1:(OI)(CI)(RX)", "/T", "/Q"]);
+  }
   if (process.platform === "linux") {
     // Ubuntu's unprivileged-user-namespace policy also applies to CfT. Configure
     // only this verified release's native SUID helper in the owned runner temp;

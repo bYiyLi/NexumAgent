@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
+import { once } from "node:events";
+import { WebSocketServer } from "ws";
 import { createExtensionConnection } from "../browser-extension/connection.js";
 import {
   transportLimits,
@@ -28,6 +30,7 @@ async function until(predicate) {
 function fixture(
   t,
   dispatch = async (input) => ({ method: input.method, input: input.args }),
+  { WebSocket: NativeSocket, pingMs = 20000, offlineMs = 60000 } = {},
 ) {
   const sockets = [],
     calls = [],
@@ -69,6 +72,11 @@ function fixture(
       );
     }
     close(code = 1000) {
+      if (code !== 1000 && (code < 3000 || code > 4999))
+        throw new DOMException(
+          "Invalid browser WebSocket close code",
+          "InvalidAccessError",
+        );
       if (this.readyState === 3) return;
       this.code = code;
       this.readyState = 3;
@@ -126,10 +134,12 @@ function fixture(
   };
   const connection = createExtensionConnection({
     chrome,
-    WebSocket: Socket,
+    WebSocket: NativeSocket ?? Socket,
     router,
     profile: "development",
     extensionVersion: "0.1.0",
+    pingMs,
+    offlineMs,
   });
   t.after(() => connection.dispose());
   const ready = () => ({
@@ -240,7 +250,7 @@ test("mismatching ready profile closes the channel without dispatching snapshots
   socket.open();
   socket.message({ ...f.ready(), profile: "production" });
   await until(() => socket.readyState === 3);
-  assert.equal(socket.code, 1002);
+  assert.equal(socket.code, 4002);
   assert.equal(f.snapshots(), 0);
 });
 
@@ -257,9 +267,57 @@ test("duplicate actions reuse their receipt and a same-ID different argument can
   assert.equal(f.calls.filter((v) => v[0] === "dispatch").length, 1);
   socket.message({ ...action, args: { request: "rebound" } });
   await until(() => socket.readyState === 3);
-  assert.equal(socket.code, 1002);
+  assert.equal(socket.code, 4002);
   assert.equal(f.calls.filter((v) => v[0] === "dispatch").length, 1);
 });
+
+for (const mode of ["protocol rejection", "silent peer expiry"])
+  test(
+    `the native Node WebSocket API closes ${mode} without an invalid-code exception`,
+    { timeout: 15000 },
+    async (t) => {
+      const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+      await once(server, "listening");
+      const closed = Promise.withResolvers();
+      class NativeSocket extends globalThis.WebSocket {
+        constructor(url) {
+          assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+          // Only the injected test transport selects an ephemeral local port;
+          // the production profile's fixed-endpoint check is still exercised.
+          super(`ws://127.0.0.1:${server.address().port}`);
+        }
+      }
+      const f = fixture(t, undefined, {
+        WebSocket: NativeSocket,
+        pingMs: 10,
+        offlineMs: mode === "silent peer expiry" ? 100 : 60000,
+      });
+      t.after(async () => {
+        for (const socket of server.clients) socket.terminate();
+        await new Promise((resolve) => server.close(resolve));
+      });
+      server.on("connection", (socket) => {
+        socket.once("close", (code) => closed.resolve(code));
+        socket.once("message", () => {
+          socket.send(
+            JSON.stringify({
+              ...f.ready(),
+              ...(mode === "protocol rejection"
+                ? { profile: "production" }
+                : {}),
+            }),
+          );
+        });
+      });
+      await f.connection.start();
+      assert.equal(
+        await closed.promise,
+        mode === "protocol rejection" ? 4002 : 4001,
+      );
+      if (mode === "protocol rejection") assert.equal(f.snapshots(), 0);
+      else assert.ok(f.snapshots() > 0);
+    },
+  );
 
 test("a pending binary action can be cancelled; its late stream is discarded while another action remains usable", async (t) => {
   const f = fixture(t),
