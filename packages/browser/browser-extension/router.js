@@ -2943,6 +2943,13 @@ export function createBrowserRouter(
         func: pageCommand,
         args: [input],
       });
+      // A main-frame replacement can finish an injection with no result. Only
+      // a readiness observation may wait for a browser-confirmed transition;
+      // actions and empty results from settled pages must still fail.
+      if (payload.command === "readyState" && result.length === 0) {
+        const tab = await chrome.tabs.get(nativeId(ctx.target.tabId));
+        if (tab.status === "loading" || tab.pendingUrl) return "loading";
+      }
       requireValue(
         result.length === 1 && result[0].result,
         "INVALID_TARGET",
@@ -4497,6 +4504,8 @@ export function createBrowserRouter(
       );
       if (state !== "networkidle") {
         await router.poll(scoped, async () => {
+          const tab = await chrome.tabs.get(nativeId(ctx.target.tabId));
+          if (tab.pendingUrl) return false;
           const ready = await router.page(scoped, { command: "readyState" });
           return state === "load"
             ? ready === "complete"

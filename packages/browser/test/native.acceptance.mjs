@@ -27,6 +27,40 @@ test("native closing an attached tab preserves the same run's other tab for both
     assert.equal(entry.tabs.includes(entry.closedId), false);
   }
 });
+test("native explicit handoff closes the original waiter and prevents same-run reacquisition without affecting another tab", async (t) => {
+  const f = await nativeFixture(t);
+  const result = await f.run(
+    select +
+      `
+    const other=await selected.tabs.new(context.input.base+'?handoff-other',{active:false});
+    await other.playwright.waitForURL(context.input.base+'?handoff-other');
+    await tab.playwright.getByRole('textbox',{name:'Name'}).fill('Before handoff');
+    const oldLocator=tab.playwright.getByRole('textbox',{name:'Name'});
+    const pending=tab.playwright.waitForDownload().then(()=>({unexpected:true}),error=>({code:error.code}));
+    await tab.markHandoff();
+    const waiter=await pending;
+    const reject=async action=>{try{await action();return {unexpected:true};}catch(error){return {code:error.code};}};
+    const oldWrite=await reject(()=>oldLocator.fill('Old facade must not write'));
+    const fresh=await selected.tabs.get(tab.id);
+    const freshWrite=await reject(()=>fresh.playwright.getByRole('textbox',{name:'Name'}).fill('Reacquired facade must not write'));
+    await other.playwright.getByRole('textbox',{name:'Name'}).fill('Other tab still controlled');
+    return {tabId:tab.id,otherId:other.id,waiter,oldWrite,freshWrite,otherValue:await other.evaluate("document.querySelector('#name').value")};`,
+    { base: f.base },
+  );
+  const data = result.result.data;
+  assert.equal(data.waiter.code, "WAITER_GONE");
+  assert.equal(data.oldWrite.code, "USER_TAKEOVER");
+  assert.equal(data.freshWrite.code, "USER_TAKEOVER");
+  assert.equal(data.otherValue, "Other tab still controlled");
+  const next = await f.run(
+    select +
+      `const before=await tab.evaluate("document.querySelector('#name').value");await tab.playwright.getByRole('textbox',{name:'Name'}).fill('Next run owns a fresh lease');return {tabId:tab.id,before,after:await tab.evaluate("document.querySelector('#name').value")};`,
+    { base: f.base },
+  );
+  assert.equal(next.result.data.tabId, data.tabId);
+  assert.equal(next.result.data.before, "Before handoff");
+  assert.equal(next.result.data.after, "Next run owns a fresh lease");
+});
 test("native MV3 provides page interaction and MCP JPEG while download file identity remains explicitly unavailable", async (t) => {
   const f = await nativeFixture(t);
   const result = await f.run(
@@ -93,13 +127,59 @@ test("native multiple-MIME ClipboardItem and AX Markdown paste/secondary actions
   });
   const result = await f.run(
     select +
-      `let stage="read-original",original=[];try{original=(await tab.clipboard.read()).filter(item=>item.entries.length);stage="write-mixed";await tab.clipboard.write([{entries:[{mimeType:"text/plain",text:"Nexum native clipboard"},{mimeType:"text/html",text:"<b>Nexum native clipboard</b>"},{mimeType:"image/png",data:new Uint8Array(context.input.png)}]}]);stage="read-mixed";const read=await tab.clipboard.read();const summary=read.flatMap(item=>item.entries.map(entry=>({mimeType:entry.mimeType,...(entry.text===undefined?{size:entry.data.byteLength,signature:Array.from(entry.data.subarray(0,8))}:{text:entry.text})})));stage="ax-snapshot";const observed=await tab.ax.snapshot();const checkbox=observed.nodes.find(node=>node.name==="Confirm native");if(!checkbox)throw new Error("Native AX checkbox was not observed");stage="ax-toggle";await tab.ax.performSecondaryAction(checkbox.index,"Toggle");const checked=await tab.evaluate("document.querySelector('#check').checked");const next=await tab.ax.snapshot();const editor=next.nodes.find(node=>node.name==="Rich editor");if(!editor)throw new Error("Native AX editor was not observed");stage="ax-markdown-paste";await tab.ax.paste(editor.index,"**native bold**",{format:"md"});return {summary,checked,html:await tab.evaluate("document.querySelector('[data-testid=editor]').innerHTML")};}catch(error){return {failed:{stage,code:error.code,message:error.message}};}finally{if(original.length)await tab.clipboard.write(original);else await tab.clipboard.writeText("");}`,
+      `
+    let stage='read-original',original=[];
+    try {
+      original=(await tab.clipboard.read()).filter(item=>item.entries.length);
+      stage='write-mixed';
+      const mixed=await tab.clipboard.write([{entries:[{mimeType:'text/plain',text:'Nexum native clipboard'},{mimeType:'text/html',text:'<b>Nexum native clipboard</b>'},{mimeType:'image/png',data:new Uint8Array(context.input.png)}]}]);
+      stage='read-mixed';
+      const summarize=items=>items.flatMap(item=>item.entries.map(entry=>({mimeType:entry.mimeType,...(entry.text===undefined?{size:entry.data.byteLength,signature:Array.from(entry.data.subarray(0,8))}:{text:entry.text})})));
+      const summary=summarize(await tab.clipboard.read()),aliasSummary=summarize(await tab.clipboardRead());
+      const text=await tab.clipboard.readText(),aliasText=await tab.clipboardReadText();
+      stage='text-aliases';
+      const canonicalWrite=await tab.clipboard.writeText('Nexum canonical text'),fromCanonical=await tab.clipboardReadText();
+      const aliasWrite=await tab.clipboardWriteText('Nexum alias text'),fromAlias=await tab.clipboard.readText();
+      const aliasMixedWrite=await tab.clipboardWrite([{entries:[{mimeType:'text/plain',text:'Nexum alias item'},{mimeType:'text/html',text:'<i>Nexum alias item</i>'}]}]);
+      const aliasMixed=summarize(await tab.clipboardRead()),fromAliasMixed=await tab.clipboard.readText();
+      stage='ax-snapshot';
+      const observed=await tab.ax.snapshot(),checkbox=observed.nodes.find(node=>node.name==='Confirm native');
+      if(!checkbox)throw new Error('Native AX checkbox was not observed');
+      stage='ax-toggle';
+      await tab.ax.performSecondaryAction(checkbox.index,'Toggle');
+      const checked=await tab.evaluate("document.querySelector('#check').checked"),next=await tab.ax.snapshot(),editor=next.nodes.find(node=>node.name==='Rich editor');
+      if(!editor)throw new Error('Native AX editor was not observed');
+      stage='ax-markdown-paste';
+      await tab.ax.paste(editor.index,'**native bold**',{format:'md'});
+      return {summary,aliasSummary,text,aliasText,fromCanonical,fromAlias,aliasMixed,fromAliasMixed,actions:[mixed,canonicalWrite,aliasWrite,aliasMixedWrite],checked,html:await tab.evaluate("document.querySelector('[data-testid=editor]').innerHTML")};
+    } catch(error) {
+      return {failed:{stage,code:error.code,message:error.message}};
+    } finally {
+      if(original.length)await tab.clipboard.write(original);else await tab.clipboard.writeText('');
+    }`,
     { base: f.base, png: [...png()] },
   );
   const data = result.result.data;
   assert.equal(data.failed, undefined, JSON.stringify(data.failed));
   assert.equal(data.checked, true);
   assert.match(data.html, /<strong>native bold<\/strong>/);
+  assert.deepEqual(data.aliasSummary, data.summary);
+  assert.equal(data.text, "Nexum native clipboard");
+  assert.equal(data.aliasText, data.text);
+  assert.equal(data.fromCanonical, "Nexum canonical text");
+  assert.equal(data.fromAlias, "Nexum alias text");
+  assert.equal(data.fromAliasMixed, "Nexum alias item");
+  assert.ok(
+    data.aliasMixed.some(
+      (entry) =>
+        entry.mimeType === "text/html" &&
+        entry.text.includes("<i>Nexum alias item</i>"),
+    ),
+  );
+  for (const action of data.actions) {
+    assert.equal(action.ok, true);
+    assert.ok(action.operationId.length > 0);
+  }
   assert.ok(
     data.summary.some(
       (entry) =>

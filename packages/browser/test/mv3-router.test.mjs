@@ -1545,6 +1545,89 @@ test("load-state waits distinguish DOM readiness from load and require the actua
   assert.equal(idle, true);
 });
 
+test("load-state waits survive a native document transition but reject an empty result from a settled page", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const get = f.chrome.tabs.get;
+  let loading = true,
+    reads = 0;
+  f.chrome.tabs.get = async (id) => ({
+    ...(await get(id)),
+    status: loading ? "loading" : "complete",
+  });
+  f.chrome.scripting.executeScript = async () => {
+    reads++;
+    if (reads === 1) return [];
+    loading = false;
+    return [{ result: { ok: true, value: "interactive" } }];
+  };
+  await f.call("playwright.waitForLoadState", {
+    options: { state: "domcontentloaded" },
+  });
+  assert.equal(reads, 2);
+  f.chrome.scripting.executeScript = async () => [];
+  await assert.rejects(
+    f.call("playwright.waitForLoadState", { options: { state: "load" } }),
+    { code: "INVALID_TARGET" },
+  );
+});
+
+test("load-state waits do not accept the old ready document before a pending navigation commits and remain cancellable", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const get = f.chrome.tabs.get,
+    observed = Promise.withResolvers();
+  let pending = true,
+    reads = 0,
+    loaded = false;
+  f.chrome.tabs.get = async (id) => {
+    const tab = await get(id);
+    if (pending) {
+      observed.resolve();
+      return { ...tab, pendingUrl: "https://example.com/next" };
+    }
+    return tab;
+  };
+  f.chrome.scripting.executeScript = async () => {
+    observed.resolve();
+    reads++;
+    return [{ result: { ok: true, value: "complete" } }];
+  };
+  const loading = f
+    .call("playwright.waitForLoadState", { options: { state: "load" } })
+    .then(() => {
+      loaded = true;
+    });
+  await observed.promise;
+  await delay(0);
+  assert.equal(loaded, false);
+  assert.equal(reads, 0);
+  pending = false;
+  await loading;
+  assert.equal(reads, 1);
+  pending = true;
+  const entered = Promise.withResolvers();
+  f.chrome.tabs.get = async (id) => {
+    entered.resolve();
+    return { ...(await get(id)), pendingUrl: "https://example.com/later" };
+  };
+  const stop = new AbortController(),
+    waiting = f.call(
+      "playwright.waitForLoadState",
+      { options: { state: "load" } },
+      { signal: stop.signal },
+    );
+  const rejected = assert.rejects(waiting, { name: "AbortError" });
+  await entered.promise;
+  stop.abort();
+  await rejected;
+  assert.equal(reads, 1);
+});
+
 test("native WebMCP versions with only tool names report their exact registration-safety limitation without an unsafe fallback", async (t) => {
   const f = fixture(t);
   f.router.start();
