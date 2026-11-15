@@ -105,6 +105,38 @@ return {before,blocked,afterBlocked,after,receipts:await tab.evaluate('window.re
   assert.deepEqual(view.run.cleanup.unconfirmed, []);
 });
 
+test("native text locators normalize whitespace and find button values without matching scripts", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Native text matching</title>
+      <p id="message">  Hello\n   <span>world</span>  </p>
+      <input id="submit" type="button" value="Submit   report">
+      <article class="card"> Total\n    <span>pending</span> </article>
+      <script>window.submissions=0;window.hiddenText='private-script-only-sentinel';document.querySelector('#submit').onclick=()=>submissions++;</script>`,
+  });
+  const view = await f.run(
+    select +
+      `const pw=tab.playwright;
+const message=pw.getByText('Hello world',{exact:true});
+const button=pw.getByText('Submit report',{exact:true});
+const counts={message:await message.count(),scoped:await pw.locator('body').getByText('Hello world',{exact:true}).count(),button:await button.count(),script:await pw.getByText('private-script-only-sentinel',{exact:true}).count(),regex:await pw.getByText(/^\\s+Hello/).count(),filtered:await pw.locator('article').filter({hasText:'total pending'}).count(),excluded:await pw.locator('article').filter({hasNotText:'total pending'}).count()};
+await button.click({timeoutMs:2000});return {counts,submissions:await tab.evaluate('window.submissions')};`,
+    { base: f.base },
+  );
+  assert.deepEqual(view.result.data, {
+    counts: {
+      message: 1,
+      scoped: 1,
+      button: 1,
+      script: 0,
+      regex: 1,
+      filtered: 1,
+      excluded: 0,
+    },
+    submissions: 1,
+  });
+  assert.deepEqual(view.run.cleanup.unconfirmed, []);
+});
+
 test("native requested click positions are hit-tested at the dispatched point and cannot click an overlay", async (t) => {
   const f = await nativeFixture(t, {
     html: `<!doctype html><title>Native requested click position</title><style>body{margin:0}#target{position:absolute;left:100px;top:100px;width:200px;height:100px;border:0;padding:0}#corner{position:absolute;left:100px;top:100px;width:50px;height:40px;z-index:2}#center{position:absolute;left:175px;top:135px;width:50px;height:30px;z-index:2}</style><button id="target">Observed positioned target</button><button id="corner">Corner cover</button><button id="center" hidden>Center cover</button><script>

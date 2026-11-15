@@ -122,7 +122,7 @@ export async function pageCommand(input) {
       node.innerText?.trim() ||
       node.textContent?.trim() ||
       "";
-    const matcher = (value, rule) => {
+    const matcher = (value, rule, normalizeText = false) => {
       check(rule && ["text", "regexp"].includes(rule.kind));
       if (rule.kind === "regexp") {
         check(
@@ -133,9 +133,40 @@ export async function pageCommand(input) {
         return new RegExp(rule.source, rule.flags).test(value);
       }
       check(typeof rule.value === "string");
+      const normalize = (text) =>
+        text
+          .replace(/[\u200b\u00ad]/g, "")
+          .trim()
+          .replace(/\s+/g, " ");
+      const actual = normalizeText ? normalize(value) : value;
+      const expected = normalizeText ? normalize(rule.value) : rule.value;
       return rule.exact
-        ? value === rule.value
-        : value.toLocaleLowerCase().includes(rule.value.toLocaleLowerCase());
+        ? actual === expected
+        : actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
+    };
+    const skipText = (node) =>
+      ["SCRIPT", "STYLE", "NOSCRIPT"].includes(node.tagName) ||
+      !!node.ownerDocument?.head?.contains(node);
+    const textValue = (node) => {
+      if (skipText(node)) return "";
+      const buttonValue = (element) =>
+        element.tagName === "INPUT" &&
+        ["button", "submit", "reset"].includes(element.type?.toLowerCase());
+      if (buttonValue(node)) return node.value || "";
+      if (!node.childNodes) return node.textContent || "";
+      const pending = [...node.childNodes].reverse(),
+        parts = [];
+      while (pending.length) {
+        const child = pending.pop();
+        if (child.nodeType === 3) parts.push(child.nodeValue || "");
+        else if (child.nodeType === 1 && !skipText(child)) {
+          if (buttonValue(child)) parts.push(child.value || "");
+          else
+            for (let index = child.childNodes.length - 1; index >= 0; index--)
+              pending.push(child.childNodes[index]);
+        }
+      }
+      return parts.join("");
     };
     const makeRef = (node) => {
       let byLease = state.reverse.get(node);
@@ -220,9 +251,10 @@ export async function pageCommand(input) {
         case "text":
           result = elements(root).filter(
             (n) =>
-              matcher(n.textContent || "", ast.matcher) &&
-              ![...n.children].some((c) =>
-                matcher(c.textContent || "", ast.matcher),
+              !skipText(n) &&
+              matcher(textValue(n), ast.matcher, true) &&
+              ![...n.children].some(
+                (c) => !skipText(c) && matcher(textValue(c), ast.matcher, true),
               ),
           );
           break;
@@ -267,9 +299,8 @@ export async function pageCommand(input) {
               (ast.visible === undefined || visible(n) === ast.visible) &&
               (!ast.has || sub(ast.has, n).length > 0) &&
               (!ast.hasNot || sub(ast.hasNot, n).length === 0) &&
-              (!ast.hasText || matcher(n.textContent || "", ast.hasText)) &&
-              (!ast.hasNotText ||
-                !matcher(n.textContent || "", ast.hasNotText)),
+              (!ast.hasText || matcher(textValue(n), ast.hasText, true)) &&
+              (!ast.hasNotText || !matcher(textValue(n), ast.hasNotText, true)),
           );
           break;
         case "ref":

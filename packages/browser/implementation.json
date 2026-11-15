@@ -655,7 +655,8 @@
       "id": "B083",
       "target": "tab.playwright.getByText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-text-matching"]
     },
     {
       "id": "B084",
@@ -800,7 +801,8 @@
       "id": "B107",
       "target": "locator.filter",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-text-matching"]
     },
     {
       "id": "B108",
@@ -843,7 +845,8 @@
       "id": "B114",
       "target": "locator.getByText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-text-matching"]
     },
     {
       "id": "B115",
@@ -1867,6 +1870,20 @@
         "explicit_aria_override",
         "disabled_action",
         "state_change",
+        "result",
+        "cleanup"
+      ]
+    },
+    "native-text-matching": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native text locators normalize whitespace and find button values without matching scripts",
+      "coverage": [
+        "whitespace",
+        "input_button_value",
+        "script_exclusion",
+        "scoped_locator",
+        "regex",
+        "text_filter",
         "result",
         "cleanup"
       ]

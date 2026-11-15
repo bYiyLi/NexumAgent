@@ -1445,6 +1445,82 @@ test("locator enabled state includes native and inherited aria disabled state", 
   }
 });
 
+test("text locators normalize string whitespace, include button values and ignore scripts", async () => {
+  const text = (tagName, textContent, extra = {}) => ({
+    tagName,
+    textContent,
+    children: [],
+    closest: () => null,
+    ...extra,
+  });
+  const paragraph = text("P", "  Hello\n    world ");
+  const button = text("INPUT", "", {
+    type: "submit",
+    value: "Submit   report",
+  });
+  const script = text("SCRIPT", "private script text", {
+    nodeType: 1,
+    childNodes: [{ nodeType: 3, nodeValue: "private script text" }],
+  });
+  const parent = text("SECTION", "Visible only private script text", {
+    children: [script],
+    childNodes: [{ nodeType: 3, nodeValue: "Visible only " }, script],
+  });
+  const card = text("ARTICLE", "Total\n    pending");
+  const document = {
+    querySelectorAll(selector) {
+      return selector === ".card"
+        ? [card]
+        : [paragraph, button, parent, script, card];
+    },
+  };
+  const context = vm.createContext({
+    document,
+    crypto,
+    TextEncoder,
+    Uint8Array,
+  });
+  const count = async (query) => {
+    const input = {
+      command: "count",
+      pageVersion: 1,
+      leaseId: "text-regression",
+      locator: { query },
+    };
+    const result = JSON.parse(
+      JSON.stringify(
+        await vm.runInContext(
+          `(${pageCommand.toString()})(${JSON.stringify(input)})`,
+          context,
+        ),
+      ),
+    );
+    assert.equal(result.ok, true);
+    return result.value;
+  };
+  const string = (value, exact = true) => ({
+    kind: "text",
+    matcher: { kind: "text", value, exact },
+  });
+  assert.deepEqual(
+    await Promise.all([
+      count(string("Hello world")),
+      count(string("Submit report")),
+      count(string("private script text")),
+      count({
+        kind: "text",
+        matcher: { kind: "regexp", source: "^\\s+Hello", flags: "" },
+      }),
+      count({
+        kind: "filter",
+        query: { kind: "selector", selector: ".card" },
+        hasText: { kind: "text", value: "total pending", exact: false },
+      }),
+    ]),
+    [1, 1, 0, 1, 1],
+  );
+});
+
 test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
   for (const pixelRatio of [0.5, 1, 1.25, 2]) {
     const f = fixture(t, { devicePixelRatio: pixelRatio });
