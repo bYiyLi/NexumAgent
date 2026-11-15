@@ -65,6 +65,41 @@ return {observed,actual,selectedId,originalId:tab.id};`,
   },
 );
 
+test(
+  "native finished visual identities do not accumulate on an unchanged page",
+  { timeout: 150000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: "<!doctype html><title>Visual identity lifecycle</title><h1>Owned test page</h1>",
+    });
+    let tabId;
+    for (let i = 0; i < 4; i++) {
+      const result = await f.run(
+        select +
+          `await tab.cua.move({x:42,y:64});return {tabId:tab.id,pointer:await tab.evaluate("!!document.querySelector('[data-nexum-visual-layer]')")};`,
+        { base: f.base },
+      );
+      assert.deepEqual(result.run.cleanup.unconfirmed, []);
+      assert.equal(
+        result.result.data.pointer,
+        true,
+        JSON.stringify(result.result.data),
+      );
+      if (tabId === undefined) tabId = result.result.data.tabId;
+      assert.equal(result.result.data.tabId, tabId);
+      if (i < 3) await delay(350);
+    }
+    const facts = await f.cleanupFacts({ visualTabId: tabId });
+    assert.deepEqual(facts.owned, [], JSON.stringify(facts));
+    assert.equal(facts.visual?.hasCurrent, false, JSON.stringify(facts));
+    assert.equal(typeof facts.visual?.closed, "number", JSON.stringify(facts));
+    assert.ok(facts.visual.closed <= 1, JSON.stringify(facts));
+    t.diagnostic(
+      JSON.stringify({ retainedVisualIdentities: facts.visual.closed }),
+    );
+  },
+);
+
 test("native visual feedback preserves user groups, follows only when enabled and releases the real result marker on tab activation", async (t) => {
   const events = [];
   const f = await nativeFixture(t, {

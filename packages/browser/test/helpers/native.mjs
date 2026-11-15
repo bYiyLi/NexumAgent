@@ -359,9 +359,18 @@ export async function nativeFixture(t, options = {}) {
   child.on("error", () => {});
   // Read-only failure/cleanup inspection of this fixture's own MV3 worker. Never
   // inspect a user profile or print journal keys, clipboard values or page data.
-  const cleanupFacts = async () => {
+  const cleanupFacts = async ({ visualTabId } = {}) => {
     let socket;
     try {
+      let visualQuery = "";
+      if (visualTabId !== undefined) {
+        const tabId = Number(visualTabId);
+        assert.ok(
+          /^\d+$/.test(String(visualTabId)) && Number.isSafeInteger(tabId),
+          "The fixture visual target must be an actual numeric tab ID.",
+        );
+        visualQuery = `result.visual=(await chrome.scripting.executeScript({target:{tabId:${tabId}},world:'ISOLATED',func:()=>{const visual=globalThis[Symbol.for('nexum.browser.visual.v1')];return {closed:visual?.closed?.size??null,hasCurrent:!!visual?.current};}}))[0]?.result??null;`;
+      }
       const port = stderr.match(
         /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/,
       )?.[1];
@@ -396,7 +405,7 @@ export async function nativeFixture(t, options = {}) {
             id: 1,
             method: "Runtime.evaluate",
             params: {
-              expression: `(async()=>{const state=await chrome.storage.session.get(['nexumOwnedControls','nexumClosedLeases','nexumVisualMarkers']),targets=await chrome.debugger.getTargets();return {id:chrome.runtime.id,owned:(state.nexumOwnedControls??[]).map(item=>({tabId:item.tabId,runId:item.runId,attached:targets.some(target=>target.tabId===item.tabId&&target.attached),keys:item.keys?.length??0,buttons:item.buttons?.length??0,streams:item.streams?.length??0,viewport:item.viewport,attachmentIntent:item.attachmentIntent})),closedReceipts:state.nexumClosedLeases?.length??0,visualMarkers:state.nexumVisualMarkers?.length??0};})()`,
+              expression: `(async()=>{const state=await chrome.storage.session.get(['nexumOwnedControls','nexumClosedLeases','nexumVisualMarkers']),targets=await chrome.debugger.getTargets();const result={id:chrome.runtime.id,owned:(state.nexumOwnedControls??[]).map(item=>({tabId:item.tabId,runId:item.runId,attached:targets.some(target=>target.tabId===item.tabId&&target.attached),keys:item.keys?.length??0,buttons:item.buttons?.length??0,streams:item.streams?.length??0,viewport:item.viewport,attachmentIntent:item.attachmentIntent})),closedReceipts:state.nexumClosedLeases?.length??0,visualMarkers:state.nexumVisualMarkers?.length??0};${visualQuery}return result;})()`,
               awaitPromise: true,
               returnByValue: true,
             },

@@ -1,0 +1,29 @@
+name: Isolated visual identity cleanup probe
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - packages/browser/test/helpers/native.mjs
+      - packages/browser/test/native-visual.acceptance.mjs
+      - .github/workflows/visual-tombstone-probe.yml
+permissions:
+  contents: read
+jobs:
+  visual:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/build-extension-api.mjs
+      - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
+      - run: pnpm --dir packages/browser build
+      - run: node scripts/prepare-native-browser.mjs
+      - run: node --experimental-vm-modules --test --test-name-pattern="native finished visual identities" packages/browser/test/native-visual.acceptance.mjs
