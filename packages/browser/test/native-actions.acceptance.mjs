@@ -73,6 +73,35 @@ const interactive = `<!doctype html><html><head><title>Native action families</t
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
 
+test("native AX and DOM scroll, Tab press and waitForTimeout produce observable effects", async (t) => {
+  const f = await nativeFixture(t, { html: interactive });
+  const result = await f.run(
+    select +
+      `
+await tab.dom.scroll({x:0,y:180});
+const domScroll=await tab.evaluate('scrollY');
+await tab.evaluate('scrollTo(0,0)');
+const point=await tab.evaluate("(()=>{const r=document.querySelector('#scroll').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()");
+await tab.ax.scroll(point,'down',0.25);
+await tab.playwright.locator('#scroll').evaluate('element => new Promise(resolve=>{if(element.scrollTop>0)return resolve(true);const done=()=>{element.removeEventListener("scroll",done);resolve(true);};element.addEventListener("scroll",done,{once:true});})');
+const axScroll=await tab.evaluate("document.querySelector('#scroll').scrollTop");
+const snapshot=await tab.snapshot(),nodes=[];const visit=node=>{nodes.push(node);for(const child of node.children??[])visit(child);};visit(snapshot.root);
+const field=nodes.find(node=>node.role==='textbox'&&node.name==='Action field');if(!field)throw Error('The actual field ref was not observed');
+await tab.focus(field.ref);await tab.fill(field.ref,'ABCDE');await tab.press('Home');
+const start=await tab.evaluate("document.querySelector('#field').selectionStart");
+await tab.press('End');const end=await tab.evaluate("document.querySelector('#field').selectionStart");
+const began=Date.now();await tab.playwright.waitForTimeout(120);const elapsed=Date.now()-began;
+return {domScroll,axScroll,start,end,elapsed};`,
+    { base: f.base },
+  );
+  const data = result.result.data;
+  assert.ok(data.domScroll > 0);
+  assert.ok(data.axScroll > 0);
+  assert.equal(data.start, 0);
+  assert.equal(data.end, 5);
+  assert.ok(data.elapsed >= 100, `wait returned after ${data.elapsed} ms`);
+});
+
 test("native enabled state respects fieldsets and inherited aria without dispatching disabled actions", async (t) => {
   const f = await nativeFixture(t, {
     html: `<!doctype html><title>Native disabled controls</title>

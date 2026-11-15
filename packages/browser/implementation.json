@@ -154,7 +154,8 @@
       "id": "B002",
       "target": "client.documentation",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B003",
@@ -188,13 +189,15 @@
       "id": "B007",
       "target": "selectedBrowser.browserId",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B008",
       "target": "selectedBrowser.capabilities",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B009",
@@ -207,49 +210,57 @@
       "id": "B010",
       "target": "selectedBrowser.user",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B011",
       "target": "selectedBrowser.documentation",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B012",
       "target": "selectedBrowser.history",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B013",
       "target": "selectedBrowser.nameSession",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-visual-feedback"]
     },
     {
       "id": "B014",
       "target": "selectedBrowser.user.claimTab",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B015",
       "target": "selectedBrowser.user.getTabContext",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B016",
       "target": "selectedBrowser.user.openTabs",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B017",
       "target": "selectedBrowser.tabs.content",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-assets-export"]
     },
     {
       "id": "B018",
@@ -269,55 +280,64 @@
       "id": "B020",
       "target": "selectedBrowser.tabs.new",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-close"]
     },
     {
       "id": "B021",
       "target": "selectedBrowser.tabs.selected",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B022",
       "target": "tab.ax",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B023",
       "target": "tab.capabilities",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B024",
       "target": "tab.clipboard",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B025",
       "target": "tab.content",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-google-docs-export"]
     },
     {
       "id": "B026",
       "target": "tab.cua",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B027",
       "target": "tab.dev",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dev-console-logs"]
     },
     {
       "id": "B028",
       "target": "tab.dom",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B029",
@@ -330,7 +350,8 @@
       "id": "B030",
       "target": "tab.playwright",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B031",
@@ -343,7 +364,8 @@
       "id": "B032",
       "target": "tab.close",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-close"]
     },
     {
       "id": "B033",
@@ -370,13 +392,15 @@
       "id": "B036",
       "target": "tab.markDeliverable",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-visual-feedback"]
     },
     {
       "id": "B037",
       "target": "tab.markHandoff",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-explicit-handoff"]
     },
     {
       "id": "B038",
@@ -389,13 +413,21 @@
       "id": "B039",
       "target": "tab.requestUserTakeover",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": [
+        "native-takeover-continuation",
+        "native-takeover-negative"
+      ]
     },
     {
       "id": "B040",
       "target": "tab.requestUserTakeover",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": [
+        "native-takeover-continuation",
+        "native-takeover-negative"
+      ]
     },
     {
       "id": "B041",
@@ -408,7 +440,8 @@
       "id": "B042",
       "target": "tab.title",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B043",
@@ -421,13 +454,15 @@
       "id": "B044",
       "target": "tab.ax.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B045",
       "target": "tab.ax.drag",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B046",
@@ -440,19 +475,22 @@
       "id": "B047",
       "target": "tab.ax.paste",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B048",
       "target": "tab.ax.performSecondaryAction",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B049",
       "target": "tab.ax.pressKey",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B050",
@@ -464,19 +502,22 @@
       "id": "B051",
       "target": "tab.ax.selectText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B052",
       "target": "tab.ax.setValue",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B053",
       "target": "tab.ax.typeText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B054",
@@ -496,25 +537,29 @@
       "id": "B056",
       "target": "tab.content.exportGsuite",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-google-docs-export"]
     },
     {
       "id": "B057",
       "target": "tab.content.exportYouTubeTranscript",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-youtube-export"]
     },
     {
       "id": "B058",
       "target": "tab.cua.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B059",
       "target": "tab.cua.doubleClick",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B060",
@@ -527,13 +572,15 @@
       "id": "B061",
       "target": "tab.cua.drag",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B062",
       "target": "tab.cua.keypress",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B063",
@@ -546,25 +593,29 @@
       "id": "B064",
       "target": "tab.cua.scroll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B065",
       "target": "tab.cua.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B066",
       "target": "tab.dom.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B067",
       "target": "tab.dom.doubleClick",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B068",
@@ -577,13 +628,15 @@
       "id": "B069",
       "target": "tab.dom.getVisibleTree",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B070",
       "target": "tab.dom.keypress",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B071",
@@ -595,13 +648,15 @@
       "id": "B072",
       "target": "tab.dom.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "B073",
       "target": "tab.playwright.domSnapshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-page-and-download-negative"]
     },
     {
       "id": "B074",
@@ -627,7 +682,8 @@
       "id": "B076",
       "target": "tab.playwright.evaluate",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "B077",
@@ -640,7 +696,8 @@
       "id": "B078",
       "target": "tab.playwright.frameLocator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cross-site-frame"]
     },
     {
       "id": "B079",
@@ -688,7 +745,8 @@
       "id": "B085",
       "target": "tab.playwright.waitForEvent",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-filechooser", "native-page-and-download-negative"]
     },
     {
       "id": "B086",
@@ -707,13 +765,15 @@
       "id": "B088",
       "target": "tab.playwright.waitForURL",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B089",
       "target": "frame.frameLocator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cross-site-frame"]
     },
     {
       "id": "B090",
@@ -999,49 +1059,60 @@
       "id": "B130",
       "target": "download.path",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": [
+        "native-file-refs-waiters",
+        "native-page-and-download-negative"
+      ]
     },
     {
       "id": "B131",
       "target": "fileChooser.isMultiple",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-filechooser"]
     },
     {
       "id": "B132",
       "target": "fileChooser.setFiles",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-filechooser"]
     },
     {
       "id": "B133",
       "target": "tab.clipboard.read",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B134",
       "target": "tab.clipboard.readText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B135",
       "target": "tab.clipboard.write",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B136",
       "target": "tab.clipboard.writeText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "B137",
       "target": "tab.dev.logs",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dev-console-logs"]
     },
     {
       "id": "B138",
@@ -1061,13 +1132,15 @@
       "id": "B140",
       "target": "dialog.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B141",
       "target": "dialog.dismiss",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B142",
@@ -1094,7 +1167,8 @@
       "id": "B145",
       "target": "client.documentation.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B146",
@@ -1121,7 +1195,8 @@
       "id": "X001",
       "target": "tab.snapshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-takeover-continuation"]
     },
     {
       "id": "X002",
@@ -1175,43 +1250,53 @@
       "id": "X009",
       "target": "tab.waitFor",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "X010",
       "target": "tab.locator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "X011",
       "target": "tab.setFiles",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X012",
       "target": "tab.downloads",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": [
+        "native-file-refs-waiters",
+        "native-page-and-download-negative"
+      ]
     },
     {
       "id": "X013",
       "target": "tab.saveDownload",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X014",
       "target": "tab.setViewport",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X015",
       "target": "tab.resetViewport",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X016",
@@ -1364,25 +1449,29 @@
       "id": "X037",
       "target": "tab.assets.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-assets-export"]
     },
     {
       "id": "X038",
       "target": "tab.assets.download",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-assets-export"]
     },
     {
       "id": "X039",
       "target": "tab.assets.bundle",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-assets-export"]
     },
     {
       "id": "X040",
       "target": "tab.exportFile",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-assets-export"]
     },
     {
       "id": "X041",
@@ -1406,37 +1495,43 @@
       "id": "X044",
       "target": "tab.cdp.send",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cdp-beforeunload"]
     },
     {
       "id": "X045",
       "target": "tab.cdp.events",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cdp-beforeunload"]
     },
     {
       "id": "X046",
       "target": "tab.cdp.cursor",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cdp-beforeunload"]
     },
     {
       "id": "X047",
       "target": "tab.cdp.readEvents",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cdp-beforeunload"]
     },
     {
       "id": "X048",
       "target": "selectedBrowser.visibility.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X049",
       "target": "selectedBrowser.visibility.set",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X050",
@@ -1449,25 +1544,29 @@
       "id": "X051",
       "target": "tab.dom.fill",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "X052",
       "target": "virtualCursor",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-visual-feedback"]
     },
     {
       "id": "X053",
       "target": "taskTabGroup",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-visual-feedback"]
     },
     {
       "id": "X054",
       "target": "faviconActiveAndResult",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-visual-feedback"]
     },
     {
       "id": "X055",
@@ -1479,19 +1578,22 @@
       "id": "X056",
       "target": "followSessionTab",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow", "native-visual-feedback"]
     },
     {
       "id": "X057",
       "target": "tab.devLogs",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dev-console-logs"]
     },
     {
       "id": "X058",
       "target": "tab.evaluate",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-cua-dom-actions"]
     },
     {
       "id": "X059",
@@ -1511,19 +1613,22 @@
       "id": "X061",
       "target": "tab.frame",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cross-site-frame"]
     },
     {
       "id": "X062",
       "target": "tab.dialogAccept",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-aliases"]
     },
     {
       "id": "X063",
       "target": "tab.dialogDismiss",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-aliases"]
     },
     {
       "id": "X064",
@@ -1536,49 +1641,57 @@
       "id": "X065",
       "target": "tab.exportGsuite",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-google-docs-export"]
     },
     {
       "id": "X066",
       "target": "tab.exportYouTubeTranscript",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-youtube-export"]
     },
     {
       "id": "X067",
       "target": "tab.clipboardReadText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "X068",
       "target": "tab.clipboardWriteText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "X069",
       "target": "tab.clipboardRead",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "X070",
       "target": "tab.clipboardWrite",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-clipboard-ax"]
     },
     {
       "id": "X071",
       "target": "tab.playwright.waitForDownload",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X072",
       "target": "tab.playwright.waitForFileChooser",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X073",
@@ -1598,7 +1711,8 @@
       "id": "X075",
       "target": "frame.fill",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cross-site-frame"]
     },
     {
       "id": "X076",
@@ -1660,85 +1774,99 @@
       "id": "X084",
       "target": "selectedBrowser.viewport.set",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X085",
       "target": "selectedBrowser.viewport.reset",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X086",
       "target": "webMcpTools.invokeTool",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-webmcp-registration"]
     },
     {
       "id": "X087",
       "target": "browser.waiters.arm",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X088",
       "target": "browser.waiters.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X089",
       "target": "browser.waiters.cancel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-file-refs-waiters"]
     },
     {
       "id": "X090",
       "target": "selectedBrowser.capabilities.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "X091",
       "target": "selectedBrowser.capabilities.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X092",
       "target": "tab.capabilities.list",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata", "native-webmcp-registration"]
     },
     {
       "id": "X093",
       "target": "tab.capabilities.get",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-webmcp-registration"]
     },
     {
       "id": "X094",
       "target": "selectedBrowser.name",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "X095",
       "target": "selectedBrowser.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "X096",
       "target": "selectedBrowser.profileName",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "X097",
       "target": "selectedBrowser.tabs.select",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-viewport-follow"]
     },
     {
       "id": "X098",
@@ -1751,7 +1879,8 @@
       "id": "X099",
       "target": "BeforeUnloadDialog.message",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-cdp-beforeunload"]
     },
     {
       "id": "X100",
@@ -1990,6 +2119,149 @@
         "stale_ref",
         "navigation",
         "result"
+      ]
+    },
+    "native-peer-metadata": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native capability revisions, browser identity, tab metadata and packaged documentation describe the actual peer",
+      "coverage": [
+        "actual_peer",
+        "user_tab_context",
+        "documentation",
+        "history",
+        "capability_revisions"
+      ]
+    },
+    "native-viewport-follow": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native visibility follows the selected target and viewport aliases change and reset actual page dimensions",
+      "coverage": ["actual_dimensions", "visibility", "aliases", "restoration"]
+    },
+    "native-ax-cua-dom-actions": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native AX, CUA and fixed DOM actions change real controls and preserve native input semantics",
+      "coverage": ["actual_dom", "native_input", "gestures", "result"]
+    },
+    "native-clipboard-ax": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native multiple-MIME ClipboardItem and AX Markdown paste/secondary actions preserve actual browser data",
+      "coverage": [
+        "clipboard_multiple_mime",
+        "actual_bytes",
+        "ax_paste",
+        "aliases"
+      ]
+    },
+    "native-assets-export": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native page inventories, embedded SVG, partial downloads, real PDF/HTML/Markdown and temporary batch pages produce fixed files",
+      "coverage": [
+        "actual_files",
+        "assets",
+        "partial_failure",
+        "temporary_pages"
+      ]
+    },
+    "native-filechooser": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native file chooser accepts multiple path/byte attachments and a failed preflight leaves selection unchanged",
+      "coverage": [
+        "multiple_files",
+        "large_bytes",
+        "failure_preserves_selection",
+        "retry"
+      ]
+    },
+    "native-cross-site-frame": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native Frame and nested FrameLocator operate inside a cross-site OOPIF using high-level methods",
+      "coverage": [
+        "cross_site_frame",
+        "nested_frame",
+        "fixed_ref",
+        "actual_dom"
+      ]
+    },
+    "native-dialog-aliases": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native dialogAccept and dialogDismiss aliases consume the actual prompt, confirm and alert identities",
+      "coverage": ["prompt", "confirm", "alert", "stale_identity"]
+    },
+    "native-file-refs-waiters": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native direct file refs and waiter cancellation keep real identities while download aliases reject unproven local files",
+      "coverage": [
+        "file_input",
+        "waiter_cancelled",
+        "unproven_download_explicitly_rejected"
+      ]
+    },
+    "native-dev-console-logs": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native dev logs normalize real console warnings and apply filter, limit and since without replaying older entries",
+      "coverage": ["actual_console", "filters", "since", "limit", "aliases"]
+    },
+    "native-cdp-beforeunload": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native beforeunload dialogs can be dismissed and CDP cursors read actual bounded ordered events",
+      "coverage": ["actual_cdp_events", "cursor", "beforeunload"]
+    },
+    "native-tab-close": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native closing an attached tab preserves the same run's other tab for both close entry points",
+      "coverage": ["actual_tab_close", "other_tab_preserved"]
+    },
+    "native-explicit-handoff": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native explicit handoff closes the original waiter and prevents same-run reacquisition without affecting another tab",
+      "coverage": ["handoff", "waiter_cancelled", "old_facade_rejected"]
+    },
+    "native-takeover-continuation": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native explicit input continuation issues a new tab epoch, rejects old handles and leaves another controlled tab intact",
+      "coverage": ["continuation", "stale_handles", "other_tab_preserved"]
+    },
+    "native-takeover-negative": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native declined, cancelled, expired and revoked continuations never renew browser control",
+      "coverage": ["declined", "cancelled", "expired", "revoked"]
+    },
+    "native-page-and-download-negative": {
+      "file": "test/native.acceptance.mjs",
+      "test": "native MV3 provides page interaction and MCP JPEG while download file identity remains explicitly unavailable",
+      "coverage": [
+        "actual_page",
+        "mcp_jpeg",
+        "unproven_download_explicitly_rejected"
+      ]
+    },
+    "native-google-docs-export": {
+      "file": "test/native-sites.acceptance.mjs",
+      "test": "native public Google Docs exports real DOCX, PDF and Markdown through the content and convenience entry points",
+      "coverage": ["public_document", "actual_files", "both_entry_points"]
+    },
+    "native-youtube-export": {
+      "file": "test/native-youtube.acceptance.mjs",
+      "test": "native public YouTube transcript exports match the actual rendered cues through both SDK entry points",
+      "coverage": ["public_video", "actual_transcript", "both_entry_points"]
+    },
+    "native-webmcp-registration": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native WebMCP either invokes real document registrations with exact revisions or reports its actual unsupported reason",
+      "coverage": [
+        "opt_in_native_registration",
+        "stale_registration",
+        "unsupported_report"
+      ]
+    },
+    "native-visual-feedback": {
+      "file": "test/native-visual.acceptance.mjs",
+      "test": "native visual feedback preserves user groups, follows only when enabled and releases the real result marker on tab activation",
+      "coverage": [
+        "user_group_preserved",
+        "session_name",
+        "result_marker",
+        "follow"
       ]
     }
   }
