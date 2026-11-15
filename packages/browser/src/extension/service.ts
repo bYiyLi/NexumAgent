@@ -127,6 +127,7 @@ export class BrowserService extends EventEmitter {
   #started = false;
   #stopping = false;
   #timer?: NodeJS.Timeout;
+  #wakeTimer?: NodeJS.Timeout;
   #port: number;
   #sockets = new Set<WebSocket>();
   #peers = new Map<string, BrowserPeer>();
@@ -163,6 +164,32 @@ export class BrowserService extends EventEmitter {
     this.#tasks.add(task);
     void task.finally(() => this.#tasks.delete(task)).catch(() => {});
     return task;
+  }
+  #wakeActiveActions(): void {
+    if (this.#wakeTimer || this.#stopping) return;
+    // Some MV3 workers defer their own timers while a controlled page is
+    // active. Existing bound heartbeat messages provide a Node-timed wakeup;
+    // they neither repeat an action nor change its deadline.
+    this.#wakeTimer = setInterval(() => {
+      for (const peer of this.#peers.values()) {
+        if (!peer.pending.size || peer.socket.readyState !== WebSocket.OPEN)
+          continue;
+        try {
+          void this.#send(peer, { v: 1, type: "ping", at: Date.now() }).catch(
+            () => {},
+          );
+        } catch {
+          // The peer may close or its existing write budget may be full.
+        }
+      }
+      this.#stopWakeIfIdle();
+    }, 100);
+    this.#wakeTimer.unref();
+  }
+  #stopWakeIfIdle(): void {
+    if ([...this.#peers.values()].some((peer) => peer.pending.size)) return;
+    if (this.#wakeTimer) clearInterval(this.#wakeTimer);
+    this.#wakeTimer = undefined;
   }
   start(signal: AbortSignal): Promise<void> {
     check(
@@ -1115,6 +1142,7 @@ export class BrowserService extends EventEmitter {
         clearTimeout(timer);
         input.signal.removeEventListener("abort", aborted);
         peer.pending.delete(actionId);
+        this.#stopWakeIfIdle();
         peer.completed.set(actionId, {
           operationId: input.operationId,
           at: Date.now(),
@@ -1125,6 +1153,7 @@ export class BrowserService extends EventEmitter {
       },
     };
     peer.pending.set(actionId, pending);
+    this.#wakeActiveActions();
     input.signal.addEventListener("abort", aborted, { once: true });
     const send = (async () => {
       input.signal.throwIfAborted();
@@ -1239,6 +1268,8 @@ export class BrowserService extends EventEmitter {
       failure("EXTENSION_OFFLINE", "The browser service is stopping."),
     );
     if (this.#timer) clearInterval(this.#timer);
+    if (this.#wakeTimer) clearInterval(this.#wakeTimer);
+    this.#wakeTimer = undefined;
     const task = (async () => {
       await this.#start?.catch(() => {});
       for (const id of this.#leases.keys()) await this.endLease(id);

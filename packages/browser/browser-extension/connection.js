@@ -511,6 +511,7 @@ export function createExtensionConnection({
       "The message belongs to a stale browser connection.",
     );
     if (message.type === "ping") {
+      router.wake?.();
       send(bound({ type: "pong" }));
       return;
     }

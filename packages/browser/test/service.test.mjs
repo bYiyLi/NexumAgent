@@ -158,6 +158,44 @@ function action(service, ready, overrides = {}) {
   });
 }
 
+test("Node sends bound wakeups only while a peer has an active action", async (t) => {
+  const f = await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f),
+    ready = await peer.ready(),
+    idle = await connect(f, { profileId: "idle-profile" });
+  await idle.ready();
+  snapshot(peer, ready);
+  await until(() => f.service.get(ready.browserId).tabsReady);
+  let idlePings = 0,
+    activePings = 0;
+  idle.socket.on("message", (raw, binary) => {
+    if (!binary && JSON.parse(raw).type === "ping") idlePings++;
+  });
+  peer.socket.on("message", (raw, binary) => {
+    if (!binary && JSON.parse(raw).type === "ping") activePings++;
+  });
+  const pending = action(f.service, ready, { budgetMs: 5000 }),
+    request = await peer.next("action"),
+    ping = await peer.next("ping");
+  assert.equal(ping.connectionId, ready.connectionId);
+  assert.equal(ping.generation, ready.generation);
+  assert.equal(idlePings, 0);
+  ready.send({
+    type: "action_result",
+    actionId: request.actionId,
+    operationId: request.operationId,
+    ok: true,
+    value: null,
+  });
+  assert.equal(await pending, null);
+  await delay(30);
+  const afterCompletion = activePings;
+  await delay(250);
+  assert.equal(activePings, afterCompletion);
+  assert.equal(idlePings, 0);
+});
+
 test("visual diagnostics correlate only a live lease and never log untrusted event data", async (t) => {
   const f = await fixture(t);
   await f.service.start(new AbortController().signal);

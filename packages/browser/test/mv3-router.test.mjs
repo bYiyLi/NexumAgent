@@ -330,6 +330,52 @@ function fixture(t, config = {}) {
   };
 }
 
+test("bound wakeups release delayed worker timers without skipping deadlines or cancellation", async (t) => {
+  const f = fixture(t);
+  const nativeSetTimeout = globalThis.setTimeout;
+  let intercepted = 0;
+  globalThis.setTimeout = (callback, milliseconds, ...args) => {
+    if (milliseconds === 37) {
+      intercepted++;
+      return nativeSetTimeout(callback, 10000, ...args);
+    }
+    return nativeSetTimeout(callback, milliseconds, ...args);
+  };
+  try {
+    const controller = new AbortController();
+    let finished = false;
+    const wait = f.router
+      .delay(
+        { started: performance.now(), budgetMs: 1000, signal: controller.signal },
+        37,
+      )
+      .then(() => {
+        finished = true;
+      });
+    f.router.wake();
+    await Promise.resolve();
+    assert.equal(finished, false, "an early heartbeat must not shorten a wait");
+    await delay(65);
+    assert.equal(finished, false, "the simulated worker timer must remain paused");
+    f.router.wake();
+    await wait;
+    assert.equal(finished, true);
+    assert.equal(intercepted, 1);
+
+    const cancelled = new AbortController(),
+      reason = new Error("cancel the actual wait"),
+      pending = f.router.delay(
+        { started: performance.now(), budgetMs: 1000, signal: cancelled.signal },
+        37,
+      );
+    cancelled.abort(reason);
+    await assert.rejects(pending, (error) => error === reason);
+    f.router.wake();
+  } finally {
+    globalThis.setTimeout = nativeSetTimeout;
+  }
+});
+
 test("native visual hooks receive the current run/target, precede pointer input and hold lease cleanup until their actual release", async (t) => {
   const events = [],
     gate = Promise.withResolvers();

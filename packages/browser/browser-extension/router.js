@@ -113,21 +113,28 @@ const mappedOptions = (args, keys, ids = []) => {
     if (result[key] !== undefined) result[key] = nativeId(result[key]);
   return result;
 };
-const sleep = (milliseconds, signal) =>
+const sleep = (milliseconds, signal, wakeups) =>
   new Promise((resolve, reject) => {
     signal?.throwIfAborted();
+    const deadline = performance.now() + milliseconds;
     const cleanup = () => {
       clearTimeout(timer);
+      wakeups.delete(wake);
       signal?.removeEventListener("abort", cancel);
+    };
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+    const wake = () => {
+      if (performance.now() >= deadline) finish();
     };
     const cancel = () => {
       cleanup();
       reject(signal.reason);
     };
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, milliseconds);
+    const timer = setTimeout(finish, milliseconds);
+    wakeups.add(wake);
     signal?.addEventListener("abort", cancel, { once: true });
   });
 const routes = {};
@@ -744,7 +751,7 @@ route(
         args.timeoutMs >= 0 &&
         args.timeoutMs <= ctx.budgetMs,
     );
-    await sleep(args.timeoutMs, ctx.signal);
+    await ctx.router.delay(ctx, args.timeoutMs);
     return null;
   },
   { needsTab: true },
@@ -1480,7 +1487,8 @@ export function createBrowserRouter(
     closedLeases = new Map(),
     owners = new Map(),
     queues = new Map(),
-    listeners = [];
+    listeners = [],
+    wakeups = new Set();
   const leaseOpenFailures = new WeakMap();
   const eventBuffer = [],
     logs = [],
@@ -1959,6 +1967,9 @@ export function createBrowserRouter(
     version,
     claim,
     canClaim,
+    wake() {
+      for (const wake of [...wakeups]) wake();
+    },
     start() {
       requireValue(
         !stopped,
@@ -3465,7 +3476,7 @@ export function createBrowserRouter(
         0,
         ctx.budgetMs - (performance.now() - ctx.started),
       );
-      await sleep(Math.min(milliseconds, remaining), ctx.signal);
+      await sleep(Math.min(milliseconds, remaining), ctx.signal, wakeups);
       requireValue(
         milliseconds <= remaining,
         "TIMEOUT",
@@ -4338,6 +4349,7 @@ export function createBrowserRouter(
             ctx.budgetMs - (performance.now() - ctx.started),
           ),
           ctx.signal,
+          wakeups,
         );
       }
       throw new BrowserActionError(

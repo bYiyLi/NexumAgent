@@ -219,6 +219,16 @@ async function online(f) {
   return socket;
 }
 
+test("a bound host heartbeat wakes router delays and still receives a pong", async (t) => {
+  const f = fixture(t);
+  let wakes = 0;
+  f.router.wake = () => wakes++;
+  const socket = await online(f);
+  socket.message({ ...f.binding(), type: "ping" });
+  await until(() => wakes === 1);
+  assert.equal(socket.sent.filter((value) => value.type === "pong").length, 1);
+});
+
 test("construction stays cold and the exact profile handshake precedes any atomic snapshots", async (t) => {
   const f = fixture(t);
   assert.deepEqual(f.getCounts, { local: 0, session: 0 });
