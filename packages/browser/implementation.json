@@ -658,7 +658,7 @@
       "target": "tab.playwright.domSnapshot",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-page-and-download-negative"]
+      "nativeCases": ["native-page-and-download-resource"]
     },
     {
       "id": "B074",
@@ -748,7 +748,7 @@
       "target": "tab.playwright.waitForEvent",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-filechooser", "native-page-and-download-negative"]
+      "nativeCases": ["native-filechooser", "native-page-and-download-resource"]
     },
     {
       "id": "B086",
@@ -1065,7 +1065,10 @@
       "nativeAcceptance": "not_run",
       "nativeCases": [
         "native-file-refs-waiters",
-        "native-page-and-download-negative"
+        "native-page-and-download-resource",
+        "native-download-other-tab",
+        "native-download-earlier-request",
+        "native-unmarked-blob-download"
       ]
     },
     {
@@ -1278,7 +1281,7 @@
       "nativeAcceptance": "not_run",
       "nativeCases": [
         "native-file-refs-waiters",
-        "native-page-and-download-negative"
+        "native-page-and-download-resource"
       ]
     },
     {
@@ -1938,7 +1941,7 @@
     }
   },
   "remaining": [
-    "原始浏览器下载GUID与本机文件的可靠身份绑定；当前MV3的path/saveDownload明确不可用，不能按URL/时间猜测或计为正向验收通过",
+    "已观察到的 HTTP 附件可按唯一标识关联原始下载；其他下载方式、异常及完整跨环境范围仍待验证，不能按 URL/时间猜测文件身份",
     "真实Chrome与Edge、macOS/Linux/Windows插件加载和用户环境接入",
     "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
     "高阶资产、站点导出、用户接管及可视化的完整真实环境、格式与失效路径验收",
@@ -2208,12 +2211,28 @@
     },
     "native-file-refs-waiters": {
       "file": "test/native-actions.acceptance.mjs",
-      "test": "native direct file refs and waiter cancellation keep real identities while download aliases reject unproven local files",
+      "test": "native direct file refs, owned download aliases and waiter cancellation keep real identities",
       "coverage": [
         "file_input",
         "waiter_cancelled",
-        "unproven_download_explicitly_rejected"
+        "http_download",
+        "save_download"
       ]
+    },
+    "native-unmarked-blob-download": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native unmarked Blob download is never mistaken for a controlled file",
+      "coverage": ["blob_unavailable", "browser_file_preserved"]
+    },
+    "native-download-other-tab": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native same-URL download in another tab keeps its normal filename",
+      "coverage": ["other_tab_preserved", "same_url", "different_bytes"]
+    },
+    "native-download-earlier-request": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native download started before a new wait keeps its original filename",
+      "coverage": ["earlier_request_preserved", "unproven_file_rejected"]
     },
     "native-dev-console-logs": {
       "file": "test/native-capabilities.acceptance.mjs",
@@ -2245,13 +2264,14 @@
       "test": "native declined, cancelled, expired and revoked continuations never renew browser control",
       "coverage": ["declined", "cancelled", "expired", "revoked"]
     },
-    "native-page-and-download-negative": {
+    "native-page-and-download-resource": {
       "file": "test/native.acceptance.mjs",
-      "test": "native MV3 provides page interaction and MCP JPEG while download file identity remains explicitly unavailable",
+      "test": "native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource",
       "coverage": [
         "actual_page",
         "mcp_jpeg",
-        "unproven_download_explicitly_rejected"
+        "download_resource",
+        "resource_read"
       ]
     },
     "native-google-docs-export": {

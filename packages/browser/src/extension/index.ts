@@ -875,19 +875,6 @@ const createExtension: ExtensionFactory = async (host) => {
             pathName === "tab.saveDownload"
           ) {
             if (value === null && pathName === "downloads.path") return null;
-            if (record(value) && Object.hasOwn(value, "data")) {
-              const artifact = await materializeArtifact(
-                value,
-                call,
-                paths.work,
-                {
-                  ...(typeof input.path === "string"
-                    ? { destination: input.path }
-                    : {}),
-                },
-              );
-              return pathName === "downloads.path" ? artifact.path : artifact;
-            }
             check(
               typeof value === "string",
               "PROTOCOL_MISMATCH",

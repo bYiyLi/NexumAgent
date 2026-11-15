@@ -770,7 +770,7 @@ test("native download started before a new wait keeps its original filename", as
   ]);
 });
 
-test("native Blob download becomes an MCP resource from the original page bytes", async (t) => {
+test("native unmarked Blob download is never mistaken for a controlled file", async (t) => {
   const expected = Buffer.alloc(100000, 31);
   const f = await nativeFixture(t, {
     html: `<!doctype html><title>Blob download</title>
@@ -786,20 +786,19 @@ test("native Blob download becomes an MCP resource from the original page bytes"
     const pending=tab.playwright.waitForDownload();
     await tab.playwright.getByRole('link',{name:'Download Blob'}).click();
     const download=await pending;
-    return output.file(await download.path(),{name:'blob.bin'});`,
+    let error;try{await download.path();}catch(cause){error=cause.code;}
+    return {error};`,
     { base: f.base },
   );
-  const rendered = await f.encoder.render(
-    view.result,
-    f.resultScope(),
-    view.run,
-  );
-  const link = rendered.content.find((item) => item.type === "resource_link");
-  assert.ok(link?.uri);
-  const resource = await f.encoder.readResource(link.uri, f.resultScope());
-  assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), expected);
-  assert.deepEqual(
-    readFileSync(path.join(f.root, "native-downloads", "blob.bin")),
-    expected,
-  );
+  assert.equal(view.result.data.error, "CAPABILITY_NOT_ALLOWED");
+  const filename = path.join(f.root, "native-downloads", "blob.bin");
+  let bytes;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      bytes = readFileSync(filename);
+      if (bytes.equals(expected)) break;
+    } catch {}
+    await delay(100);
+  }
+  assert.deepEqual(bytes, expected);
 });
