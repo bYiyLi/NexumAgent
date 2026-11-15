@@ -240,12 +240,51 @@ test("visual diagnostics correlate only a live lease and never log untrusted eve
     value: null,
   });
   assert.equal(await pending, null);
-  ready.send({
-    type: "lease_closed",
-    leaseId: "lease",
+  let nested = {};
+  for (let index = 0; index < 70; index++) nested = { child: nested };
+  const closed = once(peer.socket, "close", {
+    signal: AbortSignal.timeout(5000),
+  });
+  ready.send({ ...message, sequence: 4, reason: "VISUAL_TIMEOUT", nested });
+  await closed;
+  assert.equal(
+    diagnostics.length,
+    2,
+    "an invalid frame must not create a visual log",
+  );
+});
+
+test("closing a disconnected peer completes service cleanup without confirming its lease", async (t) => {
+  const f = await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f),
+    ready = await peer.ready(),
+    browser = f.service.get(ready.browserId);
+  let confirmedClosed = false;
+  const opened = f.service.openLease(browser, {
+    id: "lease",
     runId: "run-one",
     operationId: "operation-one",
+    target: ready.target,
+    signal: new AbortController().signal,
+    onClosed() {
+      confirmedClosed = true;
+    },
   });
+  const open = await peer.next("lease_open");
+  ready.send({
+    type: "lease_opened",
+    leaseId: open.leaseId,
+    runId: open.runId,
+    operationId: open.operationId,
+  });
+  await opened;
+  browser.socket.terminate();
+  assert.notEqual(browser.socket.readyState, WebSocket.OPEN);
+  await f.service.endLease("lease");
+  await f.service.dispose();
+  await f.service.closed;
+  assert.equal(confirmedClosed, false);
 });
 
 test("cold disposal, native listening, exact extension Origin and complete atomic snapshots", async (t) => {

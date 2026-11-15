@@ -774,6 +774,7 @@ export class BrowserService extends EventEmitter {
         "PROTOCOL_MISMATCH",
         "Browser event sequence is stale.",
       );
+      const event = data(message, limits.controlBytes);
       peer.sequence = Number(message.sequence);
       if (
         message.event === "tab_closed" &&
@@ -833,7 +834,7 @@ export class BrowserService extends EventEmitter {
           }
         }
       }
-      this.emit("browser-event", peer, data(message, limits.controlBytes));
+      this.emit("browser-event", peer, event);
       return;
     }
     check(
@@ -1213,20 +1214,24 @@ export class BrowserService extends EventEmitter {
       input.signal.removeEventListener("abort", aborted);
     }
   }
-  endLease(id: string): Promise<void> {
+  async endLease(id: string): Promise<void> {
     const lease = this.#leases.get(id);
-    if (!lease) return Promise.resolve();
+    if (!lease) return;
     const peer = this.#peers.get(lease.peer.id);
     if (!peer || peer.browserSessionId !== lease.peer.browserSessionId)
-      return Promise.resolve();
-    return this.#send(peer, {
-      v: 1,
-      type: "lease_end",
-      leaseId: id,
-      runId: lease.runId,
-      operationId: lease.operationId,
-      originalGeneration: lease.generation,
-    }).catch(() => {});
+      return;
+    try {
+      await this.#send(peer, {
+        v: 1,
+        type: "lease_end",
+        leaseId: id,
+        runId: lease.runId,
+        operationId: lease.operationId,
+        originalGeneration: lease.generation,
+      });
+    } catch {
+      // A failed send does not establish that the browser released control.
+    }
   }
   dispose(): Promise<void> {
     if (this.#disposing) return this.#disposing;
