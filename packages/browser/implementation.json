@@ -336,7 +336,8 @@
       "id": "B031",
       "target": "tab.goBack",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B032",
@@ -348,7 +349,8 @@
       "id": "B033",
       "target": "tab.forward",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B034",
@@ -361,7 +363,8 @@
       "id": "B035",
       "target": "tab.navigate",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B036",
@@ -379,7 +382,8 @@
       "id": "B038",
       "target": "tab.reload",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B039",
@@ -410,7 +414,8 @@
       "id": "B043",
       "target": "tab.url",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B044",
@@ -484,7 +489,8 @@
       "id": "B055",
       "target": "tab.content.export",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B056",
@@ -514,7 +520,8 @@
       "id": "B060",
       "target": "tab.cua.downloadMedia",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B061",
@@ -563,7 +570,8 @@
       "id": "B068",
       "target": "tab.dom.downloadMedia",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B069",
@@ -600,14 +608,20 @@
       "target": "tab.playwright.elementInfo",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-element-screenshot-scroll"]
+      "nativeCases": [
+        "native-element-screenshot-scroll",
+        "native-media-navigation"
+      ]
     },
     {
       "id": "B075",
       "target": "tab.playwright.elementScreenshot",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-element-screenshot-scroll"]
+      "nativeCases": [
+        "native-element-screenshot-scroll",
+        "native-media-navigation"
+      ]
     },
     {
       "id": "B076",
@@ -619,7 +633,8 @@
       "id": "B077",
       "target": "tab.playwright.expectNavigation",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B078",
@@ -631,25 +646,29 @@
       "id": "B079",
       "target": "tab.playwright.getByLabel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B080",
       "target": "tab.playwright.getByPlaceholder",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B081",
       "target": "tab.playwright.getByRole",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B082",
       "target": "tab.playwright.getByTestId",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B083",
@@ -662,7 +681,8 @@
       "id": "B084",
       "target": "tab.playwright.locator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B085",
@@ -674,7 +694,8 @@
       "id": "B086",
       "target": "tab.playwright.waitForLoadState",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B087",
@@ -698,251 +719,281 @@
       "id": "B090",
       "target": "frame.getByLabel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B091",
       "target": "frame.getByPlaceholder",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B092",
       "target": "frame.getByRole",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B093",
       "target": "frame.getByTestId",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B094",
       "target": "frame.getByText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B095",
       "target": "frame.locator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B096",
       "target": "locator.all",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B097",
       "target": "locator.allTextContents",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B098",
       "target": "locator.and",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B099",
       "target": "locator.check",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B100",
       "target": "locator.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-held"]
     },
     {
       "id": "B101",
       "target": "locator.count",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B102",
       "target": "locator.dblclick",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B103",
       "target": "locator.downloadMedia",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "B104",
       "target": "locator.evaluate",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B105",
       "target": "locator.evaluateAll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B106",
       "target": "locator.fill",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B107",
       "target": "locator.filter",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-text-matching"]
+      "nativeCases": ["native-text-matching", "native-locator-operations"]
     },
     {
       "id": "B108",
       "target": "locator.first",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B109",
       "target": "locator.getAttribute",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-held"]
     },
     {
       "id": "B110",
       "target": "locator.getByLabel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B111",
       "target": "locator.getByPlaceholder",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B112",
       "target": "locator.getByRole",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B113",
       "target": "locator.getByTestId",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B114",
       "target": "locator.getByText",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-text-matching"]
+      "nativeCases": ["native-text-matching", "native-locator-frame-scope"]
     },
     {
       "id": "B115",
       "target": "locator.innerText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B116",
       "target": "locator.isEnabled",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-disabled-controls"]
+      "nativeCases": ["native-disabled-controls", "native-locator-operations"]
     },
     {
       "id": "B117",
       "target": "locator.isVisible",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B118",
       "target": "locator.last",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B119",
       "target": "locator.locator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "B120",
       "target": "locator.nth",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B121",
       "target": "locator.or",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B122",
       "target": "locator.press",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B123",
       "target": "locator.pressSequentially",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B124",
       "target": "locator.selectOption",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B125",
       "target": "locator.setChecked",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B126",
       "target": "locator.textContent",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B127",
       "target": "locator.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-operations"]
     },
     {
       "id": "B128",
       "target": "locator.uncheck",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-held"]
     },
     {
       "id": "B129",
       "target": "locator.waitFor",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-positions"]
+      "nativeCases": ["native-locator-positions", "native-locator-operations"]
     },
     {
       "id": "B130",
@@ -1076,13 +1127,15 @@
       "id": "X002",
       "target": "tab.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "X003",
       "target": "tab.fill",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "X004",
@@ -1094,7 +1147,8 @@
       "id": "X005",
       "target": "tab.selectOption",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "X006",
@@ -1475,7 +1529,8 @@
       "id": "X064",
       "target": "tab.contentExport",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-media-navigation"]
     },
     {
       "id": "X065",
@@ -1529,13 +1584,15 @@
       "id": "X073",
       "target": "frame.snapshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X074",
       "target": "frame.click",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X075",
@@ -1547,49 +1604,57 @@
       "id": "X076",
       "target": "frame.locator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X077",
       "target": "frame.frameLocator",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X078",
       "target": "frame.getByLabel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X079",
       "target": "frame.getByPlaceholder",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X080",
       "target": "frame.getByRole",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X081",
       "target": "frame.getByTestId",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X082",
       "target": "frame.getByText",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X083",
       "target": "frame.waitFor",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-frame-scope"]
     },
     {
       "id": "X084",
@@ -1886,6 +1951,45 @@
         "text_filter",
         "result",
         "cleanup"
+      ]
+    },
+    "native-locator-operations": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native Locator queries, combinations, keyboard, checkbox and selection change actual DOM state",
+      "coverage": [
+        "normal",
+        "dom_mutation",
+        "keyboard",
+        "checkbox",
+        "selection",
+        "result"
+      ]
+    },
+    "native-locator-held": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native registered Locator state/metadata and held all() refs remain accurate through actual keyboard and DOM mutations",
+      "coverage": [
+        "normal",
+        "fixed_refs",
+        "reordered_nodes",
+        "stale_ref",
+        "result"
+      ]
+    },
+    "native-locator-frame-scope": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native descendant Locator and Frame query families retain their actual scope across nested documents",
+      "coverage": ["normal", "scoped_locator", "nested_frame", "result"]
+    },
+    "native-media-navigation": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native fixed refs, element geometry and three media entry points use actual image bytes and reject replaced observations",
+      "coverage": [
+        "normal",
+        "actual_media_bytes",
+        "stale_ref",
+        "navigation",
+        "result"
       ]
     }
   }
