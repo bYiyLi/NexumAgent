@@ -2082,6 +2082,26 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
   assert.equal(unrelatedSuggestion, undefined);
 
   f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "previously-in-flight",
+    responseStatusCode: 200,
+    request: { url: "https://example.com/old.bin" },
+    responseHeaders: [
+      { name: "Content-Disposition", value: "attachment; filename=old.bin" },
+    ],
+  });
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "attachment",
+    request: { url: "https://example.com/report.bin" },
+  });
+  await delay(0);
+  assert.ok(
+    f.calls.some(
+      (call) =>
+        call[2] === "Fetch.continueRequest" &&
+        call[3].requestId === "previously-in-flight",
+    ),
+  );
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
     requestId: "attachment",
     responseStatusCode: 200,
     request: { url: "https://example.com/report.bin" },
@@ -2224,6 +2244,11 @@ test("a duplicated marked identity is never used to read either browser file", a
   f.open("lease");
   await f.call("waiters.arm", { event: "download", timeoutMs: 1000 });
   const source = { tabId: 1 };
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "attachment",
+    request: { url: "https://example.com/report.bin" },
+  });
+  await delay(0);
   f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
     requestId: "attachment",
     responseStatusCode: 200,

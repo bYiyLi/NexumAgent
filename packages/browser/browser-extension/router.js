@@ -1767,6 +1767,7 @@ export function createBrowserRouter(
           await chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {});
           managed.delete(tabId);
           uncertain.delete(tabId);
+          lease.downloadRequests?.delete(tabId);
         }
         const wanted =
           !lease.ended &&
@@ -1784,7 +1785,10 @@ export function createBrowserRouter(
           managed.add(tabId);
           try {
             await chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
-              patterns: [{ urlPattern: "*", requestStage: "Response" }],
+              patterns: [
+                { urlPattern: "*", requestStage: "Request" },
+                { urlPattern: "*", requestStage: "Response" },
+              ],
             });
           } catch (cause) {
             uncertain.add(tabId);
@@ -1801,6 +1805,7 @@ export function createBrowserRouter(
             throw cause;
           }
           managed.delete(tabId);
+          lease.downloadRequests?.delete(tabId);
         }
       });
     queues.set(tabId, task);
@@ -1827,8 +1832,30 @@ export function createBrowserRouter(
           waiter.ready &&
           !waiter.settled,
       );
+      const requests = (lease.downloadRequests ??= new Map());
+      if (!requests.has(tabId)) requests.set(tabId, new Set());
+      const eligible = requests.get(tabId);
+      if (
+        params.responseStatusCode === undefined &&
+        !params.responseErrorReason
+      ) {
+        // A response already in flight before arm-ready cannot be attributed
+        // to the new wait. Observe both stages without changing the request.
+        if (
+          waiting &&
+          typeof params.requestId === "string" &&
+          eligible.size < 2048
+        )
+          eligible.add(params.requestId);
+        await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", {
+          requestId: params.requestId,
+        });
+        return;
+      }
+      const observedRequest = eligible.delete(params.requestId);
       if (
         waiting &&
+        observedRequest &&
         !lease.ended &&
         !lease.revoked &&
         Number.isInteger(params.responseStatusCode) &&
@@ -2079,6 +2106,7 @@ export function createBrowserRouter(
     lease.fileChoosers.delete(tabId);
     lease.downloadIntercept?.delete(tabId);
     lease.downloadUncertain?.delete(tabId);
+    lease.downloadRequests?.delete(tabId);
     lease.rawFetch?.delete(tabId);
     for (const [marker, mark] of downloadMarks)
       if (mark.leaseId === lease.id && mark.tabId === tabId)
