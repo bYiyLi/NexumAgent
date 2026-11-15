@@ -235,7 +235,9 @@ test("real binary responses hydrate only after full validation and malformed res
     ready = await peer.ready();
   snapshot(peer, ready);
   await until(() => f.service.get(ready.browserId).tabsReady);
-  const pending = action(f.service, ready),
+  // This test transfers a 2 MiB response; the short timeout belongs to the
+  // dedicated deadline test below, not to binary integrity validation.
+  const pending = action(f.service, ready, { budgetMs: 10000 }),
     request = await peer.next("action"),
     packed = pack(
       { bytes: Buffer.alloc(2 * 1024 * 1024, 21) },
@@ -262,7 +264,7 @@ test("real binary responses hydrate only after full validation and malformed res
   const result = await pending;
   assert.equal(result.bytes.length, 2 * 1024 * 1024);
   assert.equal(result.bytes[0], 21);
-  const broken = action(f.service, ready),
+  const broken = action(f.service, ready, { budgetMs: 10000 }),
     second = await peer.next("action");
   ready.send({
     type: "action_result",

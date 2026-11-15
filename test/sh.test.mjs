@@ -680,11 +680,20 @@ test("unknown incomplete backend output remains unconfirmed despite native closu
       ),
       waitMs: 0,
     });
+    // First observe actual OS/backend closure. On a busy Windows runner the
+    // helper can still be draining after the root process has exited.
+    const closedFacts = await until(
+      () => (observedBackend ? facts.call(observedBackend) : undefined),
+      (value) => value?.closed === true,
+      20000,
+    );
+    assert.equal(closedFacts.treeStopped, true);
     row = await until(
       () => f.store.resourcesForRun(accepted.run.runId)[0],
       (value) =>
         value?.diagnostic.details?.failure?.code ===
         "process_cleanup_unconfirmed",
+      10000,
     );
     await observedBackend.closed;
     assert.equal(facts.call(observedBackend).closed, true);
