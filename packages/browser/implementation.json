@@ -1069,7 +1069,8 @@
         "native-download-other-tab",
         "native-download-earlier-request",
         "native-local-blob-resource",
-        "native-local-data-resource"
+        "native-local-data-resource",
+        "native-generated-download-resource"
       ]
     },
     {
@@ -2233,6 +2234,15 @@
       "file": "test/native-actions.acceptance.mjs",
       "test": "native data URL download keeps its identity and becomes an MCP resource",
       "coverage": ["data_url_download", "actual_resource"]
+    },
+    "native-generated-download-resource": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native direct HTTP links and synchronously generated Blob links retain their own downloads",
+      "coverage": [
+        "http_without_disposition",
+        "synchronous_blob",
+        "actual_resource"
+      ]
     },
     "native-download-other-tab": {
       "file": "test/native-actions.acceptance.mjs",

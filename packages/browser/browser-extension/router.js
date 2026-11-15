@@ -158,18 +158,30 @@ function manageLocalDownloadClick(input) {
     return false;
   const state = { marker: input.marker, expires: input.expiresAt };
   state.listener = (event) => {
-    if (!event.isTrusted) return;
-    document.removeEventListener("click", state.listener, true);
-    clearTimeout(state.timer);
-    if (globalThis[slot] === state) delete globalThis[slot];
-    if (Date.now() > state.expires) return;
+    if (Date.now() > state.expires) {
+      document.removeEventListener("click", state.listener, true);
+      clearTimeout(state.timer);
+      if (globalThis[slot] === state) delete globalThis[slot];
+      return;
+    }
+    if (event.isTrusted) {
+      // A page may synchronously click a generated link from the actual AI
+      // click handler; do not attribute unrelated later synthetic clicks.
+      state.trustedClick = true;
+      setTimeout(() => {
+        state.trustedClick = false;
+      }, 0);
+    } else if (!state.trustedClick) return;
     const anchor = event
       .composedPath()
       .find(
         (node) =>
           node instanceof HTMLAnchorElement && node.hasAttribute("download"),
       );
-    if (!anchor || !/^(?:blob:|data:)/i.test(anchor.href)) return;
+    if (!anchor || !/^(?:https?:|blob:|data:)/i.test(anchor.href)) return;
+    document.removeEventListener("click", state.listener, true);
+    clearTimeout(state.timer);
+    if (globalThis[slot] === state) delete globalThis[slot];
     const original = anchor.getAttribute("download"),
       safe =
         (original || "download")

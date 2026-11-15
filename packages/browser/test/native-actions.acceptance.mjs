@@ -847,3 +847,66 @@ test("native data URL download keeps its identity and becomes an MCP resource", 
     expected,
   );
 });
+
+test("native direct HTTP links and synchronously generated Blob links retain their own downloads", async (t) => {
+  const httpBytes = Buffer.alloc(80000, 45),
+    blobBytes = Buffer.alloc(90000, 73);
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>More downloads</title>
+      <a href="/no-header" download="http.bin">Download HTTP</a>
+      <button id="export">Generate Blob</button>
+      <script>
+        document.querySelector('#export').addEventListener('click', () => {
+          const anchor = document.createElement('a');
+          anchor.href = URL.createObjectURL(new Blob([new Uint8Array(90000).fill(73)], {type:'application/octet-stream'}));
+          anchor.download = 'generated.bin';
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+        });
+      </script>`,
+    handleRequest(request, response) {
+      if (request.url !== "/no-header") return false;
+      response.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": httpBytes.length,
+      });
+      response.end(httpBytes);
+      return true;
+    },
+  });
+  for (const item of [
+    {
+      role: "link",
+      label: "Download HTTP",
+      name: "http.bin",
+      bytes: httpBytes,
+    },
+    {
+      role: "button",
+      label: "Generate Blob",
+      name: "generated.bin",
+      bytes: blobBytes,
+    },
+  ]) {
+    const view = await f.run(
+      select +
+        `const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole(context.input.role,{name:context.input.label}).click();const download=await pending;return output.file(await download.path(),{name:context.input.name});`,
+      { base: f.base, role: item.role, label: item.label, name: item.name },
+    );
+    const rendered = await f.encoder.render(
+      view.result,
+      f.resultScope(),
+      view.run,
+    );
+    const link = rendered.content.find(
+      (content) => content.type === "resource_link",
+    );
+    assert.ok(link?.uri);
+    const resource = await f.encoder.readResource(link.uri, f.resultScope());
+    assert.deepEqual(
+      Buffer.from(resource.contents[0].blob, "base64"),
+      item.bytes,
+    );
+  }
+});
