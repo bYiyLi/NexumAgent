@@ -855,7 +855,8 @@
       "id": "B116",
       "target": "locator.isEnabled",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-disabled-controls"]
     },
     {
       "id": "B117",
@@ -1852,6 +1853,20 @@
         "order",
         "union_document_order",
         "union_deduplication",
+        "result",
+        "cleanup"
+      ]
+    },
+    "native-disabled-controls": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native enabled state respects fieldsets and inherited aria without dispatching disabled actions",
+      "coverage": [
+        "native_fieldset",
+        "fieldset_legend_exception",
+        "inherited_aria",
+        "explicit_aria_override",
+        "disabled_action",
+        "state_change",
         "result",
         "cleanup"
       ]

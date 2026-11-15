@@ -73,6 +73,38 @@ const interactive = `<!doctype html><html><head><title>Native action families</t
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
 <script>const pad=document.querySelector('#pad');pad.onpointerdown=event=>{pad.setPointerCapture(event.pointerId);pad.dataset.start=event.clientX;};pad.onpointerup=event=>{pad.dataset.end=event.clientX;pad.dataset.drags=String(Number(pad.dataset.drags||0)+1);};</script></body></html>`;
 
+test("native enabled state respects fieldsets and inherited aria without dispatching disabled actions", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Native disabled controls</title>
+      <fieldset id="fieldset" disabled><legend><button id="legend">Legend exception</button></legend><input id="field"><button id="native">Disabled native</button></fieldset>
+      <div id="group" aria-disabled="TRUE"><button id="aria">Disabled aria</button><button id="override" aria-disabled="false">Explicitly enabled</button></div>
+      <button id="ordinary">Ordinary enabled</button>
+      <script>window.receipts={native:0,aria:0,override:0};for(const id of Object.keys(receipts))document.getElementById(id).onclick=()=>receipts[id]++;</script>`,
+  });
+  const view = await f.run(
+    select +
+      `const locator=id=>tab.playwright.locator('#'+id);
+const ids=['legend','field','native','aria','override','ordinary'];
+const before=[];for(const id of ids)before.push(await locator(id).isEnabled());
+const blocked=[];for(const id of ['native','aria']){let code=null;try{await locator(id).click({timeoutMs:350});}catch(error){code=error.code;}blocked.push(code);}
+const afterBlocked=await tab.evaluate('window.receipts');
+await locator('override').click({timeoutMs:2000});
+await tab.evaluate("()=>{document.querySelector('#fieldset').disabled=false;document.querySelector('#group').setAttribute('aria-disabled','false');return true;}");
+const after=[await locator('field').isEnabled(),await locator('native').isEnabled(),await locator('aria').isEnabled()];
+await locator('native').click({timeoutMs:2000});await locator('aria').click({timeoutMs:2000});
+return {before,blocked,afterBlocked,after,receipts:await tab.evaluate('window.receipts')};`,
+    { base: f.base },
+  );
+  assert.deepEqual(view.result.data, {
+    before: [true, false, false, false, true, true],
+    blocked: ["TIMEOUT", "TIMEOUT"],
+    afterBlocked: { native: 0, aria: 0, override: 0 },
+    after: [true, true, true],
+    receipts: { native: 1, aria: 1, override: 1 },
+  });
+  assert.deepEqual(view.run.cleanup.unconfirmed, []);
+});
+
 test("native requested click positions are hit-tested at the dispatched point and cannot click an overlay", async (t) => {
   const f = await nativeFixture(t, {
     html: `<!doctype html><title>Native requested click position</title><style>body{margin:0}#target{position:absolute;left:100px;top:100px;width:200px;height:100px;border:0;padding:0}#corner{position:absolute;left:100px;top:100px;width:50px;height:40px;z-index:2}#center{position:absolute;left:175px;top:135px;width:50px;height:30px;z-index:2}</style><button id="target">Observed positioned target</button><button id="corner">Corner cover</button><button id="center" hidden>Center cover</button><script>

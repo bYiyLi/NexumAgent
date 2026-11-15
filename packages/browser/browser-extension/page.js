@@ -64,8 +64,21 @@ export async function pageCommand(input) {
         rect.height > 0
       );
     };
-    const enabled = (node) =>
-      !node.disabled && node.getAttribute("aria-disabled") !== "true";
+    const enabled = (node) => {
+      // The native pseudo-class includes controls disabled by a fieldset or
+      // optgroup, even when their own `disabled` property remains false.
+      if (node.disabled || node.matches?.(":disabled")) return false;
+      for (
+        let current = node;
+        current;
+        current = current.parentElement ?? current.getRootNode?.()?.host ?? null
+      ) {
+        const state = current.getAttribute("aria-disabled")?.toLowerCase();
+        if (state === "true") return false;
+        if (state === "false") return true;
+      }
+      return true;
+    };
     const roleExposed = (node) => {
       const style = getComputedStyle(node);
       if (["hidden", "collapse"].includes(style.visibility)) return false;

@@ -1394,6 +1394,57 @@ test("locator unions retain document order and remove duplicates", async () => {
   });
 });
 
+test("locator enabled state includes native and inherited aria disabled state", async () => {
+  const element = ({
+    nativeDisabled = false,
+    ownDisabled = false,
+    aria = null,
+    parent = null,
+  } = {}) => ({
+    disabled: ownDisabled,
+    parentElement: parent,
+    closest: () => null,
+    matches: (selector) => selector === ":disabled" && nativeDisabled,
+    getAttribute: (name) => (name === "aria-disabled" ? aria : null),
+    getRootNode: () => ({}),
+  });
+  const disabledGroup = element({ aria: "TRUE" });
+  const cases = {
+    "#fieldset-input": [element({ nativeDisabled: true })],
+    "#aria-child": [element({ parent: disabledGroup })],
+    "#aria-override": [element({ aria: "false", parent: disabledGroup })],
+    "#ordinary": [element()],
+  };
+  const context = vm.createContext({
+    document: { querySelectorAll: (selector) => cases[selector] || [] },
+    crypto,
+    TextEncoder,
+    Uint8Array,
+  });
+  for (const [selector, expected] of [
+    ["#fieldset-input", false],
+    ["#aria-child", false],
+    ["#aria-override", true],
+    ["#ordinary", true],
+  ]) {
+    const input = {
+      command: "isEnabled",
+      pageVersion: 1,
+      leaseId: "disabled-regression",
+      locator: { query: { kind: "selector", selector } },
+    };
+    const actual = JSON.parse(
+      JSON.stringify(
+        await vm.runInContext(
+          `(${pageCommand.toString()})(${JSON.stringify(input)})`,
+          context,
+        ),
+      ),
+    );
+    assert.deepEqual(actual, { ok: true, value: expected }, selector);
+  }
+});
+
 test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
   for (const pixelRatio of [0.5, 1, 1.25, 2]) {
     const f = fixture(t, { devicePixelRatio: pixelRatio });
