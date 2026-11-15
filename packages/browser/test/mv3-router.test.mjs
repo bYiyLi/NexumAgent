@@ -1922,6 +1922,193 @@ test("native keyboard chords release only their own keys after cancellation and 
   assert.equal(f.attached.size, 0);
 });
 
+function axTextFixture(t) {
+  const f = fixture(t);
+  let name = "Original action",
+    value = "Original value",
+    nodes,
+    capture;
+  const native = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Accessibility.getFullAXTree")
+      return {
+        nodes: nodes ?? [
+          {
+            nodeId: "root",
+            backendDOMNodeId: 10,
+            role: { value: "RootWebArea" },
+          },
+          {
+            nodeId: "button",
+            backendDOMNodeId: 20,
+            role: { value: "button" },
+            name: { value: name },
+          },
+          {
+            nodeId: "input",
+            backendDOMNodeId: 30,
+            role: { value: "textbox" },
+            name: { value: "Observed value" },
+            value: { value },
+          },
+          ...Array.from({ length: 10 }, (_, index) => ({
+            nodeId: "stable" + index,
+            backendDOMNodeId: 100 + index,
+            role: { value: "StaticText" },
+            name: { value: `Stable observation ${index}` },
+          })),
+        ],
+      };
+    if (method === "Page.captureScreenshot" && capture) await capture();
+    return native(source, method, params);
+  };
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  return {
+    ...f,
+    change(next) {
+      if (Object.hasOwn(next, "name")) name = next.name;
+      if (Object.hasOwn(next, "value")) value = next.value;
+      if (Object.hasOwn(next, "nodes")) nodes = next.nodes;
+      if (Object.hasOwn(next, "capture")) capture = next.capture;
+    },
+  };
+}
+
+test("AX text compares native values, keeps per-tab baselines and starts a full state after document or lease changes", async (t) => {
+  const f = axTextFixture(t);
+  const first = await f.call("ax.get");
+  assert.match(await f.call("ax.get"), /No accessibility changes\./);
+  assert.match(first, /Title: "One"/);
+  assert.match(first, /Original value/);
+  f.change({ name: "Changed action", value: "Changed value" });
+  await f.call("ax.get", { mode: "screenshot" });
+  await f.call("ax.snapshot");
+  const delta = await f.call("ax.get");
+  assert.match(delta, /^AX diff\n/);
+  assert.match(delta, /Changed:\n~/);
+  assert.match(delta, /Changed action/);
+  assert.match(delta, /Changed value/);
+  assert.doesNotMatch(delta, /Stable observation/);
+  assert.match(
+    await f.call("ax.get", { options: { disableDiffing: true } }),
+    /^AX full\n/,
+  );
+  const observed = await f.chrome.debugger.sendCommand(
+    { tabId: 1 },
+    "Accessibility.getFullAXTree",
+    {},
+  );
+  f.change({ nodes: [...observed.nodes].reverse() });
+  assert.match(
+    await f.call("ax.get"),
+    /^AX full\n/,
+    "A reordered native observation must not become a false unchanged tree.",
+  );
+  f.open("lease", "2");
+  assert.match(await f.call("ax.get", {}, { id: "2" }), /^AX full\n/);
+  assert.match(await f.call("ax.get"), /No accessibility changes\./);
+  f.chrome.webNavigation.onCommitted.emit({
+    tabId: 1,
+    frameId: 0,
+    documentId: "fresh-AX-document",
+    url: "https://example.com/next",
+  });
+  assert.match(await f.call("ax.get"), /^AX full\n/);
+  await f.router.endLease("lease");
+  f.open("next");
+  assert.match(await f.call("ax.get", {}, { leaseId: "next" }), /^AX full\n/);
+  f.change({ nodes: [] });
+  await f.call("ax.get", {}, { leaseId: "next" });
+  assert.match(
+    await f.call("ax.get", {}, { leaseId: "next" }),
+    /No accessibility changes\./,
+    "An empty native tree still reports an unchanged observation explicitly.",
+  );
+});
+
+test("failed, cancelled, expired and stale combined AX observations never consume the previous text baseline", async (t) => {
+  for (const mode of ["failed", "cancelled", "expired", "stale"])
+    await t.test(mode, async (t) => {
+      const f = axTextFixture(t);
+      await f.call("ax.get");
+      const stop = new AbortController();
+      f.change({
+        name: "Not yet observed action",
+        async capture() {
+          if (mode === "failed") throw new Error("Native capture failed");
+          if (mode === "cancelled") stop.abort(new Error("Capture cancelled"));
+          if (mode === "expired") await delay(20);
+          if (mode === "stale")
+            f.chrome.webNavigation.onCommitted.emit({
+              tabId: 1,
+              frameId: 0,
+              documentId: "replaced-during-capture",
+              url: "https://example.com/replaced",
+            });
+        },
+      });
+      await assert.rejects(
+        f.call(
+          "ax.get",
+          { mode: "both" },
+          { signal: stop.signal, budgetMs: mode === "expired" ? 5 : 1000 },
+        ),
+        mode === "stale"
+          ? { code: "STALE_REF" }
+          : mode === "expired"
+            ? { code: "TIMEOUT" }
+            : mode === "failed"
+              ? /Native capture failed/
+              : /Capture cancelled/,
+      );
+      const next = await f.call("ax.get");
+      assert.match(next, mode === "stale" ? /^AX full\n/ : /^AX diff\n/);
+      assert.match(next, /Not yet observed action/);
+    });
+});
+
+test("AX text rejects oversized values and truncated trees without advancing its bounded baseline cache", async (t) => {
+  const f = axTextFixture(t);
+  await f.call("ax.get");
+  f.change({ value: "x".repeat(60001) });
+  await assert.rejects(f.call("ax.get"), { code: "OUTPUT_TOO_LARGE" });
+  f.change({ value: "Original value" });
+  assert.match(await f.call("ax.get"), /No accessibility changes\./);
+  f.change({
+    nodes: Array.from({ length: 20 }, (_, index) => ({
+      nodeId: String(index),
+      backendDOMNodeId: 1000 + index,
+      role: { value: "StaticText" },
+      name: { value: "x".repeat(4000) },
+    })),
+  });
+  await assert.rejects(f.call("ax.get"), { code: "OUTPUT_TOO_LARGE" });
+  f.change({ nodes: undefined });
+  assert.match(await f.call("ax.get"), /No accessibility changes\./);
+  for (let index = 0; index < 16; index++) {
+    const created = await f.call(
+      "tabs.new",
+      { url: `https://example.com/baseline-${index}` },
+      { id: null },
+    );
+    f.open("lease", created.id);
+    await f.router.dispatch({
+      ...binding,
+      actionId: crypto.randomUUID(),
+      operationId: crypto.randomUUID(),
+      runId: "lease",
+      leaseId: "lease",
+      method: "ax.get",
+      target: created.target,
+      args: {},
+      budgetMs: 1000,
+    });
+  }
+  assert.match(await f.call("ax.get"), /^AX full\n/);
+});
+
 test("native AX indices retain the exact backend node and document and never rebind old numeric observations", async (t) => {
   const f = fixture(t);
   f.router.start();

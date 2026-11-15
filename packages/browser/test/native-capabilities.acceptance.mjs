@@ -8,6 +8,120 @@ const html = `<!doctype html><html><head><title>Nexum native capabilities</title
 </body></html>`;
 
 const dimensions = `() => ({width:innerWidth,height:innerHeight})`;
+const axDiffHtml =
+  '<!doctype html><title>Native AX diffs</title><label for="field">Delta field</label><input id="field" value="Before_value"><button id="change">Before native action</button><p id="remove">Removed native content</p>' +
+  Array.from(
+    { length: 12 },
+    (_, index) =>
+      `<p>Stable native paragraph ${index} with unchanged context.</p>`,
+  ).join("");
+
+test(
+  "native AX text emits scoped bounded diffs and screenshots preserve its observation baseline",
+  { timeout: 90000 },
+  async (t) => {
+    const f = await nativeFixture(t, { html: axDiffHtml });
+    const result = await f.run(
+      select +
+        `
+const first=await tab.ax.get(),unchanged=await tab.ax.get();
+await tab.playwright.getByLabel('Delta field').fill('After_value');
+await tab.playwright.evaluate('() => {document.querySelector("#change").textContent="After native action";document.querySelector("#remove").remove();const button=document.createElement("button");button.textContent="Added native action";document.body.append(button);return true;}');
+const screenshot=await tab.ax.get('screenshot');await tab.ax.snapshot();
+const delta=await tab.ax.get(),full=await tab.ax.get('state',{disableDiffing:true}),afterFull=await tab.ax.get();
+const both=await tab.ax.get('both');
+const other=await selected.tabs.new(context.input.base+'other',{active:false});await other.playwright.waitForURL(context.input.base+'other');await other.playwright.waitForLoadState({state:'load',timeoutMs:5000});
+const otherState=await other.ax.get(),originalState=await tab.ax.get();await other.close();
+await tab.navigate(context.input.base+'next',{waitUntil:'load'});const navigated=await tab.ax.get();
+return {first,unchanged,delta,full,afterFull,bothState:both.state,screenshotLength:screenshot.length,bothImageLength:both.screenshot.length,otherState,originalState,navigated};`,
+      { base: f.base },
+    );
+    const data = result.result.data;
+    assert.match(data.first, /^AX full\n/);
+    assert.ok(data.first.includes(`URL: ${JSON.stringify(f.base)}`));
+    assert.match(data.first, /Title: "Native AX diffs"/);
+    assert.match(data.first, /Before_value/);
+    assert.match(data.unchanged, /No accessibility changes\./);
+    assert.match(data.delta, /^AX diff\n/);
+    assert.match(data.delta, /Removed:\n-/);
+    assert.match(data.delta, /Added:\n\+/);
+    assert.match(data.delta, /Changed:\n~/);
+    assert.match(data.delta, /After native action/);
+    assert.match(data.delta, /Added native action/);
+    assert.match(data.delta, /Removed native content/);
+    assert.match(data.delta, /After_value/);
+    assert.ok(data.delta.length < data.full.length);
+    assert.match(data.full, /^AX full\n/);
+    assert.match(data.full, /Stable native paragraph 11/);
+    assert.doesNotMatch(data.full, /Removed native content/);
+    for (const state of [data.afterFull, data.bothState, data.originalState])
+      assert.match(state, /No accessibility changes\./);
+    for (const size of [data.screenshotLength, data.bothImageLength])
+      assert.ok(size > 100);
+    for (const state of [data.otherState, data.navigated]) {
+      assert.match(state, /^AX full\n/);
+      assert.match(state, /Before native action/);
+      assert.match(state, /Before_value/);
+    }
+    assert.ok(data.navigated.includes(JSON.stringify(f.base + "next")));
+    const nextRun = await f.run(select + "return await tab.ax.get();", {
+      base: f.base + "next",
+    });
+    assert.match(nextRun.result.content[0].text, /^AX full\n/);
+    assert.deepEqual(result.run.cleanup.unconfirmed, []);
+    assert.deepEqual(nextRun.run.cleanup.unconfirmed, []);
+    t.diagnostic(
+      JSON.stringify({
+        fullBytes: Buffer.byteLength(data.full),
+        diffBytes: Buffer.byteLength(data.delta),
+        screenshots: [data.screenshotLength, data.bothImageLength],
+        freshRun: nextRun.run.status,
+      }),
+    );
+  },
+);
+
+test(
+  "native AX write delivers real state diffs and honors forced full and combined image modes",
+  { timeout: 60000 },
+  async (t) => {
+    const f = await nativeFixture(t, { html: axDiffHtml });
+    for (const mode of ["state", "both", "forced"]) {
+      const view = await f.run(
+        select +
+          `
+await tab.ax.get();await tab.playwright.getByLabel('Delta field').fill('Written_'+context.input.mode);
+if(context.input.mode==='forced')return await tab.ax.write('state',{disableDiffing:true});
+return await tab.ax.write(context.input.mode);`,
+        { base: f.base, mode },
+      );
+      const text = view.result.content[0].text;
+      assert.match(text, mode === "forced" ? /^AX full\n/ : /^AX diff\n/);
+      assert.ok(text.includes("Written_" + mode));
+      if (mode === "forced") assert.match(text, /Stable native paragraph 11/);
+      else assert.doesNotMatch(text, /Stable native paragraph/);
+      const rendered = await f.encoder.render(
+        view.result,
+        f.resultScope(),
+        view.run,
+      );
+      assert.deepEqual(
+        rendered.content.map((item) => item.type),
+        mode === "both" ? ["text", "image", "text"] : ["text", "text"],
+      );
+      assert.equal(rendered.content[0].text, text);
+      if (mode === "both") {
+        const image = rendered.content[1];
+        assert.equal(image.mimeType, "image/jpeg");
+        assert.ok(Buffer.from(image.data, "base64").length > 100);
+      }
+      assert.deepEqual(view.run.cleanup.unconfirmed, []);
+      t.diagnostic(
+        JSON.stringify({ mode, textBytes: Buffer.byteLength(text) }),
+      );
+    }
+  },
+);
 
 test(
   "native element screenshots capture the actual scrolled target at multiple device scales",

@@ -427,7 +427,7 @@
       "target": "tab.ax.get",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-ax-result-modes"]
+      "nativeCases": ["native-ax-result-modes", "native-ax-text-diff"]
     },
     {
       "id": "B047",
@@ -476,7 +476,7 @@
       "target": "tab.ax.write",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-ax-result-modes"]
+      "nativeCases": ["native-ax-result-modes", "native-ax-write-diff"]
     },
     {
       "id": "B055",
@@ -1364,7 +1364,8 @@
       "id": "X050",
       "target": "tab.ax.snapshot",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-ax-text-diff"]
     },
     {
       "id": "X051",
@@ -1758,6 +1759,29 @@
         "result",
         "pixel_dimensions",
         "scrolled_target"
+      ]
+    },
+    "native-ax-text-diff": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native AX text emits scoped bounded diffs and screenshots preserve its observation baseline",
+      "coverage": [
+        "normal",
+        "result",
+        "scoped_state",
+        "document_change",
+        "fresh_run",
+        "screenshot_baseline"
+      ]
+    },
+    "native-ax-write-diff": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native AX write delivers real state diffs and honors forced full and combined image modes",
+      "coverage": [
+        "normal",
+        "result",
+        "scoped_state",
+        "forced_full",
+        "mixed_content"
       ]
     }
   }

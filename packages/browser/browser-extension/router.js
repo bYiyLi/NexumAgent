@@ -1210,26 +1210,9 @@ route(
   { needsTab: true },
 );
 route("ax.snapshot", (ctx) => ctx.router.axSnapshot(ctx), { needsTab: true });
-route(
-  "ax.get",
-  async (ctx, args) => {
-    const mode = args.mode ?? "state";
-    requireValue(["state", "screenshot", "both"].includes(mode));
-    if (mode === "screenshot") return ctx.router.screenshot(ctx, {});
-    const snapshot = await ctx.router.axSnapshot(ctx);
-    const state =
-      snapshot.nodes
-        .map(
-          (node) =>
-            `[${node.index}] ${node.role}${node.name ? ` ${JSON.stringify(node.name)}` : ""}${ctx.lease.axReferences.get(node.index).actions.length ? ` (actions: ${ctx.lease.axReferences.get(node.index).actions.join(", ")})` : ""}`,
-        )
-        .join("\n") + (snapshot.truncated ? "\n[truncated]" : "");
-    return mode === "both"
-      ? { state, screenshot: await ctx.router.screenshot(ctx, {}) }
-      : state;
-  },
-  { needsTab: true },
-);
+route("ax.get", (ctx, args) => ctx.router.axState(ctx, args), {
+  needsTab: true,
+});
 route(
   "ax.click",
   async (ctx, args) => {
@@ -1832,6 +1815,7 @@ export function createBrowserRouter(
     lease.fileChoosers.delete(tabId);
     for (const [index, ref] of lease.axReferences ?? [])
       if (Number(ref.tabId) === tabId) lease.axReferences.delete(index);
+    lease.axTextStates?.delete(String(tabId));
     lease.webMcpStates?.delete(tabId);
     lease.frameTargets?.delete(tabId);
     lease.frameParents?.delete(tabId);
@@ -3564,6 +3548,139 @@ export function createBrowserRouter(
       }
       return { target: target(ctx.target.tabId, ctx.lease), nodes, truncated };
     },
+    async axState(ctx, args) {
+      const mode = args.mode ?? "state";
+      requireValue(["state", "screenshot", "both"].includes(mode));
+      if (mode === "screenshot") return router.screenshot(ctx, {});
+      const snapshot = await router.axSnapshot(ctx);
+      requireValue(
+        !snapshot.truncated,
+        "OUTPUT_TOO_LARGE",
+        "The accessibility text exceeds its observation budget; use a bounded structured snapshot.",
+      );
+      const lines = new Map();
+      let lineBytes = 0;
+      for (const node of snapshot.nodes) {
+        const ref = ctx.lease.axReferences.get(node.index),
+          facts = Object.fromEntries(
+            Object.entries(
+              fields(ref.facts, [
+                "value",
+                "checked",
+                "selected",
+                "expanded",
+                "disabled",
+                "readonly",
+                "focused",
+                "required",
+                "multiselectable",
+                "pressed",
+                "level",
+                "valuemin",
+                "valuemax",
+                "valuetext",
+              ]),
+            ).filter(([, value]) =>
+              ["string", "number", "boolean"].includes(typeof value),
+            ),
+          );
+        for (const value of Object.values(facts))
+          requireValue(
+            typeof value !== "string" || value.length <= 60000,
+            "OUTPUT_TOO_LARGE",
+            "An accessibility value exceeds its text observation budget.",
+          );
+        const line = `[${node.index}] ${node.role}${node.name ? ` ${JSON.stringify(node.name)}` : ""}${Object.keys(facts).length ? ` ${JSON.stringify(facts)}` : ""}${ref.actions.length ? ` (actions: ${ref.actions.join(", ")})` : ""}`;
+        lineBytes += encoder.encode(line).byteLength + 1;
+        requireValue(
+          lineBytes <= 60000,
+          "OUTPUT_TOO_LARGE",
+          "The accessibility text exceeds its observation budget; use a bounded structured snapshot.",
+        );
+        lines.set(node.index, line);
+      }
+      const tab = await ctx.chrome.tabs.get(nativeId(ctx.target.tabId));
+      for (const value of [tab.title ?? "", tab.url ?? ""])
+        requireValue(
+          typeof value === "string" && value.length <= 60000,
+          "OUTPUT_TOO_LARGE",
+          "The accessibility page metadata exceeds its text budget.",
+        );
+      const header = `Title: ${JSON.stringify(tab.title ?? "")}\nURL: ${JSON.stringify(tab.url ?? "")}`,
+        full = `AX full\n${header}\n${[...lines.values()].join("\n")}`,
+        fullBytes = encoder.encode(full).byteLength;
+      requireValue(
+        fullBytes <= 60000,
+        "OUTPUT_TOO_LARGE",
+        "The accessibility text exceeds its observation budget; use a bounded structured snapshot.",
+      );
+      const states = (ctx.lease.axTextStates ??= new Map()),
+        previous = states.get(ctx.target.tabId),
+        current = {
+          pageVersion: snapshot.target.pageVersion,
+          controlEpoch: snapshot.target.controlEpoch,
+          header,
+          lines,
+        };
+      let state = full;
+      const commonBefore = previous
+          ? [...previous.lines.keys()].filter((index) => lines.has(index))
+          : [],
+        commonNow = previous
+          ? [...lines.keys()].filter((index) => previous.lines.has(index))
+          : [];
+      if (
+        options(args).disableDiffing !== true &&
+        previous?.pageVersion === current.pageVersion &&
+        previous?.controlEpoch === current.controlEpoch &&
+        commonBefore.every((index, position) => index === commonNow[position])
+      ) {
+        const removed = [],
+          added = [],
+          changed = [];
+        for (const [index, line] of previous.lines)
+          if (!lines.has(index)) removed.push(`- ${line}`);
+        for (const [index, line] of lines)
+          if (!previous.lines.has(index)) added.push(`+ ${line}`);
+          else if (previous.lines.get(index) !== line)
+            changed.push(`~ ${line}`);
+        const sections = [
+          ...(removed.length ? [`Removed:\n${removed.join("\n")}`] : []),
+          ...(added.length ? [`Added:\n${added.join("\n")}`] : []),
+          ...(changed.length ? [`Changed:\n${changed.join("\n")}`] : []),
+        ];
+        const diff = `AX diff\n${header}\n${sections.length ? sections.join("\n") : previous.header === header ? "No accessibility changes." : "Page metadata changed."}`;
+        if (
+          (!sections.length && previous.header === header) ||
+          encoder.encode(diff).byteLength < fullBytes
+        )
+          state = diff;
+      }
+      // Neither a screenshot-only read nor a failed/cancelled combined read
+      // consumes the last text observation delivered to this control lease.
+      const screenshot =
+        mode === "both" ? await router.screenshot(ctx, {}) : undefined;
+      active(ctx.lease);
+      ctx.signal?.throwIfAborted();
+      requireValue(
+        performance.now() - ctx.started < ctx.budgetMs,
+        "TIMEOUT",
+        "The accessibility observation exceeded its action deadline.",
+      );
+      requireValue(
+        version(ctx.target.tabId) === current.pageVersion &&
+          ctx.lease.epochs?.get(nativeId(ctx.target.tabId)) ===
+            current.controlEpoch,
+        "STALE_REF",
+        "The document or control changed during accessibility observation.",
+      );
+      states.delete(ctx.target.tabId);
+      states.set(ctx.target.tabId, current);
+      // Each complete baseline is <=60KB; keep at most 16 per active lease.
+      // Eviction merely makes the next text observation a fresh full state.
+      while (states.size > 16) states.delete(states.keys().next().value);
+      return mode === "both" ? { state, screenshot } : state;
+    },
     axReference(ctx, index) {
       requireValue(Number.isSafeInteger(index) && index > 0);
       const value = ctx.lease.axReferences?.get(index);
@@ -4678,6 +4795,7 @@ export function createBrowserRouter(
         if (value.tabId === id) lease.choosers.delete(key);
       for (const [key, value] of lease.axReferences ?? [])
         if (value.tabId === String(id)) lease.axReferences.delete(key);
+      lease.axTextStates?.delete(String(id));
       return {
         resumed: true,
         target: target(String(id), lease),
