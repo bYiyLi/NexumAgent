@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
@@ -653,6 +654,12 @@ test("native direct file refs, owned download aliases and waiter cancellation ke
   assert.match(
     data.record.suggestedFilename,
     /^native-nexum-[0-9a-f]{32}\.bin$/,
+  );
+  const browserDirectory = path.join(f.root, "native-downloads", "Nexum");
+  assert.deepEqual(readdirSync(browserDirectory), [data.record.suggestedFilename]);
+  assert.deepEqual(
+    readFileSync(path.join(browserDirectory, data.record.suggestedFilename)),
+    f.downloadBytes,
   );
   assert.equal(data.record.state, "complete");
   assert.equal(data.multiple, true);

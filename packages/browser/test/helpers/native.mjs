@@ -41,6 +41,7 @@ const [
   { RunEngine, callerKey },
   { ArtifactStore },
   { ResultEncoder },
+  { createOutput },
 ] = await Promise.all([
   core("storage/sqlite.js"),
   core("extensions/resources.js"),
@@ -53,6 +54,7 @@ const [
   core("runtime/engine.js"),
   core("results/artifacts.js"),
   core("results/encoder.js"),
+  core("sdk/output.js"),
 ]);
 const source = realpathSync.native(
   fileURLToPath(new URL("../../", import.meta.url)),
@@ -193,7 +195,10 @@ export async function nativeFixture(t, options = {}) {
       JSON.parse(readFileSync(path.join(root, item.snapshotRef), "utf8")),
     encodeResult: (value, services) =>
       encoder.encode(value, resultScope(services)),
-    bindings: (scope) => registry.bindings(scope),
+    bindings: (scope) => ({
+      ...registry.bindings(scope),
+      output: createOutput(work, () => scope.assertCurrent()),
+    }),
     resources,
     leaseScript: (origin) =>
       origin.type === "local" ? () => {} : registry.lease(origin),

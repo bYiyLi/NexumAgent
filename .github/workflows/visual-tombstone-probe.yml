@@ -1,13 +1,6 @@
 name: Isolated visual identity cleanup probe
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - packages/browser/test/helpers/native.mjs
-      - packages/browser/test/native-visual.acceptance.mjs
-      - packages/browser/browser-extension/visual.js
-      - packages/browser/test/visual.test.mjs
-      - .github/workflows/visual-tombstone-probe.yml
 permissions:
   contents: read
 jobs:
