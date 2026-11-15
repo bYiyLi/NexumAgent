@@ -754,44 +754,53 @@ test("dispose/release during native preparation cannot create late active UI or 
     );
     await f.controller.dispose();
   }
-  const f = fixture(),
-    nativeGroup = f.chrome.tabs.group,
-    gate = Promise.withResolvers();
-  f.chrome.tabs.group = async (args) => {
-    const result = await nativeGroup(args);
-    await gate.promise;
-    return result;
-  };
-  const pending = f.controller.beforeAction(context());
-  await until(() => f.calls.some((value) => value[0] === "tabs.group"));
-  const activeBeforeCleanup = f.calls.filter(
-    (value) => value[0] === "execute" && value[1].args[0].command === "active",
-  ).length;
-  assert.equal(activeBeforeCleanup, 1);
-  let closed = false;
-  const cleanup = f.controller.dispose().then(() => {
-    closed = true;
-  });
-  await delay(5);
-  assert.equal(closed, false);
-  gate.resolve();
-  await cleanup;
-  assert.deepEqual(await pending, { degraded: true });
-  assert.equal(f.tabs.get(1).groupId, -1);
-  assert.equal(
-    f.calls.filter(
+  for (const mode of ["dispose", "release"]) {
+    const f = fixture(),
+      nativeGroup = f.chrome.tabs.group,
+      gate = Promise.withResolvers(),
+      input = context();
+    f.chrome.tabs.group = async (args) => {
+      const result = await nativeGroup(args);
+      await gate.promise;
+      return result;
+    };
+    const pending = f.controller.beforeAction(input);
+    await until(() => f.calls.some((value) => value[0] === "tabs.group"));
+    const activeBeforeCleanup = f.calls.filter(
       (value) =>
         value[0] === "execute" && value[1].args[0].command === "active",
-    ).length,
-    activeBeforeCleanup,
-  );
-  assert.equal(
-    f.calls.filter(
-      (value) =>
-        value[0] === "execute" && value[1].args[0].command === "release",
-    ).length,
-    1,
-  );
+    ).length;
+    assert.equal(activeBeforeCleanup, 1);
+    let closed = false;
+    const cleanup = (
+      mode === "dispose"
+        ? f.controller.dispose()
+        : f.controller.releaseTab(input)
+    ).then(() => {
+      closed = true;
+    });
+    await delay(5);
+    assert.equal(closed, false);
+    gate.resolve();
+    await cleanup;
+    assert.deepEqual(await pending, { degraded: true });
+    assert.equal(f.tabs.get(1).groupId, -1);
+    assert.equal(
+      f.calls.filter(
+        (value) =>
+          value[0] === "execute" && value[1].args[0].command === "active",
+      ).length,
+      activeBeforeCleanup,
+    );
+    assert.equal(
+      f.calls.filter(
+        (value) =>
+          value[0] === "execute" && value[1].args[0].command === "release",
+      ).length,
+      1,
+    );
+    await f.controller.dispose();
+  }
 });
 
 test("a 250ms degraded pointer result does not pretend its still-pending native execution has closed", async () => {
