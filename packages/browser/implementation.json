@@ -763,7 +763,8 @@
       "id": "B101",
       "target": "locator.count",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B102",
@@ -805,7 +806,8 @@
       "id": "B108",
       "target": "locator.first",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B109",
@@ -859,13 +861,15 @@
       "id": "B117",
       "target": "locator.isVisible",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B118",
       "target": "locator.last",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B119",
@@ -877,7 +881,8 @@
       "id": "B120",
       "target": "locator.nth",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B121",
@@ -931,7 +936,8 @@
       "id": "B129",
       "target": "locator.waitFor",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B130",
@@ -1835,6 +1841,11 @@
         "result",
         "cleanup"
       ]
+    },
+    "native-locator-positions": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native last locators observe empty and later matching elements without losing order",
+      "coverage": ["empty", "delayed_match", "order", "result", "cleanup"]
     }
   }
 }

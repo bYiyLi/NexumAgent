@@ -475,6 +475,34 @@ test("native descendant Locator and Frame query families retain their actual sco
   });
 });
 
+test("native last locators observe empty and later matching elements without losing order", async (t) => {
+  const f = await nativeFixture(t, {
+    html: '<!doctype html><title>Native locator positions</title><p class="item">First item</p><p class="item">Last item</p>',
+  });
+  const view = await f.run(
+    select +
+      `const pending=tab.playwright.locator('.delayed').last(),items=tab.playwright.locator('.item');
+const before={count:await pending.count(),visible:await pending.isVisible(),firstEmpty:await tab.playwright.locator('.delayed').first().count(),outside:await items.nth(9).count(),first:await items.first().innerText(),last:await items.last().innerText()};
+await tab.evaluate("() => { setTimeout(() => { const node=document.createElement('p'); node.className='delayed'; node.textContent='Arrived'; document.body.append(node); }, 400); return true; }");
+await pending.waitFor({state:'visible',timeoutMs:5000});return {before,after:{count:await pending.count(),text:await pending.innerText()}};`,
+    { base: f.base },
+  );
+  assert.deepEqual(view.result.data, {
+    before: {
+      count: 0,
+      visible: false,
+      firstEmpty: 0,
+      outside: 0,
+      first: "First item",
+      last: "Last item",
+    },
+    after: { count: 1, text: "Arrived" },
+  });
+  assert.deepEqual(view.run.cleanup.unconfirmed, []);
+  const native = await f.cleanupFacts();
+  assert.deepEqual(native.owned, [], JSON.stringify(native));
+});
+
 test("native direct file refs and waiter cancellation keep real identities while download aliases reject unproven local files", async (t) => {
   const f = await nativeFixture(t);
   const result = await f.run(

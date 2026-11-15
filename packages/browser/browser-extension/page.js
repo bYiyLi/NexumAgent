@@ -226,14 +226,18 @@ export async function pageCommand(input) {
           break;
         case "position": {
           const all = sub(ast.query);
+          check(
+            ast.at === "first" ||
+              ast.at === "last" ||
+              (Number.isInteger(ast.at) && ast.at >= 0),
+          );
           const at =
             ast.at === "first"
               ? 0
               : ast.at === "last"
                 ? all.length - 1
                 : ast.at;
-          check(Number.isInteger(at) && at >= 0);
-          result = all[at] ? [all[at]] : [];
+          result = at >= 0 && all[at] ? [all[at]] : [];
           break;
         }
         case "filter":

@@ -1285,6 +1285,56 @@ test("serialized element screenshot clips preserve document scroll and reject a 
   assert.equal(missing.error.code, "INVALID_TARGET");
 });
 
+test("a last locator with no matches remains empty and can observe later matches", async () => {
+  const nodes = [
+    { textContent: "first", closest: () => null },
+    { textContent: "last", closest: () => null },
+  ];
+  let matches = [];
+  const document = { querySelectorAll: () => matches };
+  const context = vm.createContext({
+    document,
+    crypto,
+    TextEncoder,
+    Uint8Array,
+  });
+  const read = async (at, command) => {
+    const input = {
+      command,
+      pageVersion: 1,
+      leaseId: "position-regression",
+      locator: {
+        query: {
+          kind: "position",
+          query: { kind: "selector", selector: ".item" },
+          at,
+        },
+      },
+    };
+    return JSON.parse(
+      JSON.stringify(
+        await vm.runInContext(
+          `(${pageCommand.toString()})(${JSON.stringify(input)})`,
+          context,
+        ),
+      ),
+    );
+  };
+  assert.deepEqual(await read("last", "count"), { ok: true, value: 0 });
+  assert.deepEqual(await read("last", "isVisible"), { ok: true, value: false });
+  assert.deepEqual(await read("first", "count"), { ok: true, value: 0 });
+  matches = nodes;
+  assert.deepEqual(await read(4, "count"), { ok: true, value: 0 });
+  assert.deepEqual(await read("first", "allTextContents"), {
+    ok: true,
+    value: ["first"],
+  });
+  assert.deepEqual(await read("last", "allTextContents"), {
+    ok: true,
+    value: ["last"],
+  });
+});
+
 test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
   for (const pixelRatio of [0.5, 1, 1.25, 2]) {
     const f = fixture(t, { devicePixelRatio: pixelRatio });
