@@ -335,6 +335,91 @@ test("a closing socket starts lease cleanup before reconnecting and preserves la
   }
 });
 
+test("concurrent lease closures preserve both saved receipts when storage writes are delayed", async (t) => {
+  const f = fixture(t),
+    socket = await online(f),
+    releaseFirst = Promise.withResolvers(),
+    firstStarted = Promise.withResolvers(),
+    firstFinished = Promise.withResolvers(),
+    secondFinished = Promise.withResolvers(),
+    writes = [];
+  const originalSet = f.chrome.storage.session.set;
+  f.chrome.storage.session.set = async (value) => {
+    if (!Object.hasOwn(value, "nexumClosedLeases"))
+      return await originalSet(value);
+    const index = writes.push(value);
+    if (index === 1) {
+      firstStarted.resolve();
+      await releaseFirst.promise;
+    }
+    await originalSet(value);
+    if (index === 1) firstFinished.resolve();
+    if (index === 2) secondFinished.resolve();
+  };
+  socket.message({
+    ...f.lease(),
+    leaseId: "second-lease",
+    runId: "second-run",
+    operationId: "second-open",
+  });
+  await until(() =>
+    socket.sent.some(
+      (value) =>
+        value.type === "lease_opened" && value.leaseId === "second-lease",
+    ),
+  );
+  try {
+    socket.close();
+    await firstStarted.promise;
+    await until(
+      () => f.calls.filter((value) => value[0] === "end").length === 2,
+    );
+    await delay(20);
+    const writesBeforeFirstCompleted = writes.length;
+    releaseFirst.resolve();
+    await Promise.all([firstFinished.promise, secondFinished.promise]);
+    assert.equal(writesBeforeFirstCompleted, 1);
+    assert.deepEqual(
+      f.values.session.nexumClosedLeases.map((value) => value.leaseId).sort(),
+      ["lease", "second-lease"],
+    );
+    const recovered = fixture(t);
+    Object.assign(recovered.values.local, f.values.local);
+    Object.assign(recovered.values.session, f.values.session);
+    await recovered.connection.start();
+    await until(() => recovered.sockets.length === 1);
+    const replacement = recovered.sockets[0];
+    replacement.open();
+    replacement.message({
+      ...recovered.ready(),
+      connectionId: "replacement",
+      generation: 2,
+    });
+    await until(
+      () =>
+        replacement.sent.filter((value) => value.type === "lease_closed")
+          .length === 2,
+    );
+    const recoveredReceipts = replacement.sent.filter(
+      (value) => value.type === "lease_closed",
+    );
+    assert.deepEqual(recoveredReceipts.map((value) => value.leaseId).sort(), [
+      "lease",
+      "second-lease",
+    ]);
+    assert.ok(
+      recoveredReceipts.every(
+        (value) =>
+          value.originalGeneration === 1 &&
+          value.generation === 2 &&
+          value.connectionId === "replacement",
+      ),
+    );
+  } finally {
+    releaseFirst.resolve();
+  }
+});
+
 test("a synchronous initial socket failure retries without restarting the router", async (t) => {
   let attempts = 0;
   const sockets = [];

@@ -65,6 +65,7 @@ export function createExtensionConnection({
     leases = new Map(),
     pendingLeaseReceipts = new Map();
   let binaryTail = Promise.resolve(),
+    leaseReceiptPersistence = Promise.resolve(),
     binaryProducers = 0;
   const listeners = [];
   const listen = (event, fn) => {
@@ -273,9 +274,12 @@ export function createExtensionConnection({
     pendingLeaseReceipts.set(lease.leaseId, receipt);
     while (pendingLeaseReceipts.size > 256)
       pendingLeaseReceipts.delete(pendingLeaseReceipts.keys().next().value);
-    await chrome.storage.session.set({
-      nexumClosedLeases: [...pendingLeaseReceipts.values()],
-    });
+    const saved = [...pendingLeaseReceipts.values()];
+    const write = leaseReceiptPersistence
+      .catch(() => {})
+      .then(() => chrome.storage.session.set({ nexumClosedLeases: saved }));
+    leaseReceiptPersistence = write;
+    await write;
     if (ready)
       send(
         bound({
