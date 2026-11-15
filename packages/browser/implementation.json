@@ -496,7 +496,8 @@
       "id": "B050",
       "target": "tab.ax.scroll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-scroll-press-wait"]
     },
     {
       "id": "B051",
@@ -642,7 +643,8 @@
       "id": "B071",
       "target": "tab.dom.scroll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-scroll-press-wait"]
     },
     {
       "id": "B072",
@@ -759,7 +761,8 @@
       "id": "B087",
       "target": "tab.playwright.waitForTimeout",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-scroll-press-wait"]
     },
     {
       "id": "B088",
@@ -1216,7 +1219,8 @@
       "id": "X004",
       "target": "tab.press",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-scroll-press-wait"]
     },
     {
       "id": "X005",
@@ -1477,19 +1481,22 @@
       "id": "X041",
       "target": "tab.webmcp.listTools",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-webmcp-direct-facade"]
     },
     {
       "id": "X042",
       "target": "tab.webmcp.invokeTool",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-webmcp-direct-facade"]
     },
     {
       "id": "X043",
       "target": "tab.webmcp.fetchTools",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-webmcp-direct-facade"]
     },
     {
       "id": "X044",
@@ -1572,7 +1579,8 @@
       "id": "X055",
       "target": "nativeDebuggerCancel",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-debugger-cancel-linux"]
     },
     {
       "id": "X056",
@@ -2252,6 +2260,25 @@
         "opt_in_native_registration",
         "stale_registration",
         "unsupported_report"
+      ]
+    },
+    "native-webmcp-direct-facade": {
+      "file": "test/native-capabilities.acceptance.mjs",
+      "test": "native WebMCP either invokes real document registrations with exact revisions or reports its actual unsupported reason",
+      "coverage": ["opt_in_direct_facade", "stale_registration"]
+    },
+    "native-scroll-press-wait": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native AX and DOM scroll, Tab press and waitForTimeout produce observable effects",
+      "coverage": ["actual_scroll", "native_keypress", "elapsed_wait"]
+    },
+    "native-debugger-cancel-linux": {
+      "file": "test/native-user-stop.acceptance.mjs",
+      "test": "actual native debugger Cancel ends the current control lease and original waiter",
+      "coverage": [
+        "linux_isolated_native_ui",
+        "waiter_cancelled",
+        "old_write_rejected"
       ]
     },
     "native-visual-feedback": {

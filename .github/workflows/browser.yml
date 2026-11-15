@@ -7,6 +7,7 @@ on:
       - packages/extension-api/**
       - scripts/build-extension-api.mjs
       - scripts/prepare-native-browser.mjs
+      - scripts/native-user-stop-linux.sh
       - scripts/service.mjs
       - src/extension-api.ts
       - .github/workflows/browser.yml
@@ -16,6 +17,7 @@ on:
       - packages/extension-api/**
       - scripts/build-extension-api.mjs
       - scripts/prepare-native-browser.mjs
+      - scripts/native-user-stop-linux.sh
       - scripts/service.mjs
       - src/extension-api.ts
       - .github/workflows/browser.yml
@@ -56,6 +58,17 @@ jobs:
         run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise actual isolated browser scenarios
         run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
+      - name: Prepare isolated Linux display tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends xvfb xauth xdotool imagemagick tesseract-ocr
+      - name: Exercise native debugger cancellation on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        env:
+          NEXUM_BROWSER_NATIVE_HEADFUL: "1"
+        run: xvfb-run -a -s '-screen 0 1280x800x24' bash scripts/native-user-stop-linux.sh
       - name: Exercise native Edge profile isolation and visual cleanup on macOS
         if: runner.os == 'macOS'
         timeout-minutes: 6
@@ -94,7 +107,11 @@ jobs:
         if: always()
         with:
           name: nexum-browser-native-${{ matrix.os }}
-          path: ${{ runner.temp }}/nexum-browser-native-*/receipt.json
+          path: |
+            ${{ runner.temp }}/nexum-browser-native-*/receipt.json
+            ${{ runner.temp }}/native-stop-observation.png
+            ${{ runner.temp }}/native-stop-observation.log
+            ${{ runner.temp }}/native-stop-ocr.tsv
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4
