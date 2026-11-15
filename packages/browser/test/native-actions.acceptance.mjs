@@ -812,3 +812,35 @@ test("native Blob download keeps its identity and becomes an MCP resource", asyn
     expected,
   );
 });
+
+test("native data URL download keeps its identity and becomes an MCP resource", async (t) => {
+  const expected = Buffer.from("data URL download");
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Data download</title><a id="data" download="data.bin" href="data:application/octet-stream;base64,${expected.toString("base64")}">Download data</a>`,
+  });
+  const view = await f.run(
+    select +
+      `
+    const pending=tab.playwright.waitForDownload();
+    await tab.playwright.getByRole('link',{name:'Download data'}).click();
+    const download=await pending;const file=await download.path();
+    const record=(await tab.downloads()).find(item=>item.url.startsWith('data:'));
+    return output.result({content:[output.text(record?.suggestedFilename??''),output.file(file,{name:'data.bin'})]});`,
+    { base: f.base },
+  );
+  const rendered = await f.encoder.render(
+      view.result,
+      f.resultScope(),
+      view.run,
+    ),
+    filename = rendered.content.find((item) => item.type === "text").text,
+    link = rendered.content.find((item) => item.type === "resource_link");
+  assert.match(filename, /^data-nexum-[0-9a-f]{32}\.bin$/);
+  assert.ok(link?.uri);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), expected);
+  assert.deepEqual(
+    readFileSync(path.join(f.root, "native-downloads", "Nexum", filename)),
+    expected,
+  );
+});

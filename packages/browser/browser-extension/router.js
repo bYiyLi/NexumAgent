@@ -154,7 +154,9 @@ function manageLocalDownloadClick(input) {
     delete globalThis[slot];
   }
   if (input.action !== "arm") return true;
-  const state = { marker: input.marker, expires: Date.now() + 2000 };
+  if (!Number.isFinite(input.expiresAt) || Date.now() >= input.expiresAt)
+    return false;
+  const state = { marker: input.marker, expires: input.expiresAt };
   state.listener = (event) => {
     if (!event.isTrusted) return;
     document.removeEventListener("click", state.listener, true);
@@ -188,10 +190,13 @@ function manageLocalDownloadClick(input) {
         anchor.setAttribute("download", original);
     }, 0);
   };
-  state.timer = setTimeout(() => {
-    document.removeEventListener("click", state.listener, true);
-    if (globalThis[slot] === state) delete globalThis[slot];
-  }, 2000);
+  state.timer = setTimeout(
+    () => {
+      document.removeEventListener("click", state.listener, true);
+      if (globalThis[slot] === state) delete globalThis[slot];
+    },
+    Math.max(0, state.expires - Date.now()),
+  );
   globalThis[slot] = state;
   document.addEventListener("click", state.listener, true);
   return true;
@@ -1963,19 +1968,57 @@ export function createBrowserRouter(
       // Detachment/Fetch.disable may already have resumed the request.
     }
   };
-  const stopLocalDownloadClick = async (lease, tabId) => {
-    const marker = lease.localDownloadClicks?.get(tabId);
-    if (!marker) return;
-    lease.localDownloadClicks.delete(tabId);
+  const beforeDownloadClickExpiry = async (promise, expiresAt) => {
+    const remaining = Math.max(0, expiresAt - Date.now());
+    if (!remaining) return null;
+    let timer;
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        world: "ISOLATED",
-        func: manageLocalDownloadClick,
-        args: [{ action: "disarm", marker }],
-      });
-    } catch {
-      // The old document may have closed; the page-side listener also expires.
+      return await Promise.race([
+        Promise.resolve(promise).catch(() => null),
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(null), remaining);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const stopLocalDownloadClick = async (lease, tabId) => {
+    const entry = lease.localDownloadClicks?.get(tabId),
+      stops = (lease.localDownloadStops ??= new Map());
+    if (!entry) return stops.get(tabId);
+    entry.cancelled = true;
+    lease.localDownloadClicks.delete(tabId);
+    const task = (async () => {
+      // A late arm cannot outlive this cleanup: after expiry the page-side
+      // function refuses to install or act on its old marker.
+      await beforeDownloadClickExpiry(entry.pending, entry.expiresAt);
+      if (Date.now() >= entry.expiresAt) return;
+      const result = await beforeDownloadClickExpiry(
+        Promise.resolve().then(() =>
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "ISOLATED",
+            func: manageLocalDownloadClick,
+            args: [{ action: "disarm", marker: entry.marker }],
+          }),
+        ),
+        entry.expiresAt,
+      );
+      if (result?.length === 1 && result[0].result === true) return;
+      const remaining = Math.max(0, entry.expiresAt - Date.now());
+      if (remaining) await sleep(remaining, undefined, wakeups);
+    })();
+    stops.set(tabId, task);
+    lease.pending.set(task, {
+      tabId: String(tabId),
+      actionId: `download_click_cleanup_${crypto.randomUUID()}`,
+    });
+    try {
+      await task;
+    } finally {
+      lease.pending.delete(task);
+      if (stops.get(tabId) === task) stops.delete(tabId);
     }
   };
   const armLocalDownloadClick = async (ctx, tabId) => {
@@ -1992,55 +2035,50 @@ export function createBrowserRouter(
     )
       return false;
     await stopLocalDownloadClick(ctx.lease, tabId);
-    const marker = crypto.randomUUID().replaceAll("-", "");
+    if (ctx.signal?.aborted || ctx.lease.ended || ctx.lease.revoked)
+      return false;
+    const marker = crypto.randomUUID().replaceAll("-", ""),
+      expiresAt = Date.now() + 2000;
     downloadMarks.set(marker, {
       leaseId: ctx.lease.id,
       runId: ctx.runId,
       tabId,
       controlEpoch: ctx.lease.epochs?.get(tabId),
     });
-    try {
-      const result = await chrome.scripting.executeScript({
+    const entry = { marker, expiresAt, cancelled: false },
+      clicks = (ctx.lease.localDownloadClicks ??= new Map());
+    entry.pending = Promise.resolve().then(() =>
+      chrome.scripting.executeScript({
         target: { tabId },
         world: "ISOLATED",
         func: manageLocalDownloadClick,
-        args: [{ action: "arm", marker }],
-      });
-      if (result.length !== 1 || result[0].result !== true) {
-        downloadMarks.delete(marker);
-        return false;
-      }
-      (ctx.lease.localDownloadClicks ??= new Map()).set(tabId, marker);
-      if (
-        ctx.signal?.aborted ||
-        ctx.lease.ended ||
-        ctx.lease.revoked ||
-        ![...waiters.values()].some(
-          (waiter) =>
-            waiter.leaseId === ctx.lease.id &&
-            waiter.tabId === tabId &&
-            waiter.event === "download" &&
-            waiter.ready &&
-            !waiter.settled,
-        )
-      ) {
-        await stopLocalDownloadClick(ctx.lease, tabId);
-        downloadMarks.delete(marker);
-        return false;
-      }
-      return true;
-    } catch {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "ISOLATED",
-          func: manageLocalDownloadClick,
-          args: [{ action: "disarm", marker }],
-        });
-      } catch {}
+        args: [{ action: "arm", marker, expiresAt }],
+      }),
+    );
+    clicks.set(tabId, entry);
+    const result = await beforeDownloadClickExpiry(entry.pending, expiresAt);
+    if (
+      result?.length !== 1 ||
+      result[0].result !== true ||
+      Date.now() >= expiresAt ||
+      entry.cancelled ||
+      ctx.signal?.aborted ||
+      ctx.lease.ended ||
+      ctx.lease.revoked ||
+      ![...waiters.values()].some(
+        (waiter) =>
+          waiter.leaseId === ctx.lease.id &&
+          waiter.tabId === tabId &&
+          waiter.event === "download" &&
+          waiter.ready &&
+          !waiter.settled,
+      )
+    ) {
+      await stopLocalDownloadClick(ctx.lease, tabId);
       downloadMarks.delete(marker);
       return false;
     }
+    return true;
   };
   const syncChooserIntercept = (lease, tabId) => {
     const queues = (lease.chooserSync ??= new Map()),

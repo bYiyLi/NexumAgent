@@ -1068,7 +1068,8 @@
         "native-page-and-download-resource",
         "native-download-other-tab",
         "native-download-earlier-request",
-        "native-unmarked-blob-download"
+        "native-local-blob-resource",
+        "native-local-data-resource"
       ]
     },
     {
@@ -2219,10 +2220,19 @@
         "save_download"
       ]
     },
-    "native-unmarked-blob-download": {
+    "native-local-blob-resource": {
       "file": "test/native-actions.acceptance.mjs",
-      "test": "native unmarked Blob download is never mistaken for a controlled file",
-      "coverage": ["blob_unavailable", "browser_file_preserved"]
+      "test": "native Blob download keeps its identity and becomes an MCP resource",
+      "coverage": [
+        "blob_download",
+        "actual_resource",
+        "page_attribute_restored"
+      ]
+    },
+    "native-local-data-resource": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native data URL download keeps its identity and becomes an MCP resource",
+      "coverage": ["data_url_download", "actual_resource"]
     },
     "native-download-other-tab": {
       "file": "test/native-actions.acceptance.mjs",

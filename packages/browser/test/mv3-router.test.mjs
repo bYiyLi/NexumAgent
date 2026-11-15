@@ -229,6 +229,8 @@ function fixture(t, config = {}) {
     scripting: {
       async executeScript(input) {
         calls.push(["scripting.executeScript", input]);
+        if (input.func?.name === "manageLocalDownloadClick")
+          return [{ frameId: 0, result: true }];
         return [
           {
             frameId: 0,
@@ -2235,6 +2237,59 @@ test("an uncertain download interception is disabled before a later waiter is ar
     "Fetch.enable",
   ]);
   await f.call("waiters.cancel", { id: next.id });
+});
+
+test("cancelling an in-flight local-download watcher waits for its actual disarm", async (t) => {
+  const f = fixture(t),
+    entered = Promise.withResolvers(),
+    gate = Promise.withResolvers(),
+    nativeScript = f.chrome.scripting.executeScript;
+  f.chrome.scripting.executeScript = async (input) => {
+    if (input.func?.name !== "manageLocalDownloadClick")
+      return await nativeScript(input);
+    f.calls.push(["scripting.executeScript", input]);
+    if (input.args[0].action === "arm") {
+      entered.resolve();
+      await gate.promise;
+    }
+    return [{ frameId: 0, result: true }];
+  };
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const waiter = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  const click = f.call("cdp.send", {
+    method: "Input.dispatchMouseEvent",
+    params: {
+      type: "mousePressed",
+      x: 10,
+      y: 10,
+      button: "left",
+      clickCount: 1,
+    },
+  });
+  await entered.promise;
+  let cancelled = false;
+  const cancel = f.call("waiters.cancel", { id: waiter.id }).then(() => {
+    cancelled = true;
+  });
+  await delay(20);
+  assert.equal(cancelled, false);
+  gate.resolve();
+  await Promise.all([click, cancel]);
+  const disarm = f.calls.findIndex(
+    (call) =>
+      call[0] === "scripting.executeScript" &&
+      call[1].args[0].action === "disarm",
+  );
+  const dispatched = f.calls.findIndex(
+    (call) =>
+      call[2] === "Input.dispatchMouseEvent" && call[3].type === "mousePressed",
+  );
+  assert.ok(disarm >= 0 && dispatched > disarm);
 });
 
 test("a duplicated marked identity is never used to read either browser file", async (t) => {
