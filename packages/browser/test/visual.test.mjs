@@ -228,6 +228,66 @@ test("pointer arrival is a bounded native barrier; middle drag points do not blo
   await drag.controller.dispose();
 });
 
+test("a pointer can still appear when its already-started favicon preparation is slow", async () => {
+  const gate = Promise.withResolvers(),
+    f = fixture({
+      execute: async (args) =>
+        args.args[0].command === "active"
+          ? await gate.promise
+          : [{ result: { ok: true, arrived: true } }],
+    });
+  await f.controller.start({ browserSessionId: "session" });
+  const input = context();
+  try {
+    assert.deepEqual(await f.controller.beforeAction(input), {
+      degraded: true,
+    });
+    assert.deepEqual(
+      await f.controller.beforePointer({
+        ...input,
+        visualPrepared: true,
+        point: { x: 42, y: 64 },
+        moveSequence: 1,
+      }),
+      { degraded: false },
+    );
+    assert.deepEqual(
+      f.calls
+        .filter((value) => value[0] === "execute")
+        .map((value) => value[1].args[0].command),
+      ["active", "move"],
+    );
+  } finally {
+    gate.resolve([{ result: { ok: false, reason: "VISUAL_TARGET_RELEASED" } }]);
+    await f.controller.dispose();
+  }
+});
+
+test("a prepared visual for one tab does not substitute for another tab", async () => {
+  const f = fixture();
+  await f.controller.start({ browserSessionId: "session" });
+  try {
+    await f.controller.beforeAction(context("1"));
+    await f.controller.beforePointer({
+      ...context("2"),
+      visualPrepared: true,
+      point: { x: 42, y: 64 },
+      moveSequence: 1,
+    });
+    assert.deepEqual(
+      f.calls
+        .filter(
+          (value) =>
+            value[0] === "execute" && value[1].args[0].command === "active",
+        )
+        .map((value) => value[1].target.tabId),
+      [1, 2],
+    );
+  } finally {
+    await f.controller.dispose();
+  }
+});
+
 test("unavailable rendering and slow native setup degrade within 250ms; cancellation remains cancellation", async () => {
   const f = fixture({
     execute: async () => {

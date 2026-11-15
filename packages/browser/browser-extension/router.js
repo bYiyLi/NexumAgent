@@ -4668,7 +4668,9 @@ export function createBrowserRouter(
     },
     async prepareVisual(ctx) {
       try {
-        await visual?.beforeAction(router.visualContext(ctx));
+        const visualContext = router.visualContext(ctx);
+        await visual?.beforeAction(visualContext);
+        ctx.visualPreparedTarget = { ...visualContext.target };
       } catch {
         ctx.signal?.throwIfAborted();
         emit({
@@ -4694,6 +4696,14 @@ export function createBrowserRouter(
       try {
         await visual?.beforePointer({
           ...router.visualContext(ctx),
+          visualPrepared:
+            ctx.visualPreparedTarget?.browserId === ctx.target.browserId &&
+            ctx.visualPreparedTarget?.bootId === ctx.target.bootId &&
+            ctx.visualPreparedTarget?.browserSessionId ===
+              ctx.target.browserSessionId &&
+            ctx.visualPreparedTarget?.generation === ctx.target.generation &&
+            ctx.visualPreparedTarget?.tabId === ctx.target.tabId &&
+            ctx.visualPreparedTarget?.controlEpoch === ctx.target.controlEpoch,
           point,
           moveSequence: ctx.lease.visualSequence,
           wait: first,

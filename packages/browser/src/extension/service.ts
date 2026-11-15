@@ -1218,8 +1218,7 @@ export class BrowserService extends EventEmitter {
     const lease = this.#leases.get(id);
     if (!lease) return;
     const peer = this.#peers.get(lease.peer.id);
-    if (!peer || peer.browserSessionId !== lease.peer.browserSessionId)
-      return;
+    if (!peer || peer.browserSessionId !== lease.peer.browserSessionId) return;
     try {
       await this.#send(peer, {
         v: 1,

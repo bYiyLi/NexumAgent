@@ -380,6 +380,7 @@ test("native visual hooks receive the current run/target, precede pointer input 
   assert.equal(pointer.target.pageVersion, 1);
   assert.deepEqual(pointer.point, { x: 10, y: 20 });
   assert.equal(pointer.wait, true);
+  assert.equal(pointer.visualPrepared, true);
   assert.ok(
     events.findIndex((entry) => entry[0] === "beforePointer") <
       events.findIndex(

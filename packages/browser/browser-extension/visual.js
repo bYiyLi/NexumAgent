@@ -595,7 +595,8 @@ export function createVisualController(
     );
     const perform = async (limited) => {
       const status =
-        ctx.wait === false && records.has(key(ctx))
+        (ctx.visualPrepared === true || ctx.wait === false) &&
+        records.has(key(ctx))
           ? { degraded: false }
           : await beforeActionRaw(limited);
       const record = records.get(key(ctx));
