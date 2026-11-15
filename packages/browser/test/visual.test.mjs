@@ -553,6 +553,7 @@ function pageFixture({
   iconBytes = 0,
   pausedFrames = false,
   visibility = "visible",
+  wallClock,
 } = {}) {
   const calls = { fetch: [], cancel: 0, bitmap: 0 };
   const frames = new Map();
@@ -611,14 +612,22 @@ function pageFixture({
   };
   let tick = 0,
     nextFrame = 0;
+  const ClockDate = wallClock
+    ? class extends Date {
+        static now() {
+          return wallClock();
+        }
+      }
+    : Date;
   const sandbox = vm.createContext({
     document,
     Blob,
     Uint8Array,
     AbortController,
-    Date,
+    Date: ClockDate,
     Symbol,
     Set,
+    Map,
     Promise,
     Math,
     performance: { now: () => tick },
@@ -668,8 +677,81 @@ function pageFixture({
       `(${visualPage.toString()})(${JSON.stringify(input)})`,
       sandbox,
     );
-  return { execute, document, root, head, original, calls, frames };
+  return { execute, document, root, head, original, calls, frames, sandbox };
 }
+
+test("finished visual identities expire without reviving a delayed old move", async () => {
+  let now = 100000;
+  const f = pageFixture({ visibility: "hidden", wallClock: () => now });
+  const old = {
+    token: "old-lease",
+    deadline: now + 5000,
+    command: "move",
+    point: { x: 12, y: 8 },
+    moveSequence: 1,
+  };
+  assert.equal((await f.execute(old)).ok, true);
+  await f.execute({
+    token: old.token,
+    command: "release",
+    deadline: now + 250,
+  });
+  assert.equal(f.root.children.length, 0);
+  now += 300;
+  await f.execute({
+    token: "another",
+    command: "release",
+    deadline: now + 250,
+  });
+  assert.equal((await f.execute(old)).ok, false);
+  assert.equal(f.root.children.length, 0);
+  for (let i = 0; i < 1000; i++) {
+    now += 300;
+    await f.execute({
+      token: `finished-${i}`,
+      command: "release",
+      deadline: now + 250,
+    });
+  }
+  const retained = vm.runInContext(
+    'globalThis[Symbol.for("nexum.browser.visual.v1")].closed.size',
+    f.sandbox,
+  );
+  assert.ok(retained <= 1, `retained ${retained} finished visual identities`);
+  assert.equal((await f.execute(old)).ok, false);
+  assert.equal(f.root.children.length, 0);
+});
+
+test("visual identities saved by the previous worker remain closed through the late-action window", async () => {
+  let now = 100000;
+  const f = pageFixture({ visibility: "hidden", wallClock: () => now });
+  vm.runInContext(
+    'globalThis[Symbol.for("nexum.browser.visual.v1")]={current:null,closed:new Set(["legacy-lease"])}',
+    f.sandbox,
+  );
+  const old = {
+    token: "legacy-lease",
+    deadline: now + 200,
+    command: "move",
+    point: { x: 12, y: 8 },
+    moveSequence: 1,
+  };
+  await f.execute({
+    token: "new-lease",
+    command: "release",
+    deadline: now + 250,
+  });
+  assert.equal((await f.execute(old)).ok, false);
+  now += 300;
+  await f.execute({ token: "next", command: "release", deadline: now + 250 });
+  const retained = vm.runInContext(
+    'globalThis[Symbol.for("nexum.browser.visual.v1")].closed.size',
+    f.sandbox,
+  );
+  assert.ok(retained <= 1, `retained ${retained} expired visual identities`);
+  assert.equal((await f.execute(old)).ok, false);
+  assert.equal(f.root.children.length, 0);
+});
 
 test("a hidden native page completes its cursor move without scheduling paused paint callbacks", async () => {
   const f = pageFixture({

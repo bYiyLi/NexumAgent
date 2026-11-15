@@ -5,10 +5,28 @@ export const visualStyles = `[data-nexum-visual-layer="v1"]{position:fixed!impor
 /** Self-contained native isolated-world function; no module closure crosses executeScript. */
 export async function visualPage(input) {
   const slot = Symbol.for("nexum.browser.visual.v1");
-  const state = (globalThis[slot] ??= { current: null, closed: new Set() });
-  const token = input.token;
+  const now = Date.now();
+  const state = (globalThis[slot] ??= { current: null, closed: new Map() });
+  // An updated worker can encounter tombstones left by the previous build.
+  // Preserve them for the maximum native dispatch window, then release them.
+  if (state.closed instanceof Set)
+    state.closed = new Map(
+      [...state.closed].map((token) => [token, now + 250]),
+    );
+  for (const [closedToken, deadline] of state.closed)
+    if (now >= deadline) state.closed.delete(closedToken);
+  const token = input.token,
+    inputDeadline = Number.isFinite(input.deadline) ? input.deadline : 0;
   if (input.command === "release" || input.command === "clear") {
-    if (input.command === "release") state.closed.add(token);
+    if (input.command === "release")
+      state.closed.set(
+        token,
+        Math.max(
+          now + 250,
+          inputDeadline,
+          state.current?.token === token ? (state.current.maxDeadline ?? 0) : 0,
+        ),
+      );
     if (state.current?.token === token) {
       const current = state.current;
       current.stopped = true;
@@ -26,9 +44,17 @@ export async function visualPage(input) {
       state.current.layer?.remove();
       state.current.icon?.remove();
     }
-    state.current = { token, sequence: -1, x: 0, y: 0, stopped: false };
+    state.current = {
+      token,
+      sequence: -1,
+      x: 0,
+      y: 0,
+      stopped: false,
+      maxDeadline: inputDeadline,
+    };
   }
   const current = state.current;
+  current.maxDeadline = Math.max(current.maxDeadline ?? 0, inputDeadline);
   const valid = () =>
     state.current === current &&
     !current.stopped &&

@@ -5,12 +5,18 @@ on:
     paths:
       - packages/browser/test/helpers/native.mjs
       - packages/browser/test/native-visual.acceptance.mjs
+      - packages/browser/browser-extension/visual.js
+      - packages/browser/test/visual.test.mjs
       - .github/workflows/visual-tombstone-probe.yml
 permissions:
   contents: read
 jobs:
   visual:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -25,5 +31,7 @@ jobs:
       - run: node scripts/build-extension-api.mjs
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - run: pnpm --dir packages/browser build
+      - run: node --test --test-name-pattern="finished visual identities|visual identities saved|serialized native page visuals" test/visual.test.mjs
+        working-directory: packages/browser
       - run: node scripts/prepare-native-browser.mjs
       - run: node --experimental-vm-modules --test --test-name-pattern="native finished visual identities" packages/browser/test/native-visual.acceptance.mjs
