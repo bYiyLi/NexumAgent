@@ -292,6 +292,7 @@ export function createExtensionConnection({
   };
   const disconnected = async (expected) => {
     if (expected !== socket) return;
+    socket = undefined;
     ready = undefined;
     clearInterval(keepAlive);
     keepAlive = undefined;
@@ -704,19 +705,11 @@ export function createExtensionConnection({
     );
   };
   const connect = async () => {
-    if (
-      stopped ||
-      (socket && [Socket.CONNECTING, Socket.OPEN].includes(socket.readyState))
-    )
-      return;
+    if (stopped || socket) return;
     await initialize;
-    // Startup and alarm events can both wait on the same initialization. Only
-    // the first continuation may create the connection after it completes.
-    if (
-      stopped ||
-      (socket && [Socket.CONNECTING, Socket.OPEN].includes(socket.readyState))
-    )
-      return;
+    // Recheck after initialization. A socket, including one still closing,
+    // remains the current owner until its close handler starts cleanup.
+    if (stopped || socket) return;
     const expected = new Socket(expectedUrl);
     socket = expected;
     expected.binaryType = "arraybuffer";

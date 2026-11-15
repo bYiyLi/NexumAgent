@@ -254,6 +254,51 @@ test("connection retries never bypass an invalid saved control identity", async 
   );
 });
 
+test("a closing socket completes lease cleanup before a startup signal reconnects", async (t) => {
+  const aborted = Promise.withResolvers(),
+    f = fixture(
+      t,
+      async (_input, signal) =>
+        await new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted.resolve();
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+    ),
+    original = await online(f);
+  original.message(f.action("in-flight"));
+  await until(() => f.calls.some((value) => value[0] === "dispatch"));
+  original.readyState = 2;
+  f.chrome.runtime.onStartup.emit();
+  await delay(20);
+  assert.equal(f.sockets.length, 1);
+  original.close();
+  await aborted.promise;
+  await until(() => f.calls.some((value) => value[0] === "end"));
+  await until(() => f.sockets.length === 2);
+  assert.equal(f.calls.filter((value) => value[0] === "end").length, 1);
+  assert.equal(f.calls.filter((value) => value[0] === "dispatch").length, 1);
+  assert.equal(f.connection.state().connected, false);
+  const replacement = f.sockets[1];
+  replacement.open();
+  replacement.message({
+    ...f.ready(),
+    connectionId: "replacement",
+    generation: 2,
+  });
+  await until(() => f.connection.state().connected);
+  original.dispatchEvent(new Event("close"));
+  await delay(10);
+  assert.equal(f.connection.state().connectionId, "replacement");
+  assert.equal(f.calls.filter((value) => value[0] === "end").length, 1);
+  assert.equal(f.calls.filter((value) => value[0] === "dispatch").length, 1);
+});
+
 test("a synchronous initial socket failure retries without restarting the router", async (t) => {
   let attempts = 0;
   const sockets = [];
