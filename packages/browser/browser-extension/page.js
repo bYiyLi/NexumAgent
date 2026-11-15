@@ -222,7 +222,15 @@ export async function pageCommand(input) {
           break;
         }
         case "or":
-          result = [...new Set([...sub(ast.left), ...sub(ast.right)])];
+          result = [...new Set([...sub(ast.left), ...sub(ast.right)])].sort(
+            (left, right) => {
+              const position = left.compareDocumentPosition(right);
+              if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0;
+              if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+              if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+              return 0;
+            },
+          );
           break;
         case "position": {
           const all = sub(ast.query);

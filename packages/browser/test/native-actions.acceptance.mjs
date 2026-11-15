@@ -481,8 +481,8 @@ test("native last locators observe empty and later matching elements without los
   });
   const view = await f.run(
     select +
-      `const pending=tab.playwright.locator('.delayed').last(),items=tab.playwright.locator('.item');
-const before={count:await pending.count(),visible:await pending.isVisible(),firstEmpty:await tab.playwright.locator('.delayed').first().count(),outside:await items.nth(9).count(),first:await items.first().innerText(),last:await items.last().innerText()};
+      `const pending=tab.playwright.locator('.delayed').last(),items=tab.playwright.locator('.item'),reversed=items.last().or(items.first());
+const before={count:await pending.count(),visible:await pending.isVisible(),firstEmpty:await tab.playwright.locator('.delayed').first().count(),outside:await items.nth(9).count(),first:await items.first().innerText(),last:await items.last().innerText(),union:await reversed.allTextContents(),unionFirst:await reversed.first().innerText(),unionLast:await reversed.last().innerText(),deduplicated:await items.or(items.first()).count()};
 await tab.evaluate("() => { setTimeout(() => { const node=document.createElement('p'); node.className='delayed'; node.textContent='Arrived'; document.body.append(node); }, 400); return true; }");
 await pending.waitFor({state:'visible',timeoutMs:5000});return {before,after:{count:await pending.count(),text:await pending.innerText()}};`,
     { base: f.base },
@@ -495,6 +495,10 @@ await pending.waitFor({state:'visible',timeoutMs:5000});return {before,after:{co
       outside: 0,
       first: "First item",
       last: "Last item",
+      union: ["First item", "Last item"],
+      unionFirst: "First item",
+      unionLast: "Last item",
+      deduplicated: 2,
     },
     after: { count: 1, text: "Arrived" },
   });

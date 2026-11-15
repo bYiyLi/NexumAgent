@@ -1335,6 +1335,65 @@ test("a last locator with no matches remains empty and can observe later matches
   });
 });
 
+test("locator unions retain document order and remove duplicates", async () => {
+  const nodes = ["first", "second"].map((textContent, index) => ({
+    textContent,
+    index,
+    closest: () => null,
+    compareDocumentPosition(other) {
+      return this.index < other.index ? 4 : 2;
+    },
+  }));
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === ".first") return [nodes[0]];
+      if (selector === ".second") return [nodes[1]];
+      return nodes;
+    },
+  };
+  const context = vm.createContext({
+    document,
+    crypto,
+    TextEncoder,
+    Uint8Array,
+    Node: {
+      DOCUMENT_POSITION_DISCONNECTED: 1,
+      DOCUMENT_POSITION_PRECEDING: 2,
+      DOCUMENT_POSITION_FOLLOWING: 4,
+    },
+  });
+  const read = async (left, right) => {
+    const input = {
+      command: "allTextContents",
+      pageVersion: 1,
+      leaseId: "union-order-regression",
+      locator: {
+        query: {
+          kind: "or",
+          left: { kind: "selector", selector: left },
+          right: { kind: "selector", selector: right },
+        },
+      },
+    };
+    return JSON.parse(
+      JSON.stringify(
+        await vm.runInContext(
+          `(${pageCommand.toString()})(${JSON.stringify(input)})`,
+          context,
+        ),
+      ),
+    );
+  };
+  assert.deepEqual(await read(".second", ".first"), {
+    ok: true,
+    value: ["first", "second"],
+  });
+  assert.deepEqual(await read(".second", ".all"), {
+    ok: true,
+    value: ["first", "second"],
+  });
+});
+
 test("screenshot limits use physical pixels at native and fractional device scales", async (t) => {
   for (const pixelRatio of [0.5, 1, 1.25, 2]) {
     const f = fixture(t, { devicePixelRatio: pixelRatio });

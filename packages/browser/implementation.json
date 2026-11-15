@@ -888,7 +888,8 @@
       "id": "B121",
       "target": "locator.or",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-locator-positions"]
     },
     {
       "id": "B122",
@@ -1845,7 +1846,15 @@
     "native-locator-positions": {
       "file": "test/native-actions.acceptance.mjs",
       "test": "native last locators observe empty and later matching elements without losing order",
-      "coverage": ["empty", "delayed_match", "order", "result", "cleanup"]
+      "coverage": [
+        "empty",
+        "delayed_match",
+        "order",
+        "union_document_order",
+        "union_deduplication",
+        "result",
+        "cleanup"
+      ]
     }
   }
 }
