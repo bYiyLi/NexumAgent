@@ -769,3 +769,37 @@ test("native download started before a new wait keeps its original filename", as
     "prior.bin",
   ]);
 });
+
+test("native Blob download becomes an MCP resource from the original page bytes", async (t) => {
+  const expected = Buffer.alloc(100000, 31);
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Blob download</title>
+      <a id="blob" download="blob.bin">Download Blob</a>
+      <script>
+        document.querySelector('#blob').href = URL.createObjectURL(new Blob([new Uint8Array(100000).fill(31)], {type:'application/octet-stream'}));
+        globalThis.fetch = async () => new Response(new Uint8Array([9,9,9]));
+      </script>`,
+  });
+  const view = await f.run(
+    select +
+      `
+    const pending=tab.playwright.waitForDownload();
+    await tab.playwright.getByRole('link',{name:'Download Blob'}).click();
+    const download=await pending;
+    return output.file(await download.path(),{name:'blob.bin'});`,
+    { base: f.base },
+  );
+  const rendered = await f.encoder.render(
+    view.result,
+    f.resultScope(),
+    view.run,
+  );
+  const link = rendered.content.find((item) => item.type === "resource_link");
+  assert.ok(link?.uri);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), expected);
+  assert.deepEqual(
+    readFileSync(path.join(f.root, "native-downloads", "blob.bin")),
+    expected,
+  );
+});

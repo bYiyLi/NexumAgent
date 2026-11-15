@@ -2281,6 +2281,70 @@ test("a duplicated marked identity is never used to read either browser file", a
   );
 });
 
+test("an observed Blob download reads only its original frame and denies an earlier unobserved Blob", async (t) => {
+  const f = fixture(t);
+  const send = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Page.getFrameTree")
+      return { frameTree: { frame: { id: "original-frame" } } };
+    return await send(source, method, params);
+  };
+  f.chrome.scripting.executeScript = async (input) => {
+    const payload = input.args[0];
+    const value =
+      payload.command === "fetch"
+        ? { size: 3, mimeType: "application/octet-stream", url: payload.url }
+        : payload.command === "chunk"
+          ? [1, 2, 3]
+          : null;
+    return [{ frameId: 0, result: { ok: true, value } }];
+  };
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const waiter = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  const source = { tabId: 1 },
+    url = "blob:https://example.com/owned-blob";
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "blob-request",
+    request: { url },
+  });
+  await delay(0);
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadWillBegin", {
+    guid: "blob-guid",
+    frameId: "original-frame",
+    suggestedFilename: "blob.bin",
+    url,
+  });
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadProgress", {
+    guid: "blob-guid",
+    state: "completed",
+    receivedBytes: 3,
+    totalBytes: 3,
+  });
+  await f.call("waiters.get", { id: waiter.id });
+  const content = await f.call("downloads.path", { downloadId: "blob-guid" });
+  assert.deepEqual([...content.data], [1, 2, 3]);
+  assert.equal(content.sourceUrl, "https://example.com");
+
+  await f.call("waiters.arm", { event: "download", timeoutMs: 1000 });
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadWillBegin", {
+    guid: "earlier-blob-guid",
+    frameId: "original-frame",
+    suggestedFilename: "earlier.bin",
+    url: "blob:https://example.com/earlier-blob",
+  });
+  await assert.rejects(
+    f.call("downloads.path", { downloadId: "earlier-blob-guid" }),
+    {
+      code: "CAPABILITY_NOT_ALLOWED",
+    },
+  );
+});
+
 test("attachment intent is committed before native attach and worker recovery detaches only journaled native controls", async (t) => {
   const snapshots = [],
     f = fixture(t, {

@@ -1768,6 +1768,7 @@ export function createBrowserRouter(
           managed.delete(tabId);
           uncertain.delete(tabId);
           lease.downloadRequests?.delete(tabId);
+          lease.downloadBlobs?.delete(tabId);
         }
         const wanted =
           !lease.ended &&
@@ -1806,6 +1807,7 @@ export function createBrowserRouter(
           }
           managed.delete(tabId);
           lease.downloadRequests?.delete(tabId);
+          lease.downloadBlobs?.delete(tabId);
         }
       });
     queues.set(tabId, task);
@@ -1845,8 +1847,19 @@ export function createBrowserRouter(
           waiting &&
           typeof params.requestId === "string" &&
           eligible.size < 2048
-        )
+        ) {
           eligible.add(params.requestId);
+          const url = params.request?.url;
+          if (
+            typeof url === "string" &&
+            url.startsWith("blob:") &&
+            url.length <= 32768
+          ) {
+            const blobs = (lease.downloadBlobs ??= new Map());
+            if (!blobs.has(tabId)) blobs.set(tabId, new Set());
+            blobs.get(tabId).add(url);
+          }
+        }
         await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", {
           requestId: params.requestId,
         });
@@ -2107,6 +2120,7 @@ export function createBrowserRouter(
     lease.downloadIntercept?.delete(tabId);
     lease.downloadUncertain?.delete(tabId);
     lease.downloadRequests?.delete(tabId);
+    lease.downloadBlobs?.delete(tabId);
     lease.rawFetch?.delete(tabId);
     for (const [marker, mark] of downloadMarks)
       if (mark.leaseId === lease.id && mark.tabId === tabId)
@@ -2503,11 +2517,18 @@ export function createBrowserRouter(
             runId: lease.runId,
             target: target(String(source.tabId), lease),
             url: params.url,
+            frameId: params.frameId,
             suggestedFilename: params.suggestedFilename,
             startedAt: clock(),
             state: "in_progress",
             bytesReceived: 0,
           };
+          if (
+            typeof value.url === "string" &&
+            value.url.startsWith("blob:") &&
+            lease.downloadBlobs?.get(source.tabId)?.delete(value.url)
+          )
+            value.blobObserved = true;
           const marker = downloadMarker(params.suggestedFilename),
             mark = marker && downloadMarks.get(marker);
           if (
@@ -5422,6 +5443,74 @@ export function createBrowserRouter(
         "The original download is not owned by this run target.",
       );
       const mark = value.marker && downloadMarks.get(value.marker);
+      if (!mark && value.blobObserved) {
+        await router.poll(ctx, async () => {
+          requireValue(
+            value.state !== "cancelled",
+            "FILE_UNAVAILABLE",
+            "The browser download was cancelled.",
+          );
+          return value.state === "complete";
+        });
+        requireValue(
+          value.target.pageVersion === version(ctx.target.tabId),
+          "STALE_REF",
+          "The original Blob document has changed.",
+        );
+        const tree = await router.send(ctx, "Page.getFrameTree", {});
+        requireValue(
+          typeof value.frameId === "string" &&
+            tree.frameTree?.frame?.id === value.frameId,
+          "CAPABILITY_NOT_ALLOWED",
+          "The original Blob frame is unavailable to this browser transport.",
+        );
+        requireValue(
+          Number.isSafeInteger(value.bytesReceived) &&
+            value.bytesReceived >= 0 &&
+            value.bytesReceived <= 128 * 1024 * 1024,
+          "OUTPUT_TOO_LARGE",
+          "The downloaded Blob exceeds the local browser transfer budget.",
+        );
+        let origin;
+        try {
+          origin = new URL(value.url).origin;
+        } catch {
+          origin = "null";
+        }
+        requireValue(
+          /^https?:\/\//.test(origin),
+          "CAPABILITY_NOT_ALLOWED",
+          "The Blob does not have an authorizable web origin.",
+        );
+        const token = crypto.randomUUID();
+        try {
+          const metadata = await router.dataPage(ctx, {
+            command: "fetch",
+            token,
+            url: value.url,
+            maxBytes: 128 * 1024 * 1024,
+          });
+          requireValue(
+            metadata.url === value.url && metadata.size === value.bytesReceived,
+            "FILE_UNAVAILABLE",
+            "The original Blob no longer matches the completed download.",
+          );
+          const data = await readPageBytes(ctx, token, metadata);
+          requireValue(
+            value.target.pageVersion === version(ctx.target.tabId),
+            "STALE_REF",
+            "The original Blob document changed during reading.",
+          );
+          return {
+            data,
+            name: value.suggestedFilename,
+            mimeType: metadata.mimeType,
+            sourceUrl: origin,
+          };
+        } finally {
+          await router.dataPage(ctx, { command: "drop", token }, true);
+        }
+      }
       requireValue(
         mark &&
           !mark.ambiguous &&

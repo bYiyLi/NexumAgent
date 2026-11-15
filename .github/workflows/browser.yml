@@ -30,7 +30,7 @@ jobs:
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - run: pnpm --dir packages/browser build
       - name: Verify download identity and cleanup
-        run: node --experimental-vm-modules --test --test-name-pattern='awaited attachment|duplicated marked identity|same-URL native download|existing raw Fetch|uncertain download interception' packages/browser/test/mv3-router.test.mjs
+        run: node --experimental-vm-modules --test --test-name-pattern='awaited attachment|duplicated marked identity|same-URL native download|existing raw Fetch|uncertain download interception|observed Blob download' packages/browser/test/mv3-router.test.mjs
       - run: node scripts/prepare-native-browser.mjs
       - name: Verify actual download and MCP resource in an isolated profile
-        run: node --experimental-vm-modules --test --test-concurrency=1 --test-name-pattern='native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource|native direct file refs, owned download aliases|native same-URL download in another tab|native download started before a new wait' packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs
+        run: node --experimental-vm-modules --test --test-concurrency=1 --test-name-pattern='native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource|native direct file refs, owned download aliases|native same-URL download in another tab|native download started before a new wait|native Blob download becomes an MCP resource' packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs
