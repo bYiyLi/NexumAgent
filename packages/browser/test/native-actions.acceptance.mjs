@@ -770,7 +770,7 @@ test("native download started before a new wait keeps its original filename", as
   ]);
 });
 
-test("native unmarked Blob download is never mistaken for a controlled file", async (t) => {
+test("native Blob download keeps its identity and becomes an MCP resource", async (t) => {
   const expected = Buffer.alloc(100000, 31);
   const f = await nativeFixture(t, {
     html: `<!doctype html><title>Blob download</title>
@@ -786,19 +786,29 @@ test("native unmarked Blob download is never mistaken for a controlled file", as
     const pending=tab.playwright.waitForDownload();
     await tab.playwright.getByRole('link',{name:'Download Blob'}).click();
     const download=await pending;
-    let error;try{await download.path();}catch(cause){error=cause.code;}
-    return {error};`,
+    const file=await download.path();
+    const record=(await tab.downloads()).find(item=>item.url.startsWith('blob:'));
+    let attribute=await tab.evaluate("document.querySelector('#blob').getAttribute('download')");
+    for(let i=0;i<10&&attribute!=='blob.bin';i++){await tab.playwright.waitForTimeout(50);attribute=await tab.evaluate("document.querySelector('#blob').getAttribute('download')");}
+    return output.result({content:[output.text(JSON.stringify({name:record?.suggestedFilename,attribute})),output.file(file,{name:'blob.bin'})]});`,
     { base: f.base },
   );
-  assert.equal(view.result.data.error, "CAPABILITY_NOT_ALLOWED");
-  const filename = path.join(f.root, "native-downloads", "blob.bin");
-  let bytes;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    try {
-      bytes = readFileSync(filename);
-      if (bytes.equals(expected)) break;
-    } catch {}
-    await delay(100);
-  }
-  assert.deepEqual(bytes, expected);
+  const rendered = await f.encoder.render(
+      view.result,
+      f.resultScope(),
+      view.run,
+    ),
+    details = JSON.parse(
+      rendered.content.find((item) => item.type === "text").text,
+    ),
+    link = rendered.content.find((item) => item.type === "resource_link");
+  assert.match(details.name, /^blob-nexum-[0-9a-f]{32}\.bin$/);
+  assert.equal(details.attribute, "blob.bin");
+  assert.ok(link?.uri);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), expected);
+  assert.deepEqual(
+    readFileSync(path.join(f.root, "native-downloads", "Nexum", details.name)),
+    expected,
+  );
 });

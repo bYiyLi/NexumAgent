@@ -139,6 +139,64 @@ function downloadMarker(filename) {
   const name = filename.split(/[\\/]/).pop();
   return /-nexum-([0-9a-f]{32})(?:\.[a-z0-9]{1,16})?$/i.exec(name)?.[1] ?? null;
 }
+
+// Serialized into the controlled tab's isolated world immediately around an
+// AI click. Restore the link after the browser has received its filename.
+function manageLocalDownloadClick(input) {
+  const slot = Symbol.for("nexum.browser.download-click.v1"),
+    previous = globalThis[slot];
+  if (
+    previous &&
+    (input.action === "arm" || previous.marker === input.marker)
+  ) {
+    document.removeEventListener("click", previous.listener, true);
+    clearTimeout(previous.timer);
+    delete globalThis[slot];
+  }
+  if (input.action !== "arm") return true;
+  const state = { marker: input.marker, expires: Date.now() + 2000 };
+  state.listener = (event) => {
+    if (!event.isTrusted) return;
+    document.removeEventListener("click", state.listener, true);
+    clearTimeout(state.timer);
+    if (globalThis[slot] === state) delete globalThis[slot];
+    if (Date.now() > state.expires) return;
+    const anchor = event
+      .composedPath()
+      .find(
+        (node) =>
+          node instanceof HTMLAnchorElement && node.hasAttribute("download"),
+      );
+    if (!anchor || !/^(?:blob:|data:)/i.test(anchor.href)) return;
+    const original = anchor.getAttribute("download"),
+      safe =
+        (original || "download")
+          .replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, "_")
+          .replace(/[. ]+$/g, "") || "download",
+      extension = /\.[a-z0-9]{1,16}$/i.exec(safe)?.[0] ?? "";
+    let stem = "";
+    for (const character of extension
+      ? safe.slice(0, -extension.length)
+      : safe) {
+      if (new TextEncoder().encode(stem + character).byteLength > 150) break;
+      stem += character;
+    }
+    const filename = `${stem || "download"}-nexum-${input.marker}${extension}`;
+    anchor.setAttribute("download", filename);
+    setTimeout(() => {
+      if (anchor.getAttribute("download") === filename)
+        anchor.setAttribute("download", original);
+    }, 0);
+  };
+  state.timer = setTimeout(() => {
+    document.removeEventListener("click", state.listener, true);
+    if (globalThis[slot] === state) delete globalThis[slot];
+  }, 2000);
+  globalThis[slot] = state;
+  document.addEventListener("click", state.listener, true);
+  return true;
+}
+
 const stringData = (value, maximum = 1024 * 1024) => {
   requireValue(
     typeof value === "string" && encoder.encode(value).byteLength <= maximum,
@@ -1749,8 +1807,10 @@ export function createBrowserRouter(
     }
     if (waiter.event === "download") {
       const lease = leases.get(waiter.leaseId);
-      if (lease)
+      if (lease) {
         void syncDownloadIntercept(lease, waiter.tabId).catch(() => {});
+        void stopLocalDownloadClick(lease, waiter.tabId).catch(() => {});
+      }
     }
   };
   const syncDownloadIntercept = (lease, tabId) => {
@@ -1903,6 +1963,85 @@ export function createBrowserRouter(
       // Detachment/Fetch.disable may already have resumed the request.
     }
   };
+  const stopLocalDownloadClick = async (lease, tabId) => {
+    const marker = lease.localDownloadClicks?.get(tabId);
+    if (!marker) return;
+    lease.localDownloadClicks.delete(tabId);
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "ISOLATED",
+        func: manageLocalDownloadClick,
+        args: [{ action: "disarm", marker }],
+      });
+    } catch {
+      // The old document may have closed; the page-side listener also expires.
+    }
+  };
+  const armLocalDownloadClick = async (ctx, tabId) => {
+    if (
+      downloadMarks.size >= 1024 ||
+      ![...waiters.values()].some(
+        (waiter) =>
+          waiter.leaseId === ctx.lease.id &&
+          waiter.tabId === tabId &&
+          waiter.event === "download" &&
+          waiter.ready &&
+          !waiter.settled,
+      )
+    )
+      return false;
+    await stopLocalDownloadClick(ctx.lease, tabId);
+    const marker = crypto.randomUUID().replaceAll("-", "");
+    downloadMarks.set(marker, {
+      leaseId: ctx.lease.id,
+      runId: ctx.runId,
+      tabId,
+      controlEpoch: ctx.lease.epochs?.get(tabId),
+    });
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "ISOLATED",
+        func: manageLocalDownloadClick,
+        args: [{ action: "arm", marker }],
+      });
+      if (result.length !== 1 || result[0].result !== true) {
+        downloadMarks.delete(marker);
+        return false;
+      }
+      (ctx.lease.localDownloadClicks ??= new Map()).set(tabId, marker);
+      if (
+        ctx.signal?.aborted ||
+        ctx.lease.ended ||
+        ctx.lease.revoked ||
+        ![...waiters.values()].some(
+          (waiter) =>
+            waiter.leaseId === ctx.lease.id &&
+            waiter.tabId === tabId &&
+            waiter.event === "download" &&
+            waiter.ready &&
+            !waiter.settled,
+        )
+      ) {
+        await stopLocalDownloadClick(ctx.lease, tabId);
+        downloadMarks.delete(marker);
+        return false;
+      }
+      return true;
+    } catch {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "ISOLATED",
+          func: manageLocalDownloadClick,
+          args: [{ action: "disarm", marker }],
+        });
+      } catch {}
+      downloadMarks.delete(marker);
+      return false;
+    }
+  };
   const syncChooserIntercept = (lease, tabId) => {
     const queues = (lease.chooserSync ??= new Map()),
       before = queues.get(tabId) ?? Promise.resolve();
@@ -2031,6 +2170,7 @@ export function createBrowserRouter(
     for (const waiter of waiters.values())
       if (waiter.leaseId === lease.id && waiter.tabId === tabId)
         cancelWaiter(waiter);
+    await stopLocalDownloadClick(lease, tabId);
     if (lease.attached.has(tabId)) await syncDownloadIntercept(lease, tabId);
     if (!lease.attached.has(tabId) && !lease.externallyDetached.has(tabId)) {
       const targets = await chrome.debugger.getTargets();
@@ -3772,15 +3912,43 @@ export function createBrowserRouter(
         active(ctx.lease);
         ctx.signal?.throwIfAborted();
       }
+      const watchStart =
+        !child &&
+        ((method === "Input.dispatchMouseEvent" &&
+          params.type === "mousePressed" &&
+          params.button === "left") ||
+          (method === "Input.dispatchKeyEvent" &&
+            ["keyDown", "rawKeyDown"].includes(params.type) &&
+            params.key === "Enter"));
+      const watchEnd =
+        !child &&
+        ((method === "Input.dispatchMouseEvent" &&
+          params.type === "mouseReleased" &&
+          params.button === "left") ||
+          (method === "Input.dispatchKeyEvent" &&
+            params.type === "keyUp" &&
+            params.key === "Enter"));
+      const armedLocalDownload = watchStart
+        ? await armLocalDownloadClick(ctx, tabId)
+        : false;
+      if (ctx.signal?.aborted || ctx.lease.ended || ctx.lease.revoked) {
+        if (armedLocalDownload) await stopLocalDownloadClick(ctx.lease, tabId);
+        active(ctx.lease);
+        ctx.signal?.throwIfAborted();
+      }
       ctx.dispatched();
       if (method === "Network.loadNetworkResource")
         ctx.pendingInfo.nativeNetworkTabId = tabId;
       let result;
       try {
         result = await chrome.debugger.sendCommand(source, method, params);
+      } catch (cause) {
+        if (armedLocalDownload) await stopLocalDownloadClick(ctx.lease, tabId);
+        throw cause;
       } finally {
         if (method === "Network.loadNetworkResource")
           delete ctx.pendingInfo.nativeNetworkTabId;
+        if (watchEnd) await stopLocalDownloadClick(ctx.lease, tabId);
       }
       if (rawFetch && method === "Fetch.disable") {
         ctx.lease.rawFetch?.delete(tabId);
@@ -5381,6 +5549,8 @@ export function createBrowserRouter(
         await syncChooserIntercept(ctx.lease, waiter.tabId);
       if (waiter.event === "download")
         await syncDownloadIntercept(ctx.lease, waiter.tabId);
+      if (waiter.event === "download")
+        await stopLocalDownloadClick(ctx.lease, waiter.tabId);
       return { cancelled: true };
     },
     downloads(ctx) {
