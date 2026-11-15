@@ -143,6 +143,7 @@ async function fixture(
     gateDetach = false,
     gateCommand = false,
     nativeDownloads = false,
+    declaredDownloadSize = 150000,
     visualFailure = false,
   } = {},
 ) {
@@ -356,10 +357,56 @@ async function fixture(
         attached.delete(target.tabId);
         chrome.debugger.onDetach.emit(target, "canceled_by_user");
       },
-      sendCommand: async (_source, method) => {
+      sendCommand: async (_source, method, params) => {
         counts.commands++;
         commandStarted.resolve();
         if (gateCommand) await commandGate.promise;
+        if (
+          method === "Fetch.continueResponse" &&
+          nativeDownloads === "matched"
+        ) {
+          const disposition = params.responseHeaders.find(
+            (header) => header.name.toLowerCase() === "content-disposition",
+          ).value;
+          const filename = /filename="([^"]+)"/.exec(disposition)?.[1];
+          assert.ok(filename);
+          chrome.downloads.onDeterminingFilename.emit(
+            { id: 71, filename },
+            () => {},
+          );
+          chrome.debugger.onEvent.emit(_source, "Page.downloadWillBegin", {
+            guid: "download-fixture",
+            url: "https://fixture.test/file",
+            suggestedFilename: filename,
+          });
+          chrome.debugger.onEvent.emit(_source, "Page.downloadProgress", {
+            guid: "download-fixture",
+            state: "completed",
+            receivedBytes: downloadBytes.length,
+            totalBytes: downloadBytes.length,
+          });
+          return {};
+        }
+        if (method === "Page.navigate" && nativeDownloads === "matched") {
+          const request = { url: "https://fixture.test/file" };
+          chrome.debugger.onEvent.emit(_source, "Fetch.requestPaused", {
+            requestId: "download-request",
+            request,
+          });
+          await delay(0);
+          chrome.debugger.onEvent.emit(_source, "Fetch.requestPaused", {
+            requestId: "download-request",
+            request,
+            responseStatusCode: 200,
+            responseHeaders: [
+              {
+                name: "Content-Disposition",
+                value: "attachment; filename=report.bin",
+              },
+            ],
+          });
+          return { frameId: "main" };
+        }
         if (method === "Page.navigate" && nativeDownloads) {
           const url = "https://fixture.test/file";
           chrome.downloads.onCreated.emit({
@@ -414,8 +461,15 @@ async function fixture(
   chrome.downloads = {
     onCreated: event(),
     onChanged: event(),
+    onDeterminingFilename: event(),
     search: async () => [
-      { id: 71, state: "complete", exists: true, filename: downloadSource },
+      {
+        id: 71,
+        state: "complete",
+        exists: true,
+        filename: downloadSource,
+        fileSize: declaredDownloadSize,
+      },
     ],
   };
   class ExtensionSocket extends WebSocket {
@@ -706,6 +760,24 @@ test("repeated original download waiters stay usable while Core never copies a f
   assert.equal(existsSync(path.join(f.work, "copied.txt")), false);
   assert.deepEqual(readFileSync(f.downloadSource), f.downloadBytes);
   assert.equal(f.attached.size, 0);
+});
+
+test("browser file size is enforced before the downloaded artifact is published", async (t) => {
+  const f = await fixture(t, {
+    nativeDownloads: "matched",
+    declaredDownloadSize: 150001,
+  });
+  const result = await f.start(
+    select +
+      'const pending=tab.playwright.waitForDownload();await tab.cdp.send("Page.navigate",{url:"https://fixture.test/file"});const download=await pending;try{return {path:await download.path()};}catch(error){return {error:error.code};}',
+  );
+  assert.equal(
+    result.run.status,
+    "succeeded",
+    JSON.stringify(result.run.error),
+  );
+  assert.deepEqual(result.result.data, { error: "FILE_SIZE_MISMATCH" });
+  assert.deepEqual(readFileSync(f.downloadSource), f.downloadBytes);
 });
 
 test("a queued deadline reports no dispatched effect and never sends its late native command", async (t) => {

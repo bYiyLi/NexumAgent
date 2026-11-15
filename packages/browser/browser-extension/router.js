@@ -5669,7 +5669,7 @@ export function createBrowserRouter(
         "CAPABILITY_NOT_ALLOWED",
         "The original download does not have a proven browser file identity.",
       );
-      let filename;
+      let completed;
       await router.poll(ctx, async () => {
         requireValue(
           !mark.ambiguous,
@@ -5707,10 +5707,19 @@ export function createBrowserRouter(
           "FILE_UNAVAILABLE",
           "The completed browser download has no valid local filename.",
         );
-        filename = item.filename;
+        requireValue(
+          item.fileSize === undefined ||
+            (Number.isSafeInteger(item.fileSize) && item.fileSize >= -1),
+          "PROTOCOL_MISMATCH",
+          "The completed browser download has an invalid file size.",
+        );
+        completed = {
+          path: item.filename,
+          ...(item.fileSize >= 0 ? { expectedSize: item.fileSize } : {}),
+        };
         return true;
       });
-      return filename;
+      return completed;
     },
     async recoverOwnedControls(records) {
       requireValue(

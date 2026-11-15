@@ -876,13 +876,20 @@ const createExtension: ExtensionFactory = async (host) => {
           ) {
             if (value === null && pathName === "downloads.path") return null;
             check(
-              typeof value === "string",
+              record(value) &&
+                typeof value.path === "string" &&
+                (value.expectedSize === undefined ||
+                  (Number.isSafeInteger(value.expectedSize) &&
+                    (value.expectedSize as number) >= 0)),
               "PROTOCOL_MISMATCH",
-              "A completed download did not return its actual browser-local file.",
+              "A completed download did not return its actual browser-local file and size.",
             );
             const artifact = await materializeDownload(
               {
-                path: value,
+                path: value.path as string,
+                ...(value.expectedSize === undefined
+                  ? {}
+                  : { expectedSize: value.expectedSize as number }),
                 ...(typeof input.path === "string"
                   ? { destination: input.path }
                   : {}),

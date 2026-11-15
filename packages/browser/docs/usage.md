@@ -31,7 +31,23 @@ return output.image({ data: image, mimeType: "image/jpeg" });
 
 `tab.navigate(url,{waitUntil})` 等待实际顶层导航的指定阶段，允许站点正常重定向；完成后用 `await tab.url()` 观察最终地址。`waitForURL` 或显式带 `url` 的导航等待仍按指定地址精确匹配；它们不会因某个不同地址已经加载而返回成功。
 
-当前 MV3 传输能保留目标绑定的原始下载事件和 `tab.downloads()` 状态，但 Chrome 公开接口没有提供该 GUID 与本机文件的可靠对应。因此 `download.path()`、`tab.saveDownload()` 明确返回 `CAPABILITY_NOT_ALLOWED`；本包不按 URL、时间或文件名猜测文件，不重发原请求。它们的正向文件取回仍未完成验收。下面的页面媒体、资产下载与导出按实际来源生成自己的产物，不受这项原生下载文件身份限制影响。
+明确等待受控标签发起的 HTTP 附件下载时，扩展为原始响应中的文件名添加唯一编号，并建议浏览器保存到默认下载目录的 `Nexum` 子目录，不修改浏览器全局下载位置。点击页面上带 `download` 属性的 HTTP/Blob/data 链接，或页面在该次点击中同步创建并点击此类链接时，扩展只在此次点击期间设置带编号的下载名称，随后恢复页面链接属性。两种方式都用编号绑定页面下载事件与浏览器的下载记录，等待浏览器实际完成，再按当前路径权限读取和固定文件；浏览器中的原文件保留。
+
+下载记录不能确认、其他扩展更改后的路径无权访问，或下载尚未完成时，不能把相似文件当成结果。浏览器提供文件大小时，实际文件必须与之相符；大小未知时按实际读取结果处理。无法关联身份的下载，例如部分异步生成或未连接到页面的链接、无法访问的 frame，仍明确返回 `CAPABILITY_NOT_ALLOWED`；不会按 URL、时间或普通文件名猜测，也不会重发原请求。
+
+`tab.downloads()` 对 `data:` 下载省略 URL，因为 URL 本身包含文件内容；完整内容通过文件或资源交付。
+
+下载结果需要交给 AI 时，可以直接复用平台的资源包装：
+
+```javascript
+const pending = tab.playwright.waitForDownload();
+await tab.playwright.getByRole("link", { name: "下载报表" }).click();
+const downloaded = await pending;
+const file = await downloaded.path();
+return output.file(file, { name: "报表.pdf" });
+```
+
+平台在返回结果时将实际文件固定并登记到当前 Agent 的 `work/resources`，提供标准 MCP 资源引用；Host 再通过 `resources/read` 获取内容。读取浏览器下载目录和保存平台资源仍受当前授权与大小限制约束。
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。
 

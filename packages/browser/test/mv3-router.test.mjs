@@ -2131,6 +2131,7 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
     id: 72,
     filename: `/downloads/Nexum/${filename}`,
     state: "in_progress",
+    fileSize: 3,
   });
   let originalSuggestion = "not-called";
   f.chrome.downloads.onDeterminingFilename.emit(downloads[1], (value) => {
@@ -2163,12 +2164,25 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
     receivedBytes: 3,
     totalBytes: 3,
   });
-  assert.equal(await path, `/downloads/Nexum/${filename}`);
+  assert.deepEqual(await path, {
+    path: `/downloads/Nexum/${filename}`,
+    expectedSize: 3,
+  });
   assert.deepEqual(
     f.calls
       .filter((call) => call[0] === "downloads.search")
       .map((call) => call[1]),
     [{ id: 72 }],
+  );
+  downloads[1].fileSize = -1;
+  assert.deepEqual(
+    await f.call("downloads.path", { downloadId: receipt.downloadId }),
+    { path: `/downloads/Nexum/${filename}` },
+  );
+  downloads[1].fileSize = -2;
+  await assert.rejects(
+    f.call("downloads.path", { downloadId: receipt.downloadId }),
+    { code: "PROTOCOL_MISMATCH" },
   );
   await f.call("waiters.cancel", { id: waiter.id });
   assert.ok(f.calls.some((call) => call[2] === "Fetch.disable"));
