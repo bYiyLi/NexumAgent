@@ -493,6 +493,10 @@ export class AgentRuntime {
       materialRetention: this.#materialRetention,
     });
     const permissions = new Set([
+      "connection",
+      "path",
+      "resource",
+      "url",
       "runtime.input",
       "storage.reserve",
       "output",

@@ -715,6 +715,69 @@ test("an explicitly approved enabled npm SDK contributes capabilities, materials
   );
 });
 
+test("the normal application recognizes browser extension permissions without granting access to unapproved paths", async (t) => {
+  const f = await fixture(t, {
+    runtime: {
+      modulePolicy: {
+        builtins: () => defaultBuiltins,
+        approvedPackages: () =>
+          new Map([["browser-permissions-fixture", "1.0.0"]]),
+      },
+    },
+    prepare({ root, work, write }) {
+      const name = "browser-permissions-fixture";
+      write(path.join(work, "package.json"), {
+        type: "module",
+        dependencies: { [name]: "1.0.0" },
+      });
+      const dir = path.join(work, "node_modules", name);
+      write(path.join(dir, "package.json"), {
+        name,
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./nexum": { types: "./extension.d.ts", import: "./extension.js" },
+        },
+        nexum: {
+          apiVersion: 1,
+          namespace: "browserprobe",
+          permissions: ["connection", "path", "resource", "url"],
+          docs: "./docs",
+        },
+      });
+      write(
+        path.join(dir, "extension.d.ts"),
+        "export default function createExtension(host:unknown):unknown;\n",
+      );
+      write(path.join(dir, "docs/README.md"), "# Browser permission fixture\n");
+      write(
+        path.join(dir, "extension.js"),
+        `export default function(host){host.authorize({type:'connection',value:'127.0.0.1:12345',access:'listen'});return {methods:{read:{description:'Check a browser file path',permissions:['connection','path'],schemaDialect:'draft7',inputSchema:{type:'object',properties:{path:{type:'string'}},required:['path'],additionalProperties:false},handle(input,call){call.authorize({type:'path',value:input.path,access:'read'});return {allowed:true};}}}};}`,
+      );
+      write(path.join(root, "state/maintenance/extensions.json"), {
+        [name]: {
+          enabled: true,
+          objectId: "extension_browser_fixture",
+          revision: "revision_browser_fixture",
+          config: {},
+        },
+      });
+    },
+  });
+  const allowed = await f.run(
+    "return await browserprobe.read({path:context.input});",
+    f.work,
+  );
+  assert.equal(allowed.run.status, "succeeded", JSON.stringify(allowed));
+  assert.equal(allowed.result.data.allowed, true);
+  const denied = await f.run(
+    "return await browserprobe.read({path:context.input});",
+    f.root,
+  );
+  assert.equal(denied.run.status, "failed", JSON.stringify(denied));
+  assert.equal(denied.run.error.code, "path_not_allowed");
+});
+
 class ApprovedFixtureAuthority {
   records = new Map();
   async create(identity, input) {

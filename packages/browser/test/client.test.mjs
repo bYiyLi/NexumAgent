@@ -133,6 +133,8 @@ test("browser download listing uses the selected browser and returns native path
   assert.equal(request.input.target.browserId, info.id);
   assert.equal(request.input.target.tabId, undefined);
   assert.deepEqual(request.input.options, { limit: 50 });
+  await browser.downloads.list({ limit: 0 });
+  assert.equal(f.calls.at(-1).input.options.limit, 0);
 });
 
 test("locator combinations are bounded immutable AST with native regexp flags and exact frame/target ownership", async () => {

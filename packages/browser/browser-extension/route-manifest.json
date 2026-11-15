@@ -75,6 +75,11 @@
     "mutating": false
   },
   {
+    "method": "browsers.downloads",
+    "needsTab": false,
+    "mutating": false
+  },
+  {
     "method": "browsers.nameSession",
     "needsTab": false,
     "mutating": false

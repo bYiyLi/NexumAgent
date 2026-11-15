@@ -1935,7 +1935,7 @@
     "mv3": {
       "test": ["test/mv3-router.test.mjs", "test/mv3-connection.test.mjs"],
       "scope": "真实MV3路由代码、替代Chrome API fixture；非Chrome/Edge实装证据",
-      "fixtureCases": 76
+      "fixtureCases": 77
     },
     "files": {
       "test": "test/files.test.mjs",
@@ -1944,7 +1944,7 @@
     }
   },
   "remaining": [
-    "浏览器下载列表允许 AI 选择未自动关联的文件；部分异步生成、跨 frame 下载仍不承诺自动关联，不能按 URL/时间冒充确定身份",
+    "浏览器下载列表允许 AI 选择未自动关联的文件；真实 Host 资源交付仍待验收",
     "用户现有浏览器环境接入及 Chrome、Edge 在全部支持系统和多配置下的完整验收",
     "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
     "高阶资产、站点导出、用户接管及可视化的完整真实环境、格式与失效路径验收",
