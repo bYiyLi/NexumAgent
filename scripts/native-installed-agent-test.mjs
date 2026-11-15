@@ -341,11 +341,25 @@ try {
     output: "native-managed-service",
   };
   assert.deepEqual(result.result.data, expected);
+  const grandchildFile = path.join(
+      root,
+      "work",
+      "native-service-grandchild.pid",
+    ),
+    grandchildCode =
+      "setTimeout(()=>process.exit(0),180000);setInterval(()=>{},1000);",
+    parentCode = [
+      "const {spawn}=require('node:child_process');",
+      "const {writeFileSync,renameSync}=require('node:fs');",
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(grandchildCode)}],{stdio:'ignore'});`,
+      "const tmp=process.argv[1]+'.tmp';writeFileSync(tmp,String(child.pid));renameSync(tmp,process.argv[1]);",
+      "setTimeout(()=>process.exit(0),180000);setInterval(()=>{},1000);",
+    ].join("");
   let background = await invoke(first, "agent.run.start", {
     contextId: opened.contextId,
     waitMs: 0,
-    input: { node },
-    script: `const process=await sh.start({command:context.input.node,args:['-e','setInterval(()=>{},1000);'],background:true});return {processId:process.processId,pid:process.details.pid};`,
+    input: { node, parentCode, grandchildFile },
+    script: `const process=await sh.start({command:context.input.node,args:['-e',context.input.parentCode,context.input.grandchildFile],background:true});return {processId:process.processId,pid:process.details.pid};`,
   });
   const backgroundRunId = background.run.runId;
   await until(async () => {
@@ -368,10 +382,37 @@ try {
   );
   assert.notEqual(backgroundPid, firstPid);
   leaders.add(backgroundPid);
+  let grandchildPid;
+  await until(async () => {
+    assert.equal(
+      alive(backgroundPid),
+      true,
+      "The original process exited before its child was observed.",
+    );
+    let value;
+    try {
+      value = await readFile(grandchildFile, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    }
+    assert.match(value, /^[1-9]\d*$/);
+    grandchildPid = Number(value);
+    assert.ok(Number.isSafeInteger(grandchildPid));
+    return alive(grandchildPid);
+  }, "The actual nested process was not created by the managed background process.");
+  assert.notEqual(grandchildPid, firstPid);
+  assert.notEqual(grandchildPid, backgroundPid);
+  assert.notEqual(grandchildPid, process.pid);
+  leaders.add(grandchildPid);
   await serviceAction(plan, "stop", { isolatedHome: true });
   await until(
-    () => first.closed && !alive(firstPid) && !alive(backgroundPid),
-    "The actual installed CLI and SDK background child did not close after native stop.",
+    () =>
+      first.closed &&
+      !alive(firstPid) &&
+      !alive(backgroundPid) &&
+      !alive(grandchildPid),
+    "The installed CLI and the actual managed process tree did not close after native stop.",
   );
   await serviceAction(plan, "start", { isolatedHome: true });
   await until(
@@ -412,6 +453,7 @@ try {
       cliSha256: originalEntry,
       actualBoots: peers.length,
       historyReplayed: false,
+      nestedResourceTreeClosed: true,
     }),
   );
 } finally {
