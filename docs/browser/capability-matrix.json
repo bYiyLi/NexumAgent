@@ -1,0 +1,2347 @@
+{
+  "product": "Nexum browser",
+  "package": "nexum-browser",
+  "baseline": "26.1103.32239",
+  "sourceApi": "local-reference-not-distributed",
+  "sourceApiSha256": "ad0f401b995bb3e590e46d2b95b6306c6f231ba849268bbaec055ebe59daae6d",
+  "interfaceCount": 22,
+  "memberCount": 148,
+  "members": [
+    {
+      "id": "B001",
+      "sourceInterface": "Agent",
+      "sourceMember": "browsers",
+      "target": "client.browsers",
+      "declarations": ["browsers: Browsers;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B002",
+      "sourceInterface": "Agent",
+      "sourceMember": "documentation",
+      "target": "client.documentation",
+      "declarations": ["documentation: Documentation;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B003",
+      "sourceInterface": "Browsers",
+      "sourceMember": "get",
+      "target": "client.browsers.get",
+      "declarations": ["get(id: string): Promise<Browser>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B004",
+      "sourceInterface": "Browsers",
+      "sourceMember": "getDefault",
+      "target": "client.browsers.getDefault",
+      "declarations": ["getDefault(): Promise<Browser>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B005",
+      "sourceInterface": "Browsers",
+      "sourceMember": "getForUrl",
+      "target": "client.browsers.getForUrl",
+      "declarations": ["getForUrl(url: string): Promise<Browser>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B006",
+      "sourceInterface": "Browsers",
+      "sourceMember": "list",
+      "target": "client.browsers.list",
+      "declarations": ["list(): Promise<BrowserInfo[]>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B007",
+      "sourceInterface": "Browser",
+      "sourceMember": "browserId",
+      "target": "selectedBrowser.browserId",
+      "declarations": ["browserId: string;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B008",
+      "sourceInterface": "Browser",
+      "sourceMember": "capabilities",
+      "target": "selectedBrowser.capabilities",
+      "declarations": ["capabilities: BrowserCapabilityCollection;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B009",
+      "sourceInterface": "Browser",
+      "sourceMember": "tabs",
+      "target": "selectedBrowser.tabs",
+      "declarations": ["tabs: Tabs;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B010",
+      "sourceInterface": "Browser",
+      "sourceMember": "user",
+      "target": "selectedBrowser.user",
+      "declarations": ["user: BrowserUser;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B011",
+      "sourceInterface": "Browser",
+      "sourceMember": "documentation",
+      "target": "selectedBrowser.documentation",
+      "declarations": ["documentation(): Promise<string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B012",
+      "sourceInterface": "Browser",
+      "sourceMember": "history",
+      "target": "selectedBrowser.history",
+      "declarations": [
+        "history(options?: BrowserHistoryOptions): Promise<Array<BrowserHistoryEntry>>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B013",
+      "sourceInterface": "Browser",
+      "sourceMember": "nameSession",
+      "target": "selectedBrowser.nameSession",
+      "declarations": ["nameSession(name: string): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B014",
+      "sourceInterface": "BrowserUser",
+      "sourceMember": "claimTab",
+      "target": "selectedBrowser.user.claimTab",
+      "declarations": [
+        "claimTab(tab: string | BrowserUserTabInfo): Promise<Tab>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B015",
+      "sourceInterface": "BrowserUser",
+      "sourceMember": "getTabContext",
+      "target": "selectedBrowser.user.getTabContext",
+      "declarations": [
+        "getTabContext(\n    tab?: string | BrowserUserTabInfo,\n  ): Promise<BrowserUserTabContext>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B016",
+      "sourceInterface": "BrowserUser",
+      "sourceMember": "openTabs",
+      "target": "selectedBrowser.user.openTabs",
+      "declarations": ["openTabs(): Promise<Array<BrowserUserTabInfo>>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B017",
+      "sourceInterface": "Tabs",
+      "sourceMember": "content",
+      "target": "selectedBrowser.tabs.content",
+      "declarations": [
+        "content(options: TabsContentOptions): Promise<Array<TabsContentResult>>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B018",
+      "sourceInterface": "Tabs",
+      "sourceMember": "get",
+      "target": "selectedBrowser.tabs.get",
+      "declarations": ["get(id: string): Promise<Tab>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B019",
+      "sourceInterface": "Tabs",
+      "sourceMember": "list",
+      "target": "selectedBrowser.tabs.list",
+      "declarations": ["list(): Promise<Array<TabInfo>>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B020",
+      "sourceInterface": "Tabs",
+      "sourceMember": "new",
+      "target": "selectedBrowser.tabs.new",
+      "declarations": [
+        "new: (url?: string, options?: { active?: boolean }) => Promise<Tab>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B021",
+      "sourceInterface": "Tabs",
+      "sourceMember": "selected",
+      "target": "selectedBrowser.tabs.selected",
+      "declarations": ["selected(): Promise<undefined | Tab>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B022",
+      "sourceInterface": "Tab",
+      "sourceMember": "ax",
+      "target": "tab.ax",
+      "declarations": ["ax: AXAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B023",
+      "sourceInterface": "Tab",
+      "sourceMember": "capabilities",
+      "target": "tab.capabilities",
+      "declarations": ["capabilities: TabCapabilityCollection;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B024",
+      "sourceInterface": "Tab",
+      "sourceMember": "clipboard",
+      "target": "tab.clipboard",
+      "declarations": ["clipboard: TabClipboardAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B025",
+      "sourceInterface": "Tab",
+      "sourceMember": "content",
+      "target": "tab.content",
+      "declarations": ["content: ContentAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B026",
+      "sourceInterface": "Tab",
+      "sourceMember": "cua",
+      "target": "tab.cua",
+      "declarations": ["cua: CUAAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B027",
+      "sourceInterface": "Tab",
+      "sourceMember": "dev",
+      "target": "tab.dev",
+      "declarations": ["dev: TabDevAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B028",
+      "sourceInterface": "Tab",
+      "sourceMember": "dom_cua",
+      "target": "tab.dom",
+      "declarations": ["dom: DomCUAAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B029",
+      "sourceInterface": "Tab",
+      "sourceMember": "id",
+      "target": "tab.id",
+      "declarations": ["id: string;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B030",
+      "sourceInterface": "Tab",
+      "sourceMember": "playwright",
+      "target": "tab.playwright",
+      "declarations": ["playwright: PlaywrightAPI;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B031",
+      "sourceInterface": "Tab",
+      "sourceMember": "back",
+      "target": "tab.goBack",
+      "declarations": [
+        "goBack(options?: NavigationOptions): Promise<ActionResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B032",
+      "sourceInterface": "Tab",
+      "sourceMember": "close",
+      "target": "tab.close",
+      "declarations": ["close(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B033",
+      "sourceInterface": "Tab",
+      "sourceMember": "forward",
+      "target": "tab.forward",
+      "declarations": [
+        "forward(options?: NavigationOptions): Promise<ActionResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B034",
+      "sourceInterface": "Tab",
+      "sourceMember": "getJsDialog",
+      "target": "tab.getJsDialog",
+      "declarations": ["getJsDialog(): Promise<undefined | Dialog>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B035",
+      "sourceInterface": "Tab",
+      "sourceMember": "goto",
+      "target": "tab.navigate",
+      "declarations": [
+        "navigate(url: string, options?: NavigationOptions): Promise<ActionResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B036",
+      "sourceInterface": "Tab",
+      "sourceMember": "markDeliverable",
+      "target": "tab.markDeliverable",
+      "declarations": ["markDeliverable(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B037",
+      "sourceInterface": "Tab",
+      "sourceMember": "markHandoff",
+      "target": "tab.markHandoff",
+      "declarations": ["markHandoff(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B038",
+      "sourceInterface": "Tab",
+      "sourceMember": "reload",
+      "target": "tab.reload",
+      "declarations": [
+        "reload(options?: NavigationOptions): Promise<ActionResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B039",
+      "sourceInterface": "Tab",
+      "sourceMember": "requestManualHandoff",
+      "target": "tab.requestUserTakeover",
+      "declarations": [
+        "requestUserTakeover(): Promise<void>;",
+        "requestUserTakeover(\n    reason?: \"authentication\" | \"captcha\" | \"user_requested\" | \"other\",\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B040",
+      "sourceInterface": "Tab",
+      "sourceMember": "requestUserTakeover",
+      "target": "tab.requestUserTakeover",
+      "declarations": [
+        "requestUserTakeover(): Promise<void>;",
+        "requestUserTakeover(\n    reason?: \"authentication\" | \"captcha\" | \"user_requested\" | \"other\",\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B041",
+      "sourceInterface": "Tab",
+      "sourceMember": "screenshot",
+      "target": "tab.screenshot",
+      "declarations": [
+        "screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B042",
+      "sourceInterface": "Tab",
+      "sourceMember": "title",
+      "target": "tab.title",
+      "declarations": ["title(): Promise<undefined | string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B043",
+      "sourceInterface": "Tab",
+      "sourceMember": "url",
+      "target": "tab.url",
+      "declarations": ["url(): Promise<undefined | string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B044",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "click",
+      "target": "tab.ax.click",
+      "declarations": [
+        "click(target: number | AXPoint, options?: AXClickOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B045",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "drag",
+      "target": "tab.ax.drag",
+      "declarations": ["drag(from: AXPoint, to: AXPoint): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B046",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "get",
+      "target": "tab.ax.get",
+      "declarations": [
+        "get(mode?: \"state\", options?: AXStateOptions): Promise<string>;",
+        "get(mode: \"screenshot\"): Promise<Uint8Array>;",
+        "get(\n    mode: \"both\",\n    options?: AXStateOptions,\n  ): Promise<{ screenshot?: Uint8Array; state: string }>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B047",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "paste",
+      "target": "tab.ax.paste",
+      "declarations": [
+        "paste(\n    elementIndex: null | number,\n    text: string,\n    options?: AXPasteOptions,\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B048",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "performSecondaryAction",
+      "target": "tab.ax.performSecondaryAction",
+      "declarations": [
+        "performSecondaryAction(elementIndex: number, action: string): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B049",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "pressKey",
+      "target": "tab.ax.pressKey",
+      "declarations": [
+        "pressKey(\n    elementIndex: null | number,\n    key: string,\n    options?: AXPressKeyOptions,\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B050",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "scroll",
+      "target": "tab.ax.scroll",
+      "declarations": [
+        "scroll(\n    target: number | AXPoint,\n    direction: AXDirection,\n    pages?: number,\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B051",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "selectText",
+      "target": "tab.ax.selectText",
+      "declarations": [
+        "selectText(\n    elementIndex: number,\n    text: string,\n    options?: AXSelectTextOptions,\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B052",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "setValue",
+      "target": "tab.ax.setValue",
+      "declarations": [
+        "setValue(elementIndex: number, value: string): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B053",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "typeText",
+      "target": "tab.ax.typeText",
+      "declarations": [
+        "typeText(elementIndex: null | number, text: string): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B054",
+      "sourceInterface": "AXAPI",
+      "sourceMember": "write",
+      "target": "tab.ax.write",
+      "declarations": [
+        "write(mode?: \"state\", options?: AXStateOptions): Promise<OutputIntent>;",
+        "write(mode: \"screenshot\"): Promise<OutputIntent>;",
+        "write(mode: \"both\", options?: AXStateOptions): Promise<OutputIntent>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B055",
+      "sourceInterface": "ContentAPI",
+      "sourceMember": "export",
+      "target": "tab.content.export",
+      "declarations": ["export(): Promise<BrowserArtifact>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B056",
+      "sourceInterface": "ContentAPI",
+      "sourceMember": "exportGsuite",
+      "target": "tab.content.exportGsuite",
+      "declarations": [
+        "exportGsuite(\n    type: \"pdf\" | \"md\" | \"xlsx\" | \"csv\" | \"docx\" | \"pptx\",\n  ): Promise<BrowserArtifact>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B057",
+      "sourceInterface": "ContentAPI",
+      "sourceMember": "exportYouTubeTranscript",
+      "target": "tab.content.exportYouTubeTranscript",
+      "declarations": ["exportYouTubeTranscript(): Promise<BrowserArtifact>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B058",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "click",
+      "target": "tab.cua.click",
+      "declarations": ["click(options: ClickOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B059",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "double_click",
+      "target": "tab.cua.doubleClick",
+      "declarations": [
+        "doubleClick(options: DoubleClickOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B060",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "downloadMedia",
+      "target": "tab.cua.downloadMedia",
+      "declarations": [
+        "downloadMedia(options: CuaDownloadMediaOptions): Promise<BrowserArtifact>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B061",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "drag",
+      "target": "tab.cua.drag",
+      "declarations": ["drag(options: DragOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B062",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "keypress",
+      "target": "tab.cua.keypress",
+      "declarations": ["keypress(options: KeypressOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B063",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "move",
+      "target": "tab.cua.move",
+      "declarations": ["move(options: MoveOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B064",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "scroll",
+      "target": "tab.cua.scroll",
+      "declarations": ["scroll(options: ScrollOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B065",
+      "sourceInterface": "CUAAPI",
+      "sourceMember": "type",
+      "target": "tab.cua.type",
+      "declarations": ["type(options: TypeOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B066",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "click",
+      "target": "tab.dom.click",
+      "declarations": ["click(options: DomClickOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B067",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "double_click",
+      "target": "tab.dom.doubleClick",
+      "declarations": ["doubleClick(options: DomClickOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B068",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "downloadMedia",
+      "target": "tab.dom.downloadMedia",
+      "declarations": [
+        "downloadMedia(options: DomDownloadMediaOptions): Promise<BrowserArtifact>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B069",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "get_visible_dom",
+      "target": "tab.dom.getVisibleTree",
+      "declarations": ["getVisibleTree(): Promise<VisibleDomTree>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B070",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "keypress",
+      "target": "tab.dom.keypress",
+      "declarations": ["keypress(options: DomKeypressOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B071",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "scroll",
+      "target": "tab.dom.scroll",
+      "declarations": ["scroll(options: DomScrollOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B072",
+      "sourceInterface": "DomCUAAPI",
+      "sourceMember": "type",
+      "target": "tab.dom.type",
+      "declarations": ["type(options: DomTypeOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B073",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "domSnapshot",
+      "target": "tab.playwright.domSnapshot",
+      "declarations": ["domSnapshot(): Promise<string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B074",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "elementInfo",
+      "target": "tab.playwright.elementInfo",
+      "declarations": [
+        "elementInfo(options: ElementInfoOptions): Promise<Array<ElementInfo>>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B075",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "elementScreenshot",
+      "target": "tab.playwright.elementScreenshot",
+      "declarations": [
+        "elementScreenshot(options: ElementScreenshotOptions): Promise<Uint8Array>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B076",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "evaluate",
+      "target": "tab.playwright.evaluate",
+      "declarations": [
+        "evaluate<TResult, TArg>(\n    pageFunction: PlaywrightEvaluateFunction<TArg, TResult>,\n    arg?: TArg,\n    options?: PlaywrightEvaluateOptions,\n  ): Promise<TResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B077",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "expectNavigation",
+      "target": "tab.playwright.expectNavigation",
+      "declarations": [
+        "expectNavigation<T>(\n    action: () => Promise<T>,\n    options?: { timeoutMs?: number; url?: string; waitUntil?: WaitUntil },\n  ): Promise<T>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B078",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "frameLocator",
+      "target": "tab.playwright.frameLocator",
+      "declarations": [
+        "frameLocator(frameSelector: string): PlaywrightFrameLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B079",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "getByLabel",
+      "target": "tab.playwright.getByLabel",
+      "declarations": [
+        "getByLabel(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B080",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "getByPlaceholder",
+      "target": "tab.playwright.getByPlaceholder",
+      "declarations": [
+        "getByPlaceholder(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B081",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "getByRole",
+      "target": "tab.playwright.getByRole",
+      "declarations": [
+        "getByRole(\n    role: string,\n    options?: { exact?: boolean; name?: TextMatcher },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B082",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "getByTestId",
+      "target": "tab.playwright.getByTestId",
+      "declarations": ["getByTestId(testId: string): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B083",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "getByText",
+      "target": "tab.playwright.getByText",
+      "declarations": [
+        "getByText(text: TextMatcher, options?: { exact?: boolean }): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B084",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "locator",
+      "target": "tab.playwright.locator",
+      "declarations": ["locator(selector: string): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B085",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "waitForEvent",
+      "target": "tab.playwright.waitForEvent",
+      "declarations": [
+        "waitForEvent(\n    event: \"download\",\n    options?: WaitForEventOptions,\n  ): Promise<PlaywrightDownload>;",
+        "waitForEvent(\n    event: \"filechooser\",\n    options?: WaitForEventOptions,\n  ): Promise<PlaywrightFileChooser>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B086",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "waitForLoadState",
+      "target": "tab.playwright.waitForLoadState",
+      "declarations": [
+        "waitForLoadState(options?: PageWaitForLoadStateOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B087",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "waitForTimeout",
+      "target": "tab.playwright.waitForTimeout",
+      "declarations": ["waitForTimeout(timeoutMs: number): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B088",
+      "sourceInterface": "PlaywrightAPI",
+      "sourceMember": "waitForURL",
+      "target": "tab.playwright.waitForURL",
+      "declarations": [
+        "waitForURL(url: string, options?: PageWaitForURLOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B089",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "frameLocator",
+      "target": "frame.frameLocator",
+      "declarations": [
+        "frameLocator(frameSelector: string): PlaywrightFrameLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B090",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "getByLabel",
+      "target": "frame.getByLabel",
+      "declarations": [
+        "getByLabel(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B091",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "getByPlaceholder",
+      "target": "frame.getByPlaceholder",
+      "declarations": [
+        "getByPlaceholder(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B092",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "getByRole",
+      "target": "frame.getByRole",
+      "declarations": [
+        "getByRole(\n    role: string,\n    options?: { exact?: boolean; name?: TextMatcher },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B093",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "getByTestId",
+      "target": "frame.getByTestId",
+      "declarations": ["getByTestId(testId: string): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B094",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "getByText",
+      "target": "frame.getByText",
+      "declarations": [
+        "getByText(text: TextMatcher, options?: { exact?: boolean }): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B095",
+      "sourceInterface": "PlaywrightFrameLocator",
+      "sourceMember": "locator",
+      "target": "frame.locator",
+      "declarations": ["locator(selector: string): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B096",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "all",
+      "target": "locator.all",
+      "declarations": ["all(): Promise<Array<PlaywrightLocator>>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B097",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "allTextContents",
+      "target": "locator.allTextContents",
+      "declarations": [
+        "allTextContents(options?: { timeoutMs?: number }): Promise<Array<string>>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B098",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "and",
+      "target": "locator.and",
+      "declarations": ["and(locator: PlaywrightLocator): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B099",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "check",
+      "target": "locator.check",
+      "declarations": ["check(options?: LocatorCheckOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B100",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "click",
+      "target": "locator.click",
+      "declarations": ["click(options?: LocatorClickOptions): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B101",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "count",
+      "target": "locator.count",
+      "declarations": ["count(): Promise<number>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B102",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "dblclick",
+      "target": "locator.dblclick",
+      "declarations": [
+        "dblclick(options?: LocatorClickOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B103",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "downloadMedia",
+      "target": "locator.downloadMedia",
+      "declarations": [
+        "downloadMedia(options?: LocatorDownloadMediaOptions): Promise<BrowserArtifact>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B104",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "evaluate",
+      "target": "locator.evaluate",
+      "declarations": [
+        "evaluate<TResult, TArg>(\n    pageFunction: LocatorEvaluateFunction<TArg, TResult>,\n    arg?: TArg,\n    options?: PlaywrightEvaluateOptions,\n  ): Promise<TResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B105",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "evaluateAll",
+      "target": "locator.evaluateAll",
+      "declarations": [
+        "evaluateAll<TResult, TArg>(\n    pageFunction: LocatorEvaluateAllFunction<TArg, TResult>,\n    arg?: TArg,\n    options?: PlaywrightEvaluateOptions,\n  ): Promise<TResult>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B106",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "fill",
+      "target": "locator.fill",
+      "declarations": [
+        "fill(value: string, options?: { timeoutMs?: number }): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B107",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "filter",
+      "target": "locator.filter",
+      "declarations": [
+        "filter(options: LocatorFilterOptions): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B108",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "first",
+      "target": "locator.first",
+      "declarations": ["first(): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B109",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getAttribute",
+      "target": "locator.getAttribute",
+      "declarations": [
+        "getAttribute(\n    name: string,\n    options?: { timeoutMs?: number },\n  ): Promise<null | string>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B110",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getByLabel",
+      "target": "locator.getByLabel",
+      "declarations": [
+        "getByLabel(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B111",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getByPlaceholder",
+      "target": "locator.getByPlaceholder",
+      "declarations": [
+        "getByPlaceholder(\n    text: TextMatcher,\n    options?: { exact?: boolean },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B112",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getByRole",
+      "target": "locator.getByRole",
+      "declarations": [
+        "getByRole(\n    role: string,\n    options?: { exact?: boolean; name?: TextMatcher },\n  ): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B113",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getByTestId",
+      "target": "locator.getByTestId",
+      "declarations": ["getByTestId(testId: string): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B114",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "getByText",
+      "target": "locator.getByText",
+      "declarations": [
+        "getByText(text: TextMatcher, options?: { exact?: boolean }): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B115",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "innerText",
+      "target": "locator.innerText",
+      "declarations": [
+        "innerText(options?: { timeoutMs?: number }): Promise<string>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B116",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "isEnabled",
+      "target": "locator.isEnabled",
+      "declarations": ["isEnabled(): Promise<boolean>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B117",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "isVisible",
+      "target": "locator.isVisible",
+      "declarations": ["isVisible(): Promise<boolean>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B118",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "last",
+      "target": "locator.last",
+      "declarations": ["last(): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B119",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "locator",
+      "target": "locator.locator",
+      "declarations": [
+        "locator(selector: string, options?: LocatorLocatorOptions): PlaywrightLocator;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B120",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "nth",
+      "target": "locator.nth",
+      "declarations": ["nth(index: number): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B121",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "or",
+      "target": "locator.or",
+      "declarations": ["or(locator: PlaywrightLocator): PlaywrightLocator;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B122",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "press",
+      "target": "locator.press",
+      "declarations": [
+        "press(\n    value: string,\n    options?: { timeoutMs?: number; modifiers?: KeyboardModifier[] },\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B123",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "pressSequentially",
+      "target": "locator.pressSequentially",
+      "declarations": [
+        "pressSequentially(\n    value: string,\n    options?: LocatorPressSequentiallyOptions,\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B124",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "selectOption",
+      "target": "locator.selectOption",
+      "declarations": [
+        "selectOption(\n    value: SelectOptionInput | Array<SelectOptionInput>,\n    options?: { timeoutMs?: number },\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B125",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "setChecked",
+      "target": "locator.setChecked",
+      "declarations": [
+        "setChecked(checked: boolean, options?: LocatorCheckOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B126",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "textContent",
+      "target": "locator.textContent",
+      "declarations": [
+        "textContent(options?: { timeoutMs?: number }): Promise<null | string>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B127",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "type",
+      "target": "locator.type",
+      "declarations": [
+        "type(\n    value: string,\n    options?: { timeoutMs?: number; delayMs?: number },\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B128",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "uncheck",
+      "target": "locator.uncheck",
+      "declarations": [
+        "uncheck(options?: LocatorCheckOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B129",
+      "sourceInterface": "PlaywrightLocator",
+      "sourceMember": "waitFor",
+      "target": "locator.waitFor",
+      "declarations": [
+        "waitFor(options: LocatorWaitForOptions): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B130",
+      "sourceInterface": "PlaywrightDownload",
+      "sourceMember": "path",
+      "target": "download.path",
+      "declarations": [
+        "path(options?: { timeoutMs?: number }): Promise<null | string>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B131",
+      "sourceInterface": "PlaywrightFileChooser",
+      "sourceMember": "isMultiple",
+      "target": "fileChooser.isMultiple",
+      "declarations": ["isMultiple(): boolean;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B132",
+      "sourceInterface": "PlaywrightFileChooser",
+      "sourceMember": "setFiles",
+      "target": "fileChooser.setFiles",
+      "declarations": [
+        "setFiles(\n    files: FileChooserFiles,\n    options?: { timeoutMs?: number },\n  ): Promise<void>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B133",
+      "sourceInterface": "TabClipboardAPI",
+      "sourceMember": "read",
+      "target": "tab.clipboard.read",
+      "declarations": ["read(): Promise<Array<TabClipboardItem>>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B134",
+      "sourceInterface": "TabClipboardAPI",
+      "sourceMember": "readText",
+      "target": "tab.clipboard.readText",
+      "declarations": ["readText(): Promise<string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B135",
+      "sourceInterface": "TabClipboardAPI",
+      "sourceMember": "write",
+      "target": "tab.clipboard.write",
+      "declarations": ["write(items: Array<TabClipboardItem>): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B136",
+      "sourceInterface": "TabClipboardAPI",
+      "sourceMember": "writeText",
+      "target": "tab.clipboard.writeText",
+      "declarations": ["writeText(text: string): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B137",
+      "sourceInterface": "TabDevAPI",
+      "sourceMember": "logs",
+      "target": "tab.dev.logs",
+      "declarations": [
+        "logs(options?: TabDevLogsOptions): Promise<Array<TabDevLogEntry>>;"
+      ],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B138",
+      "sourceInterface": "AlertDialog",
+      "sourceMember": "type",
+      "target": "dialog.type",
+      "declarations": ["type: \"alert\";"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B139",
+      "sourceInterface": "AlertDialog",
+      "sourceMember": "dismiss",
+      "target": "dialog.dismiss",
+      "declarations": ["dismiss(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B140",
+      "sourceInterface": "BeforeUnloadDialog",
+      "sourceMember": "type",
+      "target": "dialog.type",
+      "declarations": ["type: \"beforeunload\";"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B141",
+      "sourceInterface": "BeforeUnloadDialog",
+      "sourceMember": "dismiss",
+      "target": "dialog.dismiss",
+      "declarations": ["dismiss(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B142",
+      "sourceInterface": "ConfirmDialog",
+      "sourceMember": "type",
+      "target": "dialog.type",
+      "declarations": ["type: \"confirm\";"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B143",
+      "sourceInterface": "ConfirmDialog",
+      "sourceMember": "accept",
+      "target": "dialog.accept",
+      "declarations": ["accept(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B144",
+      "sourceInterface": "ConfirmDialog",
+      "sourceMember": "dismiss",
+      "target": "dialog.dismiss",
+      "declarations": ["dismiss(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B145",
+      "sourceInterface": "Documentation",
+      "sourceMember": "get",
+      "target": "client.documentation.get",
+      "declarations": ["get(name: string): Promise<string>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B146",
+      "sourceInterface": "PromptDialog",
+      "sourceMember": "type",
+      "target": "dialog.type",
+      "declarations": ["type: \"prompt\";"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B147",
+      "sourceInterface": "PromptDialog",
+      "sourceMember": "accept",
+      "target": "dialog.accept",
+      "declarations": ["accept(text: string): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "B148",
+      "sourceInterface": "PromptDialog",
+      "sourceMember": "dismiss",
+      "target": "dialog.dismiss",
+      "declarations": ["dismiss(): Promise<void>;"],
+      "contract": "sdk.md",
+      "acceptance": "acceptance.md"
+    }
+  ],
+  "extraMembers": [
+    {
+      "id": "X001",
+      "group": "页面便捷",
+      "target": "tab.snapshot",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X002",
+      "group": "页面便捷",
+      "target": "tab.click",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X003",
+      "group": "页面便捷",
+      "target": "tab.fill",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X004",
+      "group": "页面便捷",
+      "target": "tab.press",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X005",
+      "group": "页面便捷",
+      "target": "tab.selectOption",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X006",
+      "group": "页面便捷",
+      "target": "tab.scroll",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X007",
+      "group": "页面便捷",
+      "target": "tab.hover",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X008",
+      "group": "页面便捷",
+      "target": "tab.focus",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X009",
+      "group": "页面便捷",
+      "target": "tab.waitFor",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X010",
+      "group": "页面便捷",
+      "target": "tab.locator",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X011",
+      "group": "文件",
+      "target": "tab.setFiles",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X012",
+      "group": "文件",
+      "target": "tab.downloads",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X013",
+      "group": "文件",
+      "target": "tab.saveDownload",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X014",
+      "group": "视口",
+      "target": "tab.setViewport",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X015",
+      "group": "视口",
+      "target": "tab.resetViewport",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X016",
+      "group": "窗口",
+      "target": "selectedBrowser.windows.list",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X017",
+      "group": "窗口",
+      "target": "selectedBrowser.windows.getAll",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X018",
+      "group": "窗口",
+      "target": "selectedBrowser.windows.create",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X019",
+      "group": "窗口",
+      "target": "selectedBrowser.windows.update",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X020",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.query",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X021",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.move",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X022",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.update",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X023",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.group",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X024",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.ungroup",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X025",
+      "group": "标签组织",
+      "target": "selectedBrowser.tabs.close",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X026",
+      "group": "标签组",
+      "target": "selectedBrowser.tabGroups.query",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X027",
+      "group": "标签组",
+      "target": "selectedBrowser.tabGroups.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X028",
+      "group": "标签组",
+      "target": "selectedBrowser.tabGroups.update",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X029",
+      "group": "标签组",
+      "target": "selectedBrowser.tabGroups.move",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X030",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.search",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X031",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.getTree",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X032",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.create",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X033",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.update",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X034",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.move",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X035",
+      "group": "书签",
+      "target": "selectedBrowser.bookmarks.remove",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X036",
+      "group": "审计",
+      "target": "selectedBrowser.management.getAuditTrail",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X037",
+      "group": "资产",
+      "target": "tab.assets.list",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X038",
+      "group": "资产",
+      "target": "tab.assets.download",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X039",
+      "group": "资产",
+      "target": "tab.assets.bundle",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X040",
+      "group": "导出",
+      "target": "tab.exportFile",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X041",
+      "group": "WebMCP",
+      "target": "tab.webmcp.listTools",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X042",
+      "group": "WebMCP",
+      "target": "tab.webmcp.invokeTool",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X043",
+      "group": "WebMCP",
+      "target": "tab.webmcp.fetchTools",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X044",
+      "group": "CDP",
+      "target": "tab.cdp.send",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X045",
+      "group": "CDP",
+      "target": "tab.cdp.events",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X046",
+      "group": "CDP",
+      "target": "tab.cdp.cursor",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X047",
+      "group": "CDP",
+      "target": "tab.cdp.readEvents",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X048",
+      "group": "可见性",
+      "target": "selectedBrowser.visibility.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X049",
+      "group": "可见性",
+      "target": "selectedBrowser.visibility.set",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X050",
+      "group": "无障碍便捷",
+      "target": "tab.ax.snapshot",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X051",
+      "group": "DOM 便捷",
+      "target": "tab.dom.fill",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X052",
+      "group": "视觉",
+      "target": "virtualCursor",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X053",
+      "group": "视觉",
+      "target": "taskTabGroup",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X054",
+      "group": "视觉",
+      "target": "faviconActiveAndResult",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X055",
+      "group": "视觉",
+      "target": "nativeDebuggerCancel",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X056",
+      "group": "视觉",
+      "target": "followSessionTab",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X057",
+      "group": "开发日志便捷",
+      "target": "tab.devLogs",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X058",
+      "group": "页面便捷",
+      "target": "tab.evaluate",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X059",
+      "group": "键盘",
+      "target": "tab.keyboardDown",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X060",
+      "group": "键盘",
+      "target": "tab.keyboardUp",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X061",
+      "group": "Frame",
+      "target": "tab.frame",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X062",
+      "group": "对话框",
+      "target": "tab.dialogAccept",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X063",
+      "group": "对话框",
+      "target": "tab.dialogDismiss",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X064",
+      "group": "内容便捷",
+      "target": "tab.contentExport",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X065",
+      "group": "导出便捷",
+      "target": "tab.exportGsuite",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X066",
+      "group": "导出便捷",
+      "target": "tab.exportYouTubeTranscript",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X067",
+      "group": "剪贴板便捷",
+      "target": "tab.clipboardReadText",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X068",
+      "group": "剪贴板便捷",
+      "target": "tab.clipboardWriteText",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X069",
+      "group": "剪贴板便捷",
+      "target": "tab.clipboardRead",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X070",
+      "group": "剪贴板便捷",
+      "target": "tab.clipboardWrite",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X071",
+      "group": "事件等待便捷",
+      "target": "tab.playwright.waitForDownload",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X072",
+      "group": "事件等待便捷",
+      "target": "tab.playwright.waitForFileChooser",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X073",
+      "group": "Frame",
+      "target": "frame.snapshot",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X074",
+      "group": "Frame",
+      "target": "frame.click",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X075",
+      "group": "Frame",
+      "target": "frame.fill",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X076",
+      "group": "Frame",
+      "target": "frame.locator",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X077",
+      "group": "Frame",
+      "target": "frame.frameLocator",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X078",
+      "group": "Frame",
+      "target": "frame.getByLabel",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X079",
+      "group": "Frame",
+      "target": "frame.getByPlaceholder",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X080",
+      "group": "Frame",
+      "target": "frame.getByRole",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X081",
+      "group": "Frame",
+      "target": "frame.getByTestId",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X082",
+      "group": "Frame",
+      "target": "frame.getByText",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X083",
+      "group": "Frame",
+      "target": "frame.waitFor",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X084",
+      "group": "视口能力",
+      "target": "selectedBrowser.viewport.set",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X085",
+      "group": "视口能力",
+      "target": "selectedBrowser.viewport.reset",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X086",
+      "group": "绑定 WebMCP",
+      "target": "webMcpTools.invokeTool",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X087",
+      "group": "受管等待器",
+      "target": "browser.waiters.arm",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X088",
+      "group": "受管等待器",
+      "target": "browser.waiters.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X089",
+      "group": "受管等待器",
+      "target": "browser.waiters.cancel",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X090",
+      "group": "能力发现",
+      "target": "selectedBrowser.capabilities.list",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X091",
+      "group": "能力发现",
+      "target": "selectedBrowser.capabilities.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X092",
+      "group": "能力发现",
+      "target": "tab.capabilities.list",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X093",
+      "group": "能力发现",
+      "target": "tab.capabilities.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X094",
+      "group": "浏览器元数据",
+      "target": "selectedBrowser.name",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X095",
+      "group": "浏览器元数据",
+      "target": "selectedBrowser.type",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X096",
+      "group": "浏览器元数据",
+      "target": "selectedBrowser.profileName",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X097",
+      "group": "标签便捷",
+      "target": "selectedBrowser.tabs.select",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X098",
+      "group": "对话框元数据",
+      "target": "AlertDialog.message",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X099",
+      "group": "对话框元数据",
+      "target": "BeforeUnloadDialog.message",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X100",
+      "group": "对话框元数据",
+      "target": "ConfirmDialog.message",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X101",
+      "group": "对话框元数据",
+      "target": "PromptDialog.message",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    },
+    {
+      "id": "X102",
+      "group": "组织元数据",
+      "target": "selectedBrowser.management.tabs.get",
+      "contract": "sdk.md",
+      "types": "sdk-types.md",
+      "acceptance": "acceptance.md"
+    }
+  ],
+  "extraMemberCount": 102,
+  "sourceTypeAdaptations": [
+    {
+      "source": "BrowserTab.claimed",
+      "target": "内部 run 互斥，无人工前置",
+      "contract": "sdk.md"
+    },
+    {
+      "source": "ActionResult.tabId/generation/pageVersion",
+      "target": "ActionResult.target",
+      "contract": "sdk-types.md"
+    },
+    {
+      "source": "SdkError.tabId/generation",
+      "target": "BrowserError.target；SdkError 为类型别名",
+      "contract": "sdk-types.md"
+    },
+    {
+      "source": "Dialog.type/message",
+      "target": "四种原生 Dialog 的 type/message",
+      "contract": "sdk-types.md"
+    },
+    {
+      "source": "原始 AXPoint / Locator.force / TabClipboardEntry.base64",
+      "target": "具名坐标 / 按 Avru M0 不开放 force / 原生 bytes",
+      "contract": "sdk.md"
+    },
+    {
+      "source": "原始 visibility / viewport",
+      "target": "标签跟随开关 / 所选或显式标签的视口覆盖",
+      "contract": "sdk.md"
+    },
+    {
+      "source": "旧 browser.tab / daemon discovery",
+      "target": "显式 Browser/Tab 门面 / client.browsers",
+      "contract": "sdk.md"
+    },
+    {
+      "source": "Avru NodeId 数字别名 / DOM node_id 字符串；WaitCondition 无区分字段",
+      "target": "DOM NodeId 统一不透明字符串，原生 CDP nodeId 数字独立；等待条件采用精确可判别结构",
+      "contract": "sdk.md"
+    }
+  ]
+}

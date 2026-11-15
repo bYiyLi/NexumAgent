@@ -1,8 +1,6 @@
 name: Agent install candidates
 on:
   workflow_dispatch:
-  push:
-    branches: [codex/phase-48-process-primitives-ci]
 permissions:
   contents: read
 jobs:
