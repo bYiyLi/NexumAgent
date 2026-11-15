@@ -42,7 +42,7 @@ test(
     const observed = await f.run(
       `
     const {createBrowserClient}=await import('nexum-browser');
-    const selected=await createBrowserClient(browser).browsers.getDefault(),tab=await selected.tabs.get(context.input.id);
+    const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);
     let stage='metadata';
     try {
     const metadata=tab.playwright.locator('ytd-watch-metadata');
@@ -97,7 +97,7 @@ test(
       "tab.exportYouTubeTranscript",
     ]) {
       const result = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.getDefault(),tab=await selected.tabs.get(context.input.id);return await ${method}();`,
+        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);return await ${method}();`,
         { id },
       );
       const artifact = result.result.data,

@@ -14,6 +14,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import WebSocket from "ws";
 
@@ -62,6 +63,58 @@ const caller = {
 };
 const jpeg =
   "/9j/4AAQSkZJRgABAQAASABIAAD/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD5/ooor7Q+PP/Z";
+test(
+  "local macOS Edge native fixtures stop before launching a browser",
+  { skip: process.platform !== "darwin" ? "macOS-only guard" : false },
+  () => {
+    const helper = new URL("./helpers/native.mjs", import.meta.url).href;
+    const cases = [
+      {
+        name: "local",
+        env: { GITHUB_ACTIONS: "false" },
+        script: `try { await import(${JSON.stringify(helper)}); throw new Error("Expected the local Edge guard"); } catch(error) { if(error.code!=="LOCAL_NATIVE_EDGE_FIXTURE_DISABLED") throw error; process.stdout.write(error.code); }`,
+        expected: "LOCAL_NATIVE_EDGE_FIXTURE_DISABLED",
+      },
+      {
+        name: "GitHub macOS runner",
+        env: {
+          GITHUB_ACTIONS: "true",
+          RUNNER_OS: "macOS",
+          GITHUB_RUN_ID: "12345",
+        },
+        script: `await import(${JSON.stringify(helper)}); process.stdout.write("ALLOWED");`,
+        expected: "ALLOWED",
+      },
+    ];
+    for (const item of cases) {
+      const child = spawnSync(
+        process.execPath,
+        [
+          "--experimental-vm-modules",
+          "--input-type=module",
+          "--eval",
+          item.script,
+        ],
+        {
+          env: {
+            ...process.env,
+            ...item.env,
+            NEXUM_BROWSER_NATIVE_BINARY: "/nexum-guard-test/Microsoft Edge",
+          },
+          encoding: "utf8",
+          timeout: 10000,
+        },
+      );
+      assert.equal(
+        child.status,
+        0,
+        `${item.name}: ${child.stderr || child.error?.message}`,
+      );
+      assert.equal(child.stdout, item.expected, item.name);
+    }
+  },
+);
+
 function event() {
   const listeners = new Set();
   return {
@@ -389,11 +442,13 @@ async function fixture(
     });
   plugin = connection;
   await plugin.start();
+  let fixtureBrowserId;
   const start = async (script, options = {}) => {
     let value = await engine.start(caller, {
       contextId: context.contextId,
       script,
       ...options,
+      input: { ...options.input, fixtureBrowserId },
     });
     runs.add(value.run.runId);
     if (options.waitMs === 0) return value;
@@ -416,6 +471,8 @@ async function fixture(
     );
     await delay(5);
   }
+  fixtureBrowserId = plugin.state().browserId;
+  assert.equal(typeof fixtureBrowserId, "string");
   return {
     root,
     work,
@@ -439,7 +496,7 @@ async function fixture(
     observe: (id) => engine.observe(caller, id, 50),
   };
 }
-const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.getDefault();const tabs=await selected.tabs.list();const tab=await selected.tabs.get(tabs[0].id);`;
+const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
 
 test("the installed optional package loads through the public factory, publishes five contributions and cleans a real Core run", async (t) => {
   const f = await fixture(t);

@@ -70,6 +70,22 @@ assert.ok(
   binary && path.isAbsolute(binary),
   "Set NEXUM_BROWSER_NATIVE_BINARY to an isolated Chrome for Testing/Chromium executable; no user browser is selected automatically.",
 );
+const githubMacRunner =
+  process.env.GITHUB_ACTIONS === "true" &&
+  process.env.RUNNER_OS === "macOS" &&
+  /^\d+$/.test(process.env.GITHUB_RUN_ID ?? "");
+if (
+  process.platform === "darwin" &&
+  /^microsoft edge/i.test(path.basename(binary)) &&
+  !githubMacRunner
+) {
+  throw Object.assign(
+    new Error(
+      "Local macOS Edge fixture startup is disabled after Keychain dialogs appeared during isolated-profile checks. Run native Edge checks on a GitHub macOS runner until the cause is resolved.",
+    ),
+    { code: "LOCAL_NATIVE_EDGE_FIXTURE_DISABLED" },
+  );
+}
 export async function nativeFixture(t, options = {}) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-browser-core-")),
@@ -187,6 +203,20 @@ export async function nativeFixture(t, options = {}) {
     home,
   ])
     mkdirSync(directory, { recursive: true });
+  if (options.sessionIdSeed !== undefined) {
+    assert.ok(
+      Number.isSafeInteger(options.sessionIdSeed) &&
+        options.sessionIdSeed > 0 &&
+        options.sessionIdSeed < 2 ** 31 - 1000,
+    );
+    // Configure the real native generator only in this fixture's fresh profile.
+    writeFileSync(
+      path.join(userData, "Local State"),
+      JSON.stringify({
+        session_id_generator_last_value: String(options.sessionIdSeed),
+      }),
+    );
+  }
   writeFileSync(
     path.join(userData, "Default", "Preferences"),
     JSON.stringify({
@@ -382,11 +412,15 @@ export async function nativeFixture(t, options = {}) {
       socket?.terminate();
     }
   };
+  let fixtureBrowserId;
   const start = async (script, input = {}, options = {}) => {
     const view = await engine.start(caller, {
       contextId: context.contextId,
       script,
-      input,
+      input: {
+        ...input,
+        ...(fixtureBrowserId ? { fixtureBrowserId } : {}),
+      },
       waitMs: 0,
       timeoutMs: 60000,
       ...options,
@@ -429,13 +463,24 @@ export async function nativeFixture(t, options = {}) {
   let diagnostics = "";
   while (true) {
     const probe = await run(
-      'const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser),browsers=await client.browsers.list();return {browsers,tabs:browsers.length?await(await client.browsers.getDefault()).tabs.list():[]};',
+      'const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser),browsers=await client.browsers.list(),matches=[];for(const peer of browsers){const tabs=(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base);if(tabs.length)matches.push({browserId:peer.id,tabs});}return {browsers,matches};',
+      { base },
     );
-    if (
-      probe.result.data?.browsers.length &&
-      probe.result.data.tabs.some((tab) => tab.url === base)
-    )
+    assert.ok(
+      probe.result.data.matches.length <= 1,
+      "The owned native fixture page appeared in more than one browser.",
+    );
+    if (probe.result.data.matches.length === 1) {
+      fixtureBrowserId = probe.result.data.matches[0].browserId;
+      t.diagnostic(
+        JSON.stringify({
+          nativeFixture: true,
+          observedPeers: probe.result.data.browsers.length,
+          ownedMatches: probe.result.data.matches.length,
+        }),
+      );
       break;
+    }
     assert.equal(child.exitCode, null, `isolated browser exited: ${stderr}`);
     if (Date.now() >= deadline) {
       try {
@@ -446,7 +491,7 @@ export async function nativeFixture(t, options = {}) {
           await fetch(`http://127.0.0.1:${match[1]}/json/list`)
         ).json();
         diagnostics = JSON.stringify({
-          publicTabs: probe.result.data.tabs,
+          publicMatches: probe.result.data.matches,
           nativeTargets: targets.map((value) => ({
             type: value.type,
             url: value.url,
@@ -512,6 +557,7 @@ export async function nativeFixture(t, options = {}) {
     root,
     work,
     base,
+    browserId: fixtureBrowserId,
     run,
     start,
     cancel: (runId) => engine.cancel(caller, runId),
@@ -531,4 +577,4 @@ export async function nativeFixture(t, options = {}) {
     stderr: () => stderr,
   };
 }
-export const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.getDefault();const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("Actual test page was not discovered: "+JSON.stringify(choices));const tab=await selected.tabs.get(item.id);`;
+export const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("The owned native test page was not discovered.");const tab=await selected.tabs.get(item.id);`;

@@ -323,7 +323,8 @@
       "id": "B029",
       "target": "tab.id",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-independent-profiles"]
     },
     {
       "id": "B030",
@@ -1754,7 +1755,13 @@
     "native-independent-profiles": {
       "file": "test/native-client.acceptance.mjs",
       "test": "native independent browser profiles keep control, conflicts and offline identities isolated",
-      "coverage": ["normal", "scope_conflict", "peer_offline"]
+      "coverage": [
+        "normal",
+        "scope_conflict",
+        "peer_offline",
+        "same_native_tab_id",
+        "cleanup"
+      ]
     },
     "native-ax-result-modes": {
       "file": "test/native-capabilities.acceptance.mjs",

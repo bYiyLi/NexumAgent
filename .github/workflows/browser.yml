@@ -56,6 +56,16 @@ jobs:
         run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise actual isolated browser scenarios
         run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
+      - name: Exercise native Edge profile isolation and visual cleanup on macOS
+        if: runner.os == 'macOS'
+        timeout-minutes: 6
+        env:
+          NEXUM_BROWSER_NATIVE_BINARY: /Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge
+        run: |
+          test -x "$NEXUM_BROWSER_NATIVE_BINARY"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' '/Applications/Microsoft Edge.app/Contents/Info.plist'
+          shasum -a 256 "$NEXUM_BROWSER_NATIVE_BINARY"
+          node --experimental-vm-modules --test --test-timeout=120000 --test-concurrency=1 --test-name-pattern='native independent browser profiles|native visual feedback preserves user groups' packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
       - name: Exercise real opt-in WebMCP registrations and stale-registration rejection
         env:
           NEXUM_BROWSER_WEBMCP_TESTING: "1"

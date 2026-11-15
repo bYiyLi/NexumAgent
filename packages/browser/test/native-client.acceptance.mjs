@@ -61,21 +61,31 @@ test(
   "native independent browser profiles keep control, conflicts and offline identities isolated",
   { timeout: 120000 },
   async (t) => {
-    const f = await nativeFixture(t, { html });
-    const discovery = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const peers=await client.browsers.list();return await Promise.all(peers.map(async peer=>({peer,tabs:await(await client.browsers.get(peer.id)).tabs.list()})));`;
-    const initial = (await f.run(discovery)).result.data;
+    const sessionIdSeed = 1000000;
+    const f = await nativeFixture(t, { html, sessionIdSeed });
+    const discovery = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const peers=await client.browsers.list();const profiles=await Promise.all(peers.map(async peer=>({peer,tabs:(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base||tab.url===context.input.base+'second-profile')})));return profiles.filter(item=>item.tabs.length);`;
+    const initial = (await f.run(discovery, { base: f.base })).result.data;
     assert.equal(initial.length, 1);
     const original = initial[0].peer;
+    assert.equal(original.id, f.browserId);
     const firstTab = initial[0].tabs.find((tab) => tab.url === f.base);
     assert.ok(firstTab);
     const secondUrl = f.base + "second-profile";
     const secondHome = path.join(f.root, "second-home");
     mkdirSync(secondHome);
     const extension = path.join(f.work, ".nexum-browser", "extension");
+    const secondProfile = path.join(f.root, "second-browser-profile");
+    mkdirSync(secondProfile);
+    writeFileSync(
+      path.join(secondProfile, "Local State"),
+      JSON.stringify({
+        session_id_generator_last_value: String(sessionIdSeed),
+      }),
+    );
     const child = spawn(
       process.env.NEXUM_BROWSER_NATIVE_BINARY,
       [
-        `--user-data-dir=${path.join(f.root, "second-browser-profile")}`,
+        `--user-data-dir=${secondProfile}`,
         `--load-extension=${extension}`,
         `--disable-extensions-except=${extension}`,
         ...(process.env.NEXUM_BROWSER_NATIVE_HEADFUL === "1"
@@ -111,7 +121,7 @@ test(
       let profiles;
       const readyUntil = performance.now() + 30000;
       do {
-        profiles = (await f.run(discovery)).result.data;
+        profiles = (await f.run(discovery, { base: f.base })).result.data;
         if (
           profiles.length === 2 &&
           profiles.some((item) =>
@@ -128,10 +138,17 @@ test(
       assert.ok(secondTab, JSON.stringify({ profiles, stderr }));
       assert.equal(second.peer.bootId, original.bootId);
       assert.notEqual(second.peer.browserSessionId, original.browserSessionId);
+      assert.equal(
+        secondTab.id,
+        firstTab.id,
+        "The actual native Tab IDs must match without ID remapping.",
+      );
       t.diagnostic(
         JSON.stringify({
           actualProfiles: profiles.length,
           equalNativeTabIds: secondTab.id === firstTab.id,
+          originalNativeTabId: firstTab.id,
+          secondNativeTabId: secondTab.id,
         }),
       );
       const target = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser),selected=await client.browsers.get(context.input.browserId),tab=await selected.tabs.get(context.input.tabId);`;
@@ -178,7 +195,7 @@ test(
       assert.equal(held.run.status, "cancelled", JSON.stringify(held));
       assert.deepEqual(held.run.cleanup.unconfirmed, []);
       const values = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const values=[];for(const target of context.input.targets){const selected=await client.browsers.get(target.browserId),tab=await selected.tabs.get(target.tabId);values.push(await tab.playwright.getByTestId('keyboard-value').innerText());}return {values,defaultId:(await client.browsers.getDefault()).browserId,byUrl:(await client.browsers.getForUrl(context.input.url)).browserId};`,
+        `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const values=[];for(const target of context.input.targets){const selected=await client.browsers.get(target.browserId),tab=await selected.tabs.get(target.tabId);values.push(await tab.playwright.getByTestId('keyboard-value').innerText());}return {values,allIds:(await client.browsers.list()).map(peer=>peer.id),defaultId:(await client.browsers.getDefault()).browserId,byUrl:(await client.browsers.getForUrl(context.input.url)).browserId};`,
         {
           targets: [
             { browserId: original.id, tabId: firstTab.id },
@@ -193,9 +210,16 @@ test(
       ]);
       assert.equal(
         values.result.data.defaultId,
-        [original.id, second.peer.id].sort()[0],
+        values.result.data.allIds.sort()[0],
       );
       assert.equal(values.result.data.byUrl, second.peer.id);
+      t.diagnostic(
+        JSON.stringify({
+          ownedProfiles: profiles.length,
+          actualPeers: values.result.data.allIds.length,
+          sameNativeTabId: firstTab.id,
+        }),
+      );
     } finally {
       if (held?.run.endedAt === null) f.cancel(held.run.runId);
       if (child.exitCode === null && child.signalCode === null) {
@@ -211,7 +235,7 @@ test(
     let remaining;
     const offlineUntil = performance.now() + 5000;
     do {
-      remaining = (await f.run(discovery)).result.data;
+      remaining = (await f.run(discovery, { base: f.base })).result.data;
       if (remaining.length === 1) break;
       await delay(25);
     } while (performance.now() < offlineUntil);
@@ -512,7 +536,7 @@ test(
         held = await f.observe(held.run.runId, 50);
       }
       const checked = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.getDefault(),failure=async action=>{try{await action();return null;}catch(error){return error.code;}};const group=await failure(()=>selected.tabGroups.update(context.input.group.id,{title:'Must not change',color:'red'})),window=await failure(()=>selected.windows.update(context.input.window.id,{width:840}));return {group,window,actualGroup:await selected.tabGroups.get(context.input.group.id),actualWindow:(await selected.windows.getAll()).find(value=>value.id===context.input.window.id),audit:await selected.management.getAuditTrail({limit:10})};`,
+        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),failure=async action=>{try{await action();return null;}catch(error){return error.code;}};const group=await failure(()=>selected.tabGroups.update(context.input.group.id,{title:'Must not change',color:'red'})),window=await failure(()=>selected.windows.update(context.input.window.id,{width:840}));return {group,window,actualGroup:await selected.tabGroups.get(context.input.group.id),actualWindow:(await selected.windows.getAll()).find(value=>value.id===context.input.window.id),audit:await selected.management.getAuditTrail({limit:10})};`,
         setup.result.data,
       );
       const value = checked.result.data;
