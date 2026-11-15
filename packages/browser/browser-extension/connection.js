@@ -798,7 +798,6 @@ export function createExtensionConnection({
         for (const receipt of session.nexumClosedLeases ?? [])
           if (receipt && typeof receipt.leaseId === "string")
             pendingLeaseReceipts.set(receipt.leaseId, receipt);
-        router.start();
         const owned = session.nexumOwnedControls ?? [];
         requireValue(
           owned.every(
@@ -808,6 +807,7 @@ export function createExtensionConnection({
           "PROFILE_CONFLICT",
           "The saved native control belongs to another browser session.",
         );
+        router.start();
         if (router.recoverOwnedControls)
           for (const recovered of await router.recoverOwnedControls(owned))
             await rememberLeaseClosed(recovered.lease, recovered.receipt);
