@@ -576,6 +576,9 @@ test("maintenance tolerates only a closed empty EOF and still confirms native pr
     await write.call(this, bytes, eof, signal);
     if (!eof || bytes.byteLength !== 0) return;
     observed.push(this);
+    // Exercise error classification after the actual child has closed. The
+    // positive branch intentionally leaves closure to the production caller.
+    if (mode !== "closed") await this.closed;
     if (mode === "cancelled")
       f.controller.abort(new Error("fixture cancelled"));
     throw new AgentError(
