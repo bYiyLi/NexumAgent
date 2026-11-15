@@ -2046,6 +2046,19 @@ test("browser downloads list includes normal records from different directories"
     limit: 50,
     orderBy: ["-startTime"],
   });
+  const all = await f.call(
+    "browsers.downloads",
+    { options: { limit: 0 } },
+    { id: null },
+  );
+  assert.equal(all.length, 2);
+  assert.deepEqual(
+    f.calls.filter((call) => call[0] === "downloads.search").at(-1)[1],
+    {
+      limit: 0,
+      orderBy: ["-startTime"],
+    },
+  );
 });
 
 test("a same-URL native download before or after an owned event never authorizes an unrelated local file", async (t) => {

@@ -325,7 +325,7 @@ browser("browsers.history", {
 });
 browser("browsers.downloads", {
   options: optionalObject({
-    limit: { type: "integer", minimum: 1, maximum: 1000 },
+    limit: { type: "integer", minimum: 0, maximum: 2147483647 },
   }),
 });
 browser("tabs.list");

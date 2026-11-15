@@ -681,7 +681,7 @@ test("native browser download records expose completed file paths for MCP resour
   );
   const view = await f.run(
     select +
-      `let item;for(let i=0;i<100;i++){item=(await selected.downloads.list({limit:20})).find(value=>value.state==='complete'&&value.filename.endsWith('native.bin'));if(item)break;await new Promise(resolve=>setTimeout(resolve,100));}if(!item)throw Error('Completed browser download was not listed');return output.result({content:[output.text(JSON.stringify(item)),output.file(item.filename,{name:'native.bin'})]});`,
+      `let download;for(let i=0;i<100;i++){download=(await selected.downloads.list({limit:20})).find(value=>value.state==='complete'&&value.filename.endsWith('native.bin'));if(download)break;await new Promise(resolve=>setTimeout(resolve,100));}if(!download)throw Error('Completed browser download was not listed');return output.result({content:[output.text(JSON.stringify(download)),output.file(download.filename,{name:'native.bin'})]});`,
     { base: f.base },
   );
   const rendered = await f.encoder.render(

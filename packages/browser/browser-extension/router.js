@@ -501,29 +501,30 @@ route("browsers.history", async (ctx, args) => {
     }));
 });
 route("browsers.downloads", async (ctx, args) => {
-  const limit = options(args).limit ?? 1000;
-  requireValue(Number.isInteger(limit) && limit >= 1 && limit <= 1000);
+  const limit = options(args).limit;
+  requireValue(
+    limit === undefined ||
+      (Number.isInteger(limit) && limit >= 0 && limit <= 2147483647),
+  );
   const items = await ctx.chrome.downloads.search({
-    limit,
     orderBy: ["-startTime"],
+    ...(limit === undefined ? {} : { limit }),
   });
   requireValue(Array.isArray(items), "PROTOCOL_MISMATCH");
-  return items
-    .slice(0, limit)
-    .map((item) =>
-      fields(item, [
-        "id",
-        "filename",
-        "state",
-        "startTime",
-        "endTime",
-        "fileSize",
-        "totalBytes",
-        "bytesReceived",
-        "mime",
-        "exists",
-      ]),
-    );
+  return items.map((item) =>
+    fields(item, [
+      "id",
+      "filename",
+      "state",
+      "startTime",
+      "endTime",
+      "fileSize",
+      "totalBytes",
+      "bytesReceived",
+      "mime",
+      "exists",
+    ]),
+  );
 });
 route("browsers.nameSession", async (ctx, args) => {
   ctx.lease.name = text(args.name, 120);
