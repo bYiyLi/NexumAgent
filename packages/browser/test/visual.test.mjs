@@ -211,6 +211,40 @@ test("visual construction is cold and every run/window owns its blue group while
   assert.equal(f.chrome.tabs.onRemoved.size, 0);
 });
 
+test("favicon preparation begins while the exact tab group is still being prepared", async () => {
+  const groupGate = Promise.withResolvers(),
+    iconGate = Promise.withResolvers(),
+    groupStarted = Promise.withResolvers();
+  let iconStarted = false;
+  const f = fixture({
+    execute: async (args) => {
+      if (args.args[0].command === "active") {
+        iconStarted = true;
+        return await iconGate.promise;
+      }
+      return [{ result: { ok: true } }];
+    },
+  });
+  const group = f.chrome.tabs.group;
+  f.chrome.tabs.group = async (args) => {
+    groupStarted.resolve();
+    await groupGate.promise;
+    return group(args);
+  };
+  try {
+    const pending = f.controller.beforeAction(context());
+    await groupStarted.promise;
+    assert.equal(iconStarted, true);
+    groupGate.resolve();
+    iconGate.resolve([{ result: { ok: true } }]);
+    assert.deepEqual(await pending, { degraded: false });
+  } finally {
+    groupGate.resolve();
+    iconGate.resolve([{ result: { ok: true } }]);
+    await f.controller.dispose();
+  }
+});
+
 test("pointer arrival is a bounded native barrier; middle drag points do not block or replay a business action", async () => {
   const gate = Promise.withResolvers();
   let move;
@@ -730,6 +764,10 @@ test("dispose/release during native preparation cannot create late active UI or 
   };
   const pending = f.controller.beforeAction(context());
   await until(() => f.calls.some((value) => value[0] === "tabs.group"));
+  const activeBeforeCleanup = f.calls.filter(
+    (value) => value[0] === "execute" && value[1].args[0].command === "active",
+  ).length;
+  assert.equal(activeBeforeCleanup, 1);
   let closed = false;
   const cleanup = f.controller.dispose().then(() => {
     closed = true;
@@ -745,7 +783,14 @@ test("dispose/release during native preparation cannot create late active UI or 
       (value) =>
         value[0] === "execute" && value[1].args[0].command === "active",
     ).length,
-    0,
+    activeBeforeCleanup,
+  );
+  assert.equal(
+    f.calls.filter(
+      (value) =>
+        value[0] === "execute" && value[1].args[0].command === "release",
+    ).length,
+    1,
   );
 });
 

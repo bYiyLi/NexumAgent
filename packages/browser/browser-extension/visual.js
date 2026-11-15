@@ -531,16 +531,22 @@ export function createVisualController(
       record = await getRecord(ctx);
       const tab = await chrome.tabs.get(record.tabId);
       assertCtx(ctx);
-      await group(record, ctx, tab);
-      assertCtx(ctx);
-      if (ctx.followSessionTab !== false && !tab.active) {
-        ownActivations.set(record.tabId, Date.now() + 1000);
-        await chrome.tabs.update(record.tabId, { active: true });
-        assertCtx(ctx);
-      }
       record.result = false;
       if (markers.delete(record.tabId)) await save();
-      const result = await page(record, "active", ctx);
+      // Grouping and the favicon use the same checked document but do not
+      // depend on one another. Both must settle before a business action.
+      const [result] = await Promise.all([
+        page(record, "active", ctx),
+        (async () => {
+          await group(record, ctx, tab);
+          assertCtx(ctx);
+          if (ctx.followSessionTab !== false && !tab.active) {
+            ownActivations.set(record.tabId, Date.now() + 1000);
+            await chrome.tabs.update(record.tabId, { active: true });
+            assertCtx(ctx);
+          }
+        })(),
+      ]);
       if (!result.ok) {
         notice(ctx, result.reason || "VISUAL_UNAVAILABLE");
         return { degraded: true };
