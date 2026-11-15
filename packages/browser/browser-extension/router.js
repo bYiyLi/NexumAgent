@@ -1768,6 +1768,16 @@ export function createBrowserRouter(
   };
   const appendEvent = (source, method, params) => {
     if (!binding) return;
+    if (
+      method === "Page.downloadWillBegin" &&
+      typeof params.url === "string" &&
+      /^data:/i.test(params.url) &&
+      params.url.length > maxEventBytes
+    ) {
+      eventSequence++;
+      eventTruncated = true;
+      return;
+    }
     const event = {
       method,
       params,
@@ -2680,7 +2690,11 @@ export function createBrowserRouter(
             leaseId: lease.id,
             runId: lease.runId,
             target: target(String(source.tabId), lease),
-            url: params.url,
+            ...(typeof params.url === "string" &&
+            !/^data:/i.test(params.url) &&
+            encoder.encode(params.url).byteLength <= 32768
+              ? { url: params.url }
+              : {}),
             suggestedFilename: params.suggestedFilename,
             startedAt: clock(),
             state: "in_progress",
@@ -5612,7 +5626,7 @@ export function createBrowserRouter(
             id,
             target: source,
             suggestedFilename,
-            url,
+            ...(url === undefined ? {} : { url }),
             state,
             bytesReceived,
             ...(totalBytes === undefined ? {} : { totalBytes }),

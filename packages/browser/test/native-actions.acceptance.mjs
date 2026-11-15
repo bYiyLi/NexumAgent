@@ -824,8 +824,8 @@ test("native data URL download keeps its identity and becomes an MCP resource", 
     const pending=tab.playwright.waitForDownload();
     await tab.playwright.getByRole('link',{name:'Download data'}).click();
     const download=await pending;const file=await download.path();
-    const record=(await tab.downloads()).find(item=>item.url.startsWith('data:'));
-    return output.result({content:[output.text(record?.suggestedFilename??''),output.file(file,{name:'data.bin'})]});`,
+    const record=(await tab.downloads()).find(item=>item.suggestedFilename.startsWith('data-nexum-'));
+    return output.result({content:[output.text(JSON.stringify({name:record?.suggestedFilename,hasUrl:Object.hasOwn(record??{},'url')})),output.file(file,{name:'data.bin'})]});`,
     { base: f.base },
   );
   const rendered = await f.encoder.render(
@@ -833,14 +833,17 @@ test("native data URL download keeps its identity and becomes an MCP resource", 
       f.resultScope(),
       view.run,
     ),
-    filename = rendered.content.find((item) => item.type === "text").text,
+    details = JSON.parse(
+      rendered.content.find((item) => item.type === "text").text,
+    ),
     link = rendered.content.find((item) => item.type === "resource_link");
-  assert.match(filename, /^data-nexum-[0-9a-f]{32}\.bin$/);
+  assert.match(details.name, /^data-nexum-[0-9a-f]{32}\.bin$/);
+  assert.equal(details.hasUrl, false);
   assert.ok(link?.uri);
   const resource = await f.encoder.readResource(link.uri, f.resultScope());
   assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), expected);
   assert.deepEqual(
-    readFileSync(path.join(f.root, "native-downloads", "Nexum", filename)),
+    readFileSync(path.join(f.root, "native-downloads", "Nexum", details.name)),
     expected,
   );
 });

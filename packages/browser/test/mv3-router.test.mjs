@@ -2239,6 +2239,23 @@ test("an uncertain download interception is disabled before a later waiter is ar
   await f.call("waiters.cancel", { id: next.id });
 });
 
+test("download metadata never includes a data URL body", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("cdp.send", { method: "Page.enable" });
+  f.chrome.debugger.onEvent.emit({ tabId: 1 }, "Page.downloadWillBegin", {
+    guid: "data-guid",
+    url: "data:application/octet-stream;base64,c2VjcmV0",
+    suggestedFilename: "data.bin",
+  });
+  const downloads = await f.call("tab.downloads");
+  assert.equal(downloads.length, 1);
+  assert.equal(Object.hasOwn(downloads[0], "url"), false);
+  assert.equal(JSON.stringify(downloads).includes("c2VjcmV0"), false);
+});
+
 test("cancelling an in-flight local-download watcher waits for its actual disarm", async (t) => {
   const f = fixture(t),
     entered = Promise.withResolvers(),
