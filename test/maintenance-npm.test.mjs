@@ -557,6 +557,73 @@ test("native npm cancellation waits for the actual install-script descendant tre
   }
 });
 
+test("maintenance tolerates only a closed empty EOF and still confirms native process closure", async (t) => {
+  const f = await fixture(t);
+  const module = await import(
+    new URL(
+      `process/${process.platform === "win32" ? "windows-pipes" : "pipes"}.js`,
+      dist,
+    )
+  );
+  const Backend =
+    process.platform === "win32"
+      ? module.WindowsProcessBackend
+      : module.PipeProcessBackend;
+  const write = Backend.prototype.write,
+    observed = [];
+  let mode = "closed";
+  Backend.prototype.write = async function (bytes, eof, signal) {
+    await write.call(this, bytes, eof, signal);
+    if (!eof || bytes.byteLength !== 0) return;
+    observed.push(this);
+    if (mode === "cancelled")
+      f.controller.abort(new Error("fixture cancelled"));
+    throw new AgentError(
+      "process_input_failed",
+      "EOF result was observed.",
+      {
+        submitted: true,
+      },
+      {
+        cause: Object.assign(new Error("fixture native input result"), {
+          code: mode === "unknown" ? "EIO" : "ERR_STREAM_DESTROYED",
+        }),
+      },
+    );
+  };
+  try {
+    const prepared = await f.prepare("packages.install");
+    assert.equal(prepared.summary.version, "1.0.0");
+    assert.ok(observed.length > 0);
+    assert.equal(existsSync(f.marker), false);
+    assert.ok(
+      observed.every((backend) => {
+        const facts = backend.facts();
+        return (
+          facts.closed &&
+          facts.treeStopped &&
+          facts.outputComplete &&
+          facts.exitCode === 0
+        );
+      }),
+    );
+
+    mode = "unknown";
+    await assert.rejects(
+      f.prepare("packages.install"),
+      (error) =>
+        error.code === "process_input_failed" && error.cause?.code === "EIO",
+    );
+
+    mode = "cancelled";
+    await assert.rejects(f.prepare("packages.install"), /fixture cancelled/);
+    assert.ok(observed.every((backend) => backend.facts().closed));
+    assert.equal(existsSync(f.marker), false);
+  } finally {
+    Backend.prototype.write = write;
+  }
+});
+
 test("a changed lock after native evaluation withdraws affected SDKs and requires a real restart", async (t) => {
   const f = await fixture(t);
   await f.apply("packages.install", await f.prepare("packages.install"));

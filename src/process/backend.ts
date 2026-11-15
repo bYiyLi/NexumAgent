@@ -1,4 +1,6 @@
 import type { EventEmitter } from "node:events";
+import { types } from "node:util";
+import { isAgentError } from "../contracts/errors.js";
 import type { ManagedResource } from "../extensions/resources.js";
 
 export type ProcessStream = "stdout" | "stderr" | "terminal";
@@ -22,6 +24,51 @@ export interface ProcessFacts {
   readonly closed: boolean;
   readonly stopRequested: boolean;
   readonly forceRequested: boolean;
+}
+
+/** Only for a default empty EOF; submitted user input must retain failures. */
+export function defaultEofAlreadyClosed(
+  cause: unknown,
+  facts: ProcessFacts,
+): boolean {
+  const code = (value: unknown): unknown => {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      types.isProxy(value) ||
+      !types.isNativeError(value)
+    )
+      return undefined;
+    const field = Object.getOwnPropertyDescriptor(value, "code");
+    return field && "value" in field ? field.value : undefined;
+  };
+  const value = code(cause);
+  if (
+    [
+      "process_stdin_closed",
+      "process_input_closed",
+      "EPIPE",
+      "ERR_STREAM_DESTROYED",
+      "ERR_STREAM_WRITE_AFTER_END",
+    ].includes(value as string)
+  )
+    return true;
+  if (value === "process_closed") return facts.closed;
+  const inner = isAgentError(cause)
+    ? Object.getOwnPropertyDescriptor(cause, "cause")
+    : undefined;
+  return (
+    value === "process_input_failed" &&
+    !!inner &&
+    "value" in inner &&
+    [
+      "process_stdin_closed",
+      "process_input_closed",
+      "EPIPE",
+      "ERR_STREAM_DESTROYED",
+      "ERR_STREAM_WRITE_AFTER_END",
+    ].includes(code(inner.value) as string)
+  );
 }
 export interface ProcessSignalReceipt {
   readonly requested: string;

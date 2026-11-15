@@ -111,12 +111,13 @@ export async function pageCommand(input) {
       }[node.tagName] ||
       "generic";
     const name = (node) =>
-      node.getAttribute("aria-label") ||
       (node.getAttribute("aria-labelledby") || "")
         .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent || "")
+        .map((id) => document.getElementById(id)?.textContent?.trim() || "")
+        .filter(Boolean)
         .join(" ")
         .trim() ||
+      node.getAttribute("aria-label") ||
       node.labels?.[0]?.textContent?.trim() ||
       node.getAttribute("alt") ||
       node.innerText?.trim() ||

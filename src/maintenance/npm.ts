@@ -16,6 +16,7 @@ import type {
   ProcessBackend,
   ProcessBackendOptions,
 } from "../process/backend.js";
+import { defaultEofAlreadyClosed } from "../process/backend.js";
 import { maintenanceOrigin } from "./requests.js";
 import type { JsonObject } from "../contracts/types.js";
 import { ExtensionServices } from "../services/extensions.js";
@@ -403,7 +404,18 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
         cols: 80,
         rows: 24,
       });
-      await backend.write(new Uint8Array(), true, scope.signal);
+      try {
+        await backend.write(new Uint8Array(), true, scope.signal);
+      } catch (cause) {
+        scope.signal.throwIfAborted();
+        // Empty EOF only closes our write end. Still await actual process/tree
+        // closure, output completion and a successful exit before accepting it.
+        if (
+          backend.failure !== undefined ||
+          !defaultEofAlreadyClosed(cause, backend.facts())
+        )
+          throw cause;
+      }
       await backend.closed;
       const facts = backend.facts();
       requireCondition(

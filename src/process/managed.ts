@@ -1,7 +1,6 @@
 import { EventEmitter, once } from "node:events";
 import { performance } from "node:perf_hooks";
-import { AgentError, isAgentError } from "../contracts/errors.js";
-import { types } from "node:util";
+import { AgentError } from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
 import type { JsonObject } from "../contracts/types.js";
 import type { ResourceRef, ManagedResource } from "../extensions/resources.js";
@@ -11,6 +10,7 @@ import type {
   ProcessFacts,
   ProcessStopOptions,
 } from "./backend.js";
+import { defaultEofAlreadyClosed } from "./backend.js";
 import { ProcessOutputLog, type ProcessOutputOptions } from "./output-log.js";
 import type { LaunchInput, PreparedLaunch } from "./launch.js";
 
@@ -47,47 +47,6 @@ const initialFacts: ProcessFacts = {
   stopRequested: false,
   forceRequested: false,
 };
-
-function defaultEofAlreadyClosed(cause: unknown, facts: ProcessFacts): boolean {
-  const code = (value: unknown): unknown => {
-    if (
-      !value ||
-      typeof value !== "object" ||
-      types.isProxy(value) ||
-      !types.isNativeError(value)
-    )
-      return undefined;
-    const field = Object.getOwnPropertyDescriptor(value, "code");
-    return field && "value" in field ? field.value : undefined;
-  };
-  const value = code(cause);
-  if (
-    [
-      "process_stdin_closed",
-      "process_input_closed",
-      "EPIPE",
-      "ERR_STREAM_DESTROYED",
-      "ERR_STREAM_WRITE_AFTER_END",
-    ].includes(value as string)
-  )
-    return true;
-  if (value === "process_closed") return facts.closed;
-  const inner = isAgentError(cause)
-    ? Object.getOwnPropertyDescriptor(cause, "cause")
-    : undefined;
-  return (
-    value === "process_input_failed" &&
-    !!inner &&
-    "value" in inner &&
-    [
-      "process_stdin_closed",
-      "process_input_closed",
-      "EPIPE",
-      "ERR_STREAM_DESTROYED",
-      "ERR_STREAM_WRITE_AFTER_END",
-    ].includes(code(inner.value) as string)
-  );
-}
 
 /** Cold public-protocol resource. No process, environment probe or log is opened by construction. */
 export class ManagedProcess extends EventEmitter implements ManagedResource {

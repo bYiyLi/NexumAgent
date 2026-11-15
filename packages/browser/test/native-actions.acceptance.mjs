@@ -363,6 +363,35 @@ test("native role queries exclude hidden layout copies and inaccessible subtrees
   });
 });
 
+test("native role names prefer referenced labels over aria-label and match the browser accessibility tree", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Native accessible names</title>
+      <span id="verb">Save</span><span id="subject">report</span>
+      <button aria-label="Discard report" aria-labelledby="verb missing subject" onclick="document.querySelector('#result').textContent='saved'">Other text</button>
+      <button aria-label="Fallback name" aria-labelledby="absent">Other fallback</button>
+      <output id="result">untouched</output>`,
+  });
+  const result = await f.run(
+    select +
+      `
+const ax=await tab.ax.snapshot();
+const names=ax.nodes.filter(node=>node.role==='button').map(node=>node.name);
+const chosen=tab.playwright.getByRole('button',{name:'Save report',exact:true});
+const count=await chosen.count(),misleading=await tab.playwright.getByRole('button',{name:'Discard report',exact:true}).count();
+const fallback=await tab.playwright.getByRole('button',{name:'Fallback name',exact:true}).count();
+if(count===1)await chosen.click();
+return {names,count,misleading,fallback,result:await tab.evaluate("document.querySelector('#result').textContent")};`,
+    { base: f.base },
+  );
+  assert.deepEqual(result.result.data, {
+    names: ["Save report", "Fallback name"],
+    count: 1,
+    misleading: 0,
+    fallback: 1,
+    result: "saved",
+  });
+});
+
 test("native AX, CUA and fixed DOM actions change real controls and preserve native input semantics", async (t) => {
   const f = await nativeFixture(t, { html: interactive });
   const result = await f.run(

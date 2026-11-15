@@ -720,7 +720,7 @@
       "target": "tab.playwright.getByRole",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
-      "nativeCases": ["native-locator-operations"]
+      "nativeCases": ["native-locator-operations", "native-role-name-priority"]
     },
     {
       "id": "B082",
@@ -2100,6 +2100,17 @@
         "checkbox",
         "selection",
         "result"
+      ]
+    },
+    "native-role-name-priority": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native role names prefer referenced labels over aria-label and match the browser accessibility tree",
+      "coverage": [
+        "aria_labelledby",
+        "browser_ax",
+        "fallback",
+        "exact_name",
+        "dom_mutation"
       ]
     },
     "native-locator-held": {
