@@ -497,6 +497,8 @@ export async function nativeFixture(t, options = {}) {
         ).json();
         diagnostics = JSON.stringify({
           publicMatches: probe.result.data.matches,
+          publicPeerCount: probe.result.data.browsers.length,
+          connectionDiagnostics,
           nativeTargets: targets.map((value) => ({
             type: value.type,
             url: value.url,

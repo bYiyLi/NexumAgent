@@ -339,6 +339,79 @@ test("a pointer can still appear when its already-started favicon preparation is
   }
 });
 
+test("a later action can recover after native pointer stylesheet insertion fails", async () => {
+  const f = fixture();
+  let attempts = 0;
+  f.chrome.scripting.insertCSS = async (args) => {
+    f.calls.push(["insertCSS", args]);
+    if (++attempts === 1) throw Error("native insertion failed");
+  };
+  await f.controller.start({ browserSessionId: "session" });
+  try {
+    assert.deepEqual(await f.controller.beforeAction(context()), {
+      degraded: false,
+    });
+    const move = (moveSequence) =>
+      f.controller.beforePointer({
+        ...context(),
+        visualPrepared: true,
+        point: { x: 42, y: 64 },
+        moveSequence,
+      });
+    assert.deepEqual(await move(1), { degraded: true });
+    assert.deepEqual(await move(2), { degraded: false });
+    assert.equal(attempts, 2);
+    assert.equal(
+      f.calls.filter(
+        (value) =>
+          value[0] === "execute" && value[1].args[0].command === "move",
+      ).length,
+      1,
+    );
+  } finally {
+    await f.controller.dispose();
+  }
+});
+
+test("a late stylesheet failure cannot evict a replacement document's style", async () => {
+  let documentId = "document-old";
+  const gate = Promise.withResolvers();
+  const f = fixture({ frame: async () => ({ documentId }) });
+  f.chrome.scripting.insertCSS = async (args) => {
+    f.calls.push(["insertCSS", args]);
+    if (args.target.documentIds[0] === "document-old")
+      return await gate.promise;
+  };
+  await f.controller.start({ browserSessionId: "session" });
+  try {
+    await f.controller.beforeAction(context());
+    const move = (moveSequence) =>
+      f.controller.beforePointer({
+        ...context(),
+        visualPrepared: true,
+        point: { x: 42, y: 64 },
+        moveSequence,
+      });
+    const old = move(1);
+    await until(() => f.calls.some((value) => value[0] === "insertCSS"));
+    documentId = "document-new";
+    await f.controller.beforeAction(context());
+    assert.deepEqual(await move(2), { degraded: false });
+    gate.reject(Error("old document insertion failed"));
+    assert.deepEqual(await old, { degraded: true });
+    assert.deepEqual(await move(3), { degraded: false });
+    assert.deepEqual(
+      f.calls
+        .filter((value) => value[0] === "insertCSS")
+        .map((value) => value[1].target.documentIds[0]),
+      ["document-old", "document-new"],
+    );
+  } finally {
+    gate.resolve();
+    await f.controller.dispose();
+  }
+});
+
 test("a prepared visual for one tab does not substitute for another tab", async () => {
   const f = fixture();
   await f.controller.start({ browserSessionId: "session" });

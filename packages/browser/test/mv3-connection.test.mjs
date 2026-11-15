@@ -196,6 +196,7 @@ function fixture(
     calls,
     values,
     getCounts,
+    chrome,
     connection,
     router,
     ready,
@@ -218,6 +219,84 @@ async function online(f) {
   await until(() => socket.sent.some((v) => v.type === "lease_opened"));
   return socket;
 }
+
+test("startup signals during initialization create only one socket", async (t) => {
+  const f = fixture(t),
+    gate = Promise.withResolvers(),
+    getLocal = f.chrome.storage.local.get;
+  f.chrome.storage.local.get = async (...args) => {
+    await gate.promise;
+    return await getLocal(...args);
+  };
+  const started = f.connection.start();
+  f.chrome.runtime.onStartup.emit();
+  f.chrome.runtime.onStartup.emit();
+  gate.resolve();
+  await started;
+  await until(() => f.sockets.length > 0);
+  await delay(10);
+  assert.equal(f.sockets.length, 1);
+  assert.equal(f.calls.filter((value) => value[0] === "start").length, 1);
+});
+
+test("connection retries never bypass an invalid saved control identity", async (t) => {
+  const f = fixture(t);
+  f.values.session.nexumOwnedControls = [
+    { target: { browserSessionId: "lost" } },
+  ];
+  await assert.rejects(f.connection.start(), { code: "PROFILE_CONFLICT" });
+  f.chrome.runtime.onStartup.emit();
+  await delay(20);
+  assert.equal(f.sockets.length, 0);
+  assert.equal(
+    f.calls.some((value) => value[0] === "start"),
+    false,
+  );
+});
+
+test("a synchronous initial socket failure retries without restarting the router", async (t) => {
+  let attempts = 0;
+  const sockets = [];
+  class FlakySocket extends EventTarget {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = 0;
+    bufferedAmount = 0;
+    sent = [];
+    constructor() {
+      super();
+      if (++attempts === 1)
+        throw Error("temporary socket initialization failure");
+      sockets.push(this);
+    }
+    open() {
+      this.readyState = 1;
+      this.dispatchEvent(new Event("open"));
+    }
+    message(value) {
+      this.dispatchEvent(
+        new MessageEvent("message", { data: JSON.stringify(value) }),
+      );
+    }
+    send(value) {
+      this.sent.push(JSON.parse(value));
+    }
+    close() {
+      this.readyState = 3;
+      this.dispatchEvent(new Event("close"));
+    }
+  }
+  const f = fixture(t, undefined, { WebSocket: FlakySocket });
+  await f.connection.start();
+  await until(() => attempts === 2);
+  const socket = sockets[0];
+  socket.open();
+  socket.message(f.ready());
+  await until(() => f.connection.state().connected);
+  assert.equal(f.calls.filter((value) => value[0] === "start").length, 1);
+  assert.equal(socket.sent.filter((value) => value.type === "hello").length, 1);
+});
 
 test("a bound host heartbeat wakes router delays and still receives a pong", async (t) => {
   const f = fixture(t);

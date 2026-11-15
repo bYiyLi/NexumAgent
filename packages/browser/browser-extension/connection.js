@@ -710,7 +710,13 @@ export function createExtensionConnection({
     )
       return;
     await initialize;
-    if (stopped) return;
+    // Startup and alarm events can both wait on the same initialization. Only
+    // the first continuation may create the connection after it completes.
+    if (
+      stopped ||
+      (socket && [Socket.CONNECTING, Socket.OPEN].includes(socket.readyState))
+    )
+      return;
     const expected = new Socket(expectedUrl);
     socket = expected;
     expected.binaryType = "arraybuffer";
@@ -818,7 +824,14 @@ export function createExtensionConnection({
             session.nexumVisualMarkers ?? [],
           );
       })();
-      void initialize.then(connect).catch(() => status(false));
+      void initialize.then(
+        () =>
+          connect().catch(() => {
+            status(false);
+            schedule();
+          }),
+        () => status(false),
+      );
       listen(chrome.runtime.onStartup, () => void connect().catch(schedule));
       listen(chrome.alarms?.onAlarm, (alarm) => {
         if (alarm.name === "nexum-browser-connect")

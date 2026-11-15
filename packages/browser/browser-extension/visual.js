@@ -394,11 +394,18 @@ export function createVisualController(
       if (command === "move") {
         let style = styles.get(record.tabId);
         if (style?.documentId !== record.documentId) {
-          style = {
+          const created = {
             documentId: record.documentId,
             promise: chrome.scripting.insertCSS({ target, css: visualStyles }),
           };
-          styles.set(record.tabId, style);
+          styles.set(record.tabId, created);
+          // A later action may retry its own visual preparation after a real
+          // native rejection. Never evict a newer document's pending style.
+          void created.promise.catch(() => {
+            if (styles.get(record.tabId) === created)
+              styles.delete(record.tabId);
+          });
+          style = created;
         }
         await style.promise;
       }
