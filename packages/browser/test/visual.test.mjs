@@ -696,6 +696,11 @@ test("finished visual identities expire without reviving a delayed old move", as
     command: "release",
     deadline: now + 250,
   });
+  await f.execute({
+    token: old.token,
+    command: "release",
+    deadline: now + 250,
+  });
   assert.equal(f.root.children.length, 0);
   now += 300;
   await f.execute({

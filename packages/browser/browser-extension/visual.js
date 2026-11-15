@@ -24,6 +24,7 @@ export async function visualPage(input) {
         Math.max(
           now + 250,
           inputDeadline,
+          state.closed.get(token) ?? 0,
           state.current?.token === token ? (state.current.maxDeadline ?? 0) : 0,
         ),
       );
