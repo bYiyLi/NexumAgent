@@ -47,17 +47,14 @@ jobs:
       - run: pnpm build
       - run: node scripts/build-extension-api.mjs
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
-      - run: pnpm --dir packages/browser typecheck
-      - run: pnpm --dir packages/browser build
-      - run: node --experimental-vm-modules --test --test-timeout=120000 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/ci-test-events.mjs --test-reporter-destination=stdout "test/*.test.mjs"
-        working-directory: packages/browser
+      - run: pnpm --dir packages/browser check
       - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
       - name: Prepare the SHA-256-pinned native Chrome for Testing in runner temp
         run: node scripts/prepare-native-browser.mjs
       - name: Confirm native page and extension prerequisites
         run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise actual isolated browser scenarios
-        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
+        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs packages/browser/test/native-lease-receipt.acceptance.mjs
       - name: Prepare isolated Linux display tools
         if: runner.os == 'Linux'
         run: |
