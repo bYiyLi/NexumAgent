@@ -285,8 +285,27 @@ export function createVisualController(
     styles = new Map(),
     listeners = [],
     tasks = new Set(),
-    taskTokens = new Map();
+    taskTokens = new Map(),
+    wakeups = new Set();
   let persistence = Promise.resolve();
+  const timeout = (deadline, callback) => {
+    const duration = Math.max(1, deadline - Date.now()),
+      due = performance.now() + duration;
+    const cancel = () => {
+      clearTimeout(timer);
+      wakeups.delete(wake);
+    };
+    const fire = () => {
+      cancel();
+      callback();
+    };
+    const wake = () => {
+      if (performance.now() >= due) fire();
+    };
+    const timer = setTimeout(fire, duration);
+    wakeups.add(wake);
+    return cancel;
+  };
   const save = () => {
     const snapshot = [...markers.values()].map((value) => ({
       ...value,
@@ -405,11 +424,10 @@ export function createVisualController(
         : { ok: false, reason: "VISUAL_UNAVAILABLE" };
     })();
     observe(flow, record.token);
-    let timer, onAbort;
+    let cancelTimer, onAbort;
     const bounded = new Promise((resolve) => {
-      timer = setTimeout(
-        () => resolve({ ok: false, reason: "VISUAL_TIMEOUT" }),
-        Math.max(1, deadline - Date.now()),
+      cancelTimer = timeout(deadline, () =>
+        resolve({ ok: false, reason: "VISUAL_TIMEOUT" }),
       );
       onAbort = () => resolve({ ok: false, reason: "VISUAL_CANCELLED" });
       ctx.signal?.addEventListener("abort", onAbort, { once: true });
@@ -420,7 +438,7 @@ export function createVisualController(
     } catch {
       return { ok: false, reason: "VISUAL_UNAVAILABLE" };
     } finally {
-      clearTimeout(timer);
+      cancelTimer();
       ctx.signal?.removeEventListener("abort", onAbort);
     }
   };
@@ -552,14 +570,13 @@ export function createVisualController(
       Promise.resolve().then(() => perform(limited)),
       key(ctx),
     );
-    let timer, onAbort;
+    let cancelTimer, onAbort;
     try {
       const status = await Promise.race([
         task,
         new Promise((resolve, reject) => {
-          timer = setTimeout(
-            () => resolve({ degraded: true }),
-            Math.max(1, limited.deadline - Date.now()),
+          cancelTimer = timeout(limited.deadline, () =>
+            resolve({ degraded: true }),
           );
           onAbort = () => reject(ctx.signal.reason);
           ctx.signal?.addEventListener("abort", onAbort, { once: true });
@@ -576,7 +593,7 @@ export function createVisualController(
       notice(ctx, "VISUAL_UNAVAILABLE");
       return { degraded: true };
     } finally {
-      clearTimeout(timer);
+      cancelTimer?.();
       ctx.signal?.removeEventListener("abort", onAbort);
     }
   };
@@ -906,6 +923,9 @@ export function createVisualController(
   };
   return Object.freeze({
     start,
+    wake() {
+      for (const wake of [...wakeups]) wake();
+    },
     beforeAction,
     beforePointer,
     markDeliverable,

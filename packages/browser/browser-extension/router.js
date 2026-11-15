@@ -1969,6 +1969,7 @@ export function createBrowserRouter(
     canClaim,
     wake() {
       for (const wake of [...wakeups]) wake();
+      visual?.wake?.();
     },
     start() {
       requireValue(

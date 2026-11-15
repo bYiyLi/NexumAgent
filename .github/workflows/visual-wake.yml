@@ -1,0 +1,37 @@
+name: Isolated Edge visual wake regression
+on:
+  push:
+    branches: [codex/phase-48-visual-wake]
+permissions:
+  contents: read
+jobs:
+  edge:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            packages/browser/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/build-extension-api.mjs
+      - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
+      - run: pnpm --dir packages/browser build
+      - name: Select isolated runner Edge
+        shell: bash
+        run: |
+          edge='/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+          test -x "$edge"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' '/Applications/Microsoft Edge.app/Contents/Info.plist'
+          shasum -a 256 "$edge"
+          printf 'NEXUM_BROWSER_NATIVE_BINARY=%s\n' "$edge" >> "$GITHUB_ENV"
+      - name: Observe the original visual scenario
+        run: node --experimental-vm-modules --test --test-timeout=120000 --test-concurrency=1 --test-name-pattern="native visual feedback" packages/browser/test/native-visual.acceptance.mjs

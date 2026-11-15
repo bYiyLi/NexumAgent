@@ -126,6 +126,48 @@ async function until(predicate) {
   }
 }
 
+test("host wakeups enforce visual timeouts when worker timers are stalled", async () => {
+  const nativeSetTimeout = globalThis.setTimeout;
+  let intercepted = 0;
+  globalThis.setTimeout = (callback, milliseconds, ...args) => {
+    if (milliseconds > 0 && milliseconds <= 250) {
+      intercepted++;
+      return nativeSetTimeout(callback, 10000, ...args);
+    }
+    return nativeSetTimeout(callback, milliseconds, ...args);
+  };
+  const frameGate = Promise.withResolvers(),
+    frame = fixture({ frame: () => frameGate.promise }),
+    pageGate = Promise.withResolvers(),
+    page = fixture({
+      execute: async () => await pageGate.promise,
+    });
+  try {
+    const action = frame.controller.beforeAction(context());
+    await until(() => frame.calls.some((item) => item[0] === "getFrame"));
+    await delay(320);
+    frame.controller.wake();
+    assert.deepEqual(await action, { degraded: true });
+    frameGate.resolve({ documentId: "late-document" });
+    await delay(5);
+    assert.equal(frame.calls.filter((item) => item[0] === "execute").length, 0);
+
+    const result = page.controller.markDeliverable(context());
+    await until(() => page.calls.some((item) => item[0] === "execute"));
+    await delay(320);
+    page.controller.wake();
+    assert.deepEqual(await result, { degraded: true });
+    pageGate.resolve([{ result: { ok: true } }]);
+    assert.ok(intercepted >= 2);
+  } finally {
+    frameGate.resolve({ documentId: "late-document" });
+    pageGate.resolve([{ result: { ok: true } }]);
+    globalThis.setTimeout = nativeSetTimeout;
+    await frame.controller.dispose();
+    await page.controller.dispose();
+  }
+});
+
 test("visual construction is cold and every run/window owns its blue group while user groups and OS focus stay unchanged", async () => {
   const f = fixture();
   assert.deepEqual(f.calls, []);

@@ -194,6 +194,20 @@ test("Node sends bound wakeups only while a peer has an active action", async (t
   await delay(250);
   assert.equal(activePings, afterCompletion);
   assert.equal(idlePings, 0);
+
+  const controller = new AbortController(),
+    cancelled = action(f.service, ready, {
+      budgetMs: 5000,
+      signal: controller.signal,
+    });
+  await peer.next("action");
+  await peer.next("ping");
+  controller.abort();
+  await assert.rejects(cancelled, { code: "UNKNOWN_RESULT" });
+  await delay(30);
+  const afterCancellation = activePings;
+  await delay(250);
+  assert.equal(activePings, afterCancellation);
 });
 
 test("visual diagnostics correlate only a live lease and never log untrusted event data", async (t) => {

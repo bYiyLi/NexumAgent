@@ -342,6 +342,31 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
     return nativeSetTimeout(callback, milliseconds, ...args);
   };
   try {
+    const earlyController = new AbortController(),
+      earlyReason = new Error("finish the early-wakeup observation");
+    let earlyFinished = false;
+    const earlyWait = f.router
+      .delay(
+        {
+          started: performance.now(),
+          budgetMs: 10000,
+          signal: earlyController.signal,
+        },
+        5000,
+      )
+      .then(() => {
+        earlyFinished = true;
+      });
+    f.router.wake();
+    await Promise.resolve();
+    assert.equal(
+      earlyFinished,
+      false,
+      "an early heartbeat must not shorten a wait",
+    );
+    earlyController.abort(earlyReason);
+    await assert.rejects(earlyWait, (error) => error === earlyReason);
+
     const controller = new AbortController();
     let finished = false;
     const wait = f.router
@@ -356,9 +381,6 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
       .then(() => {
         finished = true;
       });
-    f.router.wake();
-    await Promise.resolve();
-    assert.equal(finished, false, "an early heartbeat must not shorten a wait");
     await delay(65);
     assert.equal(
       finished,
@@ -386,6 +408,13 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
   } finally {
     globalThis.setTimeout = nativeSetTimeout;
   }
+});
+
+test("bound wakeups also notify the visual deadline controller", async (t) => {
+  let wakes = 0;
+  const f = fixture(t, { visual: { wake: () => wakes++ } });
+  f.router.wake();
+  assert.equal(wakes, 1);
 });
 
 test("native visual hooks receive the current run/target, precede pointer input and hold lease cleanup until their actual release", async (t) => {
