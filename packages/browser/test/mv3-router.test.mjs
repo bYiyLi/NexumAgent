@@ -2254,6 +2254,22 @@ test("download metadata never includes a data URL body", async (t) => {
   assert.equal(downloads.length, 1);
   assert.equal(Object.hasOwn(downloads[0], "url"), false);
   assert.equal(JSON.stringify(downloads).includes("c2VjcmV0"), false);
+  const previous = await f.call("cdp.readEvents", {
+    options: { afterSequence: 0 },
+  });
+  f.chrome.debugger.onEvent.emit({ tabId: 1 }, "Page.downloadWillBegin", {
+    guid: "large-data-guid",
+    url: "data:application/octet-stream;base64," + "A".repeat(2 * 1024 * 1024),
+    suggestedFilename: "large.bin",
+  });
+  const remaining = await f.call("cdp.readEvents", {
+    options: { afterSequence: previous.cursor },
+  });
+  assert.equal(remaining.truncated, true);
+  assert.equal(remaining.events.length, 0);
+  const bounded = await f.call("tab.downloads");
+  assert.equal(bounded.length, 2);
+  assert.ok(JSON.stringify(bounded).length < 2048);
 });
 
 test("cancelling an in-flight local-download watcher waits for its actual disarm", async (t) => {

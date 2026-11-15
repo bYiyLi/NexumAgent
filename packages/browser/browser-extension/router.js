@@ -1666,7 +1666,7 @@ export function createBrowserRouter(
     webMcpEarly = new Map();
   let eventSequence = 0,
     eventBytes = 0,
-    eventTruncated = false,
+    eventDiscardedThrough = 0,
     dialogSequence = 0,
     auditSequence = 0,
     auditTruncated = false;
@@ -1775,7 +1775,7 @@ export function createBrowserRouter(
       params.url.length > maxEventBytes
     ) {
       eventSequence++;
-      eventTruncated = true;
+      eventDiscardedThrough = eventSequence;
       return;
     }
     const event = {
@@ -1794,14 +1794,18 @@ export function createBrowserRouter(
     };
     const size = encoder.encode(JSON.stringify(event)).byteLength;
     if (size > maxEventBytes) {
-      eventTruncated = true;
+      eventDiscardedThrough = event.sequence;
       return;
     }
     eventBuffer.push({ event, size });
     eventBytes += size;
     while (eventBuffer.length > 1000 || eventBytes > maxEventBytes) {
-      eventBytes -= eventBuffer.shift().size;
-      eventTruncated = true;
+      const removed = eventBuffer.shift();
+      eventBytes -= removed.size;
+      eventDiscardedThrough = Math.max(
+        eventDiscardedThrough,
+        removed.event.sequence,
+      );
     }
     emit({ type: "event", event: "cdp", value: event });
   };
@@ -2881,7 +2885,7 @@ export function createBrowserRouter(
       eventBuffer.length = 0;
       eventBytes = 0;
       eventSequence = 0;
-      eventTruncated = false;
+      eventDiscardedThrough = 0;
     },
     async snapshot() {
       requireValue(
@@ -5084,9 +5088,7 @@ export function createBrowserRouter(
           sequence,
         }),
         hasMore: matches.length > events.length,
-        truncated:
-          eventTruncated &&
-          after < (eventBuffer[0]?.event.sequence ?? eventSequence),
+        truncated: after < eventDiscardedThrough,
       };
     },
     dialog(ctx) {
