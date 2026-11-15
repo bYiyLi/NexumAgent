@@ -586,6 +586,7 @@ export async function nativeFixture(t, options = {}) {
         input,
         waitMs: 1000,
       }),
+    artifacts,
     encoder,
     resultScope,
     downloadBytes,

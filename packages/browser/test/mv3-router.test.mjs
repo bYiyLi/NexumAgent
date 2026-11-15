@@ -185,9 +185,12 @@ function fixture(t, config = {}) {
     downloads: {
       onCreated: event(),
       onChanged: event(),
+      onDeterminingFilename: event(),
       async search(query) {
         calls.push(["downloads.search", query]);
-        return config.nativeDownloads ?? [];
+        return (config.nativeDownloads ?? []).filter(
+          (item) => query.id === undefined || item.id === query.id,
+        );
       },
     },
     debugger: {
@@ -2044,6 +2047,177 @@ test("a same-URL native download before or after an owned event never authorizes
       false,
     );
   }
+});
+
+test("an awaited attachment binds the exact browser download ID and leaves unrelated responses unchanged", async (t) => {
+  const downloads = [
+    { id: 91, filename: "/downloads/unrelated.bin", state: "complete" },
+  ];
+  const f = fixture(t, { nativeDownloads: downloads });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const waiter = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  const source = { tabId: 1 };
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "html",
+    responseStatusCode: 200,
+    request: { url: "https://example.com/page" },
+    responseHeaders: [{ name: "Content-Type", value: "text/html" }],
+  });
+  await delay(0);
+  assert.ok(
+    f.calls.some(
+      (call) =>
+        call[2] === "Fetch.continueRequest" && call[3].requestId === "html",
+    ),
+  );
+  let unrelatedSuggestion = "not-called";
+  f.chrome.downloads.onDeterminingFilename.emit(downloads[0], (value) => {
+    unrelatedSuggestion = value;
+  });
+  assert.equal(unrelatedSuggestion, undefined);
+
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "attachment",
+    responseStatusCode: 200,
+    request: { url: "https://example.com/report.bin" },
+    responseHeaders: [
+      { name: "Content-Type", value: "application/octet-stream" },
+      {
+        name: "Content-Disposition",
+        value: 'attachment; filename="report.bin"',
+      },
+    ],
+  });
+  await delay(0);
+  const continued = f.calls.find(
+    (call) =>
+      call[2] === "Fetch.continueResponse" &&
+      call[3].requestId === "attachment",
+  );
+  assert.ok(continued);
+  const disposition = continued[3].responseHeaders.find(
+    (header) => header.name === "Content-Disposition",
+  ).value;
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1];
+  assert.match(filename, /^report-nexum-[0-9a-f]{32}\.bin$/);
+  downloads.push({
+    id: 72,
+    filename: `/downloads/Nexum/${filename}`,
+    state: "in_progress",
+  });
+  let originalSuggestion = "not-called";
+  f.chrome.downloads.onDeterminingFilename.emit(downloads[1], (value) => {
+    originalSuggestion = value;
+  });
+  assert.deepEqual(originalSuggestion, {
+    filename: `Nexum/${filename}`,
+    conflictAction: "uniquify",
+  });
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadWillBegin", {
+    guid: "owned-download-guid",
+    url: "https://example.com/report.bin",
+    suggestedFilename: filename,
+  });
+  const receipt = await f.call("waiters.get", { id: waiter.id });
+  assert.equal(receipt.downloadId, "owned-download-guid");
+  let completed = false;
+  const path = f
+    .call("downloads.path", { downloadId: receipt.downloadId })
+    .then((value) => {
+      completed = true;
+      return value;
+    });
+  await delay(10);
+  assert.equal(completed, false);
+  downloads[1].state = "complete";
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadProgress", {
+    guid: "owned-download-guid",
+    state: "completed",
+    receivedBytes: 3,
+    totalBytes: 3,
+  });
+  assert.equal(await path, `/downloads/Nexum/${filename}`);
+  assert.deepEqual(
+    f.calls
+      .filter((call) => call[0] === "downloads.search")
+      .map((call) => call[1]),
+    [{ id: 72 }],
+  );
+  await f.call("waiters.cancel", { id: waiter.id });
+  assert.ok(f.calls.some((call) => call[2] === "Fetch.disable"));
+});
+
+test("an existing raw Fetch session is not taken over by a download waiter", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("cdp.send", { method: "Fetch.enable", params: {} });
+  const waiter = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  assert.equal(f.calls.filter((call) => call[2] === "Fetch.enable").length, 1);
+  f.chrome.debugger.onEvent.emit({ tabId: 1 }, "Fetch.requestPaused", {
+    requestId: "user-owned",
+    responseStatusCode: 200,
+    responseHeaders: [
+      { name: "Content-Disposition", value: "attachment; filename=a.bin" },
+    ],
+    request: { url: "https://example.com/a.bin" },
+  });
+  await delay(0);
+  assert.equal(
+    f.calls.some((call) => call[3]?.requestId === "user-owned"),
+    false,
+  );
+  await f.call("cdp.send", { method: "Fetch.disable", params: {} });
+  assert.equal(f.calls.filter((call) => call[2] === "Fetch.enable").length, 2);
+  await f.call("waiters.cancel", { id: waiter.id });
+});
+
+test("a duplicated marked identity is never used to read either browser file", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("waiters.arm", { event: "download", timeoutMs: 1000 });
+  const source = { tabId: 1 };
+  f.chrome.debugger.onEvent.emit(source, "Fetch.requestPaused", {
+    requestId: "attachment",
+    responseStatusCode: 200,
+    request: { url: "https://example.com/report.bin" },
+    responseHeaders: [
+      { name: "Content-Disposition", value: "attachment; filename=report.bin" },
+    ],
+  });
+  await delay(0);
+  const disposition = f.calls.find(
+    (call) => call[2] === "Fetch.continueResponse",
+  )[3].responseHeaders[0].value;
+  const filename = /filename="([^"]+)"/.exec(disposition)[1];
+  for (const id of [72, 73])
+    f.chrome.downloads.onDeterminingFilename.emit({ id, filename }, () => {});
+  f.chrome.debugger.onEvent.emit(source, "Page.downloadWillBegin", {
+    guid: "ambiguous-download-guid",
+    url: "https://example.com/report.bin",
+    suggestedFilename: filename,
+  });
+  await assert.rejects(
+    f.call("downloads.path", { downloadId: "ambiguous-download-guid" }),
+    {
+      code: "CAPABILITY_NOT_ALLOWED",
+    },
+  );
+  assert.equal(
+    f.calls.some((call) => call[0] === "downloads.search"),
+    false,
+  );
 });
 
 test("attachment intent is committed before native attach and worker recovery detaches only journaled native controls", async (t) => {

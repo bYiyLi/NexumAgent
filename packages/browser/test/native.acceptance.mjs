@@ -61,7 +61,7 @@ test("native explicit handoff closes the original waiter and prevents same-run r
   assert.equal(next.result.data.before, "Before handoff");
   assert.equal(next.result.data.after, "Next run owns a fresh lease");
 });
-test("native MV3 provides page interaction and MCP JPEG while download file identity remains explicitly unavailable", async (t) => {
+test("native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource", async (t) => {
   const f = await nativeFixture(t);
   const result = await f.run(
     select +
@@ -88,15 +88,22 @@ test("native MV3 provides page interaction and MCP JPEG while download file iden
   assert.equal(Object.hasOwn(screenshot.result.content[1], "data"), false);
   const download = await f.run(
     select +
-      'const pending=tab.playwright.waitForEvent("download");await tab.playwright.getByRole("link",{name:"Download native"}).click();const completed=await pending;let pathError;try{await completed.path();}catch(error){pathError=error.code;}return {pathError,downloads:await tab.downloads()};',
+      'const pending=tab.playwright.waitForEvent("download");await tab.playwright.getByRole("link",{name:"Download native"}).click();const completed=await pending;return output.file(await completed.path());',
     { base: f.base },
   );
-  assert.equal(download.result.data.pathError, "CAPABILITY_NOT_ALLOWED");
-  assert.equal(download.result.data.downloads.length, 1);
-  assert.equal(download.result.data.downloads[0].url, f.base + "download");
-  t.diagnostic(
-    "The original native download event is retained. Its local file is not accepted without an exact native identity; positive path/saveDownload acceptance remains open.",
+  const renderedDownload = await f.encoder.render(
+    download.result,
+    f.resultScope(),
+    download.run,
   );
+  const link = renderedDownload.content.find(
+    (item) => item.type === "resource_link",
+  );
+  assert.ok(link?.uri);
+  const resource = await f.artifacts.read(link.uri, f.resultScope(), {
+    maxBytes: 200000,
+  });
+  assert.deepEqual(resource.data, f.downloadBytes);
 });
 
 function png() {

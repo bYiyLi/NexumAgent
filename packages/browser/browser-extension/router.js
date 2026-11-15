@@ -39,6 +39,106 @@ const maxEventBytes = 1024 * 1024;
 const now = () => Date.now();
 const targetFields = ["bootId", "browserId", "browserSessionId", "generation"];
 const options = (args) => args.options ?? args;
+
+// Preserve the original download request. Only an explicitly awaited,
+// attachment response on the controlled tab receives this unique filename.
+// A random marker is needed because Page's download GUID and the downloads
+// API's numeric ID are different browser identities.
+function markedAttachment(headers, url) {
+  if (!Array.isArray(headers)) return null;
+  const dispositions = headers.filter(
+    (header) => header?.name?.toLowerCase() === "content-disposition",
+  );
+  if (dispositions.length !== 1 || typeof dispositions[0].value !== "string")
+    return null;
+  const value = dispositions[0].value;
+  if (value.length > 16384 || /[\r\n\0]/.test(value)) return null;
+  const parts = [];
+  let part = "",
+    quoted = false,
+    escaped = false;
+  for (const char of value) {
+    if (escaped) escaped = false;
+    else if (quoted && char === "\\") escaped = true;
+    else if (char === '"') quoted = !quoted;
+    if (char === ";" && !quoted) {
+      parts.push(part.trim());
+      part = "";
+    } else part += char;
+  }
+  if (quoted || escaped) return null;
+  parts.push(part.trim());
+  if (parts.shift()?.toLowerCase() !== "attachment") return null;
+
+  let original, extended;
+  const retained = [];
+  for (const parameter of parts) {
+    const match = /^([^=\s]+)\s*=\s*(.*)$/.exec(parameter);
+    if (!match) {
+      if (parameter) retained.push(parameter);
+      continue;
+    }
+    const key = match[1].toLowerCase();
+    if (key === "filename*") {
+      const encoded = /^utf-8'[^']*'(.*)$/i.exec(match[2]);
+      if (encoded)
+        try {
+          extended = decodeURIComponent(encoded[1]);
+        } catch {
+          // An invalid extended filename does not replace the ordinary one.
+        }
+    } else if (key === "filename") {
+      const raw = match[2].trim();
+      original =
+        raw.startsWith('"') && raw.endsWith('"')
+          ? raw.slice(1, -1).replace(/\\(.)/g, "$1")
+          : raw;
+    } else retained.push(parameter);
+  }
+  if (!extended && !original)
+    try {
+      original = decodeURIComponent(new URL(url).pathname.split("/").pop());
+    } catch {
+      original = "download";
+    }
+  const safe =
+    String(extended || original || "download")
+      .replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, "_")
+      .replace(/[. ]+$/g, "") || "download";
+  const extension = /\.[a-z0-9]{1,16}$/i.exec(safe)?.[0] ?? "";
+  const requestedStem = extension ? safe.slice(0, -extension.length) : safe;
+  let stem = "";
+  for (const character of requestedStem) {
+    if (encoder.encode(stem + character).byteLength > 150) break;
+    stem += character;
+  }
+  const marker = crypto.randomUUID().replaceAll("-", "");
+  const filename = `${stem || "download"}-nexum-${marker}${extension}`;
+  const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  const encoded = encodeURIComponent(filename).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  const disposition = [
+    "attachment",
+    ...retained,
+    `filename="${ascii}"`,
+    `filename*=UTF-8''${encoded}`,
+  ].join("; ");
+  return {
+    marker,
+    filename,
+    headers: headers.map((header) =>
+      header === dispositions[0] ? { ...header, value: disposition } : header,
+    ),
+  };
+}
+
+function downloadMarker(filename) {
+  if (typeof filename !== "string") return null;
+  const name = filename.split(/[\\/]/).pop();
+  return /-nexum-([0-9a-f]{32})(?:\.[a-z0-9]{1,16})?$/i.exec(name)?.[1] ?? null;
+}
 const stringData = (value, maximum = 1024 * 1024) => {
   requireValue(
     typeof value === "string" && encoder.encode(value).byteLength <= maximum,
@@ -1498,6 +1598,7 @@ export function createBrowserRouter(
     auditEntries = [],
     waiters = new Map(),
     downloadRecords = new Map(),
+    downloadMarks = new Map(),
     webMcpPending = new Map(),
     webMcpEarly = new Map();
   let eventSequence = 0,
@@ -1524,6 +1625,32 @@ export function createBrowserRouter(
     event.addListener(fn);
     listeners.push(() => event.removeListener(fn));
   };
+  // Register synchronously so a restarted MV3 worker always releases the
+  // browser's filename decision. Lost in-memory marks never authorize a file.
+  on(chrome.downloads?.onDeterminingFilename, (item, suggest) => {
+    let destination;
+    try {
+      const marker = downloadMarker(item?.filename),
+        mark = marker && downloadMarks.get(marker);
+      if (mark && Number.isSafeInteger(item.id)) {
+        if (mark.nativeId !== undefined && mark.nativeId !== item.id)
+          mark.ambiguous = true;
+        else {
+          mark.nativeId = item.id;
+          // Chrome permits a per-download relative path only below its own
+          // Downloads directory. The Agent later fixes the completed file in
+          // work/resources through the existing output.file contract.
+          const filename = item.filename.split(/[\\/]/).pop();
+          destination = {
+            filename: `Nexum/${filename}`,
+            conflictAction: "uniquify",
+          };
+        }
+      }
+    } finally {
+      suggest(destination);
+    }
+  });
   const verifyTarget = (value) => {
     record(value);
     requireValue(
@@ -1619,6 +1746,123 @@ export function createBrowserRouter(
     if (waiter.event === "filechooser") {
       const lease = leases.get(waiter.leaseId);
       if (lease) void syncChooserIntercept(lease, waiter.tabId).catch(() => {});
+    }
+    if (waiter.event === "download") {
+      const lease = leases.get(waiter.leaseId);
+      if (lease)
+        void syncDownloadIntercept(lease, waiter.tabId).catch(() => {});
+    }
+  };
+  const syncDownloadIntercept = (lease, tabId) => {
+    const queues = (lease.downloadSync ??= new Map()),
+      before = queues.get(tabId) ?? Promise.resolve();
+    const task = before
+      .catch(() => {})
+      .then(async () => {
+        if (owners.get(tabId) !== lease.id || !lease.attached.has(tabId))
+          return;
+        const managed = (lease.downloadIntercept ??= new Set()),
+          wanted =
+            !lease.ended &&
+            !lease.revoked &&
+            !lease.rawFetch?.has(tabId) &&
+            [...waiters.values()].some(
+              (waiter) =>
+                waiter.leaseId === lease.id &&
+                waiter.tabId === tabId &&
+                waiter.event === "download" &&
+                !waiter.settled,
+            );
+        if (wanted === managed.has(tabId)) return;
+        if (wanted) {
+          managed.add(tabId);
+          try {
+            await chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
+              patterns: [{ urlPattern: "*", requestStage: "Response" }],
+            });
+          } catch (cause) {
+            managed.delete(tabId);
+            throw cause;
+          }
+        } else {
+          await Promise.allSettled([
+            ...(lease.downloadResponses?.get(tabId) ?? []),
+          ]);
+          await chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {});
+          managed.delete(tabId);
+        }
+      });
+    queues.set(tabId, task);
+    lease.pending.set(task, {
+      tabId: String(tabId),
+      actionId: `download_cleanup_${crypto.randomUUID()}`,
+    });
+    void task
+      .finally(() => {
+        lease.pending.delete(task);
+        if (queues.get(tabId) === task) queues.delete(tabId);
+      })
+      .catch(() => {});
+    return task;
+  };
+  const continueDownloadResponse = async (lease, tabId, params) => {
+    let mark;
+    try {
+      const waiting = [...waiters.values()].some(
+        (waiter) =>
+          waiter.leaseId === lease.id &&
+          waiter.tabId === tabId &&
+          waiter.event === "download" &&
+          waiter.ready &&
+          !waiter.settled,
+      );
+      if (
+        waiting &&
+        !lease.ended &&
+        !lease.revoked &&
+        Number.isInteger(params.responseStatusCode) &&
+        params.responseStatusCode >= 200 &&
+        params.responseStatusCode < 300 &&
+        !params.responseErrorReason &&
+        downloadMarks.size < 1024
+      ) {
+        const marked = markedAttachment(
+          params.responseHeaders,
+          params.request?.url,
+        );
+        if (marked) {
+          mark = {
+            leaseId: lease.id,
+            runId: lease.runId,
+            tabId,
+            controlEpoch: lease.epochs?.get(tabId),
+          };
+          downloadMarks.set(marked.marker, mark);
+          await chrome.debugger.sendCommand(
+            { tabId },
+            "Fetch.continueResponse",
+            {
+              requestId: params.requestId,
+              responseCode: params.responseStatusCode,
+              ...(params.responseStatusText
+                ? { responsePhrase: params.responseStatusText }
+                : {}),
+              responseHeaders: marked.headers,
+            },
+          );
+          return;
+        }
+      }
+    } catch {
+      if (mark) mark.ambiguous = true;
+    }
+    // Unrelated responses and failed marking always continue unchanged.
+    try {
+      await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", {
+        requestId: params.requestId,
+      });
+    } catch {
+      // Detachment/Fetch.disable may already have resumed the request.
     }
   };
   const syncChooserIntercept = (lease, tabId) => {
@@ -1749,6 +1993,7 @@ export function createBrowserRouter(
     for (const waiter of waiters.values())
       if (waiter.leaseId === lease.id && waiter.tabId === tabId)
         cancelWaiter(waiter);
+    if (lease.attached.has(tabId)) await syncDownloadIntercept(lease, tabId);
     if (!lease.attached.has(tabId) && !lease.externallyDetached.has(tabId)) {
       const targets = await chrome.debugger.getTargets();
       if (!targets.some((item) => item.tabId === tabId && item.attached))
@@ -1821,6 +2066,11 @@ export function createBrowserRouter(
     lease.keys.delete(tabId);
     lease.viewports.delete(tabId);
     lease.fileChoosers.delete(tabId);
+    lease.downloadIntercept?.delete(tabId);
+    lease.rawFetch?.delete(tabId);
+    for (const [marker, mark] of downloadMarks)
+      if (mark.leaseId === lease.id && mark.tabId === tabId)
+        downloadMarks.delete(marker);
     for (const [index, ref] of lease.axReferences ?? [])
       if (Number(ref.tabId) === tabId) lease.axReferences.delete(index);
     lease.axTextStates?.delete(String(tabId));
@@ -2022,6 +2272,32 @@ export function createBrowserRouter(
         const owner = owners.get(source.tabId),
           lease = owner && leases.get(owner);
         if (!lease?.attached.has(source.tabId)) return;
+        if (
+          !source.sessionId &&
+          method === "Fetch.requestPaused" &&
+          lease.downloadIntercept?.has(source.tabId)
+        ) {
+          const responses = (lease.downloadResponses ??= new Map());
+          if (!responses.has(source.tabId))
+            responses.set(source.tabId, new Set());
+          const pending = responses.get(source.tabId),
+            task = Promise.resolve().then(() =>
+              continueDownloadResponse(lease, source.tabId, params),
+            );
+          pending.add(task);
+          lease.pending.set(task, {
+            tabId: String(source.tabId),
+            actionId: `download_response_${crypto.randomUUID()}`,
+          });
+          void task
+            .finally(() => {
+              pending.delete(task);
+              lease.pending.delete(task);
+              if (!pending.size) responses.delete(source.tabId);
+            })
+            .catch(() => {});
+          return;
+        }
         if (method === "Runtime.executionContextCreated") {
           const context = params.context;
           executionContexts.set(
@@ -2192,9 +2468,27 @@ export function createBrowserRouter(
             state: "in_progress",
             bytesReceived: 0,
           };
+          const marker = downloadMarker(params.suggestedFilename),
+            mark = marker && downloadMarks.get(marker);
+          if (
+            mark &&
+            mark.leaseId === lease.id &&
+            mark.runId === lease.runId &&
+            mark.tabId === source.tabId &&
+            mark.controlEpoch === lease.epochs?.get(source.tabId)
+          ) {
+            if (mark.guid !== undefined && mark.guid !== value.id)
+              mark.ambiguous = true;
+            else mark.guid = value.id;
+            value.marker = marker;
+          }
           downloadRecords.set(value.id, value);
-          while (downloadRecords.size > 1024)
-            downloadRecords.delete(downloadRecords.keys().next().value);
+          while (downloadRecords.size > 1024) {
+            const oldest = downloadRecords.keys().next().value;
+            const removed = downloadRecords.get(oldest);
+            if (removed?.marker) downloadMarks.delete(removed.marker);
+            downloadRecords.delete(oldest);
+          }
           for (const waiter of waiters.values())
             if (
               !waiter.settled &&
@@ -3345,6 +3639,19 @@ export function createBrowserRouter(
         source = { ...source, sessionId };
       }
       const tabId = nativeId(ctx.target.tabId);
+      const rawFetch =
+        ctx.method === "cdp.send" && !child && method.startsWith("Fetch.");
+      if (rawFetch) {
+        requireValue(
+          !ctx.lease.downloadIntercept?.has(tabId),
+          "CAPABILITY_NOT_ALLOWED",
+          "Fetch commands cannot replace an active managed download waiter.",
+        );
+        // An uncertain raw enable must not be silently replaced by our own
+        // interception. A confirmed disable or detachment releases ownership.
+        if (method === "Fetch.enable")
+          (ctx.lease.rawFetch ??= new Set()).add(tabId);
+      }
       let inputMap,
         token,
         inputIntent = false;
@@ -3434,6 +3741,10 @@ export function createBrowserRouter(
       } finally {
         if (method === "Network.loadNetworkResource")
           delete ctx.pendingInfo.nativeNetworkTabId;
+      }
+      if (rawFetch && method === "Fetch.disable") {
+        ctx.lease.rawFetch?.delete(tabId);
+        await syncDownloadIntercept(ctx.lease, tabId);
       }
       if (
         (params.type === "keyUp" || params.type === "mouseReleased") &&
@@ -4958,6 +5269,8 @@ export function createBrowserRouter(
         if (input.event === "filechooser") {
           await syncChooserIntercept(ctx.lease, tabId);
         }
+        if (input.event === "download")
+          await syncDownloadIntercept(ctx.lease, tabId);
         if (
           input.event === "navigation" &&
           waiter.waitUntil === "networkidle"
@@ -4980,6 +5293,8 @@ export function createBrowserRouter(
         cancelWaiter(waiter);
         if (input.event === "filechooser")
           await syncChooserIntercept(ctx.lease, tabId);
+        if (input.event === "download")
+          await syncDownloadIntercept(ctx.lease, tabId);
         waiters.delete(waiter.id);
         throw cause;
       }
@@ -5024,6 +5339,8 @@ export function createBrowserRouter(
       cancelWaiter(waiter);
       if (waiter.event === "filechooser")
         await syncChooserIntercept(ctx.lease, waiter.tabId);
+      if (waiter.event === "download")
+        await syncDownloadIntercept(ctx.lease, waiter.tabId);
       return { cancelled: true };
     },
     downloads(ctx) {
@@ -5064,14 +5381,60 @@ export function createBrowserRouter(
         "FILE_UNAVAILABLE",
         "The original download is not owned by this run target.",
       );
-      // Page's GUID proves the original target; downloads.search exposes a
-      // different integer ID without that GUID. URL/time/name matching cannot
-      // authorize a local file, including a single currently visible match.
-      // Do not read an unrelated user's download or refetch the original URL.
-      throw new BrowserActionError(
+      const mark = value.marker && downloadMarks.get(value.marker);
+      requireValue(
+        mark &&
+          !mark.ambiguous &&
+          mark.guid === id &&
+          mark.leaseId === ctx.lease.id &&
+          mark.runId === ctx.runId &&
+          mark.tabId === nativeId(ctx.target.tabId) &&
+          mark.controlEpoch === ctx.target.controlEpoch,
         "CAPABILITY_NOT_ALLOWED",
-        "This browser transport cannot prove the original download's local file identity.",
+        "The original download does not have a proven browser file identity.",
       );
+      let filename;
+      await router.poll(ctx, async () => {
+        requireValue(
+          !mark.ambiguous,
+          "FILE_UNAVAILABLE",
+          "The browser reported an ambiguous download identity.",
+        );
+        requireValue(
+          value.state !== "cancelled",
+          "FILE_UNAVAILABLE",
+          "The browser download was cancelled.",
+        );
+        if (value.state !== "complete" || !Number.isSafeInteger(mark.nativeId))
+          return false;
+        const items = await chrome.downloads.search({ id: mark.nativeId });
+        requireValue(
+          Array.isArray(items) &&
+            items.length === 1 &&
+            items[0].id === mark.nativeId,
+          "FILE_UNAVAILABLE",
+          "The original browser download record is unavailable.",
+        );
+        const item = items[0];
+        requireValue(
+          item.state !== "interrupted",
+          "FILE_UNAVAILABLE",
+          "The browser download was interrupted.",
+        );
+        if (item.state !== "complete") return false;
+        requireValue(
+          typeof item.filename === "string" &&
+            /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/.test(
+              item.filename,
+            ) &&
+            !/[\x00-\x1f\x7f]/.test(item.filename),
+          "FILE_UNAVAILABLE",
+          "The completed browser download has no valid local filename.",
+        );
+        filename = item.filename;
+        return true;
+      });
+      return filename;
     },
     async recoverOwnedControls(records) {
       requireValue(
