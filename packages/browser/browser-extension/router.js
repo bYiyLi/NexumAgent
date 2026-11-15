@@ -500,6 +500,31 @@ route("browsers.history", async (ctx, args) => {
       dateVisited: new Date(item.lastVisitTime).toISOString(),
     }));
 });
+route("browsers.downloads", async (ctx, args) => {
+  const limit = options(args).limit ?? 1000;
+  requireValue(Number.isInteger(limit) && limit >= 1 && limit <= 1000);
+  const items = await ctx.chrome.downloads.search({
+    limit,
+    orderBy: ["-startTime"],
+  });
+  requireValue(Array.isArray(items), "PROTOCOL_MISMATCH");
+  return items
+    .slice(0, limit)
+    .map((item) =>
+      fields(item, [
+        "id",
+        "filename",
+        "state",
+        "startTime",
+        "endTime",
+        "fileSize",
+        "totalBytes",
+        "bytesReceived",
+        "mime",
+        "exists",
+      ]),
+    );
+});
 route("browsers.nameSession", async (ctx, args) => {
   ctx.lease.name = text(args.name, 120);
   await ctx.router.nameVisualSession(ctx, args.name);

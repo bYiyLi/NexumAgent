@@ -37,6 +37,7 @@ const [
   { RunEngine, callerKey },
   { ArtifactStore },
   { ResultEncoder },
+  { createOutput },
 ] = await Promise.all([
   core("storage/sqlite.js"),
   core("extensions/resources.js"),
@@ -49,6 +50,7 @@ const [
   core("runtime/engine.js"),
   core("results/artifacts.js"),
   core("results/encoder.js"),
+  core("sdk/output.js"),
 ]);
 const source = realpathSync.native(
   fileURLToPath(new URL("../", import.meta.url)),
@@ -144,6 +146,7 @@ async function fixture(
     gateCommand = false,
     nativeDownloads = false,
     declaredDownloadSize = 150000,
+    authorize,
     visualFailure = false,
   } = {},
 ) {
@@ -194,7 +197,9 @@ async function fixture(
     registry = new ExtensionRegistry(resources, {
       cleanupTimeoutMs: 25,
       permissions,
-      authorize() {},
+      authorize(policy) {
+        authorize?.(policy);
+      },
       log(_origin, entry) {
         logs.push(entry);
       },
@@ -739,6 +744,42 @@ test("AX state plus actual JPEG bytes cross Registry and the real Core result pi
     Buffer.from(jpeg, "base64"),
   );
   assert.equal(f.attached.size, 0);
+});
+
+test("browser download records are not filtered by file-read authorization", async (t) => {
+  let denyFileReads = false;
+  const f = await fixture(t, {
+    nativeDownloads: true,
+    authorize(policy) {
+      if (denyFileReads && policy.target?.type === "path")
+        throw Object.assign(new Error("path denied"), {
+          code: "path_not_allowed",
+        });
+    },
+  });
+  denyFileReads = true;
+  const result = await f.start(
+    select + "return await selected.downloads.list({limit:20});",
+  );
+  assert.equal(
+    result.run.status,
+    "succeeded",
+    JSON.stringify(result.run.error),
+  );
+  assert.equal(result.result.data[0].filename, f.downloadSource);
+  assert.equal(result.result.data[0].state, "complete");
+  await assert.rejects(
+    f.encoder.encode(createOutput(f.work, () => {}).file(f.downloadSource), {
+      ...f.resultScope(),
+      authorize(target) {
+        if (target.path === f.downloadSource)
+          throw Object.assign(new Error("path denied"), {
+            code: "path_not_allowed",
+          });
+      },
+    }),
+    { code: "path_not_allowed" },
+  );
 });
 
 test("repeated original download waiters stay usable while Core never copies a file identified only by URL and time", async (t) => {

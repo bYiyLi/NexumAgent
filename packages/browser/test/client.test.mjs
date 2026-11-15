@@ -121,6 +121,20 @@ test("construction is inert and public discovery fixes immutable connection targ
   });
 });
 
+test("browser download listing uses the selected browser and returns native paths", async () => {
+  const rows = [
+    { id: 17, filename: "/Downloads/report.csv", state: "complete" },
+  ];
+  const f = fixture({ "browsers.downloads": () => rows });
+  const browser = await f.client.browsers.get(info.id);
+  assert.deepEqual(await browser.downloads.list({ limit: 50 }), rows);
+  const request = f.calls.at(-1);
+  assert.equal(request.path, "browsers.downloads");
+  assert.equal(request.input.target.browserId, info.id);
+  assert.equal(request.input.target.tabId, undefined);
+  assert.deepEqual(request.input.options, { limit: 50 });
+});
+
 test("locator combinations are bounded immutable AST with native regexp flags and exact frame/target ownership", async () => {
   const f = fixture(),
     tab = await f.tab();

@@ -33,7 +33,20 @@ return output.image({ data: image, mimeType: "image/jpeg" });
 
 明确等待受控标签发起的 HTTP 附件下载时，扩展为原始响应中的文件名添加唯一编号，并建议浏览器保存到默认下载目录的 `Nexum` 子目录，不修改浏览器全局下载位置。点击页面上带 `download` 属性的 HTTP/Blob/data 链接，或页面在该次点击中同步创建并点击此类链接时，扩展只在此次点击期间设置带编号的下载名称，随后恢复页面链接属性。两种方式都用编号绑定页面下载事件与浏览器的下载记录，等待浏览器实际完成，再按当前路径权限读取和固定文件；浏览器中的原文件保留。
 
-下载记录不能确认、其他扩展更改后的路径无权访问，或下载尚未完成时，不能把相似文件当成结果。浏览器提供文件大小时，实际文件必须与之相符；大小未知时按实际读取结果处理。无法关联身份的下载，例如部分异步生成或未连接到页面的链接、无法访问的 frame，仍明确返回 `CAPABILITY_NOT_ALLOWED`；不会按 URL、时间或普通文件名猜测，也不会重发原请求。
+如果网页下载没有被当前等待器关联，可以直接查看当前浏览器配置的下载列表。`selected.downloads.list()` 返回原生记录，`filename` 是浏览器报告的本机路径；列表包含其他标签和目录的记录，默认最多 1000 条，可用 `limit` 减少返回数量。按需要选中一条 `state === "complete"` 的记录，再交给 `output.file`：
+
+```javascript
+const records = await selected.downloads.list({ limit: 20 });
+const report = records.find((item) =>
+  item.state === "complete" && item.filename.endsWith("report.pdf"),
+);
+if (!report) throw new Error("未找到下载完成的报表");
+return output.file(report.filename, { name: "report.pdf" });
+```
+
+列表中路径可能位于浏览器配置的任意下载目录；实际读取仍使用当前 Agent 的路径授权和大小规则。记录由浏览器提供，文件可能已移动或删除，`exists` 也可能滞后。浏览器记录的数字 `id` 与 `tab.downloads()` 的页面下载 ID 不同，不可用于 `tab.saveDownload`。列表不返回来源 URL，避免将下载内容或凭据放进模型上下文。
+
+当前等待器无法确认下载身份时，`download.path()` 仍返回 `CAPABILITY_NOT_ALLOWED`；可以通过上述列表由 AI 选择文件。浏览器提供文件大小时，等待器路径的实际文件必须与之相符；大小未知时按实际读取结果处理。不会重发原请求。
 
 `tab.downloads()` 对 `data:` 下载省略 URL，因为 URL 本身包含文件内容；完整内容通过文件或资源交付。
 

@@ -30,6 +30,20 @@ export interface BrowserHistoryEntry {
   url: string;
 }
 
+/** A native download from the selected browser profile; filename is its local path. */
+export interface BrowserDownloadRecord {
+  id: number;
+  filename: string;
+  state: "in_progress" | "interrupted" | "complete";
+  startTime: string;
+  endTime?: string;
+  fileSize: number;
+  totalBytes: number;
+  bytesReceived: number;
+  mime: string;
+  exists: boolean;
+}
+
 export interface BrowserUserTabInfo {
   id: string;
   lastOpened?: string;
@@ -1013,6 +1027,9 @@ export interface Browsers {
 export interface Browser {
   browserId: string;
   capabilities: BrowserCapabilityCollection;
+  downloads: {
+    list(options?: { limit?: number }): Promise<BrowserDownloadRecord[]>;
+  };
   tabs: Tabs;
   user: BrowserUser;
   documentation(): Promise<string>;

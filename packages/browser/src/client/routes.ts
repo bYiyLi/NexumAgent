@@ -323,6 +323,11 @@ browser("browsers.history", {
     limit: { type: "integer", minimum: 1, maximum: 20 },
   }),
 });
+browser("browsers.downloads", {
+  options: optionalObject({
+    limit: { type: "integer", minimum: 1, maximum: 1000 },
+  }),
+});
 browser("tabs.list");
 browser("tabs.get", { id }, ["id"]);
 browser("tabs.new", { url: string, options: optionalObject({ active: bool }) });

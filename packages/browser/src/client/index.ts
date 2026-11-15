@@ -696,6 +696,13 @@ function makeBrowser(router: Router, value: t.BrowserInfo): t.Browser {
     reset: (tabId?: string) =>
       router.call<t.ActionResult>("viewport.reset", { target, tabId }),
   });
+  const downloads = freeze({
+    list: (options?: { limit?: number }) =>
+      router.call<t.BrowserDownloadRecord[]>("browsers.downloads", {
+        target,
+        options: router.option("browsers.downloads", options),
+      }),
+  });
   const capabilities = {
     list: () =>
       router.call<t.CapabilityInfo[]>("capabilities.browserList", { target }),
@@ -773,6 +780,7 @@ function makeBrowser(router: Router, value: t.BrowserInfo): t.Browser {
     name: info.name,
     type: "extension" as const,
     profileName: info.profileName,
+    downloads,
     tabs,
     user,
     capabilities,

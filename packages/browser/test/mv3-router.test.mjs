@@ -2007,6 +2007,47 @@ test("filechooser readiness, original download events and cancellation keep iden
   });
 });
 
+test("browser downloads list includes normal records from different directories", async (t) => {
+  const f = fixture(t, {
+    nativeDownloads: [
+      {
+        id: 1,
+        filename: "/Downloads/report.csv",
+        state: "complete",
+        startTime: "2026-01-01T00:00:00Z",
+        fileSize: 42,
+        url: "data:text/plain,private-file-content",
+      },
+      {
+        id: 2,
+        filename: "/Other/archive.zip",
+        state: "in_progress",
+        startTime: "2026-01-01T00:00:01Z",
+        fileSize: -1,
+      },
+    ],
+  });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const rows = await f.call(
+    "browsers.downloads",
+    { options: { limit: 50 } },
+    { id: null },
+  );
+  assert.deepEqual(
+    rows.map((item) => item.filename),
+    ["/Downloads/report.csv", "/Other/archive.zip"],
+  );
+  assert.equal(rows[0].state, "complete");
+  assert.equal(rows[1].state, "in_progress");
+  assert.equal(JSON.stringify(rows).includes("private-file-content"), false);
+  assert.deepEqual(f.calls.find((call) => call[0] === "downloads.search")[1], {
+    limit: 50,
+    orderBy: ["-startTime"],
+  });
+});
+
 test("a same-URL native download before or after an owned event never authorizes an unrelated local file", async (t) => {
   for (const order of ["before", "after"]) {
     const foreign = {

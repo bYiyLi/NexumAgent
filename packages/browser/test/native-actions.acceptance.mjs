@@ -670,6 +670,43 @@ test("native direct file refs, owned download aliases and waiter cancellation ke
   assert.equal(data.error, "WAITER_GONE");
 });
 
+test("native browser download records expose completed file paths for MCP resources", async (t) => {
+  const f = await nativeFixture(t, {
+    html: `<!doctype html><title>Download history</title><button onclick="setTimeout(()=>{const a=document.createElement('a');a.href='/download';a.download='native.bin';a.click();},100)">Download later</button>`,
+  });
+  await f.run(
+    select +
+      `await tab.playwright.getByRole('button',{name:'Download later'}).click();return true;`,
+    { base: f.base },
+  );
+  const view = await f.run(
+    select +
+      `let item;for(let i=0;i<100;i++){item=(await selected.downloads.list({limit:20})).find(value=>value.state==='complete'&&value.filename.endsWith('native.bin'));if(item)break;await new Promise(resolve=>setTimeout(resolve,100));}if(!item)throw Error('Completed browser download was not listed');return output.result({content:[output.text(JSON.stringify(item)),output.file(item.filename,{name:'native.bin'})]});`,
+    { base: f.base },
+  );
+  const rendered = await f.encoder.render(
+      view.result,
+      f.resultScope(),
+      view.run,
+    ),
+    listed = JSON.parse(
+      rendered.content.find((item) => item.type === "text").text,
+    ),
+    link = rendered.content.find((item) => item.type === "resource_link");
+  assert.equal(
+    listed.filename,
+    path.join(f.root, "native-downloads", "native.bin"),
+  );
+  assert.equal(listed.state, "complete");
+  assert.ok(link?.uri);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.deepEqual(
+    Buffer.from(resource.contents[0].blob, "base64"),
+    f.downloadBytes,
+  );
+  assert.deepEqual(readFileSync(listed.filename), f.downloadBytes);
+});
+
 test("native same-URL download in another tab keeps its normal filename", async (t) => {
   const otherBytes = Buffer.from("independent browser download"),
     ownBytes = Buffer.from("download requested by the controlled tab"),

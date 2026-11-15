@@ -1,36 +1,17 @@
-name: Optional browser package
+name: Phase 48 browser download records
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - packages/browser/**
-      - packages/extension-api/**
-      - scripts/build-extension-api.mjs
-      - scripts/prepare-native-browser.mjs
-      - scripts/native-user-stop-linux.sh
-      - scripts/service.mjs
-      - src/extension-api.ts
-      - .github/workflows/browser.yml
-  pull_request:
-    paths:
-      - packages/browser/**
-      - packages/extension-api/**
-      - scripts/build-extension-api.mjs
-      - scripts/prepare-native-browser.mjs
-      - scripts/native-user-stop-linux.sh
-      - scripts/service.mjs
-      - src/extension-api.ts
-      - .github/workflows/browser.yml
+    branches: [codex/phase48-download-resource-17bc4856]
 permissions:
   contents: read
 jobs:
-  browser:
+  browser-downloads:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,72 +28,9 @@ jobs:
       - run: pnpm build
       - run: node scripts/build-extension-api.mjs
       - run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
-      - run: pnpm --dir packages/browser check
-      - run: pnpm --dir packages/browser pack --pack-destination "${{ runner.temp }}/browser-package"
-      - name: Prepare the SHA-256-pinned native Chrome for Testing in runner temp
-        run: node scripts/prepare-native-browser.mjs
-      - name: Confirm native page and extension prerequisites
-        run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
-      - name: Exercise actual isolated browser scenarios
-        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs packages/browser/test/native-lease-receipt.acceptance.mjs
-      - name: Prepare isolated Linux display tools
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends xvfb xauth xdotool imagemagick tesseract-ocr
-      - name: Exercise native debugger cancellation on Linux
-        if: runner.os == 'Linux'
-        timeout-minutes: 5
-        env:
-          NEXUM_BROWSER_NATIVE_HEADFUL: "1"
-        run: xvfb-run -a -s '-screen 0 1280x800x24' bash scripts/native-user-stop-linux.sh
-      - name: Exercise native Edge profile isolation and visual cleanup on macOS
-        if: runner.os == 'macOS'
-        timeout-minutes: 6
-        env:
-          NEXUM_BROWSER_NATIVE_BINARY: /Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge
-        run: |
-          test -x "$NEXUM_BROWSER_NATIVE_BINARY"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' '/Applications/Microsoft Edge.app/Contents/Info.plist'
-          shasum -a 256 "$NEXUM_BROWSER_NATIVE_BINARY"
-          node --experimental-vm-modules --test --test-timeout=120000 --test-concurrency=1 --test-name-pattern='native independent browser profiles|native visual feedback preserves user groups' packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs
-      - name: Exercise real opt-in WebMCP registrations and stale-registration rejection
-        env:
-          NEXUM_BROWSER_WEBMCP_TESTING: "1"
-        run: node --experimental-vm-modules --test --test-name-pattern="native WebMCP" packages/browser/test/native-capabilities.acceptance.mjs
-      - name: Exercise anonymous public Google Docs export through the actual browser
-        env:
-          # Public Chromium design: https://issues.chromium.org/issues/376084060
-          NEXUM_BROWSER_PUBLIC_DOC_URL: https://docs.google.com/document/d/1RVbtvklXUg9QCNvMT0r-1qDwJNeQFGoTCOD1Ur9mDa4/edit
-          NEXUM_BROWSER_PUBLIC_DOC_TEXT: Guest View MPArch Migration
-        run: node --experimental-vm-modules --test packages/browser/test/native-sites.acceptance.mjs
-      - name: Exercise anonymous public YouTube transcript through the actual browser
-        env:
-          # Public Google IFrame API example video; no account or copied cookies.
-          NEXUM_BROWSER_PUBLIC_YOUTUBE_URL: https://www.youtube.com/watch?v=M7lc1UVf-VE
-          NEXUM_BROWSER_PUBLIC_YOUTUBE_TEXT: YouTube
-        run: node --experimental-vm-modules --test packages/browser/test/native-youtube.acceptance.mjs
-      - name: Exercise anonymous public Google Sheets and Slides export through the actual browser
-        env:
-          # Public Google Sheets quickstart fixture and official BlinkOn 6 slides.
-          NEXUM_BROWSER_PUBLIC_SHEET_URL: https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
-          NEXUM_BROWSER_PUBLIC_SHEET_TEXT: Alexandra
-          NEXUM_BROWSER_PUBLIC_SLIDES_URL: https://docs.google.com/presentation/d/1gqK9F4lGAY3TZudAtdcxzMQNEE7PcuQrGu83No3l0lw/edit
-          NEXUM_BROWSER_PUBLIC_SLIDES_TEXT: Headless Chrome
-        run: node --experimental-vm-modules --test packages/browser/test/native-workspace.acceptance.mjs
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: nexum-browser-native-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/nexum-browser-native-*/receipt.json
-            ${{ runner.temp }}/native-stop-observation.png
-            ${{ runner.temp }}/native-stop-observation.log
-            ${{ runner.temp }}/native-stop-ocr.tsv
-          if-no-files-found: ignore
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nexum-browser-${{ matrix.os }}-candidate
-          path: ${{ runner.temp }}/browser-package/*.tgz
-          retention-days: 7
+      - run: pnpm --dir packages/browser build
+      - name: Verify list and path authorization
+        run: node --experimental-vm-modules --test --test-name-pattern="browser download listing|browser downloads list includes|browser download records are not filtered" packages/browser/test/client.test.mjs packages/browser/test/mv3-router.test.mjs packages/browser/test/runtime.test.mjs
+      - run: node scripts/prepare-native-browser.mjs
+      - name: Verify actual browser download records and MCP resources
+        run: node --experimental-vm-modules --test --test-concurrency=1 --test-name-pattern="native browser download records expose" packages/browser/test/native-actions.acceptance.mjs

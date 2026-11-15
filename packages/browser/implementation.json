@@ -27,6 +27,7 @@
     "user.openTabs",
     "user.claimTab",
     "browsers.history",
+    "browsers.downloads",
     "browsers.nameSession",
     "visibility.get",
     "visibility.set",
@@ -1928,13 +1929,13 @@
     },
     "core": {
       "test": "test/runtime.test.mjs",
-      "scope": "实际Core PackageLoader/Registry/SQLite/RunEngine五类贡献、运行资源、争用、取消、真实native-fixture detach、AX混合MCP图片、38次等待器、拒绝未确证下载文件及排队期限",
-      "fixtureCases": 8
+      "scope": "实际Core PackageLoader/Registry/SQLite/RunEngine五类贡献、运行资源、争用、取消、真实native-fixture detach、AX混合MCP图片、下载列表、身份及大小检查、排队期限",
+      "fixtureCases": 11
     },
     "mv3": {
       "test": ["test/mv3-router.test.mjs", "test/mv3-connection.test.mjs"],
       "scope": "真实MV3路由代码、替代Chrome API fixture；非Chrome/Edge实装证据",
-      "fixtureCases": 28
+      "fixtureCases": 76
     },
     "files": {
       "test": "test/files.test.mjs",
@@ -1943,13 +1944,18 @@
     }
   },
   "remaining": [
-    "已观察到的 HTTP 附件可按唯一标识关联原始下载；其他下载方式、异常及完整跨环境范围仍待验证，不能按 URL/时间猜测文件身份",
-    "真实Chrome与Edge、macOS/Linux/Windows插件加载和用户环境接入",
+    "浏览器下载列表允许 AI 选择未自动关联的文件；部分异步生成、跨 frame 下载仍不承诺自动关联，不能按 URL/时间冒充确定身份",
+    "用户现有浏览器环境接入及 Chrome、Edge 在全部支持系统和多配置下的完整验收",
     "B001–B148与X001–X102逐项支持环境、失败路径和精确修订验收",
     "高阶资产、站点导出、用户接管及可视化的完整真实环境、格式与失效路径验收",
     "正式公共协议包、npm/browser制品发行与端到端Host媒体交付"
   ],
   "nativeScenarios": {
+    "native-browser-download-records-resource": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native browser download records expose completed file paths for MCP resources",
+      "coverage": ["native_download_history", "actual_path", "resource_read"]
+    },
     "native-background-cursor": {
       "file": "test/native-visual.acceptance.mjs",
       "test": "native background cursor movement settles without a paint callback and leaves no control after run cleanup",
