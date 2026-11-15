@@ -353,7 +353,8 @@
       "id": "B034",
       "target": "tab.getJsDialog",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values", "native-dialog-completion"]
     },
     {
       "id": "B035",
@@ -983,13 +984,15 @@
       "id": "B138",
       "target": "dialog.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B139",
       "target": "dialog.dismiss",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B140",
@@ -1007,19 +1010,22 @@
       "id": "B142",
       "target": "dialog.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values", "native-dialog-completion"]
     },
     {
       "id": "B143",
       "target": "dialog.accept",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-completion"]
     },
     {
       "id": "B144",
       "target": "dialog.dismiss",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B145",
@@ -1031,19 +1037,22 @@
       "id": "B146",
       "target": "dialog.type",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values", "native-dialog-completion"]
     },
     {
       "id": "B147",
       "target": "dialog.accept",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "B148",
       "target": "dialog.dismiss",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-completion"]
     },
     {
       "id": "X001",
@@ -1079,19 +1088,22 @@
       "id": "X006",
       "target": "tab.scroll",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-input-aliases"]
     },
     {
       "id": "X007",
       "target": "tab.hover",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-input-aliases"]
     },
     {
       "id": "X008",
       "target": "tab.focus",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-input-aliases"]
     },
     {
       "id": "X009",
@@ -1419,13 +1431,15 @@
       "id": "X059",
       "target": "tab.keyboardDown",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-input-aliases"]
     },
     {
       "id": "X060",
       "target": "tab.keyboardUp",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-tab-input-aliases"]
     },
     {
       "id": "X061",
@@ -1653,7 +1667,8 @@
       "id": "X098",
       "target": "AlertDialog.message",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values"]
     },
     {
       "id": "X099",
@@ -1665,13 +1680,15 @@
       "id": "X100",
       "target": "ConfirmDialog.message",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values", "native-dialog-completion"]
     },
     {
       "id": "X101",
       "target": "PromptDialog.message",
       "clientSurface": "declared",
-      "nativeAcceptance": "not_run"
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-dialog-values", "native-dialog-completion"]
     },
     {
       "id": "X102",
@@ -1782,6 +1799,34 @@
         "scoped_state",
         "forced_full",
         "mixed_content"
+      ]
+    },
+    "native-dialog-values": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native Dialog descriptors accept prompts, dismiss confirmations and reject consumed identities",
+      "coverage": ["normal", "result", "consumed_identity"]
+    },
+    "native-dialog-completion": {
+      "file": "test/native-client.acceptance.mjs",
+      "test": "native confirm acceptance and prompt dismissal preserve real values and consumed identities",
+      "coverage": [
+        "normal",
+        "invalid_argument",
+        "consumed_identity",
+        "result",
+        "cleanup"
+      ]
+    },
+    "native-tab-input-aliases": {
+      "file": "test/native-actions.acceptance.mjs",
+      "test": "native Tab focus hover keyboard and scroll aliases produce actual events, coordinates and fixed-ref rejection",
+      "coverage": [
+        "normal",
+        "stale_ref",
+        "trusted_events",
+        "actual_scroll",
+        "result",
+        "cleanup"
       ]
     }
   }

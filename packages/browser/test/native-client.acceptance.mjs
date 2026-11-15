@@ -8,6 +8,43 @@ import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
+test(
+  "native confirm acceptance and prompt dismissal preserve real values and consumed identities",
+  { timeout: 60000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: "<!doctype html><title>Native dialog completion</title><h1>Owned dialog methods</h1>",
+    });
+    const view = await f.run(
+      select +
+        `
+await tab.navigate(context.input.base+'?dialog-completion');
+const dialog=async()=>{const until=Date.now()+5000;do{const current=await tab.getJsDialog();if(current)return current;await tab.playwright.waitForTimeout(10);}while(Date.now()<until);throw Error('The actual native dialog was not observed');};
+await tab.playwright.evaluate('() => {setTimeout(()=>{window.confirmed=confirm("Confirm completion");},20);return true;}');
+const confirm=await dialog();let invalid;try{await confirm.accept('not supported');}catch(error){invalid=error.code;}
+const stillOpen=(await tab.getJsDialog())?.type??null;await confirm.accept();const confirmed=await tab.playwright.evaluate('() => window.confirmed');
+await tab.playwright.evaluate('() => {setTimeout(()=>{window.prompted=prompt("Prompt completion","seed");},20);return true;}');
+const prompt=await dialog();await prompt.dismiss();const prompted=await tab.playwright.evaluate('() => window.prompted');let stale;try{await prompt.accept('must not reopen');}catch(error){stale=error.code;}
+return {types:[confirm.type,prompt.type],messages:[confirm.message,prompt.message],invalid,stillOpen,confirmed,prompted,stale,remaining:await tab.getJsDialog()??null};`,
+      { base: f.base },
+    );
+    assert.deepEqual(view.result.data, {
+      types: ["confirm", "prompt"],
+      messages: ["Confirm completion", "Prompt completion"],
+      invalid: "INVALID_ARGUMENT",
+      stillOpen: "confirm",
+      confirmed: true,
+      prompted: null,
+      stale: "STALE_REF",
+      remaining: null,
+    });
+    assert.deepEqual(view.run.cleanup.unconfirmed, []);
+    const native = await f.cleanupFacts();
+    assert.deepEqual(native.owned, [], JSON.stringify(native));
+    t.diagnostic(JSON.stringify(view.result.data));
+  },
+);
+
 const html = `<!doctype html><html><head><title>Nexum native client</title></head><body>
 <h1>Native SDK client surface</h1>
 <label for="keyboard">Keyboard field</label><input id="keyboard" placeholder="Type native input"><output data-testid="keyboard-value"></output>

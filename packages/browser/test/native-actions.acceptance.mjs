@@ -3,6 +3,71 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
+test(
+  "native Tab focus hover keyboard and scroll aliases produce actual events, coordinates and fixed-ref rejection",
+  { timeout: 60000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: '<!doctype html><title>Native Tab alias facts</title><style>body{height:3200px}button,input{display:block;margin:20px}</style><label for="field">Alias field</label><input id="field"><button id="hover">Alias hover</button><script>window.receipts=[];document.querySelector("#hover").addEventListener("mouseenter",event=>receipts.push({type:"mouseenter",trusted:event.isTrusted}));for(const type of ["keydown","keyup"])document.querySelector("#field").addEventListener(type,event=>receipts.push({type,key:event.key,shift:event.shiftKey,trusted:event.isTrusted}));</script>',
+    });
+    const view = await f.run(
+      select +
+        `
+const snapshot=await tab.snapshot(),nodes=[];const visit=node=>{nodes.push(node);for(const child of node.children??[])visit(child);};visit(snapshot.root);
+const field=nodes.find(node=>node.role==='textbox'&&node.name==='Alias field'),hover=nodes.find(node=>node.role==='button'&&node.name==='Alias hover');if(!field||!hover)throw Error('The actual alias refs were not observed');
+const actions=[];actions.push(await tab.hover(hover.ref));const hovered=await tab.evaluate('document.querySelector("#hover").matches(":hover")');
+actions.push(await tab.focus(field.ref));const focused=await tab.evaluate('document.activeElement.id');
+actions.push(await tab.keyboardDown('Shift'));actions.push(await tab.keyboardUp('Shift'));
+actions.push(await tab.scroll({x:0,y:240}));const position=await tab.evaluate('({x:scrollX,y:scrollY})'),receipts=await tab.evaluate('window.receipts');
+await tab.evaluate('() => {document.querySelector("#field").remove();const replacement=document.createElement("input");replacement.id="field";replacement.dataset.kind="replacement";document.body.append(replacement);return true;}');
+let stale;try{await tab.focus(field.ref);}catch(error){stale=error.code;}const replacementFocused=await tab.evaluate('document.activeElement.dataset.kind??null');
+return {hovered,focused,position,receipts,actions,stale,replacementFocused,tabId:tab.id};`,
+      { base: f.base },
+    );
+    const data = view.result.data;
+    assert.equal(data.hovered, true);
+    assert.equal(data.focused, "field");
+    assert.deepEqual(data.position, { x: 0, y: 240 });
+    assert.ok(
+      data.receipts.some(
+        (event) => event.type === "mouseenter" && event.trusted,
+      ),
+    );
+    assert.deepEqual(
+      data.receipts.filter((event) => event.type !== "mouseenter"),
+      [
+        { type: "keydown", key: "Shift", shift: true, trusted: true },
+        { type: "keyup", key: "Shift", shift: false, trusted: true },
+      ],
+    );
+    assert.equal(data.actions.length, 5);
+    assert.equal(
+      new Set(data.actions.map((action) => action.operationId)).size,
+      5,
+    );
+    for (const action of data.actions) {
+      assert.equal(action.ok, true);
+      assert.equal(action.target.tabId, data.tabId);
+      assert.ok(action.operationId);
+    }
+    assert.equal(data.stale, "STALE_REF");
+    assert.equal(data.replacementFocused, null);
+    assert.deepEqual(view.run.cleanup.unconfirmed, []);
+    const native = await f.cleanupFacts();
+    assert.deepEqual(native.owned, [], JSON.stringify(native));
+    t.diagnostic(
+      JSON.stringify({
+        hovered: data.hovered,
+        focused: data.focused,
+        position: data.position,
+        receipts: data.receipts,
+        stale: data.stale,
+        actions: data.actions.length,
+      }),
+    );
+  },
+);
+
 const interactive = `<!doctype html><html><head><title>Native action families</title><style>body{margin:8px}#pad{width:240px;height:70px;background:lightblue;user-select:none}#scroll{width:240px;height:80px;overflow:auto}#inside{height:600px}#spacer{height:1500px}</style></head><body>
 <label for="field">Action field</label><input id="field" value="initial"><button id="button" onclick="this.dataset.clicks=String(Number(this.dataset.clicks||0)+1)" ondblclick="this.dataset.doubles=String(Number(this.dataset.doubles||0)+1)">Action button</button>
 <div id="pad">Native drag surface</div><div id="scroll" tabindex="0"><div id="inside">Scrollable native content</div></div><div id="spacer"></div>
