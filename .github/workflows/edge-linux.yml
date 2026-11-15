@@ -35,8 +35,12 @@ jobs:
           resolved="$(readlink -f "$edge")"
           file "$resolved"
           sha256sum "$resolved"
-          ls -l /opt/microsoft/msedge/msedge-sandbox || true
-          printf 'NEXUM_BROWSER_NATIVE_BINARY=%s\n' "$edge" >> "$GITHUB_ENV"
+          ls -l /opt/microsoft/msedge/msedge-sandbox
+          helper_dir="$(mktemp -d "$RUNNER_TEMP/nexum-edge-sandbox.XXXXXXXX")"
+          sudo --non-interactive install -o root -g root -m 4755 /opt/microsoft/msedge/msedge-sandbox "$helper_dir/chrome-sandbox"
+          cmp /opt/microsoft/msedge/msedge-sandbox "$helper_dir/chrome-sandbox"
+          ls -l "$helper_dir/chrome-sandbox"
+          printf 'NEXUM_BROWSER_NATIVE_BINARY=%s\nCHROME_DEVEL_SANDBOX=%s\n' "$edge" "$helper_dir/chrome-sandbox" >> "$GITHUB_ENV"
       - name: Confirm actual Edge prerequisites
         run: node --experimental-vm-modules --test --test-timeout=120000 --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise the isolated native Edge scenarios
