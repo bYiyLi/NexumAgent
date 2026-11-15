@@ -27,6 +27,7 @@ import {
   limits,
   pack,
   parseControl,
+  record,
   socketPath,
   unpack,
   type Target,
@@ -50,11 +51,20 @@ export interface BrowserConnectionDiagnostic {
   closeCode: number | null;
   operationIds: string[];
 }
+export interface BrowserVisualDiagnostic {
+  browserId: string;
+  generation: number;
+  runId: string;
+  operationId: string | null;
+  tabId: string | null;
+  reason: string;
+}
 interface Pending {
   actionId: string;
   operationId: string;
   runId: string;
   leaseId: string;
+  target: Target;
   generation: number;
   resolve(value: unknown): void;
   reject(cause: unknown): void;
@@ -772,6 +782,57 @@ export class BrowserService extends EventEmitter {
         identifier((message.target as { tabId?: unknown }).tabId)
       )
         peer.tabs.delete((message.target as { tabId: string }).tabId);
+      if (message.event === "visual_degraded" && identifier(message.leaseId)) {
+        const lease = this.#leases.get(message.leaseId);
+        if (
+          lease?.opened &&
+          lease.peer === peer &&
+          lease.generation === peer.generation &&
+          lease.runId === message.runId
+        ) {
+          const target = record(message.target) ? message.target : undefined;
+          const pending = [...peer.pending.values()].find(
+            (item) =>
+              item.leaseId === message.leaseId &&
+              item.runId === lease.runId &&
+              item.operationId === message.operationId &&
+              target?.bootId === item.target.bootId &&
+              target.browserId === item.target.browserId &&
+              target.browserSessionId === item.target.browserSessionId &&
+              target.generation === item.target.generation &&
+              target.tabId === item.target.tabId,
+          );
+          const reasons = [
+            "VISUAL_BUSY",
+            "VISUAL_CANCELLED",
+            "VISUAL_GROUP_UNAVAILABLE",
+            "VISUAL_MOVE_SUPERSEDED",
+            "VISUAL_TARGET_RELEASED",
+            "VISUAL_TIMEOUT",
+            "VISUAL_UNAVAILABLE",
+          ];
+          const diagnostic: BrowserVisualDiagnostic = {
+            browserId: peer.id,
+            generation: peer.generation,
+            runId: lease.runId,
+            operationId: pending?.operationId ?? null,
+            tabId:
+              pending?.target.tabId && /^\d{1,20}$/.test(pending.target.tabId)
+                ? pending.target.tabId
+                : null,
+            reason:
+              typeof message.reason === "string" &&
+              reasons.includes(message.reason)
+                ? message.reason
+                : "VISUAL_UNAVAILABLE",
+          };
+          try {
+            this.emit("visual-diagnostic", diagnostic);
+          } catch {
+            // Diagnostics never change the outcome of the actual browser action.
+          }
+        }
+      }
       this.emit("browser-event", peer, data(message, limits.controlBytes));
       return;
     }
@@ -1045,6 +1106,7 @@ export class BrowserService extends EventEmitter {
       ...binding,
       runId: input.runId,
       leaseId: input.leaseId,
+      target: { ...input.target },
       resolve: result.resolve,
       reject: result.reject,
       dispatched: false,

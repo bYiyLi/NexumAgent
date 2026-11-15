@@ -19,6 +19,7 @@ import {
   BrowserService,
   type BrowserPeer,
   type BrowserConnectionDiagnostic,
+  type BrowserVisualDiagnostic,
 } from "./service.js";
 import { BrowserRuntime } from "./scope.js";
 import { collectTabContent } from "./batch.js";
@@ -122,6 +123,17 @@ class BrowserInstallation implements ManagedResource {
                 ? "debug"
                 : "warn",
             message: "browser.connection",
+            data: { ...entry },
+          });
+        } catch {
+          // A diagnostic write cannot prevent actual channel/resource cleanup.
+        }
+      });
+      this.service.on("visual-diagnostic", (entry: BrowserVisualDiagnostic) => {
+        try {
+          host.log({
+            level: "warn",
+            message: "browser.visual_degraded",
             data: { ...entry },
           });
         } catch {

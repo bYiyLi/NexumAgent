@@ -130,7 +130,8 @@ export async function nativeFixture(t, options = {}) {
     profile: "development",
     cloudEnvironment: "test",
   });
-  const connectionDiagnostics = [];
+  const connectionDiagnostics = [],
+    visualDiagnostics = [];
   const resources = new ResourceManager(store, { cleanupTimeoutMs: 25 }),
     permissions = new Set(["connection", "path", "resource", "url"]),
     registry = new ExtensionRegistry(resources, {
@@ -140,6 +141,10 @@ export async function nativeFixture(t, options = {}) {
         options.authorize?.(...args);
       },
       log(_origin, entry) {
+        if (entry.message === "browser.visual_degraded") {
+          visualDiagnostics.push(entry.data);
+          if (visualDiagnostics.length > 20) visualDiagnostics.shift();
+        }
         if (entry.message !== "browser.connection") return;
         connectionDiagnostics.push(entry.data);
         if (connectionDiagnostics.length > 20) connectionDiagnostics.shift();
@@ -574,6 +579,7 @@ export async function nativeFixture(t, options = {}) {
     resultScope,
     downloadBytes,
     cleanupFacts,
+    visualDiagnostics: () => [...visualDiagnostics],
     stderr: () => stderr,
   };
 }

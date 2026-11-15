@@ -4674,6 +4674,7 @@ export function createBrowserRouter(
         emit({
           type: "event",
           event: "visual_degraded",
+          leaseId: ctx.lease.id,
           runId: ctx.runId,
           operationId: ctx.operationId,
           target: ctx.target,
@@ -4702,6 +4703,7 @@ export function createBrowserRouter(
         emit({
           type: "event",
           event: "visual_degraded",
+          leaseId: ctx.lease.id,
           runId: ctx.runId,
           operationId: ctx.operationId,
           target: ctx.target,

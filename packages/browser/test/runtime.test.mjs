@@ -139,7 +139,12 @@ function storage() {
 }
 async function fixture(
   t,
-  { gateDetach = false, gateCommand = false, nativeDownloads = false } = {},
+  {
+    gateDetach = false,
+    gateCommand = false,
+    nativeDownloads = false,
+    visualFailure = false,
+  } = {},
 ) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-browser-core-")),
@@ -182,13 +187,16 @@ async function fixture(
     profile: "development",
     cloudEnvironment: "test",
   });
+  const logs = [];
   const resources = new ResourceManager(store, { cleanupTimeoutMs: 25 }),
     permissions = new Set(["connection", "path", "resource", "url"]),
     registry = new ExtensionRegistry(resources, {
       cleanupTimeoutMs: 25,
       permissions,
       authorize() {},
-      log() {},
+      log(_origin, entry) {
+        logs.push(entry);
+      },
       progress() {},
     });
   const policy = {
@@ -432,14 +440,31 @@ async function fixture(
         path.join(packageRoot, "browser-extension", "connection.js"),
       ).href
     );
-  const router = createBrowserRouter(chrome),
-    connection = createExtensionConnection({
-      chrome,
-      WebSocket: ExtensionSocket,
-      router,
-      profile: "development",
-      extensionVersion: release.extensionVersion,
-    });
+  let connection;
+  const router = createBrowserRouter(chrome, {
+    ...(visualFailure
+      ? { emit: (message) => connection?.publish(message) }
+      : {}),
+    ...(visualFailure
+      ? {
+          visual: {
+            async start() {},
+            async beforeAction() {
+              throw new Error("fixture visual failure");
+            },
+            async releaseTab() {},
+            async dispose() {},
+          },
+        }
+      : {}),
+  });
+  connection = createExtensionConnection({
+    chrome,
+    WebSocket: ExtensionSocket,
+    router,
+    profile: "development",
+    extensionVersion: release.extensionVersion,
+  });
   plugin = connection;
   await plugin.start();
   let fixtureBrowserId;
@@ -493,10 +518,37 @@ async function fixture(
     downloadBytes,
     encoder,
     resultScope,
+    logs,
     observe: (id) => engine.observe(caller, id, 50),
   };
 }
 const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
+
+test("visual degradation reaches extension logs with its actual run and action while the browser action continues", async (t) => {
+  const f = await fixture(t, { visualFailure: true });
+  const result = await f.start(
+    select + 'await tab.cdp.send("Page.enable");return {done:true};',
+  );
+  assert.equal(result.run.status, "succeeded");
+  assert.deepEqual(result.result.data, { done: true });
+  const entry = f.logs.find(
+    (item) => item.message === "browser.visual_degraded",
+  );
+  assert.ok(
+    entry,
+    "the actual extension log did not receive visual degradation",
+  );
+  assert.equal(entry.level, "warn");
+  assert.equal(entry.data.runId, result.run.runId);
+  assert.equal(entry.data.reason, "VISUAL_UNAVAILABLE");
+  assert.equal(entry.data.tabId, "1");
+  assert.ok(
+    result.operations.items.some(
+      (item) => item.operationId === entry.data.operationId,
+    ),
+  );
+  assert.doesNotMatch(JSON.stringify(entry), /fixture visual failure|https?:/);
+});
 
 test("the installed optional package loads through the public factory, publishes five contributions and cleans a real Core run", async (t) => {
   const f = await fixture(t);

@@ -72,7 +72,7 @@ test("native visual feedback preserves user groups, follows only when enabled an
       const report = () => {
         const layer=document.querySelector('[data-nexum-visual-layer]');
         const icon=document.querySelector('[data-nexum-visual-icon]');
-        fetch('/visual-state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:location.href,layer:!!layer,icon:!!icon,href:icon?.href,original:document.querySelector('#original-icon').getAttribute('href')})}).catch(()=>{});
+        fetch('/visual-state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({at:Date.now(),url:location.href,layer:!!layer,icon:!!icon,href:icon?.href,original:document.querySelector('#original-icon').getAttribute('href')})}).catch(()=>{});
       };
       new MutationObserver(report).observe(document.documentElement,{attributes:true,childList:true,subtree:true});report();
     </script></body></html>`,
@@ -103,7 +103,7 @@ test("native visual feedback preserves user groups, follows only when enabled an
       await selected.nameSession('Native visual task');
       await selected.visibility.set(false);
       await selected.tabs.select(tab.id);
-      await other.cua.move({x:42,y:64});
+      const moveStarted=Date.now();await other.cua.move({x:42,y:64});const moveCompleted=Date.now();
       const stationary=await selected.tabs.selected();
       const pointer=await other.evaluate("(()=>{const e=document.querySelector('[data-nexum-visual-layer]');const css=e&&getComputedStyle(e);return {exists:!!e,width:css?.width,height:css?.height,pointerEvents:css?.pointerEvents,hidden:e?.getAttribute('aria-hidden'),role:e?.getAttribute('role'),transform:e?.style.transform,state:e?.getAttribute('data-nexum-visual-state'),icon:document.querySelector('[data-nexum-visual-icon]')?.href};})()");
       const nativeOther=await selected.management.tabs.get(other.id);
@@ -114,10 +114,23 @@ test("native visual feedback preserves user groups, follows only when enabled an
       await other.cua.move({x:42,y:64});
       const followed=await selected.tabs.selected();
       await other.markDeliverable();
-      return {pointer,stationary:stationary.id,followed:followed.id,ownGroup,preserved,inventory};`,
+      return {pointer,moveStarted,moveCompleted,stationary:stationary.id,followed:followed.id,ownGroup,preserved,inventory};`,
     { base: f.base, ...ids },
   );
   const data = result.result.data;
+  if (!data.pointer.exists) {
+    await delay(250);
+    t.diagnostic(
+      JSON.stringify({
+        moveStarted: data.moveStarted,
+        moveCompleted: data.moveCompleted,
+        visualDiagnostics: f.visualDiagnostics(),
+        pageStates: events
+          .slice(-10)
+          .map(({ at, layer, icon }) => ({ at, layer, icon })),
+      }),
+    );
+  }
   assert.equal(data.stationary, ids.originalId);
   assert.equal(data.followed, ids.otherId);
   assert.deepEqual(

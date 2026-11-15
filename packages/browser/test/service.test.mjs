@@ -158,6 +158,96 @@ function action(service, ready, overrides = {}) {
   });
 }
 
+test("visual diagnostics correlate only a live lease and never log untrusted event data", async (t) => {
+  const f = await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f),
+    ready = await peer.ready();
+  snapshot(peer, ready, [
+    { id: "1", title: "Native", url: "https://example.test/", pageVersion: 1 },
+    { id: "2", title: "Other", url: "https://other.test/", pageVersion: 1 },
+  ]);
+  await until(() => f.service.get(ready.browserId).tabsReady);
+  const browser = f.service.get(ready.browserId),
+    opened = f.service.openLease(browser, {
+      id: "lease",
+      runId: "run-one",
+      operationId: "operation-one",
+      target: ready.target,
+      signal: new AbortController().signal,
+      onClosed() {},
+    });
+  const open = await peer.next("lease_open");
+  ready.send({
+    type: "lease_opened",
+    leaseId: open.leaseId,
+    runId: open.runId,
+    operationId: open.operationId,
+  });
+  await opened;
+  const pending = action(f.service, ready, { budgetMs: 10000 }),
+    request = await peer.next("action"),
+    diagnostics = [],
+    events = [];
+  f.service.on("visual-diagnostic", (value) => diagnostics.push(value));
+  f.service.on("browser-event", (_peer, value) => events.push(value));
+  const message = {
+    type: "event",
+    event: "visual_degraded",
+    leaseId: "lease",
+    runId: "run-one",
+    operationId: "operation-one",
+    target: ready.target,
+  };
+  ready.send({ ...message, sequence: 1, reason: "VISUAL_TIMEOUT" });
+  ready.send({
+    ...message,
+    sequence: 2,
+    reason: "private-untrusted-payload",
+    target: { ...ready.target, tabId: "2" },
+  });
+  ready.send({
+    ...message,
+    sequence: 3,
+    runId: "other-run",
+    reason: "VISUAL_TIMEOUT",
+  });
+  await until(() => events.length === 3);
+  assert.deepEqual(diagnostics, [
+    {
+      browserId: ready.browserId,
+      generation: ready.generation,
+      runId: "run-one",
+      operationId: "operation-one",
+      tabId: "1",
+      reason: "VISUAL_TIMEOUT",
+    },
+    {
+      browserId: ready.browserId,
+      generation: ready.generation,
+      runId: "run-one",
+      operationId: null,
+      tabId: null,
+      reason: "VISUAL_UNAVAILABLE",
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /private|https?:/);
+  ready.send({
+    type: "action_result",
+    actionId: request.actionId,
+    operationId: request.operationId,
+    ok: true,
+    value: null,
+  });
+  assert.equal(await pending, null);
+  ready.send({
+    type: "lease_closed",
+    leaseId: "lease",
+    runId: "run-one",
+    operationId: "operation-one",
+  });
+});
+
 test("cold disposal, native listening, exact extension Origin and complete atomic snapshots", async (t) => {
   const cold = await fixture(t);
   assert.equal(cold.service.address, null);
