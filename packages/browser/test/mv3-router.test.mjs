@@ -346,7 +346,11 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
     let finished = false;
     const wait = f.router
       .delay(
-        { started: performance.now(), budgetMs: 1000, signal: controller.signal },
+        {
+          started: performance.now(),
+          budgetMs: 1000,
+          signal: controller.signal,
+        },
         37,
       )
       .then(() => {
@@ -356,7 +360,11 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
     await Promise.resolve();
     assert.equal(finished, false, "an early heartbeat must not shorten a wait");
     await delay(65);
-    assert.equal(finished, false, "the simulated worker timer must remain paused");
+    assert.equal(
+      finished,
+      false,
+      "the simulated worker timer must remain paused",
+    );
     f.router.wake();
     await wait;
     assert.equal(finished, true);
@@ -365,7 +373,11 @@ test("bound wakeups release delayed worker timers without skipping deadlines or 
     const cancelled = new AbortController(),
       reason = new Error("cancel the actual wait"),
       pending = f.router.delay(
-        { started: performance.now(), budgetMs: 1000, signal: cancelled.signal },
+        {
+          started: performance.now(),
+          budgetMs: 1000,
+          signal: cancelled.signal,
+        },
         37,
       );
     cancelled.abort(reason);
