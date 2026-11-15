@@ -717,3 +717,55 @@ test("native same-URL download in another tab keeps its normal filename", async 
     1,
   );
 });
+
+test("native download started before a new wait keeps its original filename", async (t) => {
+  let started = false;
+  const original = Buffer.from("download started before the waiter");
+  const f = await nativeFixture(t, {
+    html: '<!doctype html><title>Earlier download</title><a href="/old" download="prior.bin">Earlier download</a>',
+    handleRequest(request, response) {
+      if (request.url === "/status") {
+        response.writeHead(200, { "Content-Type": "text/plain" });
+        response.end(started ? "started" : "pending");
+        return true;
+      }
+      if (request.url !== "/old") return false;
+      started = true;
+      setTimeout(() => {
+        if (response.destroyed) return;
+        response.writeHead(200, {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": "attachment; filename=prior.bin",
+          "Content-Length": original.length,
+        });
+        response.end(original);
+      }, 1500);
+      return true;
+    },
+  });
+  const view = await f.run(
+    select +
+      `
+    await tab.playwright.getByRole('link',{name:'Earlier download'}).click();
+    const started=await tab.evaluate("async () => { for (let i=0;i<50;i++) { if ((await (await fetch('/status')).text()) === 'started') return true; await new Promise(resolve=>setTimeout(resolve,20)); } return false; }");
+    if(!started)throw Error('The earlier network request did not start');
+    const download=await tab.playwright.waitForDownload({timeoutMs:5000});
+    let error;try{await download.path();}catch(cause){error=cause.code;}
+    return {error};`,
+    { base: f.base },
+  );
+  assert.equal(view.result.data.error, "CAPABILITY_NOT_ALLOWED");
+  const filename = path.join(f.root, "native-downloads", "prior.bin");
+  let bytes;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      bytes = readFileSync(filename);
+      if (bytes.equals(original)) break;
+    } catch {}
+    await delay(100);
+  }
+  assert.deepEqual(bytes, original);
+  assert.deepEqual(readdirSync(path.join(f.root, "native-downloads")), [
+    "prior.bin",
+  ]);
+});
