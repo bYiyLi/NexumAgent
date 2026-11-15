@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { nativeFixture, select } from "./helpers/native.mjs";
 
 test(
@@ -656,7 +657,9 @@ test("native direct file refs, owned download aliases and waiter cancellation ke
     /^native-nexum-[0-9a-f]{32}\.bin$/,
   );
   const browserDirectory = path.join(f.root, "native-downloads", "Nexum");
-  assert.deepEqual(readdirSync(browserDirectory), [data.record.suggestedFilename]);
+  assert.deepEqual(readdirSync(browserDirectory), [
+    data.record.suggestedFilename,
+  ]);
   assert.deepEqual(
     readFileSync(path.join(browserDirectory, data.record.suggestedFilename)),
     f.downloadBytes,
@@ -665,4 +668,52 @@ test("native direct file refs, owned download aliases and waiter cancellation ke
   assert.equal(data.multiple, true);
   assert.equal(data.cancelled.cancelled, true);
   assert.equal(data.error, "WAITER_GONE");
+});
+
+test("native same-URL download in another tab keeps its normal filename", async (t) => {
+  const otherBytes = Buffer.from("independent browser download"),
+    ownBytes = Buffer.from("download requested by the controlled tab"),
+    observed = [];
+  const f = await nativeFixture(t, {
+    handleRequest(request, response) {
+      if (request.url !== "/download") return false;
+      const other = (request.headers.referer ?? "").includes("?other"),
+        body = other ? otherBytes : ownBytes;
+      observed.push(other ? "other" : "owned");
+      response.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": "attachment; filename=native.bin",
+        "Content-Length": body.length,
+      });
+      response.end(body);
+      return true;
+    },
+  });
+  const result = await f.run(
+    select +
+      `
+    const other=await selected.tabs.new(context.input.base+'?other',{active:false});
+    await other.playwright.waitForURL(context.input.base+'?other');
+    const pending=tab.playwright.waitForDownload();
+    await other.playwright.getByRole('link',{name:'Download native'}).click();
+    await tab.playwright.getByRole('link',{name:'Download native'}).click();
+    const own=await pending;return {path:await own.path()};`,
+    { base: f.base },
+  );
+  assert.deepEqual(readFileSync(result.result.data.path), ownBytes);
+  const ordinary = path.join(f.root, "native-downloads", "native.bin");
+  let bytes;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      bytes = readFileSync(ordinary);
+      if (bytes.equals(otherBytes)) break;
+    } catch {}
+    await delay(100);
+  }
+  assert.deepEqual(bytes, otherBytes);
+  assert.deepEqual(observed.sort(), ["other", "owned"]);
+  assert.equal(
+    readdirSync(path.join(f.root, "native-downloads", "Nexum")).length,
+    1,
+  );
 });

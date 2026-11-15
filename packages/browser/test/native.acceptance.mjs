@@ -100,10 +100,12 @@ test("native MV3 provides page interaction, MCP JPEG and an actual downloaded MC
     (item) => item.type === "resource_link",
   );
   assert.ok(link?.uri);
-  const resource = await f.artifacts.read(link.uri, f.resultScope(), {
-    maxBytes: 200000,
-  });
-  assert.deepEqual(resource.data, f.downloadBytes);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.equal(resource.contents[0].uri, link.uri);
+  assert.deepEqual(
+    Buffer.from(resource.contents[0].blob, "base64"),
+    f.downloadBytes,
+  );
 });
 
 function png() {

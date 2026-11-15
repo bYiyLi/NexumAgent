@@ -1762,17 +1762,23 @@ export function createBrowserRouter(
         if (owners.get(tabId) !== lease.id || !lease.attached.has(tabId))
           return;
         const managed = (lease.downloadIntercept ??= new Set()),
-          wanted =
-            !lease.ended &&
-            !lease.revoked &&
-            !lease.rawFetch?.has(tabId) &&
-            [...waiters.values()].some(
-              (waiter) =>
-                waiter.leaseId === lease.id &&
-                waiter.tabId === tabId &&
-                waiter.event === "download" &&
-                !waiter.settled,
-            );
+          uncertain = (lease.downloadUncertain ??= new Set());
+        if (uncertain.has(tabId)) {
+          await chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {});
+          managed.delete(tabId);
+          uncertain.delete(tabId);
+        }
+        const wanted =
+          !lease.ended &&
+          !lease.revoked &&
+          !lease.rawFetch?.has(tabId) &&
+          [...waiters.values()].some(
+            (waiter) =>
+              waiter.leaseId === lease.id &&
+              waiter.tabId === tabId &&
+              waiter.event === "download" &&
+              !waiter.settled,
+          );
         if (wanted === managed.has(tabId)) return;
         if (wanted) {
           managed.add(tabId);
@@ -1781,14 +1787,19 @@ export function createBrowserRouter(
               patterns: [{ urlPattern: "*", requestStage: "Response" }],
             });
           } catch (cause) {
-            managed.delete(tabId);
+            uncertain.add(tabId);
             throw cause;
           }
         } else {
           await Promise.allSettled([
             ...(lease.downloadResponses?.get(tabId) ?? []),
           ]);
-          await chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {});
+          try {
+            await chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {});
+          } catch (cause) {
+            uncertain.add(tabId);
+            throw cause;
+          }
           managed.delete(tabId);
         }
       });
@@ -2067,6 +2078,7 @@ export function createBrowserRouter(
     lease.viewports.delete(tabId);
     lease.fileChoosers.delete(tabId);
     lease.downloadIntercept?.delete(tabId);
+    lease.downloadUncertain?.delete(tabId);
     lease.rawFetch?.delete(tabId);
     for (const [marker, mark] of downloadMarks)
       if (mark.leaseId === lease.id && mark.tabId === tabId)

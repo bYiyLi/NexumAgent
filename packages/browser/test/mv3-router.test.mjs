@@ -2181,6 +2181,42 @@ test("an existing raw Fetch session is not taken over by a download waiter", asy
   await f.call("waiters.cancel", { id: waiter.id });
 });
 
+test("an uncertain download interception is disabled before a later waiter is armed", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const nativeSend = f.chrome.debugger.sendCommand;
+  let failures = 2;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Fetch.disable" && failures-- > 0) {
+      f.calls.push(["debugger.sendCommand", source, method, params]);
+      throw new Error("native cleanup is not confirmed");
+    }
+    return await nativeSend(source, method, params);
+  };
+  const first = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  await assert.rejects(f.call("waiters.cancel", { id: first.id }));
+  const next = await f.call("waiters.arm", {
+    event: "download",
+    timeoutMs: 1000,
+  });
+  const commands = f.calls
+    .filter((call) => call[2] === "Fetch.enable" || call[2] === "Fetch.disable")
+    .map((call) => call[2]);
+  assert.deepEqual(commands, [
+    "Fetch.enable",
+    "Fetch.disable",
+    "Fetch.disable",
+    "Fetch.disable",
+    "Fetch.enable",
+  ]);
+  await f.call("waiters.cancel", { id: next.id });
+});
+
 test("a duplicated marked identity is never used to read either browser file", async (t) => {
   const f = fixture(t);
   f.router.start();
