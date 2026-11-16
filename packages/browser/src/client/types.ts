@@ -1,6 +1,6 @@
 /** Public browser SDK data and facade contracts. Runtime control objects never cross managed calls. */
-import type { OutputIntent } from "@nexum/sdk";
-export type { OutputIntent } from "@nexum/sdk";
+import type { OutputIntent } from "@nexum-hub/sdk";
+export type { OutputIntent } from "@nexum-hub/sdk";
 
 export type BrowserCapabilityCollection = {
   get(id: "management"): Promise<ManagementCapability>;

@@ -207,7 +207,7 @@ test("native visual feedback preserves user groups, follows only when enabled an
   assert.notEqual(latest().href, data.pointer.icon);
   assert.match(latest().original, /^data:image\/svg\+xml,/);
   await f.run(
-    `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);await selected.tabs.select(context.input.originalId);await selected.tabs.select(context.input.otherId);`,
+    `const {createBrowserClient}=await import('@nexum-hub/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);await selected.tabs.select(context.input.originalId);await selected.tabs.select(context.input.otherId);`,
     ids,
   );
   while (latest()?.icon || latest()?.layer) {

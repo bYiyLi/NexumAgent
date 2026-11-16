@@ -2,12 +2,12 @@
 
 此页由本包公开 TypeScript 声明生成，用于查询调用合同；调用是否已注册及实际验证范围见包内 `implementation.json`。未注册的方法明确失败，类型存在不代表当前插件已经支持。
 
-入口为 `import { createBrowserClient } from "@nexum/browser"`。`createBrowserClient(browser)` 接收当前运行注入的方法容器，返回 `BrowserClient`。所有 I/O 都经过当前受管调用，客户端对象不传入 MCP 结果。
+入口为 `import { createBrowserClient } from "@nexum-hub/browser"`。`createBrowserClient(browser)` 接收当前运行注入的方法容器，返回 `BrowserClient`。所有 I/O 都经过当前受管调用，客户端对象不传入 MCP 结果。
 
 ```typescript
 /** Public browser SDK data and facade contracts. Runtime control objects never cross managed calls. */
-import type { OutputIntent } from "@nexum/sdk";
-export type { OutputIntent } from "@nexum/sdk";
+import type { OutputIntent } from "@nexum-hub/sdk";
+export type { OutputIntent } from "@nexum-hub/sdk";
 
 export type BrowserCapabilityCollection = {
   get(id: "management"): Promise<ManagementCapability>;

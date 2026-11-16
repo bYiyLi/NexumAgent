@@ -93,7 +93,7 @@ export async function nativeFixture(t, options = {}) {
       mkdtempSync(path.join(tmpdir(), "nexum-browser-core-")),
     ),
     work = path.join(root, "work"),
-    packageRoot = path.join(work, "node_modules", "@nexum/browser");
+    packageRoot = path.join(work, "node_modules", "@nexum-hub/browser");
   mkdirSync(packageRoot, { recursive: true });
   for (const name of [
     "dist",
@@ -124,7 +124,7 @@ export async function nativeFixture(t, options = {}) {
     path.join(work, "package.json"),
     JSON.stringify({
       type: "module",
-      dependencies: { "@nexum/browser": version },
+      dependencies: { "@nexum-hub/browser": version },
     }),
   );
   const store = new SqliteStore(root, {
@@ -155,13 +155,13 @@ export async function nativeFixture(t, options = {}) {
     });
   const policy = {
     builtins: () => [],
-    approvedPackages: () => new Map([["@nexum/browser", version]]),
+    approvedPackages: () => new Map([["@nexum-hub/browser", version]]),
   };
   const modules = await ModuleLoader.create(work, store.bootId, policy),
     packages = new ExtensionPackageLoader(registry, modules, {
       policy,
       permissions,
-      enabled: () => new Set(["@nexum/browser"]),
+      enabled: () => new Set(["@nexum-hub/browser"]),
     }),
     materials = new ExtensionMaterials(work),
     services = new ExtensionServices(registry, packages, materials);
@@ -282,8 +282,8 @@ export async function nativeFixture(t, options = {}) {
       if (!active) break;
       await delay(10);
     }
-    const entry = services.get("@nexum/browser");
-    if (entry) await services.disable("@nexum/browser").catch(() => {});
+    const entry = services.get("@nexum-hub/browser");
+    if (entry) await services.disable("@nexum-hub/browser").catch(() => {});
     const report = await resources
       .shutdown(new Error("The isolated native test fixture is closing."))
       .catch((error) => ({ error: String(error) }));
@@ -307,7 +307,7 @@ export async function nativeFixture(t, options = {}) {
     if (process.env.NEXUM_BROWSER_KEEP_NATIVE !== "1")
       rmSync(root, { recursive: true, force: true });
   });
-  await services.enable("@nexum/browser");
+  await services.enable("@nexum-hub/browser");
   const extension = path.join(work, ".nexum-browser", "extension");
   for (const name of readdirSync(extension)) {
     if (!name.endsWith(".js") || name === "profile.js") continue;
@@ -482,7 +482,7 @@ export async function nativeFixture(t, options = {}) {
   let diagnostics = "";
   while (true) {
     const probe = await run(
-      'const {createBrowserClient}=await import("@nexum/browser");const client=createBrowserClient(browser),browsers=await client.browsers.list(),matches=[];for(const peer of browsers){const tabs=(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base);if(tabs.length)matches.push({browserId:peer.id,tabs});}return {browsers,matches};',
+      'const {createBrowserClient}=await import("@nexum-hub/browser");const client=createBrowserClient(browser),browsers=await client.browsers.list(),matches=[];for(const peer of browsers){const tabs=(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base);if(tabs.length)matches.push({browserId:peer.id,tabs});}return {browsers,matches};',
       { base },
     );
     assert.ok(
@@ -599,4 +599,4 @@ export async function nativeFixture(t, options = {}) {
     stderr: () => stderr,
   };
 }
-export const select = `const {createBrowserClient}=await import("@nexum/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("The owned native test page was not discovered.");const tab=await selected.tabs.get(item.id);`;
+export const select = `const {createBrowserClient}=await import("@nexum-hub/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const choices=await selected.tabs.list();const item=choices.find(item=>item.url===context.input.base);if(!item)throw new Error("The owned native test page was not discovered.");const tab=await selected.tabs.get(item.id);`;

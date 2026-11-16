@@ -1,5 +1,5 @@
 {
-  "name": "@nexum/agent",
+  "name": "@nexum-hub/agent",
   "version": "0.0.1-next.0",
   "private": false,
   "description": "Nexum local-first programmable TypeScript Agent",

@@ -18,7 +18,7 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
-      '@nexum/sdk':
+      '@nexum-hub/sdk':
         specifier: file:../extension-api
         version: file:../extension-api
       '@types/node':
@@ -42,7 +42,7 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
-  '@nexum/sdk@file:../extension-api':
+  '@nexum-hub/sdk@file:../extension-api':
     resolution: {directory: ../extension-api, type: directory}
     engines: {node: '>=24.22.1 <25'}
 
@@ -104,7 +104,7 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@nexum/sdk@file:../extension-api': {}
+  '@nexum-hub/sdk@file:../extension-api': {}
 
   '@types/node@24.19.2':
     dependencies:

@@ -1,5 +1,5 @@
 {
-  "name": "@nexum/browser",
+  "name": "@nexum-hub/browser",
   "version": "0.1.0-next.0",
   "private": false,
   "description": "Nexum 可选浏览器客户端与受管扩展",
@@ -64,15 +64,15 @@
     "ws": "8.23.0"
   },
   "peerDependencies": {
-    "@nexum/sdk": ">=0.0.1-next.0 <0.1.0"
+    "@nexum-hub/sdk": ">=0.0.1-next.0 <0.1.0"
   },
   "peerDependenciesMeta": {
-    "@nexum/sdk": {
+    "@nexum-hub/sdk": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@nexum/sdk": "file:../extension-api",
+    "@nexum-hub/sdk": "file:../extension-api",
     "@types/node": "24.19.2",
     "@types/turndown": "5.0.6",
     "@types/ws": "8.18.2",

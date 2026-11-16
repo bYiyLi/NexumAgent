@@ -41,7 +41,7 @@ test(
     const facts = `(()=>{const player=document.querySelector('#movie_player')?.getPlayerResponse?.()??globalThis.ytInitialPlayerResponse;return {videoId:document.querySelector('ytd-watch-flexy')?.getAttribute('video-id')??null,playerVideoId:player?.videoDetails?.videoId??null,urlVideoId:new URL(location.href).searchParams.get('v'),readyState:document.readyState,metadata:document.querySelectorAll('ytd-watch-metadata').length,expands:Array.from(document.querySelectorAll('ytd-watch-metadata #description-inline-expander #expand')).map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return {visible:s.display!=='none'&&s.visibility!=='hidden'&&r.width>0&&r.height>0};}),segments:document.querySelectorAll('transcript-segment-view-model,ytd-transcript-segment-renderer').length};})()`;
     const observed = await f.run(
       `
-    const {createBrowserClient}=await import('@nexum/browser');
+    const {createBrowserClient}=await import('@nexum-hub/browser');
     const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);
     let stage='metadata';
     try {
@@ -97,7 +97,7 @@ test(
       "tab.exportYouTubeTranscript",
     ]) {
       const result = await f.run(
-        `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);return await ${method}();`,
+        `const {createBrowserClient}=await import('@nexum-hub/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);return await ${method}();`,
         { id },
       );
       const artifact = result.result.data,

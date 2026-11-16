@@ -4,7 +4,7 @@ import type {
   Invocation,
   ManagedResource,
   ResourceRef,
-} from "@nexum/sdk";
+} from "@nexum-hub/sdk";
 import {
   BrowserService,
   type BrowserPeer,

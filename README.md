@@ -19,7 +19,7 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 - `output` 的文本、JSON、图片、音频、资源链接、嵌入资源和混合结果意图包装，以及受预算约束的 JS 值规范化和 Agent 本地结果编码；
 - `work/resources` 的原子登记、固定内容与 SHA-256、目录分页/当前权限、真实流关闭、到期/丢失反馈，以及标准 MCP 内容构建和 Resources 的 `text/blob` 正文；保存结果只含规范化数据和资源身份，媒体 bytes 在授权交付时读取。
 - 受管 `sh/transfer`、npm 扩展加载与五类贡献整体发布、MCP Tasks/Host 请求/订阅和 OpenAPI 适配、维护请求及 npm 执行组件；
-- WSS 身份绑定、短期授权、HTTP 数据面、多附件、README 更新及应用组合入口，以及从实际源码生成的独立公开类型包 `@nexum/sdk`。
+- WSS 身份绑定、短期授权、HTTP 数据面、多附件、README 更新及应用组合入口，以及从实际源码生成的独立公开类型包 `@nexum-hub/sdk`。
 
 以上是待整体验收的开发快照。MCP/API 配置与 OAuth、用户共享数据的 Cloud authority、远端资源投影、Task 保护、清理器及安装脚本已有实现；真实链路、配额边界、原生服务与三平台支持仍须按最终源码分别验证。Console 进程控制和 MCP Apps 尚未完整承接，不能宣称所有 AI Host 特性已交付。媒体验证覆盖格式、尺寸/时长和有界 metadata，不声明已完整解码所有像素、动画帧或音频样本。Node VM 用于执行作用域，系统安全由目标 OS/容器负责，不提供恶意代码安全沙箱。
 
@@ -31,9 +31,9 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 
 ## npm 开发版发布
 
-本仓库的 npm 目标包为 `@nexum/agent`、`@nexum/sdk` 和可选的 `@nexum/browser`；独立版本先使用 `next` 发布标签。发布入口为手动触发的 GitHub Actions `npm-next.yml`，依次选择 SDK → Agent → Browser，并固定只从 `main` 发行。三包当前标记 `UNLICENSED`，公开可安装不等于开源授权。
+本仓库的 npm 目标包为 `@nexum-hub/agent`、`@nexum-hub/sdk` 和可选的 `@nexum-hub/browser`；独立版本先使用 `next` 发布标签。发布入口为手动触发的 GitHub Actions `npm-next.yml`，依次选择 SDK → Agent → Browser，并固定只从 `main` 发行。三包当前标记 `UNLICENSED`，公开可安装不等于开源授权。
 
-**首次 npm 发布需要 `@nexum` scope 的真实发布权限。** 可在 GitHub 仓库 Secrets 临时设置有对应包权限的 `NPM_PUBLISH_TOKEN` 进行首发；首发成功后为三个包分别配置 GitHub Trusted Publisher：仓库 `bYiyLi/NexumAgent`、工作流文件 `npm-next.yml`，允许 `npm publish`，然后删除该临时 Secret。后续 CI 使用 OIDC，无需长期 npm Token。Token、OTP 和用户配置不能进入仓库或输出日志。
+**首次 npm 发布需要 `@nexum-hub` scope 的真实发布权限。** 可在 GitHub 仓库 Secrets 临时设置有对应包权限的 `NPM_PUBLISH_TOKEN` 进行首发；首发成功后为三个包分别配置 GitHub Trusted Publisher：仓库 `bYiyLi/NexumAgent`、工作流文件 `npm-next.yml`，允许 `npm publish`，然后删除该临时 Secret。后续 CI 使用 OIDC，无需长期 npm Token。Token、OTP 和用户配置不能进入仓库或输出日志。
 
 Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册系统用户服务或完成三平台安装验收。是否真正发布以 npm Registry 的版本和 dist-tag 为准。
 

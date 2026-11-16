@@ -22,7 +22,7 @@ test(
     assert.equal(url.username + url.password, "");
     const f = await nativeFixture(t);
     const opened = await f.run(
-      `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tab=await selected.tabs.new(context.input.url);await tab.playwright.waitForLoadState({state:'domcontentloaded',timeoutMs:30000});return {tabId:tab.id,url:await tab.url()};`,
+      `const {createBrowserClient}=await import('@nexum-hub/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tab=await selected.tabs.new(context.input.url);await tab.playwright.waitForLoadState({state:'domcontentloaded',timeoutMs:30000});return {tabId:tab.id,url:await tab.url()};`,
       { url: source },
     );
     const actual = new URL(opened.result.data.url);
@@ -36,7 +36,7 @@ test(
       ["md", false],
     ]) {
       const result = await f.run(
-        `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tab=await selected.tabs.get(context.input.id);return await ${alias ? "tab.exportGsuite" : "tab.content.exportGsuite"}(context.input.format);`,
+        `const {createBrowserClient}=await import('@nexum-hub/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tab=await selected.tabs.get(context.input.id);return await ${alias ? "tab.exportGsuite" : "tab.content.exportGsuite"}(context.input.format);`,
         { id: opened.result.data.tabId, format },
       );
       const artifact = result.result.data,

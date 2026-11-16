@@ -1,6 +1,6 @@
 {
   "product": "Nexum browser",
-  "package": "@nexum/browser",
+  "package": "@nexum-hub/browser",
   "baseline": "26.1103.32239",
   "sourceApi": "local-reference-not-distributed",
   "sourceApiSha256": "ad0f401b995bb3e590e46d2b95b6306c6f231ba849268bbaec055ebe59daae6d",

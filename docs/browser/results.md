@@ -19,7 +19,7 @@ browser 方法返回普通业务数据、原生 bytes 或公开结果意图；No
 | 历史                                    | 取已保存结果/资源，不重读已变化页面或源文件，不重新触发截图/下载                                                                                                                                          |
 
 ```javascript
-import { createBrowserClient } from "@nexum/browser";
+import { createBrowserClient } from "@nexum-hub/browser";
 const client = createBrowserClient(browser);
 const selectedBrowser = await client.browsers.get(context.input.browserId);
 const tab = await selectedBrowser.tabs.get(context.input.tabId);

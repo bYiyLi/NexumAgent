@@ -2,7 +2,7 @@
 
 ## 身份与安装
 
-产品显示名固定 **Nexum browser**；npm 技术包名设计为 `@nexum/browser`，namespace 为 `browser`。技术包名的 registry 可用性、所有权、发布权限和许可证在正式发行前核实；2026-11-16 只读查询公共 registry 的该名称未找到可公开获取的版本；这不是名称保留或未来可发布保证，本设计不声称名称已取得。本包独立 semver，不以 Agent 版本代替插件/协议版本。
+产品显示名固定 **Nexum browser**；npm 技术包名设计为 `@nexum-hub/browser`，namespace 为 `browser`。技术包名的 registry 可用性、所有权、发布权限和许可证在正式发行前核实；2026-11-16 只读查询公共 registry 的该名称未找到可公开获取的版本；这不是名称保留或未来可发布保证，本设计不声称名称已取得。本包独立 semver，不以 Agent 版本代替插件/协议版本。
 
 官方内置包是 Agent 仓库内维护的可选第一方包：Agent 默认依赖/安装命令/初始化/首次上线不包含它，未安装或未启用时没有其端口、SDK、文档注入或浏览器扫描。用户经 maintenance.packages.install 安装指定版本，再经 maintenance.extensions.enable 启用。卸载走先检查占用/停用，再 remove；仅 npm 安装成功不表示浏览器插件已经装好或已连接。
 
@@ -10,7 +10,7 @@
 
 ```json
 {
-  "name": "@nexum/browser",
+  "name": "@nexum-hub/browser",
   "type": "module",
   "license": "UNLICENSED",
   "files": [
@@ -45,7 +45,7 @@
 }
 ```
 
-permissions 表达需要连接、路径和资源能力；具体平台注册键及方法子集须以公共协议包正式导出固化，不以自创字符串授予权限。无 postinstall 自动启用/监听/浏览器安装/系统服务注册。内部使用公开 @nexum/sdk 类型；运行依赖仅为本包真实需要的 Node 库，不拉入 Avru/QuickJS/FRPC/Host 私有运行时。
+permissions 表达需要连接、路径和资源能力；具体平台注册键及方法子集须以公共协议包正式导出固化，不以自创字符串授予权限。无 postinstall 自动启用/监听/浏览器安装/系统服务注册。内部使用公开 @nexum-hub/sdk 类型；运行依赖仅为本包真实需要的 Node 库，不拉入 Avru/QuickJS/FRPC/Host 私有运行时。
 
 ## 五类贡献
 

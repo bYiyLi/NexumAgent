@@ -26,7 +26,7 @@ function fixture(t) {
   const consumer = path.join(root, "external-extension");
   const modules = path.join(consumer, "node_modules");
   mkdirSync(modules, { recursive: true });
-  mkdirSync(path.join(modules, "@nexum"));
+  mkdirSync(path.join(modules, "@nexum-hub"));
   writeFileSync(
     path.join(consumer, "package.json"),
     JSON.stringify({
@@ -34,10 +34,10 @@ function fixture(t) {
       version: "1.0.0",
       private: true,
       type: "module",
-      dependencies: { "@nexum/agent": `file:${agent}` },
+      dependencies: { "@nexum-hub/agent": `file:${agent}` },
     }),
   );
-  symlinkSync(agent, path.join(modules, "@nexum/agent"), "junction");
+  symlinkSync(agent, path.join(modules, "@nexum-hub/agent"), "junction");
   symlinkSync(
     path.join(agent, "node_modules", "@types"),
     path.join(modules, "@types"),
@@ -60,16 +60,16 @@ import type {
   ManagedResource, ResourceRef, ResourceService, ResourceSnapshot, ResourceQuery,
   OutputAPI, OutputIntent, McpResourceReader, McpReadScope, McpResultOptions,
   TransferService, TransferSnapshot, SchemaDialect, JsonObject,
-} from "@nexum/agent/extension-api";
-import type { ExtensionFactory as RootFactory } from "@nexum/agent";
+} from "@nexum-hub/agent/extension-api";
+import type { ExtensionFactory as RootFactory } from "@nexum-hub/agent";
 // @ts-expect-error Core manager is not part of the extension protocol.
-import type { ExtensionRegistry } from "@nexum/agent/extension-api";
+import type { ExtensionRegistry } from "@nexum-hub/agent/extension-api";
 // @ts-expect-error Core result-resource manager is not part of the extension protocol.
-import type { McpResultResources } from "@nexum/agent/extension-api";
+import type { McpResultResources } from "@nexum-hub/agent/extension-api";
 // @ts-expect-error Root re-exports public types, not Core managers.
-import type { ExtensionRegistry as RootRegistry } from "@nexum/agent";
+import type { ExtensionRegistry as RootRegistry } from "@nexum-hub/agent";
 // @ts-expect-error The package exports do not grant private dist subpath access.
-import type { ExtensionRegistry as PrivateRegistry } from "@nexum/agent/dist/extensions/registry.js";
+import type { ExtensionRegistry as PrivateRegistry } from "@nexum-hub/agent/dist/extensions/registry.js";
 
 class Connection implements McpResourceReader, ManagedResource {
   readonly connection = "third-party-service";
@@ -179,7 +179,7 @@ test("the public type entry has no runtime exports or service initialization and
 import assert from "node:assert/strict";
 import {registerHooks} from "node:module";
 import {readdirSync} from "node:fs";
-const allowed="@nexum/agent/extension-api";
+const allowed="@nexum-hub/agent/extension-api";
 const hooks=registerHooks({resolve(specifier,context,next){
   assert.equal(specifier,allowed,"The type-only entry must not import any Core or other runtime dependency.");
   const resolved=next(specifier,context);
@@ -189,7 +189,7 @@ const hooks=registerHooks({resolve(specifier,context,next){
 let namespace;
 try{ namespace=await import(allowed); }finally{ hooks.deregister(); }
 assert.deepEqual(Object.getOwnPropertyNames(namespace),[]);
-for(const specifier of ["@nexum/agent/dist/extensions/registry.js","@nexum/agent/dist/results/mcp.js","@nexum/agent/src/extensions/registry.ts"]){
+for(const specifier of ["@nexum-hub/agent/dist/extensions/registry.js","@nexum-hub/agent/dist/results/mcp.js","@nexum-hub/agent/src/extensions/registry.ts"]){
   await assert.rejects(import(specifier),{code:"ERR_PACKAGE_PATH_NOT_EXPORTED"});
 }
 assert.deepEqual(readdirSync(${JSON.stringify(home)}),[]);

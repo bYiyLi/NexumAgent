@@ -1,9 +1,9 @@
-# @nexum/sdk — Nexum 扩展协议类型
+# @nexum-hub/sdk — Nexum 扩展协议类型
 
 此包由 Agent 的 `src/extension-api.ts` 自动生成，包含扩展工厂、调用上下文、资源及公开 SDK 的 TypeScript 类型。类型协议没有运行初始化逻辑，不启动 Agent、不读取配置或凭据，也不提供私有 Core manager。
 
 ```ts
-import type { ExtensionFactory } from "@nexum/sdk";
+import type { ExtensionFactory } from "@nexum-hub/sdk";
 
 export const createExtension: ExtensionFactory = (host) => ({
   methods: {
