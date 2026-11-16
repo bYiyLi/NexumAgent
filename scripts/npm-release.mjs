@@ -212,10 +212,15 @@ async function registryPackage(name) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitUntilIndexed(name, version, tag) {
-  for (let attempt = 0; attempt < 30; attempt++) {
+  // Public npm indexing can lag an accepted publish by more than 150 seconds.
+  for (let attempt = 0; attempt < 60; attempt++) {
     const result = await registryPackage(name);
     if (result?.versions?.[version] && result["dist-tags"]?.[tag] === version)
       return result;
+    if (attempt % 12 === 0)
+      console.log(
+        `Waiting for npm Registry: ${name}@${version} (${tag}), check ${attempt + 1}/60`,
+      );
     await sleep(5000);
   }
   throw new Error(
