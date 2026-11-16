@@ -227,7 +227,57 @@ export function servicePlan({
   );
   // Task Scheduler retries failure to start an action, not a completed app's
   // nonzero exit. Keep app retries here, bounded, under that same user task.
-  const launcher = `$ErrorActionPreference = 'Stop'\nRemove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue\n${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}\n$env:USERPROFILE = ${ps(home)}\nAdd-Type -TypeDefinition @'\n${windowsServiceJob}\n'@\n$nexumJob = [NexumAgentService.JobOwner]::Bind()\nfor ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {\n  $global:LASTEXITCODE = $null\n  $nexumExit = 1\n  try {\n    & ${ps(node)} ${args.map(ps).join(" ")}\n    if ($LASTEXITCODE -is [int]) { $nexumExit = $LASTEXITCODE }\n  } catch { $nexumExit = 1 }\n  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }\n  Start-Sleep -Seconds 10\n}\n`;
+  // Native PowerShell invocation can allocate a new visible console for
+  // node.exe, even if the task's PowerShell window itself is hidden.
+  // CreateNoWindow and redirected pipes keep the Agent independent of a
+  // closeable console window while retaining this task's exit/retry policy.
+  const childArguments = args.map(windowsArgument).join(" ");
+  const launcher = `$ErrorActionPreference = 'Stop'
+Remove-Item Env:NODE_OPTIONS,Env:NODE_PATH,Env:NODE_REPL_EXTERNAL_MODULE -ErrorAction SilentlyContinue
+${"$env:PATH = " + ps(p.dirname(node) + ";") + " + $env:PATH"}
+$env:USERPROFILE = ${ps(home)}
+Add-Type -TypeDefinition @'
+${windowsServiceJob}
+'@
+$nexumJob = [NexumAgentService.JobOwner]::Bind()
+$nexumStart = New-Object System.Diagnostics.ProcessStartInfo
+$nexumStart.FileName = ${ps(node)}
+$nexumStart.Arguments = ${ps(childArguments)}
+$nexumStart.UseShellExecute = $false
+$nexumStart.CreateNoWindow = $true
+$nexumStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+$nexumStart.RedirectStandardInput = $true
+$nexumStart.RedirectStandardOutput = $true
+$nexumStart.RedirectStandardError = $true
+for ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {
+  $nexumExit = 1
+  $nexumProcess = $null
+  try {
+    $nexumProcess = New-Object System.Diagnostics.Process
+    $nexumProcess.StartInfo = $nexumStart
+    if (-not $nexumProcess.Start()) { throw 'Failed to start the managed Agent process.' }
+    $nexumProcess.StandardInput.Close()
+    $nexumProcess.BeginOutputReadLine()
+    $nexumProcess.BeginErrorReadLine()
+    $nexumProcess.WaitForExit()
+    $nexumExit = $nexumProcess.ExitCode
+  } catch {
+    $nexumExit = 1
+    if ($null -ne $nexumProcess) {
+      try {
+        if (-not $nexumProcess.HasExited) {
+          $nexumProcess.Kill()
+          $nexumProcess.WaitForExit()
+        }
+      } catch {}
+    }
+  } finally {
+    if ($null -ne $nexumProcess) { $nexumProcess.Dispose() }
+  }
+  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }
+  Start-Sleep -Seconds 10
+}
+`;
   const executable = p.join(
     process.env.SystemRoot || "C:\\Windows",
     "System32",

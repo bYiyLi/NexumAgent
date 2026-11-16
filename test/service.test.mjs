@@ -86,6 +86,15 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.match(plan.content, /<LogonType>InteractiveToken/);
       assert.match(plan.content, /-WindowStyle/);
       assert.match(plan.content, /Hidden/);
+      assert.match(plan.launcher, /New-Object System\.Diagnostics\.ProcessStartInfo/);
+      assert.match(plan.launcher, /\$nexumStart\.UseShellExecute = \$false/);
+      assert.match(plan.launcher, /\$nexumStart\.CreateNoWindow = \$true/);
+      assert.match(plan.launcher, /\$nexumStart\.RedirectStandardOutput = \$true/);
+      assert.match(plan.launcher, /\$nexumStart\.RedirectStandardError = \$true/);
+      assert.match(plan.launcher, /\$nexumProcess\.BeginOutputReadLine\(\)/);
+      assert.match(plan.launcher, /\$nexumProcess\.BeginErrorReadLine\(\)/);
+      assert.match(plan.launcher, /\$nexumProcess\.WaitForExit\(\)/);
+      assert.doesNotMatch(plan.launcher, /^\s*&\s*['"]?C:/m);
       assert.match(plan.content, /<RunLevel>LeastPrivilege/);
       assert.match(plan.content, /<ExecutionTimeLimit>PT0S/);
       assert.match(plan.content, /<Count>255/);
@@ -254,6 +263,22 @@ test(
     );
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /validated/);
+    const parser = spawnSync(
+      path.join(
+        process.env.SystemRoot,
+        "System32/WindowsPowerShell/v1.0/powershell.exe",
+      ),
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$issues=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile('" +
+          plan.launcherPath.replaceAll("'", "''") +
+          "',[ref]$tokens,[ref]$issues)|Out-Null;if($issues.Count){$issues|Out-String|Write-Host;exit 1}",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    assert.equal(parser.status, 0, parser.stderr || parser.stdout);
   },
 );
 test("service/build child environment strips Agent credentials and Node preloads without changing the caller", () => {

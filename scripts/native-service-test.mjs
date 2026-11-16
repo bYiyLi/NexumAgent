@@ -65,6 +65,35 @@ const alive = (pid) => {
     throw error;
   }
 };
+// A real scheduled Agent must have no console attached: closing a console
+// window must not be capable of terminating the Agent's connection.
+const assertWindowless = (pid) => {
+  if (process.platform !== "win32") return;
+  const script =
+    "$ErrorActionPreference='Stop';" +
+    "Add-Type -Namespace NexumNativeProbe -Name Console -MemberDefinition @'\n" +
+    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool FreeConsole();\n' +
+    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool AttachConsole(uint pid);\n' +
+    "'@\n" +
+    "[NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
+    " \$attached=[NexumNativeProbe.Console]::AttachConsole([uint32]" + pid + ");" +
+    " \$errorCode=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error();" +
+    " if(\$attached){[NexumNativeProbe.Console]::FreeConsole()|Out-Null;exit 1};" +
+    " if(\$errorCode -ne 6){exit 2}";
+  const result = run(
+    path.join(
+      process.env.SystemRoot,
+      "System32/WindowsPowerShell/v1.0/powershell.exe",
+    ),
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+    true,
+  );
+  assert.equal(
+    result.status,
+    0,
+    "The scheduled Agent has an attached console, or its console state could not be verified.",
+  );
+};
 let ledger, control;
 const readLedger = async () => {
   try {
@@ -184,6 +213,7 @@ try {
   await serviceAction(plan, "start", { isolatedHome: true });
   await waitFor(async () => alive((await readLedger()).pid), "first startup");
   let record = await readLedger();
+  assertWindowless(record.pid);
   assert.equal(
     record.boots.length,
     1,
