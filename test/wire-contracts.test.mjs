@@ -6,7 +6,6 @@ import { fixedCaller, callerKey } from "../dist/contracts/caller.js";
 import {
   decodeEnvelopeV2,
   validateConnectionV2,
-  validatePolicyLeaseV2,
   validateReplyV2,
   validateSubmissionV2,
 } from "../dist/contracts/wire-validation.js";
@@ -54,30 +53,12 @@ test("every declared operation has registered strict input and output schemas", 
   }
 });
 
-test("policy lease checks use the trusted current time, independent of structural fixture validation", () => {
-  const now = Date.parse("2026-11-14T00:00:00.000Z");
+test("authorization scope is structural and has no short expiry", () => {
   const policy = invoke.context.authorization;
-  validatePolicyLeaseV2(
-    { ...policy, expiresAt: new Date(now + 30_000).toISOString() },
-    now,
-  );
-  for (const offset of [0, -1, 30_001]) {
-    assert.throws(
-      () =>
-        validatePolicyLeaseV2(
-          { ...policy, expiresAt: new Date(now + offset).toISOString() },
-          now,
-        ),
-      { code: "authorization_expired" },
-    );
-  }
-  // A schema-owned time must be real, while arbitrary business keys remain ordinary data.
+  validateContract("wire.type:Authorization", policy);
   assert.throws(
     () =>
-      validatePolicyLeaseV2(
-        { ...policy, expiresAt: "2026-13-99T00:00:00Z" },
-        now,
-      ),
+      validateContract("wire.type:Authorization", { ...policy, expiresAt: "2026-11-14T00:00:00Z" }),
     { code: "invalid_arguments" },
   );
   validateContract("wire.type:Result", {

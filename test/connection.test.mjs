@@ -51,7 +51,6 @@ function context(binding) {
       allowedRoots: [],
       budgets: {},
       revision: "policy",
-      expiresAt: new Date(Date.now() + 20000).toISOString(),
     },
   };
 }
@@ -211,9 +210,9 @@ test("real Upgrade sends bounded metadata once and admits only the authenticated
   assert.throws(
     () =>
       c.request(
-        "authorization.refresh",
+        "state.user.get",
         context(c.binding),
-        { runId: "run", originInvocationId: "rpc" },
+        { namespace: "default", key: "fixture" },
         new AbortController().signal,
       ),
     { code: "connection_closed" },
@@ -356,14 +355,14 @@ test("ready can await a reverse reply while invocation and event admission remai
     onMessage(peer, message) {
       if (
         message.type === "invoke" &&
-        message.operation === "authorization.refresh"
+        message.operation === "state.user.get"
       )
         peer.send(
           JSON.stringify({
             type: "result",
             id: message.id,
             operation: message.operation,
-            output: { authorization: message.context.authorization },
+            output: { state: null },
           }),
         );
     },
@@ -375,12 +374,12 @@ test("ready can await a reverse reply while invocation and event admission remai
   const opening = f.connect({
     ready: async (c) => {
       const result = await c.request(
-        "authorization.refresh",
+        "state.user.get",
         context(c.binding),
-        { runId: "run", originInvocationId: "rpc" },
+        { namespace: "default", key: "fixture" },
         c.signal,
       );
-      assert.equal(result.authorization.revision, "policy");
+      assert.equal(result.state, null);
       entered.resolve();
       await gate.promise;
     },
@@ -454,9 +453,9 @@ test("current binding and expected operation identity are checked before invokin
   assert.throws(
     () =>
       c.request(
-        "authorization.refresh",
+        "state.user.get",
         context({ ...binding, connectionId: "old" }),
-        { runId: "r", originInvocationId: "rpc" },
+        { namespace: "default", key: "fixture" },
         c.signal,
       ),
     { code: "connection_binding_mismatch" },
@@ -486,9 +485,9 @@ test("current binding and expected operation identity are checked before invokin
     d = await g.connect(),
     entry = await g.peer();
   const pending = d.request(
-    "authorization.refresh",
+    "state.user.get",
     context(d.binding),
-    { runId: "r", originInvocationId: "rpc" },
+    { namespace: "default", key: "fixture" },
     d.signal,
   );
   const rejected = assert.rejects(pending, { code: "connection_closed" });
@@ -511,9 +510,9 @@ test("RPC cancellation ends the observer, sends one cancel and discards a late r
     { peer } = await f.peer(),
     abort = new AbortController();
   const pending = c.request(
-    "authorization.refresh",
+    "state.user.get",
     context(c.binding),
-    { runId: "r", originInvocationId: "rpc" },
+    { namespace: "default", key: "fixture" },
     abort.signal,
   );
   const rejected = assert.rejects(pending, /observer cancelled/);
@@ -526,15 +525,15 @@ test("RPC cancellation ends the observer, sends one cancel and discards a late r
       type: "result",
       id: request.id,
       operation: request.operation,
-      output: { authorization: context(c.binding).authorization },
+      output: { state: null },
     }),
   );
   await tick();
   assert.equal(c.signal.aborted, false);
   const again = c.request(
-    "authorization.refresh",
+    "state.user.get",
     context(c.binding),
-    { runId: "r", originInvocationId: "second" },
+    { namespace: "default", key: "fixture" },
     c.signal,
   );
   const next = await f.waitMessage(
@@ -545,10 +544,10 @@ test("RPC cancellation ends the observer, sends one cancel and discards a late r
       type: "result",
       id: next.id,
       operation: next.operation,
-      output: { authorization: context(c.binding).authorization },
+      output: { state: null },
     }),
   );
-  assert.equal((await within(again)).authorization.agentId, "agent");
+  assert.equal((await within(again)).state, null);
   assert.equal(f.messages.filter((x) => x.message.type === "cancel").length, 1);
 });
 
@@ -840,9 +839,9 @@ test("an observation timeout sends cancellation without reporting remote work st
   const f = await fixture(t),
     c = await f.connect();
   const pending = c.request(
-      "authorization.refresh",
+      "state.user.get",
       context(c.binding),
-      { runId: "run", originInvocationId: "rpc" },
+      { namespace: "default", key: "fixture" },
       c.signal,
       20,
     ),
@@ -858,9 +857,9 @@ test("valid envelopes used in the wrong Cloud-to-Agent direction are rejected be
     (binding) => ({
       type: "invoke",
       id: "wrong_direction",
-      operation: "authorization.refresh",
+      operation: "state.user.get",
       context: context(binding),
-      input: { runId: "r", originInvocationId: "rpc" },
+      input: { namespace: "default", key: "fixture" },
     }),
     (binding) => ({
       type: "event",

@@ -21,7 +21,6 @@ export const MAX_HOST_BODY_BYTES_V2 = 128 * 1024 * 1024;
 export const MAX_STATE_VALUE_BYTES_V2 = 64 * 1024;
 export const MAX_STATE_RECEIPT_BYTES_V2 = MAX_STATE_VALUE_BYTES_V2 + 1024;
 export const MAX_PROCESS_OUTPUT_BYTES_V2 = 64 * 1024;
-export const POLICY_LEASE_MS_V2 = 30_000;
 export const wireOperationsV2 = [
   "agent.project.resolve",
   "agent.project.inspect",
@@ -49,7 +48,6 @@ export const wireOperationsV2 = [
   "agent.transfer.reserveClaim",
   "agent.transfer.commitClaim",
   "agent.transfer.releaseReservation",
-  "authorization.refresh",
   "state.user.get",
   "state.user.set",
   "state.user.delete",
@@ -125,9 +123,8 @@ export interface WireAuthorizationV2 {
   readonly projectContextVisibility?: WireVisibilityV2;
   readonly allowedRoots: readonly string[];
   readonly budgets: WireBudgetsV2;
-  /** Current Cloud policy revision and a short lease; neither comes from model input. */
+  /** Current Cloud policy revision; it is never read from model input. */
   readonly revision: string;
-  readonly expiresAt: string;
 }
 export interface WireInvocationContextV2 {
   readonly caller: WireCallerV2;
@@ -725,37 +722,6 @@ export interface WireTransferSnapshotV2 {
   readonly file?: WireTransferFileV2;
   readonly error: WireErrorV2 | null;
 }
-export type WireAuthorizationRefreshInputV2 = {
-  readonly originInvocationId: string;
-} & (
-  | {
-      readonly runId: string;
-      readonly maintenanceRequestId?: never;
-      readonly transferId?: never;
-      readonly streamId?: never;
-    }
-  | {
-      readonly maintenanceRequestId: string;
-      readonly runId?: never;
-      readonly transferId?: never;
-      readonly streamId?: never;
-    }
-  | {
-      readonly transferId: string;
-      readonly runId?: never;
-      readonly maintenanceRequestId?: never;
-      readonly streamId?: never;
-    }
-  | {
-      readonly streamId: string;
-      readonly runId?: never;
-      readonly maintenanceRequestId?: never;
-      readonly transferId?: never;
-    }
-);
-export interface WireAuthorizationRefreshOutputV2 {
-  readonly authorization: WireAuthorizationV2;
-}
 export interface WireUserStateGetInputV2 {
   readonly namespace: "default";
   readonly key: string;
@@ -990,7 +956,6 @@ export interface WireInputsV2 {
   "agent.transfer.reserveClaim": WireTransferReserveInputV2;
   "agent.transfer.commitClaim": WireTransferCommitInputV2;
   "agent.transfer.releaseReservation": WireTransferReleaseInputV2;
-  "authorization.refresh": WireAuthorizationRefreshInputV2;
   "state.user.get": WireUserStateGetInputV2;
   "state.user.set": WireUserStateSetInputV2;
   "state.user.delete": WireUserStateDeleteInputV2;
@@ -1041,7 +1006,6 @@ export interface WireOutputsV2 {
   "agent.transfer.reserveClaim": WireTransferReserveOutputV2;
   "agent.transfer.commitClaim": WireTransferSnapshotV2;
   "agent.transfer.releaseReservation": WireTransferReleaseOutputV2;
-  "authorization.refresh": WireAuthorizationRefreshOutputV2;
   "state.user.get": WireUserStateGetOutputV2;
   "state.user.set": WireUserStateSetOutputV2;
   "state.user.delete": WireUserStateDeleteOutputV2;
@@ -1134,11 +1098,6 @@ export interface WireEventDataV2 {
     readonly sequence: number;
     readonly observedAt: string;
     readonly projects: readonly WireCatalogSummaryV2[];
-  };
-  /** null is authoritative revocation; it never commands a run transition. */
-  "agent.authorization.changed": {
-    readonly caller: WireCallerV2;
-    readonly authorization: WireAuthorizationV2 | null;
   };
 }
 export type WireEventNameV2 = keyof WireEventDataV2;

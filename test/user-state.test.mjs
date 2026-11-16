@@ -164,7 +164,6 @@ async function fixture(t, receive) {
         allowedRoots: [],
         budgets: {},
         revision: "policy",
-        expiresAt: new Date(Date.now() + 25000).toISOString(),
       },
     };
     authority.observe(context);
@@ -260,7 +259,7 @@ test("real control RPC preserves verified Grant and Agent binding and returns sh
   assert.equal(b.store.getState("shared"), null);
 });
 
-test("missing Grant, revoked current authority and mismatched caller fail before reverse RPC", async (t) => {
+test("missing Grant, unknown authority and mismatched caller fail before reverse RPC", async (t) => {
   const f = await fixture(t),
     a = await f.agent("agent-a"),
     signal = new AbortController().signal;
@@ -280,8 +279,10 @@ test("missing Grant, revoked current authority and mismatched caller fail before
     forged.get({ ...a.identity, agentId: "other-agent" }, "key", signal),
     { code: "runtime_binding_mismatch" },
   );
-  a.authority.revoke(a.context.caller);
-  await assert.rejects(a.service.user.get("key"), { code: "forbidden" });
+  assert.throws(
+    () => a.authority.context({ ...a.context.caller, grantId: "unknown-grant" }),
+    { code: "forbidden" },
+  );
   assert.equal(
     f.messages.filter((message) => message.type === "invoke").length,
     0,

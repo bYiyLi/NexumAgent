@@ -11,25 +11,12 @@ import type {
   WireInvocationContextV2,
   WireCallerV2,
 } from "../contracts/wire.js";
-import {
-  validateConnectionV2,
-  validatePolicyLeaseV2,
-} from "../contracts/wire-validation.js";
+import { validateConnectionV2 } from "../contracts/wire-validation.js";
 import { contains } from "../runtime/paths.js";
 import { validateContract } from "../contracts/validation.js";
-import { performance } from "node:perf_hooks";
 
 interface Cell {
-  readonly token: symbol;
-  readonly caller: WireCallerV2;
-  readonly policy: WireAuthorizationV2 | null;
-}
-/** A captured refresh cannot overwrite a newer authenticated observation or revocation. */
-export interface PolicyObservation {
-  readonly key: string;
-  readonly token: symbol;
-  readonly projectId: string | null;
-  readonly context: WireInvocationContextV2;
+  readonly policy: WireAuthorizationV2;
 }
 const copy = <T>(value: T): T => JSON.parse(canonicalJson(value)) as T;
 function targetPath(value: string): string {
@@ -69,11 +56,9 @@ export class AgentAuthority {
   readonly work: string;
   #connection?: WireConnectionV2;
   #policies = new Map<string, Cell>();
-  #now: () => number;
   constructor(
     binding: Binding & { bootId: string },
     work: string,
-    now = Date.now,
   ) {
     this.binding = Object.freeze({
       agentId: binding.agentId,
@@ -82,14 +67,6 @@ export class AgentAuthority {
       cloudEnvironment: binding.cloudEnvironment,
     });
     this.work = realpathSync.native(work);
-    let logical = now(),
-      monotonic = performance.now();
-    this.#now = () => {
-      const next = performance.now();
-      logical = Math.max(now(), logical + next - monotonic);
-      monotonic = next;
-      return Math.floor(logical);
-    };
   }
   connect(binding: WireConnectionV2): void {
     for (const key of [
@@ -134,7 +111,7 @@ export class AgentAuthority {
       projectId,
     ]);
   }
-  observe(context: WireInvocationContextV2): PolicyObservation {
+  observe(context: WireInvocationContextV2): void {
     validateContract("wire.type:Caller", context.caller);
     requireCondition(
       this.#connection,
@@ -142,7 +119,7 @@ export class AgentAuthority {
       "No authenticated control connection exists.",
     );
     validateConnectionV2(context.connection, this.#connection);
-    validatePolicyLeaseV2(context.authorization, this.#now());
+    validateContract("wire.type:Authorization", context.authorization);
     requireCondition(
       context.authorization.agentId === this.binding.agentId,
       "agent_mismatch",
@@ -151,33 +128,9 @@ export class AgentAuthority {
     const fixed = copy(context),
       projectId = fixed.authorization.projectId ?? null,
       key = this.#key(fixed.caller, projectId);
-    if (!this.#policies.has(key) && this.#policies.size >= 4096) {
-      for (const [candidate, cell] of this.#policies)
-        if (cell.policy && Date.parse(cell.policy.expiresAt) <= this.#now())
-          this.#policies.delete(candidate);
-      requireCondition(
-        this.#policies.size < 4096,
-        "authorization_busy",
-        "The current policy cache is occupied.",
-      );
-    }
-    const token = Symbol("policy-observation");
     this.#policies.set(key, {
-      token,
-      caller: fixed.caller,
       policy: fixed.authorization,
     });
-    return { key, token, projectId, context: fixed };
-  }
-  revoke(caller: WireCallerV2): void {
-    const identity = this.#key(caller);
-    for (const [key, cell] of this.#policies)
-      if (this.#key(cell.caller) === identity)
-        this.#policies.set(key, {
-          token: Symbol("policy-revoked"),
-          caller: copy(caller),
-          policy: null,
-        });
   }
   current(
     caller: Caller,
@@ -189,56 +142,9 @@ export class AgentAuthority {
       "forbidden",
       "The current Cloud authority was revoked or is unavailable.",
     );
-    validatePolicyLeaseV2(cell.policy, this.#now());
     return copy(cell.policy);
   }
-  capture(
-    caller: WireCallerV2,
-    projectId: string | null = null,
-  ): PolicyObservation {
-    const key = this.#key(caller, projectId),
-      cell = this.#policies.get(key);
-    requireCondition(
-      cell?.policy && this.#connection,
-      "forbidden",
-      "No current policy observation is available.",
-    );
-    this.current(caller, projectId);
-    return {
-      key,
-      token: cell.token,
-      projectId,
-      context: {
-        caller: copy(caller),
-        authorization: copy(cell.policy),
-        connection: copy(this.#connection),
-      },
-    };
-  }
-  refresh(
-    observation: PolicyObservation,
-    policy: WireAuthorizationV2,
-  ): boolean {
-    if (this.#policies.get(observation.key)?.token !== observation.token)
-      return false;
-    requireCondition(
-      this.#connection,
-      "connection_closed",
-      "No authenticated control connection exists.",
-    );
-    requireCondition(
-      (policy.projectId ?? null) === observation.projectId,
-      "authorization_scope_mismatch",
-      "A refreshed policy cannot change its Project scope.",
-    );
-    this.observe({
-      ...observation.context,
-      connection: this.#connection,
-      authorization: policy,
-    });
-    return true;
-  }
-  /** Cleanup proves original ownership separately; it does not obtain a new business-access lease. */
+  /** Cleanup proves original ownership separately; it does not grant new access. */
   cleanupContext(
     caller: WireCallerV2,
     previous: WireInvocationContextV2,
@@ -269,7 +175,16 @@ export class AgentAuthority {
     caller: WireCallerV2,
     projectId: string | null = null,
   ): WireInvocationContextV2 {
-    return this.capture(caller, projectId).context;
+    requireCondition(
+      this.#connection,
+      "connection_closed",
+      "No authenticated control connection exists.",
+    );
+    return {
+      caller: copy(caller),
+      authorization: this.current(caller, projectId),
+      connection: copy(this.#connection),
+    };
   }
   authorize(
     caller: Caller,

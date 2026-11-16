@@ -156,9 +156,7 @@ async function fixture(t, options = {}) {
         validateContract("wire.input:" + operation, input);
         requests.push({ operation, context, input });
         let output;
-        if (operation === "authorization.refresh")
-          output = { authorization: authorization(context.authorization) };
-        else if (operation === "stream.prepare") {
+        if (operation === "stream.prepare") {
           const {
             originInvocationId: _origin,
             runId: _run,
@@ -238,7 +236,6 @@ async function fixture(t, options = {}) {
         fileBytes: 256 * 1024 * 1024,
       },
       revision: newId("policy"),
-      expiresAt: new Date(Date.now() + 25_000).toISOString(),
       ...extra,
     };
   }
@@ -1087,137 +1084,6 @@ test("close reports an unsettled native Promise and keeps its Store available un
   assert.ok(started.run.runId);
 });
 
-test("explicit Cloud revocation aborts the original live Run and its actual native fetch with the authorization stop reason", async (t) => {
-  const entered = Promise.withResolvers(),
-    disconnected = Promise.withResolvers();
-  const remote = createServer((request, response) => {
-    request.on("close", () => disconnected.resolve());
-    response.on("error", () => {});
-    entered.resolve();
-  });
-  await new Promise((resolve) => remote.listen(0, "127.0.0.1", resolve));
-  t.after(
-    () =>
-      new Promise((resolve) => {
-        remote.closeAllConnections();
-        remote.close(resolve);
-      }),
-  );
-  const f = await configuredFixture(t);
-  const handle = await f.components.registry.prepare(
-    {
-      apiVersion: 1,
-      origin: {
-        type: "extension",
-        owner: "@test/revoke",
-        namespace: "live",
-        version: "1",
-        revision: "1",
-      },
-      permissions: [],
-    },
-    () => ({
-      methods: {
-        hold: {
-          description:
-            "Await real native HTTP until current authorization stops",
-          permissions: [],
-          schemaDialect: "draft7",
-          inputSchema: { type: "object", additionalProperties: false },
-          async handle(_input, call) {
-            const response = await fetch(
-              `http://127.0.0.1:${remote.address().port}`,
-              { signal: call.signal },
-            );
-            return response.status;
-          },
-        },
-      },
-    }),
-  );
-  f.components.registry.publish(handle);
-  const opened = await f.open(),
-    started = await f.invoke("agent.run.start", {
-      contextId: opened.contextId,
-      script: "return await live.hold({});",
-      waitMs: 0,
-    });
-  await entered.promise;
-  await f.runtime.event(
-    {
-      type: "event",
-      name: "agent.authorization.changed",
-      connection: f.binding,
-      data: { caller, authorization: null },
-    },
-    new AbortController().signal,
-  );
-  await disconnected.promise;
-  const row = f.components.store.getRun(started.run.runId);
-  assert.equal(row.stop.kind, "authorization");
-  assert.equal(row.stop.code, "authorization_revoked");
-  for (
-    let i = 0;
-    i < 100 && !f.components.store.getRun(started.run.runId).endedAt;
-    i++
-  )
-    await delay(10);
-  assert.equal(f.components.store.getRun(started.run.runId).status, "failed");
-  assert.equal(
-    (await f.components.registry.disable(handle)).status,
-    "disabled",
-  );
-});
-
-test("an independent maintenance lease outlives its creator and observer connection but aborts on explicit revocation", async (t) => {
-  const f = await configuredFixture(t),
-    opened = await f.open();
-  const origin = await f.run("return null;", null, opened);
-  const originInvocationId = f.events.find(
-    (event) =>
-      event.data?.runId === origin.run.runId && event.data.originInvocationId,
-  ).data.originInvocationId;
-  const spec = path.join(f.work, "lease-spec.json");
-  writeFileSync(
-    spec,
-    JSON.stringify({
-      openapi: "3.1.0",
-      info: { title: "lease", version: "1" },
-      paths: {
-        "/value": {
-          get: {
-            operationId: "read",
-            responses: { 200: { description: "value" } },
-          },
-        },
-      },
-      servers: [{ url: "https://api.example.com" }],
-    }),
-  );
-  const created = await f.maintenance
-    .bind(f.scope())
-    .api.import({ name: "lease", path: spec });
-  const lease = f.components.startLease(
-    caller,
-    { maintenanceRequestId: created.requestId, originInvocationId },
-    new AbortController().signal,
-  );
-  await f.reconnect();
-  assert.equal(lease.scope.signal.aborted, false);
-  await f.runtime.event(
-    {
-      type: "event",
-      name: "agent.authorization.changed",
-      connection: f.binding,
-      data: { caller, authorization: null },
-    },
-    new AbortController().signal,
-  );
-  assert.equal(lease.scope.signal.aborted, true);
-  assert.equal(lease.scope.signal.reason.code, "authorization_revoked");
-  lease.close();
-});
-
 test("the default package policy imports only its verified approved snapshot and immediately rejects work manifest drift", async (t) => {
   const f = await configuredFixture(t);
   const manifest = JSON.stringify({
@@ -1546,15 +1412,6 @@ test("a fresh Agent owner session reads closed Project history using its current
   assert.equal(inspected.transient, undefined);
   // A valid Project policy for the same session must never override a newer
   // Agent-base request that no longer grants this directory.
-  await f.runtime.event(
-    {
-      type: "event",
-      name: "agent.authorization.changed",
-      connection: f.binding,
-      data: { caller: owner, authorization: f.authorization(projectPolicy) },
-    },
-    new AbortController().signal,
-  );
   await assert.rejects(
     f.invoke(
       "agent.run.inspect",
@@ -1662,7 +1519,7 @@ test("current Agent authorization can resume and cancel accepted Project Runs af
   assert.equal((await f.finish(stopped.view)).run.status, "cancelled");
 });
 
-test("the current Console owner controls the actual background sh resource after Project close and creator Grant revocation", async (t) => {
+test("the current Console owner controls the actual background sh resource after Project close", async (t) => {
   const f = await fixture(t),
     projectId = newId("project");
   const policy = {
@@ -1725,15 +1582,6 @@ test("the current Console owner controls the actual background sh resource after
       policy,
     ),
     { code: "context_closed" },
-  );
-  await f.runtime.event(
-    {
-      type: "event",
-      name: "agent.authorization.changed",
-      connection: f.binding,
-      data: { caller, authorization: null },
-    },
-    new AbortController().signal,
   );
   const page = await f.invoke(
     "agent.process.list",
@@ -1930,101 +1778,6 @@ test("a control disconnect before transfer I/O admission releases the actual res
       reservationId: reservation.reservationId,
     }),
     { code: "invalid_transfer_reservation" },
-  );
-});
-
-test("a current Project policy that removes the Run directory stops silent native I/O without waiting for another SDK call", async (t) => {
-  const entered = Promise.withResolvers(),
-    disconnected = Promise.withResolvers();
-  const remote = createServer((request, response) => {
-    request.on("close", () => disconnected.resolve());
-    response.on("error", () => {});
-    entered.resolve();
-  });
-  await new Promise((resolve) => remote.listen(0, "127.0.0.1", resolve));
-  t.after(
-    () =>
-      new Promise((resolve) => {
-        remote.closeAllConnections();
-        remote.close(resolve);
-      }),
-  );
-  const f = await configuredFixture(t),
-    projectId = newId("project");
-  const policy = {
-    projectId,
-    projectRoot: f.project,
-    projectName: "Silent Project",
-    allowedRoots: [f.project],
-  };
-  const handle = await f.components.registry.prepare(
-    {
-      apiVersion: 1,
-      origin: {
-        type: "extension",
-        owner: "@test/root-removal",
-        namespace: "rootRemoval",
-        version: "1",
-        revision: "1",
-      },
-      permissions: [],
-    },
-    () => ({
-      methods: {
-        hold: {
-          description: "Await actual native HTTP",
-          permissions: [],
-          schemaDialect: "draft7",
-          inputSchema: { type: "object", additionalProperties: false },
-          async handle(_input, call) {
-            return (
-              await fetch(`http://127.0.0.1:${remote.address().port}`, {
-                signal: call.signal,
-              })
-            ).status;
-          },
-        },
-      },
-    }),
-  );
-  f.components.registry.publish(handle);
-  const opened = await f.open({ projectId }, policy);
-  const run = await f.invoke(
-    "agent.run.start",
-    {
-      contextId: opened.contextId,
-      script: "return await rootRemoval.hold({});",
-      waitMs: 0,
-    },
-    policy,
-  );
-  await entered.promise;
-  await f.runtime.event(
-    {
-      type: "event",
-      name: "agent.authorization.changed",
-      connection: f.binding,
-      data: {
-        caller,
-        authorization: f.authorization({ ...policy, allowedRoots: [] }),
-      },
-    },
-    new AbortController().signal,
-  );
-  await disconnected.promise;
-  const deadline = Date.now() + 10000;
-  while (
-    !f.components.store.getRun(run.run.runId).endedAt &&
-    Date.now() < deadline
-  )
-    await delay(10);
-  const stopped = f.components.store.getRun(run.run.runId);
-  assert.equal(stopped.status, "failed");
-  assert.equal(stopped.stop.kind, "authorization");
-  assert.equal(stopped.stop.code, "path_not_allowed");
-  assert.equal(
-    (await f.components.registry.disable(handle)).status,
-    "disabled",
   );
 });
 

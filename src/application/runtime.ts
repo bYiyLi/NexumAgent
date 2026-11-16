@@ -39,7 +39,6 @@ import type {
   WireFixedStreamRefV2,
   WireStreamPurposeV2,
   WireCallerV2,
-  WireAuthorizationRefreshInputV2,
 } from "../contracts/wire.js";
 import { SqliteStore, type ResourceHistoryRecord } from "../storage/sqlite.js";
 import {
@@ -156,11 +155,6 @@ export interface ApplicationComponents {
   data(): AgentDataPlane;
   context(caller: Caller, projectId?: string | null): WireInvocationContextV2;
   scope(caller: Caller, signal: AbortSignal, runId?: string): MaintenanceScope;
-  startLease(
-    caller: Caller,
-    source: WireAuthorizationRefreshInputV2,
-    signal: AbortSignal,
-  ): ApplicationAuthorityLease;
   onShutdown(join: () => Promise<void>): () => void;
   shipJson(
     value: JsonObject,
@@ -191,29 +185,12 @@ export interface AgentRuntimeOptions {
     observerSignal: AbortSignal,
   ): Promise<unknown>;
 }
-export interface ApplicationAuthorityLease {
-  readonly scope: MaintenanceScope;
-  refresh(): Promise<void>;
-  close(): void;
-}
-interface LeaseEntry {
-  readonly caller: WireCallerV2;
-  readonly projectId: string | null;
-  readonly source: WireAuthorizationRefreshInputV2;
-  readonly signal: AbortSignal;
-  readonly controller: AbortController;
-  timer?: NodeJS.Timeout;
-  active: boolean;
-  refreshing?: Promise<void>;
-  close(): void;
-}
 interface AcceptedRun {
   readonly originInvocationId: string;
   readonly context: WireInvocationContextV2;
   readonly services: RunServices;
   readonly announced: Promise<void>;
-  readonly lease: ApplicationAuthorityLease;
-  refreshing?: Promise<void>;
+  readonly scope: MaintenanceScope;
   notify: () => void;
 }
 interface Reservation {
@@ -276,7 +253,6 @@ export class AgentRuntime {
   #slots = new TransferStreamSlots();
   #lifetime = new AbortController();
   #stopping = new AbortController();
-  #leases = new Set<LeaseEntry>();
   #shutdownJoins = new Set<() => Promise<void>>();
   #invocation = new AsyncLocalStorage<WireInvokeV2>();
   #runs = new Map<string, AcceptedRun>();
@@ -293,7 +269,6 @@ export class AgentRuntime {
   #logErrorCode: string | null = null;
   #logWriterClosed = false;
   #catalog: AgentCatalog;
-  #refreshTimer?: NodeJS.Timeout;
   #closing = false;
   #closed = false;
   #closeTask?: Promise<void>;
@@ -438,8 +413,6 @@ export class AgentRuntime {
       data: () => this.#data(),
       context: (caller, projectId) => this.#context(caller, projectId),
       scope: (caller, signal, runId) => this.#scope(caller, signal, runId),
-      startLease: (caller, source, signal) =>
-        this.#startLease(caller, source, signal),
       onShutdown: (join) => {
         this.#shutdownJoins.add(join);
         return () => {
@@ -780,16 +753,6 @@ export class AgentRuntime {
         this.#enablement.get(name)?.config ?? {},
       );
     await this.#documents.refresh(this.#published().docs);
-    this.#refreshTimer = setInterval(() => {
-      for (const entry of this.#runs.values())
-        if (
-          !terminalStatuses.has(this.#store.getRun(entry.services.runId).status)
-        )
-          void this.#refresh(entry).catch(() => {});
-      for (const entry of this.#leases)
-        void this.#refreshLease(entry).catch(() => {});
-    }, 10000);
-    this.#refreshTimer.unref();
   }
   #published(): PublishedMaterials {
     const extra = this.#materials.published();
@@ -1050,132 +1013,6 @@ export class AgentRuntime {
       },
     };
   }
-  #startLease(
-    caller: Caller,
-    source: WireAuthorizationRefreshInputV2,
-    signal: AbortSignal,
-    projectId = this.#projectFor(caller),
-  ): ApplicationAuthorityLease {
-    validateContract("wire.input:authorization.refresh", source);
-    const controller = new AbortController();
-    const scope = this.#scope(
-      caller,
-      AbortSignal.any([signal, controller.signal]),
-      source.runId,
-      projectId,
-    );
-    const entry: LeaseEntry = {
-      caller: copy(caller) as WireCallerV2,
-      projectId,
-      source: copy(source),
-      signal: scope.signal,
-      controller,
-      active: true,
-      close: () => {
-        if (!entry.active) return;
-        entry.active = false;
-        clearTimeout(entry.timer);
-        entry.signal.removeEventListener("abort", entry.close);
-        this.#leases.delete(entry);
-      },
-    };
-    entry.signal.addEventListener("abort", entry.close, { once: true });
-    this.#leases.add(entry);
-    if (entry.signal.aborted) entry.close();
-    else this.#scheduleLease(entry);
-    return {
-      scope,
-      refresh: () => this.#refreshLease(entry),
-      close: entry.close,
-    };
-  }
-  #scheduleLease(entry: LeaseEntry): void {
-    clearTimeout(entry.timer);
-    if (!entry.active) return;
-    try {
-      const policy = this.#authority.current(entry.caller, entry.projectId);
-      if (entry.source.runId)
-        this.#authority.authorize(
-          entry.caller,
-          {
-            type: "path",
-            value: this.#store.getWork(
-              this.#store.getRun(entry.source.runId).contextId,
-            ).pwd,
-            access: "read",
-          },
-          entry.projectId,
-        );
-      const remaining = Date.parse(policy.expiresAt) - Date.now();
-      if (remaining <= 0)
-        throw new AgentError(
-          "authorization_expired",
-          "The current authorization lease has expired.",
-        );
-      entry.timer = setTimeout(
-        () => this.#scheduleLease(entry),
-        Math.min(remaining + 1, 2_147_483_647),
-      );
-      entry.timer.unref();
-    } catch (cause) {
-      entry.controller.abort(cause);
-    }
-  }
-  #revokeLeases(caller: Caller): void {
-    const cause = new AgentError(
-      "authorization_revoked",
-      "The authenticated Cloud revoked this caller's authorization.",
-    );
-    for (const entry of this.#leases)
-      if (
-        callerKey(entry.caller) === callerKey(caller) &&
-        entry.caller.grantId === caller.grantId
-      )
-        entry.controller.abort(cause);
-  }
-  async #refreshLease(entry: LeaseEntry): Promise<void> {
-    if (!entry.active) return;
-    if (entry.refreshing) return entry.refreshing;
-    entry.refreshing = (async () => {
-      const observed = this.#authority.capture(entry.caller, entry.projectId);
-      if (
-        Date.parse(observed.context.authorization.expiresAt) - Date.now() >
-        15000
-      )
-        return;
-      const fresh = await this.#control().request(
-        "authorization.refresh",
-        observed.context,
-        entry.source,
-        entry.signal,
-        10000,
-      );
-      if (entry.active) {
-        this.#authority.refresh(observed, fresh.authorization);
-        this.#scheduleLease(entry);
-      }
-    })();
-    try {
-      await entry.refreshing;
-    } catch (cause) {
-      if (
-        isAgentError(cause) &&
-        [
-          "forbidden",
-          "unauthorized",
-          "grant_revoked",
-          "grant_expired",
-          "authorization_denied",
-          "authorization_revoked",
-          "authorization_expired",
-        ].includes(cause.code)
-      )
-        entry.controller.abort(cause);
-      throw cause;
-    } finally {
-      entry.refreshing = undefined;
-    }
-  }
   #authorize(
     caller: Caller,
     target: {
@@ -1337,22 +1174,12 @@ export class AgentRuntime {
       "authorization_scope_mismatch",
       "The accepted run origin must retain its actual work Project scope.",
     );
-    const lease = this.#startLease(
+    const runScope = this.#scope(
       context.caller,
-      { runId: services.runId, originInvocationId: origin.id },
       services.signal,
+      services.runId,
       context.authorization.projectId ?? null,
     );
-    const stop = () => {
-      if (!this.#closing && !services.signal.aborted) {
-        const cause = lease.scope.signal.reason;
-        this.#engine.stopAcceptedRun(services.runId, {
-          code: isAgentError(cause) ? cause.code : "authorization_revoked",
-        });
-      }
-    };
-    if (lease.scope.signal.aborted) stop();
-    else lease.scope.signal.addEventListener("abort", stop, { once: true });
     const announce = this.#connection.send({
       type: "event",
       name: "agent.run.changed",
@@ -1372,7 +1199,7 @@ export class AgentRuntime {
       context,
       services,
       announced: announce,
-      lease,
+      scope: runScope,
       notify: () => {
         if (this.#closed) return;
         const row = this.#store.getRun(services.runId);
@@ -1391,7 +1218,6 @@ export class AgentRuntime {
             })
             .catch(() => {});
         if (terminalStatuses.has(row.status)) {
-          lease.close();
           this.#engine.off(services.runId, entry.notify);
           this.#runs.delete(services.runId);
         }
@@ -1401,9 +1227,9 @@ export class AgentRuntime {
     this.#engine.on(services.runId, entry.notify);
     return entry;
   }
-  async #refresh(entry: AcceptedRun): Promise<void> {
+  async #checkAccepted(entry: AcceptedRun): Promise<void> {
     await entry.announced;
-    await entry.lease.refresh();
+    entry.scope.assertCurrent();
   }
   #track(task: Promise<void>): void {
     this.#streams.add(task);
@@ -1478,22 +1304,18 @@ export class AgentRuntime {
         signal,
       );
       prepared = { control, stream: output.stream };
-      const lease = this.#startLease(
+      const streamScope = this.#scope(
         context.caller,
-        {
-          streamId: output.stream.streamId,
-          originInvocationId: originId ?? invoke!.id,
-        },
         signal,
+        runId,
         context.authorization.projectId ?? null,
       );
       const task = this.#data(control)
-        .sendFixedBody(output.stream, bytes, lease.scope.signal)
+        .sendFixedBody(output.stream, bytes, streamScope.signal)
         .catch((cause) =>
           this.#failedStream(control, context, output.stream, cause),
         )
         .finally(() => {
-          lease.close();
           permit.release();
         });
       this.#track(task);
@@ -1527,7 +1349,7 @@ export class AgentRuntime {
         "The original Host session did not provide this capability.",
       );
       await accepted.announced;
-      await this.#refresh(accepted);
+      await this.#checkAccepted(accepted);
       binding.assertCurrent();
       const signal = options?.signal
         ? AbortSignal.any([binding.signal, options.signal])
@@ -1606,7 +1428,7 @@ export class AgentRuntime {
   ): Promise<AttachmentSource> {
     const accepted = this.#accepted(services);
     await accepted.announced;
-    await this.#refresh(accepted);
+    await this.#checkAccepted(accepted);
     if (typeof reference.sourceId === "string") {
       const control = this.#control();
       const controllerCaller =
@@ -1708,7 +1530,7 @@ export class AgentRuntime {
       "The transfer needs its accepted run origin.",
     );
     await accepted.announced;
-    await this.#refresh(accepted);
+    await this.#checkAccepted(accepted);
     const context = this.#context(
       binding.caller,
       accepted.context.authorization.projectId ?? null,
@@ -1768,21 +1590,7 @@ export class AgentRuntime {
     validateConnectionV2(message.connection, this.#connection.binding);
     if (message.name === "agent.catalog.sync")
       await this.#catalog.sync(message.data, signal);
-    else if (message.name === "agent.authorization.changed") {
-      if (message.data.authorization === null) {
-        this.#authority.revoke(message.data.caller);
-        this.#revokeLeases(message.data.caller);
-      } else {
-        this.#authority.observe({
-          caller: message.data.caller,
-          authorization: message.data.authorization,
-          connection: message.connection,
-        });
-        for (const lease of this.#leases)
-          if (callerKey(lease.caller) === callerKey(message.data.caller))
-            this.#scheduleLease(lease);
-      }
-    } else
+    else
       throw new AgentError(
         "invalid_control_direction",
         "This event is not an Agent application entry.",
@@ -1812,9 +1620,6 @@ export class AgentRuntime {
         "An owner Console session has only its declared Project and managed-process operations.",
       );
     this.#authority.observe(message.context);
-    for (const lease of this.#leases)
-      if (callerKey(lease.caller) === callerKey(message.context.caller))
-        this.#scheduleLease(lease);
     return this.#invocation.run(copy(message), async () => {
       if (message.context.caller.source !== "owner_session")
         await this.#restoreConfigurations(message.context.caller);
@@ -2363,22 +2168,18 @@ export class AgentRuntime {
         signal,
       );
       prepared = { context, stream };
-      const lease = this.#startLease(
-        caller,
-        { streamId: stream.streamId, originInvocationId: invoke.id },
-        this.#lifetime.signal,
-      );
+      const streamScope = this.#scope(caller, this.#lifetime.signal);
       const task = (async () => {
         let source: Awaited<ReturnType<ArtifactStore["open"]>> | undefined;
         try {
           source = await this.#artifacts.open(input.uri, {
             ...scope,
-            signal: lease.scope.signal,
+            signal: streamScope.signal,
           });
           await this.#data(control).sendFixedBody(
             stream,
             source.stream,
-            lease.scope.signal,
+            streamScope.signal,
           );
           await source.closed;
         } finally {
@@ -2388,7 +2189,6 @@ export class AgentRuntime {
       })()
         .catch((cause) => this.#failedStream(control, context, stream, cause))
         .finally(() => {
-          lease.close();
           permit.release();
         });
       this.#track(task);
@@ -2475,7 +2275,6 @@ export class AgentRuntime {
     };
     const controller = new AbortController();
     const signal = AbortSignal.any([this.#lifetime.signal, controller.signal]);
-    let lease: ApplicationAuthorityLease | undefined;
     let transportClosed: Promise<void> | undefined;
     let enteredCore = false;
     const knownClosure = (closed: Promise<void>) => {
@@ -2502,17 +2301,14 @@ export class AgentRuntime {
         "transfer_origin_unavailable",
         "The transfer has no original approved channel source.",
       );
-      lease = this.#startLease(
+      const transferScope = this.#scope(
         caller,
-        {
-          transferId: input.transferId,
-          originInvocationId: source.originInvocationId,
-        },
         signal,
+        undefined,
         reservation.context.authorization.projectId ?? null,
       );
       if (input.stream.direction === "agent-to-cloud") {
-        const stream = data.openWrite(input.stream, lease.scope.signal, claim);
+        const stream = data.openWrite(input.stream, transferScope.signal, claim);
         enteredCore = true;
         return await this.#transfers.commitClaim(reservation.core, {
           download: stream.writable,
@@ -2521,7 +2317,7 @@ export class AgentRuntime {
       }
       // The existing reservation is consumed before waiting for response headers
       // or the Host's first upload byte. A native Readable supplies the deferred I/O.
-      const opening = data.openRead(input.stream, lease.scope.signal, claim);
+      const opening = data.openRead(input.stream, transferScope.signal, claim);
       void opening.catch(() => {});
       let actual: Awaited<typeof opening> | undefined;
       const readable = Readable.from(
@@ -2560,7 +2356,6 @@ export class AgentRuntime {
       }
       throw cause;
     } finally {
-      lease?.close();
       this.#reservations.delete(input.reservationId);
     }
   }
@@ -2572,7 +2367,6 @@ export class AgentRuntime {
         new AgentError("runtime_closed", "The Agent process is stopping."),
       );
       await Promise.all([...this.#shutdownJoins].map((join) => join()));
-      clearInterval(this.#refreshTimer);
       await this.#catalog.close();
       if (this.#engine)
         for (const entry of this.#runs.values())

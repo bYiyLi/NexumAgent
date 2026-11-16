@@ -21,7 +21,6 @@ function fixture(t) {
     outside = path.join(root, "outside");
   for (const dir of [work, approved, outside]) mkdirSync(dir);
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  let now = Date.now();
   const connection = {
     agentId: "agent",
     profile: "development",
@@ -29,7 +28,7 @@ function fixture(t) {
     bootId: "boot_" + "a".repeat(32),
     connectionId: "connection-one",
   };
-  const authority = new AgentAuthority(connection, work, () => now);
+  const authority = new AgentAuthority(connection, work);
   authority.connect(connection);
   const caller = {
     principalId: "owner",
@@ -44,7 +43,6 @@ function fixture(t) {
       allowedRoots: [approved],
       budgets: { textBytes: 65536 },
       revision: "one",
-      expiresAt: new Date(now + 20000).toISOString(),
     },
   });
   return {
@@ -56,9 +54,6 @@ function fixture(t) {
     connection,
     caller,
     context,
-    advance(ms) {
-      now += ms;
-    },
   };
 }
 
@@ -91,23 +86,16 @@ test("current Agent authority is scoped to an exact verified Grant and captured 
   );
 });
 
-test("a delayed refresh cannot erase a revocation or a newer authenticated observation", (t) => {
+test("a newer authenticated invocation updates only its own current policy", (t) => {
   const f = fixture(t);
   f.authority.observe(f.context());
-  const captured = f.authority.capture(f.caller);
-  f.authority.revoke(f.caller);
-  assert.equal(f.authority.refresh(captured, f.context().authorization), false);
-  assert.throws(() => f.authority.current(f.caller), { code: "forbidden" });
-  f.authority.observe(f.context());
-  const earlier = f.authority.capture(f.caller),
-    newer = f.context();
+  const newer = f.context();
   newer.authorization.revision = "newer";
   f.authority.observe(newer);
-  assert.equal(f.authority.refresh(earlier, f.context().authorization), false);
   assert.equal(f.authority.current(f.caller).revision, "newer");
 });
 
-test("concurrent Agent and Project policy scopes retain their own roots, metadata and refresh CAS", (t) => {
+test("concurrent Agent and Project policies retain their own roots and metadata", (t) => {
   const f = fixture(t);
   const agent = f.context();
   f.authority.observe(agent);
@@ -118,7 +106,6 @@ test("concurrent Agent and Project policy scopes retain their own roots, metadat
     projectName: "A",
   });
   f.authority.observe(projectA);
-  const first = f.authority.capture(f.caller, "project-a");
   const projectB = f.context();
   Object.assign(projectB.authorization, {
     projectId: "project-b",
@@ -130,13 +117,11 @@ test("concurrent Agent and Project policy scopes retain their own roots, metadat
   assert.equal(f.authority.current(f.caller).projectId, undefined);
   assert.equal(f.authority.current(f.caller, "project-a").projectName, "A");
   assert.equal(f.authority.current(f.caller, "project-b").projectName, "B");
-  assert.equal(
-    f.authority.refresh(first, {
-      ...projectA.authorization,
-      revision: "a-refreshed",
-    }),
-    true,
-  );
+  f.authority.observe({
+    ...projectA,
+    authorization: { ...projectA.authorization, revision: "a-refreshed" },
+  });
+  assert.equal(f.authority.current(f.caller, "project-a").revision, "a-refreshed");
   assert.equal(f.authority.current(f.caller, "project-b").revision, "one");
   assert.throws(
     () =>
@@ -152,16 +137,7 @@ test("concurrent Agent and Project policy scopes retain their own roots, metadat
     { type: "path", value: f.outside, access: "read" },
     "project-b",
   );
-  const current = f.authority.capture(f.caller, "project-a");
-  assert.throws(() => f.authority.refresh(current, projectB.authorization), {
-    code: "authorization_scope_mismatch",
-  });
-  f.authority.revoke(f.caller);
-  for (const id of [null, "project-a", "project-b"])
-    assert.throws(() => f.authority.current(f.caller, id), {
-      code: "forbidden",
-    });
-  assert.equal(f.authority.refresh(current, projectA.authorization), false);
+  assert.equal(f.authority.current(f.caller, "project-b").projectRoot, f.outside);
 });
 
 test("an owner session has its own bounded policy identity and cannot borrow or mint an MCP Grant", (t) => {
@@ -217,8 +193,6 @@ test("an owner session has its own bounded policy identity and cannot borrow or 
       caller: { ...caller, grantId: "forged" },
     }),
   );
-  f.authority.revoke(caller);
-  assert.throws(() => f.authority.current(caller), { code: "forbidden" });
 });
 
 test("declared process execution can resolve a system executable while data reads stay within approved roots", (t) => {
@@ -240,19 +214,18 @@ test("declared process execution can resolve a system executable while data read
   );
 });
 
-test("expired authority stops new managed access without changing a Run or borrowing another Grant", (t) => {
+test("current policy has no short expiry and a different Grant cannot borrow it", (t) => {
   const f = fixture(t);
   f.authority.observe(f.context());
-  f.advance(21000);
-  assert.throws(() => f.authority.current(f.caller), {
-    code: "authorization_expired",
-  });
+  assert.equal(Object.hasOwn(f.authority.current(f.caller), "expiresAt"), false);
+  assert.equal(f.authority.current(f.caller).revision, "one");
   f.authority.observe({
     ...f.context(),
     caller: { ...f.caller, grantId: "fresh-other-grant" },
   });
-  assert.throws(() => f.authority.current(f.caller), {
-    code: "authorization_expired",
+  assert.equal(f.authority.current(f.caller).revision, "one");
+  assert.throws(() => f.authority.current({ ...f.caller, grantId: "unknown" }), {
+    code: "forbidden",
   });
 });
 
@@ -278,18 +251,17 @@ test("same-boot reconnection retains policy but every new observation uses the c
     );
 });
 
-test("pure cleanup keeps original identity after revocation and cannot obtain a new access permit", (t) => {
+test("pure cleanup retains original identity and cannot invent new access", (t) => {
   const f = fixture(t),
     old = f.context();
   f.authority.observe(old);
-  f.authority.revoke(f.caller);
   const current = { ...f.connection, connectionId: "connection-two" };
   f.authority.connect(current);
   assert.equal(
     f.authority.cleanupContext(f.caller, old).connection.connectionId,
     "connection-two",
   );
-  assert.throws(() => f.authority.current(f.caller), { code: "forbidden" });
+  assert.equal(f.authority.current(f.caller).revision, "one");
   assert.throws(
     () => f.authority.cleanupContext({ ...f.caller, grantId: "other" }, old),
     { code: "forbidden" },

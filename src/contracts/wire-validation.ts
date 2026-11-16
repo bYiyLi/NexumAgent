@@ -2,7 +2,6 @@ import { AgentError, requireCondition } from "./errors.js";
 import { canonicalJson, requestWindow } from "./json.js";
 import { validateContract } from "./validation.js";
 import {
-  POLICY_LEASE_MS_V2,
   MAX_RESOURCES_READ_BODY_BYTES_V2,
   MAX_STATE_VALUE_BYTES_V2,
   MAX_STATE_RECEIPT_BYTES_V2,
@@ -120,14 +119,6 @@ export function validateWireSemantics(contract: string, value: unknown): void {
     } else if (data.type === "event") {
       if (record(data.data).caller !== undefined)
         callerFeatures(record(record(data.data).caller));
-      if (data.name === "agent.authorization.changed") {
-        const policy = record(data.data).authorization;
-        if (policy !== null)
-          check(
-            record(policy).agentId === record(data.connection).agentId,
-            "The policy event targets a different Agent.",
-          );
-      }
     }
   } else if (contract.startsWith("wire.input:")) {
     validateOperation(contract.slice("wire.input:".length), data, false);
@@ -477,21 +468,6 @@ function validateOperation(
   }
 }
 
-/** Called at admission/refresh against the current trusted clock, never by schema fixtures. */
-export function validatePolicyLeaseV2(
-  policy: WireAuthorizationV2,
-  now = Date.now(),
-): void {
-  validateContract("wire.type:Authorization", policy);
-  const expiry = Date.parse(policy.expiresAt);
-  requireCondition(
-    Number.isSafeInteger(now) &&
-      expiry > now &&
-      expiry <= now + POLICY_LEASE_MS_V2,
-    "authorization_expired",
-    "The current policy lease is expired or exceeds its allowed lifetime.",
-  );
-}
 export function validateSubmissionV2(
   input: WireRunStartInputV2,
   now = Date.now(),

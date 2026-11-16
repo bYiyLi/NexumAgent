@@ -217,26 +217,6 @@
       },
       "required": ["sequence", "observedAt", "projects"],
       "additionalProperties": false
-    },
-    "agent.authorization.changed": {
-      "type": "object",
-      "properties": {
-        "caller": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Caller"
-        },
-        "authorization": {
-          "anyOf": [
-            {
-              "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Authorization"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": ["caller", "authorization"],
-      "additionalProperties": false
     }
   }
 }

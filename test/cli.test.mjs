@@ -147,22 +147,7 @@ async function nativeCliScenario(t, unavailableProbe) {
         const message = JSON.parse(raw.toString());
         if (message.type === "result" || message.type === "error")
           received.set(message.id, message);
-        if (
-          message.type === "invoke" &&
-          message.operation === "authorization.refresh"
-        )
-          peer.send(
-            JSON.stringify({
-              type: "result",
-              id: message.id,
-              output: {
-                authorization: {
-                  ...message.context.authorization,
-                  expiresAt: new Date(Date.now() + 30000).toISOString(),
-                },
-              },
-            }),
-          );
+
       });
     });
   });
@@ -268,7 +253,6 @@ AgentRuntime.prototype.dispatch=async function(...args){
         allowedRoots: [],
         budgets: {},
         revision: "one",
-        expiresAt: new Date(Date.now() + 30000).toISOString(),
       },
     };
     socket.send(

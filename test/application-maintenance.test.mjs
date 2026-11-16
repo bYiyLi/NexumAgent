@@ -172,7 +172,6 @@ async function fixture(t) {
         fileBytes: 268435456,
       },
       revision: newId("policy"),
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
       ...extra,
     };
   }
@@ -223,17 +222,7 @@ async function fixture(t) {
           input: clone(input),
         });
         let output;
-        if (operation === "authorization.refresh") {
-          if (!policyAllowed)
-            throw new AgentError("forbidden", "Current Grant revoked.");
-          output = {
-            authorization: authorization(
-              context.authorization.projectId
-                ? { projectId: context.authorization.projectId }
-                : {},
-            ),
-          };
-        } else if (operation === "stream.prepare") {
+        if (operation === "stream.prepare") {
           const { originInvocationId, runId, resourceUri, ...source } = input;
           const ref = { streamId: newId("stream"), ...source };
           streams.set(ref.streamId, { ref, received: gate(), reads: 0 });
@@ -585,18 +574,6 @@ async function fixture(t) {
     disconnect() {
       currentPort.abort();
     },
-    async revokeEvent() {
-      policyAllowed = false;
-      await runtime.event(
-        {
-          type: "event",
-          name: "agent.authorization.changed",
-          connection: currentPort.binding,
-          data: { caller, authorization: null },
-        },
-        new AbortController().signal,
-      );
-    },
     revoke() {
       policyAllowed = false;
     },
@@ -622,12 +599,9 @@ test("accepted maintenance returns the durable operation before Cloud execution 
   assert.equal(receipt.execution.operationId, operation.operationId);
   assert.equal(f.calls.apply, 0);
   assert.equal(f.records.get(created.requestId).execution, undefined);
-  assert.ok(
-    f.requests.some(
-      (item) =>
-        item.operation === "authorization.refresh" &&
-        item.input.maintenanceRequestId === created.requestId,
-    ),
+  assert.equal(
+    f.requests.some((item) => item.operation === "authorization.refresh"),
+    false,
   );
   begin.resolve();
   await until(
@@ -836,26 +810,6 @@ test("maintenance JSON bodies use fixed hashes and the actual four shared slots 
   assert.equal(f.calls.oauthStart, 1);
   assert.equal(f.calls.oauthComplete, 1);
   safe([f.events, f.requests]);
-});
-
-test("a current Grant revocation propagates a stop request to its reachable independently executing native maintenance", async (t) => {
-  const f = await fixture(t),
-    created = await f.create();
-  f.approve(created.requestId);
-  await f.invoke("agent.maintenance.execute", { requestId: created.requestId });
-  await until(
-    () => f.native[0]?.ready,
-    "The authorized native execution must actually be running",
-  );
-  await f.revokeEvent();
-  await until(
-    () => f.native[0].backend.facts().stopRequested,
-    "Revocation must reach its in-flight native stop signal",
-  );
-  await until(
-    () => f.native[0].backend.facts().closed,
-    "Revoked native work must confirm actual closure",
-  );
 });
 
 test("shutdown joins a real OAuth body and its backend cleanup before closing SQLite", async (t) => {

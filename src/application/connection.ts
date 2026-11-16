@@ -27,7 +27,6 @@ const maximum = 1024 * 1024;
 const reverseOperations: ReadonlySet<WireOperationV2> = new Set([
   "transfer.prepare",
   "transfer.revoke",
-  "authorization.refresh",
   "host.request",
   "attachment.open",
   "stream.prepare",
@@ -44,7 +43,6 @@ const reverseOperations: ReadonlySet<WireOperationV2> = new Set([
 ]);
 const cloudEvents = new Set([
   "agent.catalog.sync",
-  "agent.authorization.changed",
 ]);
 const permanent = new Map([
   ["invalid_agent_credential", 401],

@@ -187,17 +187,13 @@ export class MaintenanceApplication {
     const accepted = Promise.withResolvers<void>();
     // The Core operation is independent of the observing WebSocket and the original script.
     const signal = AbortSignal.any([controller.signal, this.components.signal]);
-    const lease = this.components.startLease(
-      scope.caller,
-      { maintenanceRequestId: requestId, originInvocationId: message.id },
-      signal,
-    );
     const executionScope: MaintenanceScope = {
-      ...lease.scope,
+      ...this.components.scope(scope.caller, signal),
       onAccepted: () => accepted.resolve(),
     };
     const task = (async () => {
-      await lease.refresh();
+      executionScope.assertCurrent();
+      await Promise.resolve();
       return await this.requests.execute(requestId, executionScope);
     })();
     const entry: Execution = {
@@ -215,7 +211,6 @@ export class MaintenanceApplication {
         (error: unknown) => accepted.reject(error),
       )
       .finally(() => {
-        lease.close();
         if (this.#executions.get(requestId) === entry)
           this.#executions.delete(requestId);
       });

@@ -734,51 +734,6 @@
           "maxLength": 256
         },
         "operation": {
-          "const": "authorization.refresh"
-        },
-        "context": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/McpInvocationContext"
-        },
-        "input": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/authorization.refresh.input"
-        }
-      },
-      "required": ["type", "id", "operation", "context", "input"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "const": "result"
-        },
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "operation": {
-          "const": "authorization.refresh"
-        },
-        "output": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/authorization.refresh.output"
-        }
-      },
-      "required": ["type", "id", "operation", "output"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "const": "invoke"
-        },
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "operation": {
           "const": "host.request"
         },
         "context": {
@@ -1122,25 +1077,6 @@
         },
         "data": {
           "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.catalog.changed"
-        }
-      },
-      "required": ["type", "name", "connection", "data"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "const": "event"
-        },
-        "name": {
-          "const": "agent.authorization.changed"
-        },
-        "connection": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Connection"
-        },
-        "data": {
-          "$ref": "https://schemas.nexum.local/agent/v2/wire/events.schema.json#/$defs/agent.authorization.changed"
         }
       },
       "required": ["type", "name", "connection", "data"],

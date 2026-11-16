@@ -25,8 +25,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -80,8 +79,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -136,8 +134,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -191,8 +188,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -246,8 +242,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -303,8 +298,7 @@
             "imageBytes": 10485760,
             "unbounded": 10
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -354,8 +348,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -410,8 +403,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -464,8 +456,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -520,8 +511,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -576,8 +566,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -633,8 +622,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -1235,36 +1223,6 @@
     }
   },
   {
-    "name": "policy revocation is an event not a fake run stop",
-    "contract": "wire",
-    "valid": true,
-    "value": {
-      "type": "event",
-      "name": "agent.authorization.changed",
-      "connection": {
-        "agentId": "agent_a",
-        "profile": "development",
-        "bootId": "boot_a",
-        "cloudEnvironment": "development",
-        "connectionId": "conn_a"
-      },
-      "data": {
-        "caller": {
-          "principalId": "user_a",
-          "clientId": "client_a",
-          "grantId": "grant_a",
-          "hostRef": "host_a",
-          "hostCapabilities": {
-            "sampling": true,
-            "elicitation": false,
-            "roots": true
-          }
-        },
-        "authorization": null
-      }
-    }
-  },
-  {
     "name": "catalog sync authenticated machine event",
     "contract": "wire",
     "valid": true,
@@ -1430,8 +1388,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -1486,8 +1443,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -1529,8 +1485,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -1584,8 +1539,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -1865,44 +1819,6 @@
       "projectId": null,
       "closed": true,
       "agentConfirmed": false
-    }
-  },
-  {
-    "name": "policy event cannot cross Agent binding",
-    "contract": "wire",
-    "valid": false,
-    "value": {
-      "type": "event",
-      "name": "agent.authorization.changed",
-      "connection": {
-        "agentId": "agent_a",
-        "profile": "development",
-        "bootId": "boot_a",
-        "cloudEnvironment": "development",
-        "connectionId": "conn_a"
-      },
-      "data": {
-        "caller": {
-          "principalId": "user_a",
-          "clientId": "client_a",
-          "grantId": "grant_a",
-          "hostRef": "host_a",
-          "hostCapabilities": {
-            "sampling": true,
-            "elicitation": false,
-            "roots": true
-          }
-        },
-        "authorization": {
-          "agentId": "other",
-          "allowedRoots": ["/tmp/work"],
-          "budgets": {
-            "imageBytes": 10485760
-          },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
-        }
-      }
     }
   },
   {
@@ -2679,146 +2595,6 @@
     }
   },
   {
-    "name": "lease refresh runId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": true,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "runId": "run_original"
-    }
-  },
-  {
-    "name": "lease refresh maintenanceRequestId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": true,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "maintenanceRequestId": "maint_req_original"
-    }
-  },
-  {
-    "name": "lease refresh transferId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": true,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    }
-  },
-  {
-    "name": "lease refresh streamId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": true,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "streamId": "stream_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed runId maintenanceRequestId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "runId": "run_original",
-      "maintenanceRequestId": "maint_req_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed runId transferId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "runId": "run_original",
-      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed runId streamId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "runId": "run_original",
-      "streamId": "stream_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed maintenanceRequestId transferId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "maintenanceRequestId": "maint_req_original",
-      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed maintenanceRequestId streamId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "maintenanceRequestId": "maint_req_original",
-      "streamId": "stream_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects mixed transferId streamId",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "transferId": "tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "streamId": "stream_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects missing source",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original"
-    }
-  },
-  {
-    "name": "lease refresh requires original invocation",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "maintenanceRequestId": "maint_req_original"
-    }
-  },
-  {
-    "name": "lease refresh rejects malformed maintenance identity",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "maintenanceRequestId": "run_fake"
-    }
-  },
-  {
-    "name": "lease refresh rejects nonregistered transfer syntax",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "transferId": "tr_not-a-live-id"
-    }
-  },
-  {
-    "name": "lease refresh rejects caller identity in arguments",
-    "contract": "wire.input:authorization.refresh",
-    "valid": false,
-    "value": {
-      "originInvocationId": "rpc_original",
-      "runId": "run_original",
-      "userId": "injected"
-    }
-  },
-  {
     "name": "resource read independent complete body",
     "contract": "wire.output:agent.resources.read",
     "valid": true,
@@ -3372,8 +3148,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -3415,8 +3190,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -3462,8 +3236,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -3659,8 +3432,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4280,8 +4052,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4322,8 +4093,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4614,8 +4384,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4652,7 +4421,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
@@ -4691,8 +4459,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4731,8 +4498,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4782,8 +4548,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4819,8 +4584,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -4857,8 +4621,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -5107,8 +4870,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -5149,8 +4911,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -5925,8 +5686,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -5965,8 +5725,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6000,8 +5759,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6042,8 +5800,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6079,8 +5836,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6121,8 +5877,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6159,7 +5914,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
@@ -6276,7 +6030,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
@@ -6321,7 +6074,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
@@ -6360,8 +6112,7 @@
           "budgets": {
             "imageBytes": 10485760
           },
-          "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z"
+          "revision": "policy_1"
         },
         "connection": {
           "agentId": "agent_a",
@@ -6398,7 +6149,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
@@ -6438,7 +6188,6 @@
             "imageBytes": 10485760
           },
           "revision": "policy_1",
-          "expiresAt": "2026-11-14T00:00:00.000Z",
           "projectId": "project_a",
           "projectRoot": "/tmp/work",
           "projectName": "Work"
