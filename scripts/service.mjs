@@ -67,6 +67,9 @@ namespace NexumAgentService {
     static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool FreeConsole();
+    public static void DetachConsole() { FreeConsole(); }
     public static IntPtr Bind() {
       var job = CreateJobObject(IntPtr.Zero, null);
       if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -240,6 +243,7 @@ Add-Type -TypeDefinition @'
 ${windowsServiceJob}
 '@
 $nexumJob = [NexumAgentService.JobOwner]::Bind()
+[NexumAgentService.JobOwner]::DetachConsole()
 $nexumStart = New-Object System.Diagnostics.ProcessStartInfo
 $nexumStart.FileName = ${ps(node)}
 $nexumStart.Arguments = ${ps(childArguments)}

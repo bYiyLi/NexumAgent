@@ -87,6 +87,8 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.match(plan.content, /-WindowStyle/);
       assert.match(plan.content, /Hidden/);
       assert.match(plan.launcher, /New-Object System\.Diagnostics\.ProcessStartInfo/);
+      assert.match(plan.launcher, /\[NexumAgentService\.JobOwner\]::DetachConsole\(\)/);
+      assert.match(plan.launcher, /static extern bool FreeConsole\(\)/);
       assert.match(plan.launcher, /\$nexumStart\.UseShellExecute = \$false/);
       assert.match(plan.launcher, /\$nexumStart\.CreateNoWindow = \$true/);
       assert.match(plan.launcher, /\$nexumStart\.RedirectStandardOutput = \$true/);
