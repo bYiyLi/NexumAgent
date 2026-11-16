@@ -33,6 +33,22 @@ const npmBin = (root) =>
       ? "node_modules/npm/bin/npm-cli.js"
       : "lib/node_modules/npm/bin/npm-cli.js",
   );
+// Mainland timezone IDs, not an ambiguous UTC+8 offset, select the China mirror.
+export function npmRegistries(
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+) {
+  const mainland = [
+    "Asia/Shanghai",
+    "Asia/Chongqing",
+    "Asia/Harbin",
+    "Asia/Urumqi",
+    "PRC",
+  ].includes(timeZone);
+  return [
+    ...(mainland ? ["https://registry.npmmirror.com/"] : []),
+    "https://registry.npmjs.org/",
+  ];
+}
 const fail = (condition, reason) => {
   if (!condition) throw new Error(reason);
 };
@@ -159,20 +175,30 @@ async function packageStage(stage, version, managedNode, source) {
   const scratch = path.join(stage, ".resolve");
   let from = source;
   if (!from) {
-    await directory(scratch);
-    exec(nodeBin(managedNode), [
-      npmBin(managedNode),
-      "install",
-      "--prefix",
-      scratch,
-      "--no-save",
-      "--no-package-lock",
-      "--omit=dev",
-      "--no-audit",
-      "--no-fund",
-      "--registry=https://registry.npmjs.org/",
-      `@nexum-hub/agent@${version}`,
-    ]);
+    const registries = npmRegistries();
+    for (const [index, registry] of registries.entries()) {
+      // Retry package resolution only; the Agent is activated after this stage.
+      await rm(scratch, { recursive: true, force: true });
+      await directory(scratch);
+      try {
+        exec(nodeBin(managedNode), [
+          npmBin(managedNode),
+          "install",
+          "--prefix",
+          scratch,
+          "--no-save",
+          "--no-package-lock",
+          "--omit=dev",
+          "--no-audit",
+          "--no-fund",
+          `--registry=${registry}`,
+          `@nexum-hub/agent@${version}`,
+        ]);
+        break;
+      } catch (error) {
+        if (index === registries.length - 1) throw error;
+      }
+    }
     from = path.join(scratch, "node_modules", "@nexum-hub", "agent");
   }
   const manifest = JSON.parse(

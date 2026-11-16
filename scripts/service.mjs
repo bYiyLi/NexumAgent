@@ -239,6 +239,9 @@ export function servicePlan({
     "-NoLogo",
     "-NoProfile",
     "-NonInteractive",
+    // Task Scheduler must not expose a console window that a user can close.
+    "-WindowStyle",
+    "Hidden",
     "-ExecutionPolicy",
     "Bypass",
     "-File",

@@ -21,6 +21,7 @@ import {
   currentWindowsSid,
   loadServicePlan,
 } from "../scripts/service.mjs";
+import { npmRegistries } from "../scripts/npm-install.mjs";
 
 const temporary = async (t) => {
   const root = realpathSync.native(
@@ -83,6 +84,8 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
     }
     if (platform === "win32") {
       assert.match(plan.content, /<LogonType>InteractiveToken/);
+      assert.match(plan.content, /-WindowStyle/);
+      assert.match(plan.content, /Hidden/);
       assert.match(plan.content, /<RunLevel>LeastPrivilege/);
       assert.match(plan.content, /<ExecutionTimeLimit>PT0S/);
       assert.match(plan.content, /<Count>255/);
@@ -93,6 +96,17 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.ok(plan.launcher.includes("Start-Sleep -Seconds 10"));
       assert.ok(plan.launcher.includes("Remove-Item Env:NODE_OPTIONS"));
     }
+  }
+});
+test("npm mirror follows mainland timezone rather than UTC offset", () => {
+  for (const zone of ["Asia/Shanghai", "Asia/Urumqi"]) {
+    assert.deepEqual(npmRegistries(zone), [
+      "https://registry.npmmirror.com/",
+      "https://registry.npmjs.org/",
+    ]);
+  }
+  for (const zone of ["Asia/Singapore", "Asia/Taipei", "UTC"]) {
+    assert.deepEqual(npmRegistries(zone), ["https://registry.npmjs.org/"]);
   }
 });
 test("npm-managed native service launches a stable local runner rather than npx or an old version", async (t) => {
