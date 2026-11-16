@@ -1,30 +1,31 @@
-name: Publish npm next
+name: Publish npm
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
-    inputs:
-      package:
-        description: Which npm package to publish
-        type: choice
-        required: true
-        options:
-          - sdk
-          - agent
-          - browser
 
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: nexum-agent-npm-release
+  cancel-in-progress: false
+
 jobs:
   publish:
-    if: github.repository == 'bYiyLi/NexumAgent' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'bYiyLi/NexumAgent' &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      PACKAGE: ${{ inputs.package }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.34.5
@@ -32,57 +33,21 @@ jobs:
         with:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
+      - name: Use npm with OIDC dist-tag support
+        run: npm install --global npm@11.21.0
       - run: pnpm install --frozen-lockfile
-      - if: inputs.package == 'agent'
+      - name: Determine version from tag or manual run
+        run: node scripts/npm-release.mjs prepare
+      - name: Check Agent runtime and SDK contract
         run: pnpm check
-      - if: inputs.package == 'sdk' || inputs.package == 'browser'
-        run: node scripts/build-extension-api.mjs
-      - if: inputs.package == 'sdk'
-        run: node --test test/extension-package.test.mjs
-      - if: inputs.package == 'browser'
-        run: pnpm build
-      - if: inputs.package == 'browser'
-        run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
-      - if: inputs.package == 'browser'
-        run: pnpm --dir packages/browser check
-      - name: Verify unified 0.0.1 package identity and tarball boundaries
+      - name: Build optional Browser and check its package
         run: |
-          node --input-type=module - <<'JS'
-          import assert from 'node:assert/strict';
-          import {execFileSync} from 'node:child_process';
-          import {readFileSync} from 'node:fs';
-          import path from 'node:path';
-
-          const directories = {sdk:'packages/extension-api',agent:'.',browser:'packages/browser'};
-          const names = {sdk:'@nexum-hub/sdk',agent:'@nexum-hub/agent',browser:'@nexum-hub/browser'};
-          const directory = directories[process.env.PACKAGE];
-          assert.ok(directory && names[process.env.PACKAGE]);
-          const manifest = JSON.parse(readFileSync(path.join(directory,'package.json'),'utf8'));
-          assert.equal(manifest.name, names[process.env.PACKAGE]);
-          assert.equal(manifest.version,'0.0.1');
-          assert.equal(manifest.private, false);
-          assert.equal(manifest.publishConfig?.tag,'next');
-          assert.equal(manifest.publishConfig?.access,'public');
-          assert.equal(manifest.license,'UNLICENSED');
-          const [pack] = JSON.parse(execFileSync('npm',['pack','--dry-run','--ignore-scripts','--json'],{cwd:directory,encoding:'utf8'}));
-          assert.equal(pack.name, manifest.name);
-          assert.equal(pack.version, manifest.version);
-          const files = pack.files.map(item=>item.path);
-          assert.ok(files.includes('package.json'));
-          const required = {sdk:['dist/index.js','dist/index.d.ts'],agent:['dist/cli.js','contracts/v2/common.schema.json'],browser:['dist/client/index.js','dist/extension/index.js','browser-extension/dist/development/manifest.json','browser-extension/dist/production/manifest.json','implementation.json']};
-          for(const file of required[process.env.PACKAGE]) assert.ok(files.includes(file),file);
-          for(const file of files) assert.doesNotMatch(file,/(^|\/)(node_modules|test|archive|\.git|\.nexum|src)(\/|$)|(^|\/)(\.env[^/]*|.*\.pem)$/);
-          if(process.env.PACKAGE === 'browser'){
-            const ledger = JSON.parse(readFileSync(path.join(directory,'implementation.json'),'utf8'));
-            const release = JSON.parse(readFileSync(path.join(directory,'browser-extension/release-info.json'),'utf8'));
-            assert.equal(ledger.packageVersion,manifest.version);
-            assert.equal(release.packageVersion,manifest.version);
-            assert.equal(release.extensionVersion,manifest.version);
-          }
-          console.log('Reviewed',manifest.name+'@'+manifest.version,'files:',files.length);
-          JS
-      - name: Publish reviewed preview via npm trusted publishing
-        working-directory: ${{ inputs.package == 'sdk' && 'packages/extension-api' || inputs.package == 'browser' && 'packages/browser' || '.' }}
+          node scripts/build-extension-api.mjs
+          pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
+          pnpm --dir packages/browser check
+      - name: Verify all three npm archives
+        run: node scripts/npm-release.mjs verify
+      - name: Publish SDK, Agent and Browser in dependency order
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
-        run: npm publish --access public --tag next --provenance --ignore-scripts
+        run: node scripts/npm-release.mjs publish

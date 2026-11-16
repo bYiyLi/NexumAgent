@@ -29,13 +29,17 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 
 [Nexum browser 完整设计与验收资料](docs/browser/README.md)包含 SDK、类型、插件连接、生命周期、结果、独立 npm 包和逐项验收，以及 Avru/原始接口资料的本地归档。[可选包候选实现](packages/browser/README.md)已开始实现并进行组件测试，不作为 Agent 默认依赖或默认安装项；完整能力、原生浏览器验收和发行尚未完成。
 
-## npm 开发版发布
+## npm 发布：Tag 正式版、手动测试版
 
-本仓库的 npm 目标包为 `@nexum-hub/agent`、`@nexum-hub/sdk` 和可选的 `@nexum-hub/browser`；首次统一发行版本为 **`0.0.1`**，验证期仍使用 npm `next` 分发标签，不预先标记稳定版 `latest`。发布入口为手动触发的 GitHub Actions `npm-next.yml`，依次选择 SDK → Agent → Browser，并固定只从 `main` 发行。三包当前标记 `UNLICENSED`，公开可安装不等于开源授权。已发布的 `@nexum-hub/sdk@0.0.1-next.0` 作为历史版本保留，不覆盖或重发。
+统一使用 GitHub Actions 的 `.github/workflows/npm-next.yml` 发行 `@nexum-hub/sdk`、`@nexum-hub/agent`、`@nexum-hub/browser`，三包同版，依次构建、检查、发布，并回读 npm Registry。只有发布者推送 `vX.Y.Z` Tag 才会触发正式版；手动运行该工作流（选择 `main`）只会发布 `next` 测试版。**普通推送 `main` 不自动发布 npm 包。**
 
-**首次 npm 发布需要 `@nexum-hub` scope 的真实发布权限。** 可在 GitHub 仓库 Secrets 临时设置有对应包权限的 `NPM_PUBLISH_TOKEN` 进行首发；首发成功后为三个包分别配置 GitHub Trusted Publisher：仓库 `bYiyLi/NexumAgent`、工作流文件 `npm-next.yml`，允许 `npm publish`，然后删除该临时 Secret。后续 CI 使用 OIDC，无需长期 npm Token。Token、OTP 和用户配置不能进入仓库或输出日志。
+- **正式版**：在已提交并推送到 `main` 的代码上执行 `git tag v0.0.2 && git push origin v0.0.2`，CI 从 Tag 解析 `0.0.2`，发布三个 `0.0.2` 包并将 dist-tag 设为 `latest`；非 `vX.Y.Z` 格式或不属于 `main` 历史的 Tag 不发布。
+- **测试版**：在 GitHub Actions 手动运行 `Publish npm`（或 `gh workflow run npm-next.yml --ref main`）。如尚无正式 Tag，默认以 `0.0.1` 为基线，自动生成 `0.0.1-next.<run_number>`；如果已有正式 Tag（例如 `v0.0.2`），则自动生成下一补丁测试版 `0.0.3-next.<run_number>`。`run_number` 是 GitHub Workflow 的唯一运行序号，不必人为维护版本。
+- **已发布版本不可覆盖**：在 Registry 中检查同版本实际 tarball 校验值；内容不一致时停止，而不是重发。如果内容完全一致，可复用不可变制品并按需要更新 dist-tag。已发布的三个 `0.0.1` 与历史 `@nexum-hub/sdk@0.0.1-next.0` 都保留；首次新的正式发布建议使用尚未占用的 `v0.0.2`。
 
-Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册系统用户服务或完成三平台安装验收。是否真正发布以 npm Registry 的版本和 dist-tag 为准。
+三个包继续保持 `UNLICENSED`，公开可安装不代表开源再分发授权。当前工作流仍接受 GitHub Secret `NPM_PUBLISH_TOKEN`；要取消它，应先为三个包配置与 `npm-next.yml` 匹配的 Trusted Publisher，分别允许 `npm publish` 和 `npm dist-tag`，完成 OIDC 验收后再撤销 Token。Token、OTP 和私有配置不能进入仓库或 CI 日志。
+
+Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册系统用户服务或完成三平台安装验收。是否真正发布以 npm Registry 的版本和 dist-tag 回读为准。
 
 ## 本地开发
 
