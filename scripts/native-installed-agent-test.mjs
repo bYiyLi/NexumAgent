@@ -73,9 +73,6 @@ for (const signal of ["SIGTERM", "SIGINT"])
   );
 let failure,
   sequence = 0;
-// Exercise an ordinary valid lease, leaving headroom below the protocol's 30s
-// maximum for two independent native processes observing the system clock.
-const policyLeaseMs = 20_000;
 const peers = [],
   responses = new Map(),
   connections = new Set(),
@@ -122,33 +119,17 @@ server.on("upgrade", (request, socket, head) => {
           if (message.type === "result" || message.type === "error")
             responses.set(message.id, message);
           if (message.type === "invoke") {
-            if (message.operation === "authorization.refresh")
-              peer.send(
-                JSON.stringify({
-                  type: "result",
-                  id: message.id,
-                  output: {
-                    authorization: {
-                      ...message.context.authorization,
-                      expiresAt: new Date(
-                        Date.now() + policyLeaseMs,
-                      ).toISOString(),
-                    },
-                  },
-                }),
-              );
-            else
-              peer.send(
-                JSON.stringify({
-                  type: "error",
-                  id: message.id,
-                  error: {
-                    code: "fixture_unsupported",
-                    message:
-                      "This isolated service fixture does not implement that reverse operation.",
-                  },
-                }),
-              );
+            peer.send(
+              JSON.stringify({
+                type: "error",
+                id: message.id,
+                error: {
+                  code: "fixture_unsupported",
+                  message:
+                    "This isolated service fixture does not implement that reverse operation.",
+                },
+              }),
+            );
           }
         } catch (error) {
           failure ??= error;
@@ -239,7 +220,6 @@ async function invoke(peer, operation, input) {
   const id = `inv_native_service_${++sequence}`;
   const issuedAt = Date.now(),
     started = performance.now();
-  const expiresAt = new Date(issuedAt + policyLeaseMs).toISOString();
   peer.socket.send(
     JSON.stringify({
       type: "invoke",
@@ -258,7 +238,6 @@ async function invoke(peer, operation, input) {
           allowedRoots: [home],
           budgets: {},
           revision: "one",
-          expiresAt,
         },
       },
     }),
@@ -276,7 +255,6 @@ async function invoke(peer, operation, input) {
       response,
       operation,
       issuedAt,
-      expiresAt,
       receivedAt: Date.now(),
       elapsedMs: performance.now() - started,
     }),
