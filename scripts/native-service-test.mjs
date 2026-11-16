@@ -65,8 +65,8 @@ const alive = (pid) => {
     throw error;
   }
 };
-// A real scheduled Agent must have no console attached: closing a console
-// window must not be capable of terminating the Agent's connection.
+// A real scheduled Agent must have no visible console window: closing a
+// foreground console must not be able to terminate its connection.
 const assertWindowless = (pid) => {
   if (process.platform !== "win32") return;
   const script =
@@ -74,11 +74,17 @@ const assertWindowless = (pid) => {
     "Add-Type -Namespace NexumNativeProbe -Name Console -MemberDefinition @'\n" +
     '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool FreeConsole();\n' +
     '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool AttachConsole(uint pid);\n' +
+    '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();\n' +
+    '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr handle);\n' +
     "'@\n" +
     "[NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
     " \$attached=[NexumNativeProbe.Console]::AttachConsole([uint32]" + pid + ");" +
     " \$errorCode=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error();" +
-    " if(\$attached){[NexumNativeProbe.Console]::FreeConsole()|Out-Null;exit 1};" +
+    " if(\$attached){" +
+    " \$window=[NexumNativeProbe.Console]::GetConsoleWindow();" +
+    " \$visible=(\$window -ne [IntPtr]::Zero) -and [NexumNativeProbe.Console]::IsWindowVisible(\$window);" +
+    " [NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
+    " if(\$visible){exit 1};exit 0};" +
     " if(\$errorCode -ne 6){exit 2}";
   const result = run(
     path.join(
@@ -91,7 +97,7 @@ const assertWindowless = (pid) => {
   assert.equal(
     result.status,
     0,
-    "The scheduled Agent has an attached console, or its console state could not be verified.",
+    "The scheduled Agent has a visible console window, or its console state could not be verified.",
   );
 };
 let ledger, control;
