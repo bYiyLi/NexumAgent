@@ -1,6 +1,6 @@
 {
-  "packageVersion": "0.1.0-next.0",
-  "extensionVersion": "0.1.0",
+  "packageVersion": "0.0.1",
+  "extensionVersion": "0.0.1",
   "protocolVersion": 1,
   "profiles": {
     "production": {

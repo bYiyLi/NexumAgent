@@ -31,7 +31,7 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 
 ## npm 开发版发布
 
-本仓库的 npm 目标包为 `@nexum-hub/agent`、`@nexum-hub/sdk` 和可选的 `@nexum-hub/browser`；独立版本先使用 `next` 发布标签。发布入口为手动触发的 GitHub Actions `npm-next.yml`，依次选择 SDK → Agent → Browser，并固定只从 `main` 发行。三包当前标记 `UNLICENSED`，公开可安装不等于开源授权。
+本仓库的 npm 目标包为 `@nexum-hub/agent`、`@nexum-hub/sdk` 和可选的 `@nexum-hub/browser`；首次统一发行版本为 **`0.0.1`**，验证期仍使用 npm `next` 分发标签，不预先标记稳定版 `latest`。发布入口为手动触发的 GitHub Actions `npm-next.yml`，依次选择 SDK → Agent → Browser，并固定只从 `main` 发行。三包当前标记 `UNLICENSED`，公开可安装不等于开源授权。已发布的 `@nexum-hub/sdk@0.0.1-next.0` 作为历史版本保留，不覆盖或重发。
 
 **首次 npm 发布需要 `@nexum-hub` scope 的真实发布权限。** 可在 GitHub 仓库 Secrets 临时设置有对应包权限的 `NPM_PUBLISH_TOKEN` 进行首发；首发成功后为三个包分别配置 GitHub Trusted Publisher：仓库 `bYiyLi/NexumAgent`、工作流文件 `npm-next.yml`，允许 `npm publish`，然后删除该临时 Secret。后续 CI 使用 OIDC，无需长期 npm Token。Token、OTP 和用户配置不能进入仓库或输出日志。
 

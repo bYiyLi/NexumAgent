@@ -1,6 +1,6 @@
 {
   "package": "@nexum-hub/browser",
-  "packageVersion": "0.1.0-next.0",
+  "packageVersion": "0.0.1",
   "status": "in_progress",
   "published": false,
   "browserInstallation": "test_profiles_only",

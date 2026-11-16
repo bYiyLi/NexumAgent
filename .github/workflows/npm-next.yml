@@ -32,16 +32,18 @@ jobs:
         with:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - if: inputs.package == 'agent'
+        run: pnpm check
       - if: inputs.package == 'sdk' || inputs.package == 'browser'
         run: node scripts/build-extension-api.mjs
+      - if: inputs.package == 'sdk'
+        run: node --test test/extension-package.test.mjs
       - if: inputs.package == 'browser'
         run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - if: inputs.package == 'browser'
         run: pnpm --dir packages/browser check
-      - name: Verify exact next-package identity and tarball file boundaries
+      - name: Verify unified 0.0.1 package identity and tarball boundaries
         run: |
           node --input-type=module - <<'JS'
           import assert from 'node:assert/strict';
@@ -55,7 +57,7 @@ jobs:
           assert.ok(directory && names[process.env.PACKAGE]);
           const manifest = JSON.parse(readFileSync(path.join(directory,'package.json'),'utf8'));
           assert.equal(manifest.name, names[process.env.PACKAGE]);
-          assert.match(manifest.version,/^\d+\.\d+\.\d+-next\.\d+$/);
+          assert.equal(manifest.version,'0.0.1');
           assert.equal(manifest.private, false);
           assert.equal(manifest.publishConfig?.tag,'next');
           assert.equal(manifest.publishConfig?.access,'public');
@@ -68,6 +70,13 @@ jobs:
           const required = {sdk:['dist/index.js','dist/index.d.ts'],agent:['dist/cli.js','contracts/v2/common.schema.json'],browser:['dist/client/index.js','dist/extension/index.js','browser-extension/dist/development/manifest.json','browser-extension/dist/production/manifest.json','implementation.json']};
           for(const file of required[process.env.PACKAGE]) assert.ok(files.includes(file),file);
           for(const file of files) assert.doesNotMatch(file,/(^|\/)(node_modules|test|archive|\.git|\.nexum|src)(\/|$)|(^|\/)(\.env[^/]*|.*\.pem)$/);
+          if(process.env.PACKAGE === 'browser'){
+            const ledger = JSON.parse(readFileSync(path.join(directory,'implementation.json'),'utf8'));
+            const release = JSON.parse(readFileSync(path.join(directory,'browser-extension/release-info.json'),'utf8'));
+            assert.equal(ledger.packageVersion,manifest.version);
+            assert.equal(release.packageVersion,manifest.version);
+            assert.equal(release.extensionVersion,manifest.version);
+          }
           console.log('Reviewed',manifest.name+'@'+manifest.version,'files:',files.length);
           JS
       - name: Publish reviewed preview via npm trusted publishing

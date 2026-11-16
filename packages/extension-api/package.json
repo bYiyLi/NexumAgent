@@ -1,6 +1,6 @@
 {
   "name": "@nexum-hub/sdk",
-  "version": "0.0.1-next.0",
+  "version": "0.0.1",
   "private": false,
   "description": "Nexum SDK 扩展公共类型协议",
   "license": "UNLICENSED",
