@@ -1,5 +1,8 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { realpath, rename, writeFile, rm } from "node:fs/promises";
+import path from "node:path";
 import vm from "node:vm";
 import { AgentError, isAgentError } from "../contracts/errors.js";
 import { newId } from "../contracts/json.js";
@@ -102,7 +105,7 @@ export async function runAgent(
     const defaults = maintenanceRuntimeOptions(config);
     const configure =
       options.runtime?.configureMaintenance ?? defaults.configureMaintenance!;
-    await reconnectControl(
+    const reconnectResult = await reconnectControl(
       {
         serverUrl: config.serverUrl,
         token: config.token,
@@ -110,6 +113,28 @@ export async function runAgent(
         bootId,
         version: options.version,
         signal,
+        async upgrade(version) {
+          const program = path.join(config.root, "program");
+          if ((await realpath(program)) !== program)
+            throw new AgentError(
+              "agent_update_failed",
+              "The managed Agent program directory is invalid.",
+            );
+          const temporary = path.join(
+            program,
+            ".update-" + randomUUID() + ".new",
+          );
+          try {
+            await writeFile(temporary, JSON.stringify({ version }) + "\n", {
+              flag: "wx",
+              mode: 0o600,
+            });
+            await rename(temporary, path.join(program, "update.json"));
+          } finally {
+            await rm(temporary, { force: true });
+          }
+          diagnose("agent_upgrade_required", false);
+        },
         async ready(connection) {
           try {
             if (stopping)
@@ -168,7 +193,7 @@ export async function runAgent(
       diagnose,
     );
     if (failure) throw failure;
-    return 0;
+    return reconnectResult === "upgrade" ? 75 : 0;
   } catch (cause) {
     const code = isAgentError(cause) ? cause.code : "agent_failed";
     diagnose(/^[a-z0-9_]{1,128}$/.test(code) ? code : "agent_failed", false);

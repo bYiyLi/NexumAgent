@@ -24,7 +24,7 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node --test test/installer.test.mjs test/service.test.mjs test/extension-package.test.mjs
+      - run: node --test test/installer.test.mjs test/service.test.mjs test/npm-install.test.mjs test/extension-package.test.mjs
       - name: Exercise the actual native user service in an isolated home and unique namespace
         run: node scripts/native-service-test.mjs
       - name: Create a disposable candidate signing identity

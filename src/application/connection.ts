@@ -53,6 +53,8 @@ const permanent = new Map([
   ["invalid_agent_metadata", 400],
   ["unsupported_agent_environment", 400],
 ]);
+const releasePattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.[0-9]+)?$/;
 export interface ControlConnectionOptions {
   readonly serverUrl: string;
   readonly token: string;
@@ -64,11 +66,13 @@ export interface ControlConnectionOptions {
   ready(connection: ControlConnection): Promise<void>;
   invoke(message: WireInvokeV2, signal: AbortSignal): Promise<unknown>;
   event(message: WireEventV2, signal: AbortSignal): Promise<void>;
+  upgrade?(version: string): Promise<void>;
 }
 export class ConnectionRejection extends AgentError {
   constructor(
     readonly status: number,
     readonly rejectionCode: string | null,
+    readonly targetVersion: string | null = null,
   ) {
     super("connection_rejected", "The Agent connection was rejected.");
   }
@@ -254,9 +258,19 @@ export class ControlConnection {
     });
     socket.once("unexpected-response", (_request, response) => {
       const code = response.headers["x-nexum-error-code"];
+      const target = response.headers["x-nexum-target-agent-version"];
+      const upgrade =
+        response.statusCode === 426 &&
+        code === "upgrade_required" &&
+        typeof target === "string" &&
+        releasePattern.test(target) &&
+        target !== options.version;
       failure = new ConnectionRejection(
         response.statusCode ?? 0,
-        typeof code === "string" && permanent.has(code) ? code : null,
+        typeof code === "string" && (permanent.has(code) || upgrade)
+          ? code
+          : null,
+        upgrade ? target : null,
       );
       response.destroy();
       socket.terminate();
@@ -609,7 +623,7 @@ export class ControlConnection {
 export async function reconnectControl(
   options: ControlConnectionOptions,
   diagnose: (code: string, retry: boolean) => void,
-): Promise<"stopped" | "permanent"> {
+): Promise<"stopped" | "permanent" | "upgrade"> {
   let failures = 0;
   while (!options.signal.aborted) {
     try {
@@ -618,6 +632,14 @@ export async function reconnectControl(
       await connection.closed;
     } catch (cause) {
       if (options.signal.aborted) break;
+      if (
+        cause instanceof ConnectionRejection &&
+        cause.targetVersion &&
+        options.upgrade
+      ) {
+        await options.upgrade(cause.targetVersion);
+        return "upgrade";
+      }
       const local =
         isAgentError(cause) &&
         Object.getOwnPropertyDescriptor(cause, "code")?.value ===

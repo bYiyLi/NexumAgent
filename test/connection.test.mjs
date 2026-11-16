@@ -97,9 +97,9 @@ async function fixture(t, options = {}) {
     requests.push(request);
     events.emit("request", request);
     if (options.rejection) {
-      const { status, code } = options.rejection;
+      const { status, code, target } = options.rejection;
       socket.end(
-        `HTTP/1.1 ${status} Rejected\r\n${code ? `X-Nexum-Error-Code: ${code}\r\n` : ""}Content-Length: 0\r\nConnection: close\r\n\r\n`,
+        `HTTP/1.1 ${status} Rejected\r\n${code ? `X-Nexum-Error-Code: ${code}\r\n` : ""}${target ? `X-Nexum-Target-Agent-Version: ${target}\r\n` : ""}Content-Length: 0\r\nConnection: close\r\n\r\n`,
       );
       return;
     }
@@ -300,6 +300,55 @@ test("only matching documented HTTP rejection pairs and invalid local configurat
     new ConnectionRejection(403, "invalid_agent_credential").stopNoRestart,
     false,
   );
+});
+
+test("a complete Cloud 426 triggers only the precise upgrade, while malformed gates retry", async (t) => {
+  const valid = await fixture(t, {
+    rejection: {
+      status: 426,
+      code: "upgrade_required",
+      target: "0.0.2-next.51",
+    },
+  });
+  const requested = [];
+  const result = await reconnectControl(
+    {
+      ...valid.base,
+      upgrade: async (version) => {
+        requested.push(version);
+      },
+    },
+    () =>
+      assert.fail(
+        "a valid version gate must not fall through to ordinary reconnect",
+      ),
+  );
+  assert.equal(result, "upgrade");
+  assert.deepEqual(requested, ["0.0.2-next.51"]);
+  assert.equal(valid.requests.length, 1);
+  for (const release of [
+    { status: 426, code: "upgrade_required", target: "invalid" },
+    { status: 426, code: "upgrade_required" },
+    { status: 503, code: "upgrade_required", target: "0.0.2-next.51" },
+    { status: 426, code: "unknown", target: "0.0.2-next.51" },
+  ]) {
+    const fixtureCase = await fixture(t, { rejection: release });
+    let upgrades = 0;
+    const outcome = await reconnectControl(
+      {
+        ...fixtureCase.base,
+        upgrade: async () => {
+          upgrades++;
+        },
+      },
+      (_, retry) => {
+        if (retry) fixtureCase.controller.abort();
+      },
+    );
+    assert.equal(outcome, "stopped");
+    assert.equal(upgrades, 0);
+    assert.equal(fixtureCase.requests.length, 1);
+  }
 });
 
 test("ready can await a reverse reply while invocation and event admission remain buffered and an early cancel removes its queued RPC", async (t) => {

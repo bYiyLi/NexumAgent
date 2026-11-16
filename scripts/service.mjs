@@ -114,6 +114,7 @@ export function childEnvironment(source = process.env) {
 export function servicePlan({
   profile,
   programDir,
+  npmManaged = false,
   home = homedir(),
   platform = process.platform,
   userId = process.getuid?.(),
@@ -144,18 +145,17 @@ export function servicePlan({
       "Use one immutable version inside this profile's program directory.",
     );
   const node = p.join(
-      programDir,
-      "runtime",
+      npmManaged
+        ? p.join(root, "program", "runtime")
+        : p.join(programDir, "runtime"),
       platform === "win32" ? "node.exe" : "bin/node",
     ),
-    entry = p.join(programDir, "app", "dist", "cli.js");
-  const args = [
-    "--experimental-vm-modules",
-    entry,
-    "run",
-    "--profile",
-    profile,
-  ];
+    entry = npmManaged
+      ? p.join(root, "program", "service-runner.mjs")
+      : p.join(programDir, "app", "dist", "cli.js");
+  const args = npmManaged
+    ? [entry, "--profile", profile]
+    : ["--experimental-vm-modules", entry, "run", "--profile", profile];
   const runtimePath =
     p.dirname(node) +
     (platform === "win32" ? ";" : ":") +
@@ -558,10 +558,19 @@ export async function loadServicePlan(profile, home = homedir()) {
   const active = JSON.parse(
     await readFile(path.join(root, "program", "active.json"), "utf8"),
   );
+  const npmManaged =
+    typeof active.directory === "string" &&
+    active.directory === active.version &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.[0-9]+)?$/.test(
+      active.version,
+    );
   return servicePlan({
     profile,
     home,
-    programDir: active.programDir,
+    programDir: npmManaged
+      ? path.join(root, "program", "versions", active.directory)
+      : active.programDir,
+    npmManaged,
     windowsSid: process.platform === "win32" ? currentWindowsSid() : undefined,
   });
 }

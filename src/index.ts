@@ -10,6 +10,7 @@ const help =
     "",
     "用法：nexum-agent [--help | --version]",
     "      nexum-agent run --profile development|production",
+    "      nexum-agent install --profile development|production",
     "",
     "run 使用所选 profile 的 config.json，连接其配置的 Server。",
     "启动 run 时，Node 必须带 --experimental-vm-modules。",

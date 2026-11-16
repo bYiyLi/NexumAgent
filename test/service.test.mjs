@@ -19,6 +19,7 @@ import {
   childEnvironment,
   serviceAction,
   currentWindowsSid,
+  loadServicePlan,
 } from "../scripts/service.mjs";
 
 const temporary = async (t) => {
@@ -94,6 +95,47 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
     }
   }
 });
+test("npm-managed native service launches a stable local runner rather than npx or an old version", async (t) => {
+  for (const platform of ["darwin", "linux", "win32"]) {
+    const home = platform === "win32" ? "C:\\Users\\Agent" : "/tmp/agent-user";
+    const p = platform === "win32" ? path.win32 : path.posix;
+    const root = p.join(home, ".nexum-dev", "program");
+    const plan = servicePlan({
+      platform,
+      home,
+      profile: "development",
+      npmManaged: true,
+      userId: 501,
+      windowsSid: "S-1-5-21-1-2-3-1001",
+      programDir: p.join(root, "versions", "0.0.2-next.123"),
+    });
+    assert.equal(
+      plan.node,
+      p.join(root, "runtime", platform === "win32" ? "node.exe" : "bin/node"),
+    );
+    assert.deepEqual(plan.args, [
+      p.join(root, "service-runner.mjs"),
+      "--profile",
+      "development",
+    ]);
+    assert.ok(
+      plan.content.includes("service-runner.mjs") ||
+        (platform === "win32" && plan.launcher.includes("service-runner.mjs")),
+    );
+    assert.doesNotMatch(plan.content, /npx|0\.0\.2-next\.123/);
+  }
+  const home = await temporary(t);
+  const program = path.join(home, ".nexum-dev", "program");
+  await mkdir(program, { recursive: true });
+  await writeFile(
+    path.join(program, "active.json"),
+    JSON.stringify({ version: "0.0.2", directory: "0.0.2" }),
+  );
+  const loaded = await loadServicePlan("development", home);
+  assert.equal(loaded.entry, path.join(program, "service-runner.mjs"));
+  assert.equal(loaded.programDir, path.join(program, "versions", "0.0.2"));
+});
+
 test("preparing a service preview cannot overwrite the selected manifest or its Windows launcher", async (t) => {
   const home = await temporary(t),
     selected = planFor(process.platform, home),

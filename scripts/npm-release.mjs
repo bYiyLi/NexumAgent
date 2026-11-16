@@ -167,7 +167,13 @@ function inspectRelease() {
     const names = new Set(pack.files.map(({ path: filename }) => filename));
     for (const required of {
       sdk: ["dist/index.js", "dist/index.d.ts"],
-      agent: ["dist/cli.js", "contracts/v2/common.schema.json"],
+      agent: [
+        "dist/cli.js",
+        "contracts/v2/common.schema.json",
+        "scripts/service.mjs",
+        "scripts/npm-install.mjs",
+        "scripts/service-runner.mjs",
+      ],
       browser: [
         "dist/client/index.js",
         "dist/extension/index.js",

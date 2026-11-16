@@ -29,7 +29,10 @@
   },
   "files": [
     "dist",
-    "contracts"
+    "contracts",
+    "scripts/service.mjs",
+    "scripts/npm-install.mjs",
+    "scripts/service-runner.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

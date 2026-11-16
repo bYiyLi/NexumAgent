@@ -55,6 +55,12 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 
 Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册系统用户服务或完成三平台安装验收。是否真正发布以 npm Registry 的版本和 dist-tag 回读为准。
 
+### Cloud 一键安装与强制版本更新（本地实现候选）
+
+用户应从相应 Nexum Cloud 的 Agent 创建或详情页面复制平台专用安装命令，不需要在终端自行选择 npm 通道。Cloud 使用 `production → latest` 或 `development → next` 映射，命令包含当前 Server URL、长期 Agent Token、profile 以及 **Cloud 已确认的精确目标版本**。安装命令调用 Cloud 提供的 `/agent/install.sh`（macOS/Linux）或 `/agent/install.ps1`（Windows）；引导脚本校验 Node.js 24.22.1 后用 npx 执行当前 npm Agent 包的 `install --profile`。Agent 程序、固定 Node/npm、私有配置以及服务启动器落在所选用户 profile，分别注册 LaunchAgent、systemd user service 或 InteractiveToken 用户任务；默认登录自启，异常退出按各平台有界策略重试，不承诺用户未登录时启动。
+
+后台服务不在每次启动时运行 npx；它通过本地 `program/service-runner.mjs` 执行 `active.json` 指向的确定版本。Cloud 启动时必须成功从 npm 查询最新版本，运行期间由管理员手动「刷新 Agent 版本」；旧版 Agent 的 WSS 被断开，在下一次握手收到 `426 upgrade_required` 和目标精确版本。Agent 写入待升级状态、退出旧进程，启动器在没有旧进程占用时由 npm 下载和准备新程序，再切换 `active.json`、启动新进程。升级失败保留旧版本与 Token/本地记录，但 Cloud 不允许旧版重新上线。此流程已经接线并进行本机隔离测试，**未发布包含这些新安装脚本的 npm 版本，亦未完成三平台真实用户安装/登录恢复/更新和生产上线验收**；不可把当前 Registry 旧包视为已交付该新 CLI。
+
 ## 本地开发
 
 需要 Node.js 24.22.1（当前验证基线）、pnpm 10.34.5：
