@@ -39,6 +39,20 @@ Nexum 的独立、公开 TypeScript Agent 项目。它是运行在用户本地�
 
 三个包继续保持 `UNLICENSED`，公开可安装不代表开源再分发授权。当前工作流仍接受 GitHub Secret `NPM_PUBLISH_TOKEN`；要取消它，应先为三个包配置与 `npm-next.yml` 匹配的 Trusted Publisher，分别允许 `npm publish` 和 `npm dist-tag`，完成 OIDC 验收后再撤销 Token。Token、OTP 和私有配置不能进入仓库或 CI 日志。
 
+### Trusted Publishing / OIDC 迁移
+
+在 npmjs.com 分别进入 `@nexum-hub/sdk`、`@nexum-hub/agent`、`@nexum-hub/browser` 的 **Settings → Trusted Publishing**，添加 GitHub Actions Publisher，每个包填写相同配置：
+
+| 项目                        | 值                                       |
+| --------------------------- | ---------------------------------------- |
+| GitHub organization or user | `bYiyLi`                                 |
+| GitHub repository           | `NexumAgent`                             |
+| Workflow filename           | `npm-next.yml`（仅文件名，不包含目录）   |
+| Environment                 | 留空                                     |
+| Allowed actions             | 同时允许 `npm publish` 和 `npm dist-tag` |
+
+在 npm 完成三包配置后，手动运行 `Publish npm` 工作流，分支选 `main`、`publish_auth` 选 `oidc`。CI 会以新的 `next` 版本完成三包发布，OIDC 步骤**不注入 `NODE_AUTH_TOKEN`**。必须以 GitHub CI 成功、三包 Registry 精确版本、`next` 标签和实际下载为验收依据。确认 OIDC 三包全部成功后，才能从工作流移除 token 分支，再删除 GitHub Secret `NPM_PUBLISH_TOKEN` 并在 npm 网站撤销原始 Token。迁移期间正式 Tag 仍沿用现有 Token，避免尚未验收的 OIDC 中断正式发布。新建的 Trusted Publisher 需要在规定期限内完成首次成功发布，否则会失效。
+
 Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册系统用户服务或完成三平台安装验收。是否真正发布以 npm Registry 的版本和 dist-tag 回读为准。
 
 ## 本地开发

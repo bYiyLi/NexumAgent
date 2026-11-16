@@ -5,6 +5,15 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      publish_auth:
+        description: "Publish authentication: token (current) or OIDC (trusted-publisher verification)"
+        required: true
+        type: choice
+        default: token
+        options:
+          - token
+          - oidc
 
 permissions:
   contents: read
@@ -47,7 +56,18 @@ jobs:
           pnpm --dir packages/browser check
       - name: Verify all three npm archives
         run: node scripts/npm-release.mjs verify
-      - name: Publish SDK, Agent and Browser in dependency order
+      - name: Publish SDK, Agent and Browser with migration token
+        if: github.event_name == 'push' || inputs.publish_auth == 'token'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: node scripts/npm-release.mjs publish
+      - name: Verify no npm token is provided for OIDC
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_auth == 'oidc'
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "OIDC publishing must not use NODE_AUTH_TOKEN"
+            exit 1
+          fi
+      - name: Publish SDK, Agent and Browser with npm OIDC
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_auth == 'oidc'
         run: node scripts/npm-release.mjs publish
