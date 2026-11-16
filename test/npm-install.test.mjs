@@ -77,7 +77,9 @@ test(
       JSON.parse(await readFile(path.join(root, "config.json"), "utf8")).token,
       "private-test-token",
     );
-    assert.equal((await stat(path.join(root, "config.json"))).mode & 0o077, 0);
+    // Windows fs.stat().mode emulates Unix bits and does not report NTFS ACLs.
+    if (process.platform !== "win32")
+      assert.equal((await stat(path.join(root, "config.json"))).mode & 0o077, 0);
     const runtime = path.join(
       root,
       "program/runtime",
