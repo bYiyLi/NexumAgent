@@ -192,6 +192,98 @@ async function fixture(t, options = {}) {
   };
 }
 
+test("Cloud Ping keeps a connection healthy, and its silence eventually closes the observation", async (t) => {
+  const f = await fixture(t);
+  const c = await f.connect({ liveness: { silenceMs: 400, checkMs: 25 } });
+  const { peer } = await f.peer();
+  const pong = once(peer, "pong");
+  peer.ping();
+  await within(pong);
+  assert.match(c.closeInfo.lastPingAt, /^20/);
+  const keepalive = setInterval(() => {
+    if (peer.readyState === peer.OPEN) peer.ping();
+  }, 70);
+  t.after(() => clearInterval(keepalive));
+  await delay(800);
+  assert.equal(c.signal.aborted, false);
+  clearInterval(keepalive);
+  await within(c.closed, 1400);
+  assert.equal(c.signal.aborted, true);
+  assert.equal(c.closeInfo.reason, "heartbeat_timeout");
+  assert.equal(c.closeInfo.closeCode, 1006);
+  assert.match(c.closeInfo.lastPingAt, /^20/);
+});
+
+test("a silent half-open WSS reconnects once with a bounded close reason and offline duration", async (t) => {
+  const f = await fixture(t);
+  const diagnostics = [];
+  const recovered = Promise.withResolvers();
+  const running = reconnectControl(
+    { ...f.base, liveness: { silenceMs: 160, checkMs: 20 } },
+    (code, retry, details) => {
+      diagnostics.push({ code, retry, details });
+      if (code === "agent_reconnect_succeeded") recovered.resolve();
+    },
+  );
+  t.after(async () => {
+    f.controller.abort();
+    await within(running);
+  });
+  await f.peer();
+  await within(recovered.promise);
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(
+    diagnostics
+      .filter((entry) => entry.code === "agent_connection_lost")
+      .map((entry) => [
+        entry.retry,
+        entry.details.reason,
+        entry.details.lastPingAt,
+      ]),
+    [[true, "heartbeat_timeout", null]],
+  );
+  assert(
+    diagnostics.some(
+      (entry) =>
+        entry.code === "agent_reconnect_attempt" && entry.details.attempt === 1,
+    ),
+  );
+  const waiting = diagnostics.find(
+    (entry) => entry.code === "agent_reconnect_wait",
+  );
+  assert(waiting.details.retryDelayMs >= 1000);
+  assert(waiting.details.retryDelayMs < 1250);
+  const success = diagnostics.find(
+    (entry) => entry.code === "agent_reconnect_succeeded",
+  );
+  assert(success.details.offlineMs >= 1000);
+  assert.equal(success.details.attempt, 1);
+  assert.equal(JSON.stringify(diagnostics).includes(token), false);
+  f.controller.abort();
+  assert.equal(await within(running), "stopped");
+  await delay(220);
+  assert.equal(f.requests.length, 2);
+});
+
+test("a deliberate Agent stop does not trigger liveness timeout or reconnect", async (t) => {
+  const f = await fixture(t);
+  const diagnostics = [];
+  const running = reconnectControl(
+    { ...f.base, liveness: { silenceMs: 160, checkMs: 20 } },
+    (code) => diagnostics.push(code),
+  );
+  t.after(async () => {
+    f.controller.abort();
+    await within(running);
+  });
+  await f.peer();
+  f.controller.abort();
+  assert.equal(await within(running), "stopped");
+  await delay(240);
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(diagnostics, []);
+});
+
 test("real Upgrade sends bounded metadata once and admits only the authenticated immutable 101 identity", async (t) => {
   const f = await fixture(t),
     c = await f.connect({ serverUrl: f.base.serverUrl + "/prefix///" });
@@ -353,10 +445,7 @@ test("a complete Cloud 426 triggers only the precise upgrade, while malformed ga
 test("ready can await a reverse reply while invocation and event admission remain buffered and an early cancel removes its queued RPC", async (t) => {
   const f = await fixture(t, {
     onMessage(peer, message) {
-      if (
-        message.type === "invoke" &&
-        message.operation === "state.user.get"
-      )
+      if (message.type === "invoke" && message.operation === "state.user.get")
         peer.send(
           JSON.stringify({
             type: "result",

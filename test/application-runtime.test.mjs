@@ -393,6 +393,17 @@ async function fixture(t, options = {}) {
   };
 }
 
+test("Agent-generated platform documents show actual positional JavaScript calls", async (t) => {
+  const f = await fixture(t);
+  const stateDocs = readFileSync(path.join(f.work, "docs", "platform", "state.md"), "utf8");
+  const runtimeDocs = readFileSync(path.join(f.work, "docs", "platform", "runtime.md"), "utf8");
+  assert.match(stateDocs, /state\.agent\.get\(key: string\)/);
+  assert.match(stateDocs, /state\.user\.set\(key: string, value: JSON, options:/);
+  assert.match(stateDocs, /expectedVersion: current\?\.version \?\? null/);
+  assert.match(runtimeDocs, /runtime\.sleep\(milliseconds\)/);
+  assert.match(runtimeDocs, /inputSchema.*归一化/);
+});
+
 test("actual application composes one work, VM, registry, local state and output encoder", async (t) => {
   const f = await fixture(t);
   const opened = await f.open();

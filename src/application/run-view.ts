@@ -37,12 +37,34 @@ const json = <T>(value: T, maximum = 1024 * 1024): T =>
   JSON.parse(canonicalJson(value, maximum)) as T;
 function error(value: JsonObject | null | undefined): WireErrorV2 | null {
   if (!value) return null;
+  const code = typeof value.code === "string" ? value.code : "agent_error";
+  const hint =
+    code === "script_execution_failed"
+      ? "Use error.details.location to inspect the failing script line and error.details.exceptionType to identify the exception. Check prior operations before retrying; never replay unknown side effects blindly."
+      : code === "script_syntax_error"
+        ? "Correct JavaScript syntax at the reported location if present, then submit a new Run."
+        : code === "invalid_arguments" || code === "invalid_input_schema"
+          ? "Read the current SDK JavaScript calling examples and parameter order; fix the arguments instead of repeating the same call."
+          : code === "module_missing" || code === "module_not_allowed"
+            ? "Inspect the approved Node/npm module catalog; an unavailable or unapproved module cannot be loaded by renaming its import."
+            : code === "state_version_conflict"
+              ? "Read the current state version and reconcile concurrent changes before conditional write; do not override blindly."
+              : code === "authorization_required" || code === "permission_denied" || code === "path_not_allowed"
+                ? "Check current authorization; ask the user to approve through a provided authorization flow when available, never bypass the denied path."
+                : code === "agent_offline" || code === "context_unavailable"
+                  ? "Check the Agent connection or reopen the authorized context; query the original runId/requestId before resubmitting work."
+        : code === "run_cancelled"
+          ? "This run was cancelled. Do not restart it unless the user still wants the action."
+          : code === "run_deadline_exceeded" || code === "run_timeout"
+            ? "The deadline was reached. Check recorded effects before deciding whether a new run is safe."
+            : "Inspect the run status and available logs; avoid automatically repeating side effects.";
   return {
-    code: typeof value.code === "string" ? value.code : "agent_error",
+    code,
     message:
       typeof value.message === "string"
         ? value.message
         : "The Agent operation failed.",
+    hint,
     ...((value.details &&
       typeof value.details === "object" &&
       !Array.isArray(value.details)) ||
@@ -97,6 +119,10 @@ export function projectRunRecord(
       : null;
   return {
     runId: run.runId,
+    title:
+      typeof source.title === "string"
+        ? source.title
+        : (run.scriptName ?? "执行脚本").slice(0, 120),
     contextId: run.contextId,
     projectId: run.projectId,
     revision: run.revision,

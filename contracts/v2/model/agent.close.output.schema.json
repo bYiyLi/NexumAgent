@@ -83,6 +83,20 @@
             "retryable": {
               "type": "boolean"
             },
+            "hint": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "nextAction": {
+              "type": "object",
+              "properties": {
+                "type": {"type": "string"},
+                "label": {"type": "string"},
+                "url": {"type": "string", "format": "uri"}
+              },
+              "required": ["type", "label"],
+              "additionalProperties": false
+            },
             "details": {
               "type": "object"
             }

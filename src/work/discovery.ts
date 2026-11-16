@@ -232,7 +232,9 @@ export function parseSkillFrontmatter(
   const raw = prefix.subarray(offset).toString("latin1");
   const opening = /^---\r?\n/.exec(raw);
   requireCondition(opening, "invalid_skill", "A Skill needs YAML frontmatter.");
-  const closing = /(?:^|\n)---(?:\r?\n|$)/.exec(raw.slice(opening[0].length));
+  // Consume the complete CRLF delimiter: leaving its leading CR in the YAML
+  // body makes otherwise-valid quoted metadata fail on Windows.
+  const closing = /(?:^|\r?\n)---(?:\r?\n|$)/.exec(raw.slice(opening[0].length));
   requireCondition(
     closing && (closing[0].endsWith("\n") || prefix.length === bytes.length),
     "invalid_skill",
@@ -546,7 +548,10 @@ export async function discoverMaterials(
         result.warnings.push({
           code: error instanceof AgentError ? error.code : "skill_unavailable",
           path: file,
-          message: "Skill metadata could not be loaded.",
+          message:
+            error instanceof AgentError
+              ? error.message
+              : "Skill metadata could not be loaded.",
         });
         continue;
       }

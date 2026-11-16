@@ -78,6 +78,40 @@ test("native diagnostics retain a bounded complete JSONL tail and fixed safe fie
     assert.equal(statSync(f.filename).mode & 0o777, 0o600);
 });
 
+test("connection diagnostics keep only safe timestamps, reasons and retry measurements", (t) => {
+  const f = fixture(t);
+  appendDiagnostic(f.root, "development", "agent_connection_lost", true, {
+    reason: "heartbeat_timeout",
+    lastPingAt: "2026-11-16T13:01:00.000Z",
+    closeCode: 1006,
+    offlineMs: 1200,
+    attempt: 2,
+    retryDelayMs: 2000,
+    httpStatus: 502,
+  });
+  appendDiagnostic(f.root, "development", "agent_connection_lost", true, {
+    reason: "private-secret",
+    lastPingAt: "token:private-secret",
+    closeCode: -20,
+    offlineMs: -1,
+    httpStatus: 900,
+    extra: "private-secret",
+  });
+  const [valid, rejected] = readFileSync(f.filename, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(valid.reason, "heartbeat_timeout");
+  assert.equal(valid.lastPingAt, "2026-11-16T13:01:00.000Z");
+  assert.equal(valid.closeCode, 1006);
+  assert.equal(valid.offlineMs, 1200);
+  assert.equal(valid.attempt, 2);
+  assert.equal(valid.retryDelayMs, 2000);
+  assert.equal(valid.httpStatus, 502);
+  assert.deepEqual(Object.keys(rejected), ["time", "profile", "code", "retry"]);
+  assert.doesNotMatch(readFileSync(f.filename, "utf8"), /private-secret/);
+});
+
 test("a hard-linked diagnostic target cannot modify another retained file", (t) => {
   const f = fixture(t);
   mkdirSync(f.logs);

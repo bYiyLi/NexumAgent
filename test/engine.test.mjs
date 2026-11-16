@@ -276,6 +276,46 @@ test("safe error data reads only branded own data, bounds messages and omits inv
   assert.equal(calls, 0);
 });
 
+test("VM exceptions expose only safe type and script line, never guest message or host stack", async (t) => {
+  let getterCalled = 0;
+  const f = await fixture(t, {
+    bindings: () => ({ mark: () => getterCalled++ }),
+  });
+  const runtimeError = await f.start({
+    script: 'const secret="password=private-value";\nconst object=null;\nreturn object.missing;',
+    waitMs: 3000,
+  });
+  assert.equal(runtimeError.run.status, "failed");
+  assert.equal(runtimeError.run.error.code, "script_execution_failed");
+  assert.equal(runtimeError.run.error.details.exceptionType, "TypeError");
+  assert.equal(runtimeError.run.error.details.location.line, 3);
+  assert.match(runtimeError.run.error.message, /line 3/);
+  assert.doesNotMatch(JSON.stringify(runtimeError.run.error), /password=private-value|node:vm|src\/runtime/);
+
+  const syntax = await f.start({ script: "const x = ;", waitMs: 3000 });
+  assert.equal(syntax.run.status, "failed");
+  assert.equal(syntax.run.error.code, "script_syntax_error");
+  assert.equal(syntax.run.error.details.exceptionType, "SyntaxError");
+  assert.equal(syntax.run.error.details.location.line, 1);
+  assert.equal(syntax.run.error.details.location.column, undefined);
+
+  const hostile = await f.start({
+    script: 'const e=new Error("secret");Object.defineProperty(e,"stack",{get(){mark();return "fake";}});throw e;',
+    waitMs: 3000,
+  });
+  assert.equal(hostile.run.status, "failed");
+  assert.equal(hostile.run.error.details.exceptionType, "Error");
+  assert.equal(getterCalled, 0);
+  assert.doesNotMatch(JSON.stringify(hostile.run.error), /secret/);
+  const prepareHook = await f.start({
+    script: 'const e=new TypeError("secret");Error.prepareStackTrace=()=>{mark();return "forged";};throw e;',
+    waitMs: 3000,
+  });
+  assert.equal(prepareHook.run.error.details.exceptionType, "TypeError");
+  assert.equal(prepareHook.run.error.details.location, undefined);
+  assert.equal(getterCalled, 0);
+});
+
 test("accepted native execution saves snapshots/results and keeps observation timeouts independent", async (t) => {
   const { start, finish, engine, store, root } = await fixture(t);
   const first = await start({

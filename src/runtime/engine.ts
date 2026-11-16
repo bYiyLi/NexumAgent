@@ -55,6 +55,7 @@ export { callerKey, type Caller } from "../contracts/caller.js";
 
 export interface StartInput {
   contextId: string;
+  title?: string;
   script?: string;
   scriptName?: string;
   replayRunId?: string;
@@ -118,6 +119,7 @@ export interface RunDetails extends RunView {
 }
 export interface RunSummary extends JsonObject {
   runId: string;
+  title: string;
   scriptName: string | null;
   scriptDesc: string | null;
   source: "inline" | "named" | "history";
@@ -219,9 +221,16 @@ interface Scope {
   fatal?: AgentError;
 }
 
-function failure(error: unknown, phase: string): JsonObject {
+function failure(
+  error: unknown,
+  phase: string,
+  scriptDiagnostic?: {
+    exceptionType: string;
+    location?: { source: string; line: number; column?: number };
+  },
+): JsonObject {
   // Exceptions never cross the control plane with host stack, cause or configuration.
-  return {
+  const result: JsonObject = {
     ...safeErrorData(error, {
       code:
         phase === "compile" ? "script_syntax_error" : "script_execution_failed",
@@ -232,6 +241,15 @@ function failure(error: unknown, phase: string): JsonObject {
     }),
     phase,
   };
+  if (!isAgentError(error) && scriptDiagnostic && (phase === "compile" || phase === "execute")) {
+    const at = scriptDiagnostic.location;
+    result.message = "JavaScript " + scriptDiagnostic.exceptionType +
+      (at
+        ? ` at line ${at.line}${at.column === undefined ? "" : `, column ${at.column}`}.`
+        : ` during ${phase}.`);
+    result.details = scriptDiagnostic;
+  }
+  return result;
 }
 function frozenJson(value: JsonObject): JsonObject {
   const copy = JSON.parse(canonicalJson(value, 2 * 1024 * 1024)) as JsonObject;
@@ -792,6 +810,10 @@ export class RunEngine extends EventEmitter {
       typeof source.scriptDesc === "string" ? source.scriptDesc : null;
     return {
       runId: run.runId,
+      title:
+        typeof source.title === "string"
+          ? source.title
+          : (run.scriptName ?? "执行脚本").slice(0, 120),
       scriptName: run.scriptName,
       scriptDesc: description === null ? null : description.slice(0, 2048),
       ...(description !== null && description.length > 2048
@@ -908,6 +930,7 @@ export class RunEngine extends EventEmitter {
                 ? "named"
                 : "history",
           ...(input.replayRunId ? { replayRunId: input.replayRunId } : {}),
+          ...(input.title ? { title: input.title } : {}),
         },
         ...(input.scriptName === undefined
           ? {}
@@ -1118,6 +1141,10 @@ export class RunEngine extends EventEmitter {
     let result: JsonObject | undefined, error: JsonObject | undefined;
     let resultRef: string | undefined;
     let releaseScript: (() => void) | undefined;
+    let scriptDiagnostic: {
+      exceptionType: string;
+      location?: { source: string; line: number; column?: number };
+    } | undefined;
     const moduleUses = new Map<string, ModuleUse>();
     let modulesIncomplete = false;
     try {
@@ -1240,6 +1267,7 @@ export class RunEngine extends EventEmitter {
       );
       run = this.store.getRun(scope.runId);
       const source: JsonObject = {
+        ...(input.title ? { title: input.title } : {}),
         origin: snapshot.origin,
         revision: snapshot.origin.revision,
         nodeVersion: process.version,
@@ -1334,6 +1362,7 @@ export class RunEngine extends EventEmitter {
         {
           filename: `nexum:${snapshot.name ?? run.runId + ".js"}`,
           console: runConsole,
+          onScriptError: (value) => { scriptDiagnostic = value; },
           onModule: (use) => {
             if (moduleUses.size < 256 || moduleUses.has(use.entry))
               moduleUses.set(use.entry, use);
@@ -1402,7 +1431,14 @@ export class RunEngine extends EventEmitter {
       );
       resultRef = this.#relative(path.join(directory, "result.json"));
     } catch (cause) {
-      error = failure(cause, phase);
+      // An explicit stop outranks a cooperative AbortError from a SDK wait.
+      error = failure(
+        scope.controller.signal.aborted
+          ? scope.controller.signal.reason
+          : cause,
+        phase,
+        scriptDiagnostic,
+      );
     }
     scope.accepting = false;
     if (scope.pending) {

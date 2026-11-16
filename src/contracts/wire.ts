@@ -134,6 +134,7 @@ export interface WireInvocationContextV2 {
 export interface WireErrorV2 {
   readonly code: string;
   readonly message: string;
+  readonly hint?: string;
   readonly details?: JsonObject;
 }
 export interface WireSubmissionV2 {
@@ -189,6 +190,7 @@ export type WireAttachmentV2 =
   | { readonly sourceId: string };
 export interface WireRunStartInputV2 {
   readonly contextId: string;
+  readonly title?: string;
   readonly script?: string;
   readonly scriptName?: string;
   readonly replayRunId?: string;
@@ -237,6 +239,7 @@ export interface WireRunListInputV2 {
 }
 export interface WireRunV2 {
   readonly runId: string;
+  readonly title?: string;
   readonly contextId: string;
   readonly projectId: string | null;
   readonly revision: number;

@@ -98,8 +98,8 @@ import {
   type MaintenanceRequests,
   type MaintenanceScope,
 } from "../maintenance/requests.js";
-import { runtimeExtension } from "../sdk/runtime.js";
-import { stateExtension } from "../sdk/state.js";
+import { runtimeExtension, runtimeSdkUsage } from "../sdk/runtime.js";
+import { stateExtension, stateSdkUsage } from "../sdk/state.js";
 import { outputExtension } from "../sdk/output-extension.js";
 import { shExtension } from "../sdk/sh.js";
 import { transferExtension } from "../sdk/transfer.js";
@@ -705,6 +705,9 @@ export class AgentRuntime {
       const filename = path.join(directory, namespace + ".md");
       const text =
         `# ${namespace} SDK\n\n` +
+        `> 以下 inputSchema 表示方法内部归一化后的校验结构，不代表 JavaScript 的实际参数顺序。\n\n` +
+        (namespace === "state" ? stateSdkUsage + "\n\n" : "") +
+        (namespace === "runtime" ? runtimeSdkUsage + "\n\n" : "") +
         handle.methods
           .map(
             (method) => "```json\n" + canonicalJson(method, 65536) + "\n```\n",

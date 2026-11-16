@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import { executionGlobals } from "./globals.js";
+import { inspectScriptError, type ScriptDiagnostic } from "./script-diagnostics.js";
 
 export const defaultBuiltins = Object.freeze([
   "assert",
@@ -474,6 +475,7 @@ export class ModuleLoader {
     options: {
       filename?: string;
       onModule?: (use: ModuleUse) => void;
+      onScriptError?: (value: ScriptDiagnostic) => void;
       console?: Console;
     } = {},
   ): () => Promise<unknown> {
@@ -525,29 +527,64 @@ export class ModuleLoader {
     const realm = vm.createContext(
       Object.assign(Object.create(null), executionGlobals(options.console)),
     );
-    const entry = vm.compileFunction(
-      '"use strict"; return (async function () {\n' +
-        code +
-        "\n}).call(undefined);",
-      names,
-      {
-        parsingContext: realm,
-        filename: options.filename ?? "nexum:script.js",
-        importModuleDynamically: async (specifier, _referrer, attributes) => {
-          const authorized = this.#authorize(specifier);
-          const filename = this.#entry(authorized, "import");
-          record(authorized, filename);
-          const value = await this.#bridge.fromWork(filename, {
-            with: attributes,
-          });
-          // Node accepts an actual ESM namespace here; @types/node only lists vm.Module.
-          // Returning that native namespace preserves live bindings and Node's cache.
-          return value as vm.Module;
-        },
-      },
+    const filename = options.filename ?? "nexum:script.js";
+    const nativeStackGetter = vm.runInContext(
+      "Object.getOwnPropertyDescriptor(new Error(), 'stack').get",
+      realm,
+    ) as (this: Error) => unknown;
+    const realmError = vm.runInContext("Error", realm) as typeof Error;
+    const prototypes = new Map(
+      vm.runInContext(
+        "[['Error', Error.prototype], ['SyntaxError', SyntaxError.prototype], ['TypeError', TypeError.prototype], ['ReferenceError', ReferenceError.prototype], ['RangeError', RangeError.prototype], ['URIError', URIError.prototype], ['EvalError', EvalError.prototype], ['AggregateError', AggregateError.prototype]]",
+        realm,
+      ) as Array<[string, object]>,
     );
-    return () =>
-      entry(...names.map((name) => publicParameters[name])) as Promise<unknown>;
+    const allowedPrototypes = new Map(
+      [...prototypes].map(([type, prototype]) => [prototype, type]),
+    );
+    const report = (cause: unknown) => {
+      const diagnostic = inspectScriptError(
+        cause, nativeStackGetter, filename, allowedPrototypes, realmError,
+      );
+      if (diagnostic) options.onScriptError?.(diagnostic);
+    };
+    let entry: ReturnType<typeof vm.compileFunction>;
+    try {
+      entry = vm.compileFunction(
+        '"use strict"; return (async function () {\n' +
+          code +
+          "\n}).call(undefined);",
+        names,
+        {
+          parsingContext: realm,
+          filename,
+          importModuleDynamically: async (specifier, _referrer, attributes) => {
+            const authorized = this.#authorize(specifier);
+            const filename = this.#entry(authorized, "import");
+            record(authorized, filename);
+            const value = await this.#bridge.fromWork(filename, {
+              with: attributes,
+            });
+            // Node accepts an actual ESM namespace here; @types/node only lists vm.Module.
+            // Returning that native namespace preserves live bindings and Node's cache.
+            return value as vm.Module;
+          },
+        },
+      );
+    } catch (cause) {
+      report(cause);
+      throw cause;
+    }
+    return async () => {
+      try {
+        return await (entry(
+          ...names.map((name) => publicParameters[name]),
+        ) as Promise<unknown>);
+      } catch (cause) {
+        report(cause);
+        throw cause;
+      }
+    };
   }
 
   async execute(

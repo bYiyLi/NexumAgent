@@ -1363,8 +1363,10 @@ test("real Streamable HTTP uses configured static headers without publishing cre
 });
 
 test("failed stdio initialization closes registered resources and waits for actual process exit", async (t) => {
-  const f = await fixture(t),
-    peer = stdioFixture(t, f, { mode: "idle" });
+  const f = await fixture(t);
+  // Exercise real stdio cleanup, not a delayed interactive login-shell probe.
+  controlledProbeShell(t, f);
+  const peer = stdioFixture(t, f, { mode: "idle" });
   await assert.rejects(f.prepare(peer.config, { connectTimeoutMs: 2500 }));
   const pid = await until(
     () => peer.pid(),

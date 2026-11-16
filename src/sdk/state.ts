@@ -7,6 +7,28 @@ const positiveVersion = {
   minimum: 1,
   maximum: Number.MAX_SAFE_INTEGER,
 };
+
+// Keep callable examples beside the positional normalizer that owns them.
+// inputSchema below describes the *normalized* object, not JS arguments.
+export const stateSdkUsage = `## JavaScript 调用签名（位置参数）
+
+以下是脚本实际调用形式，不要把下方的内部 inputSchema 对象直接传给方法。
+
+` + ["agent", "user"].flatMap((scope) => [
+  `- \`state.${scope}.get(key: string)\`：读取，返回现有值及其 version；不存在时按 SDK 实际空值处理。`,
+  `- \`state.${scope}.set(key: string, value: JSON, options: { expectedVersion: number | null })\`：条件写入。`,
+  `- \`state.${scope}.delete(key: string, options: { expectedVersion: number })\`：条件删除。`,
+]).join("\n") + `
+
+~~~javascript
+const current = await state.agent.get("example");
+const saved = await state.agent.set("example", { count: 1 }, { expectedVersion: current?.version ?? null });
+await state.agent.delete("example", { expectedVersion: saved.version });
+// user 作用域使用相同的调用签名，如 state.user.get("example")。
+~~~
+
+首次创建时 expectedVersion 为 null；更新或删除必须使用读取到的实际版本，不要猜测版本号。脚本异常时先核对是否已发生写入，不要盲目重试。
+`;
 export const stateExtension: ExtensionFactory = () => {
   const methods: Record<string, MethodDefinition> = {};
   for (const scope of ["agent", "user"] as const) {

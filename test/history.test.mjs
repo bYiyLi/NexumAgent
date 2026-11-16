@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { projectRunRecord } from "../dist/application/run-view.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson, newRequestId } from "../dist/contracts/json.js";
 
@@ -174,6 +175,20 @@ function all(f, filter = {}, who = caller) {
   } while (cursor);
   return found;
 }
+
+test("run title is optional, bounded and retained across start, get and list", async (t) => {
+  const f = await fixture(t);
+  const title = "检查项目依赖并报告风险";
+  const finished = await f.execute({ title, script: "return 42;" });
+  assert.equal(finished.run.source.title, title);
+  assert.equal(f.store.getRun(finished.run.runId).source.title, title);
+  assert.equal(projectRunRecord(finished.run).title, title);
+  assert.equal(projectRunRecord((await f.finish(finished.run.runId)).run).title, title);
+  assert.equal(all(f).find((item) => item.runId === finished.run.runId)?.title, title);
+  const fallback = await f.execute({ script: "return 'without title';" });
+  assert.equal(projectRunRecord(fallback.run).title, "执行脚本");
+  await assert.rejects(f.start({ title: "x".repeat(121), script: "return 1;" }));
+});
 
 test("get confirms only the caller-scoped accepted request and never accepts, replays or revives a closed work", async (t) => {
   const f = await fixture(t),

@@ -149,6 +149,23 @@ async function fixture(t, user) {
   };
 }
 
+test("runtime.sleep is cancelled promptly without falsely completing a long wait", async (t) => {
+  const f = await fixture(t);
+  const initial = await f.start('await runtime.sleep(45000);return "must-not-complete";', {
+    waitMs: 0,
+    timeoutMs: 60000,
+  });
+  let observed = await f.engine.observe(caller, initial.run.runId, 2000);
+  assert.equal(observed.run.status, "running");
+  const at = Date.now();
+  assert.equal(f.engine.cancel(caller, initial.run.runId).run.status, "cancelling");
+  observed = await f.engine.observe(caller, initial.run.runId, 2000);
+  assert.equal(observed.run.status, "cancelled");
+  assert.equal(observed.result, null);
+  assert.equal(observed.run.error.code, "run_cancelled");
+  assert.ok(Date.now() - at < 2000);
+});
+
 test("state SDK uses the public invocation service and keeps snapshots and returned data independent", async (t) => {
   const f = await fixture(t);
   let result = await f.start(

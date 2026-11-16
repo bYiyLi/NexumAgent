@@ -14,8 +14,45 @@ import path from "node:path";
 import type { Profile } from "../contracts/types.js";
 import { requireCondition } from "../contracts/errors.js";
 import { privateDirectory } from "../runtime/paths.js";
+import type { ConnectionDiagnosticDetails } from "./connection.js";
 
 export const MAX_DIAGNOSTIC_BYTES = 1024 * 1024;
+
+function safeDiagnosticDetails(details?: ConnectionDiagnosticDetails): object {
+  if (!details) return {};
+  const reason = [
+    "heartbeat_timeout",
+    "socket_closed",
+    "socket_error",
+    "local_close",
+  ].includes(details.reason ?? "")
+    ? details.reason
+    : undefined;
+  const lastPingAt =
+    details.lastPingAt === null
+      ? null
+      : typeof details.lastPingAt === "string" &&
+          Number.isFinite(Date.parse(details.lastPingAt))
+        ? new Date(details.lastPingAt).toISOString()
+        : undefined;
+  const safeNumber = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return {
+    ...(reason ? { reason } : {}),
+    ...(lastPingAt !== undefined ? { lastPingAt } : {}),
+    ...(safeNumber(details.closeCode) && details.closeCode <= 65535
+      ? { closeCode: details.closeCode }
+      : {}),
+    ...(safeNumber(details.httpStatus) && details.httpStatus <= 599
+      ? { httpStatus: details.httpStatus }
+      : {}),
+    ...(safeNumber(details.attempt) ? { attempt: details.attempt } : {}),
+    ...(safeNumber(details.retryDelayMs)
+      ? { retryDelayMs: details.retryDelayMs }
+      : {}),
+    ...(safeNumber(details.offlineMs) ? { offlineMs: details.offlineMs } : {}),
+  };
+}
 
 /** Private, bounded control diagnostics. Native/plugin errors and payloads never enter this file. */
 export function appendDiagnostic(
@@ -23,6 +60,7 @@ export function appendDiagnostic(
   profile: Profile,
   code: string,
   retry: boolean,
+  details?: ConnectionDiagnosticDetails,
 ): void {
   const directory = privateDirectory(root, "logs");
   const filename = path.join(directory, "agent.log");
@@ -61,6 +99,7 @@ export function appendDiagnostic(
         profile,
         code: /^[a-z][a-z0-9_]{0,127}$/.test(code) ? code : "agent_failed",
         retry,
+        ...safeDiagnosticDetails(details),
       }) + "\n",
     );
     let position = actual.size;

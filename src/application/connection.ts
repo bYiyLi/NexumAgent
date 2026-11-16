@@ -41,9 +41,7 @@ const reverseOperations: ReadonlySet<WireOperationV2> = new Set([
   "state.user.set",
   "state.user.delete",
 ]);
-const cloudEvents = new Set([
-  "agent.catalog.sync",
-]);
+const cloudEvents = new Set(["agent.catalog.sync"]);
 const permanent = new Map([
   ["invalid_agent_credential", 401],
   ["agent_already_connected", 409],
@@ -53,6 +51,20 @@ const permanent = new Map([
 ]);
 const releasePattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.[0-9]+)?$/;
+const heartbeatSilenceMs = 90_000;
+const heartbeatCheckMs = 10_000;
+
+export type ConnectionDiagnosticDetails = {
+  readonly reason?:
+    "heartbeat_timeout" | "socket_closed" | "socket_error" | "local_close";
+  readonly lastPingAt?: string | null;
+  readonly closeCode?: number;
+  readonly httpStatus?: number;
+  readonly attempt?: number;
+  readonly retryDelayMs?: number;
+  readonly offlineMs?: number;
+};
+
 export interface ControlConnectionOptions {
   readonly serverUrl: string;
   readonly token: string;
@@ -60,6 +72,8 @@ export interface ControlConnectionOptions {
   readonly bootId: string;
   readonly version: string;
   readonly signal: AbortSignal;
+  /** Internal test override; installed Agents use the fixed 90s / 10s values. */
+  readonly liveness?: { readonly silenceMs: number; readonly checkMs: number };
   /** Application initialization completes before an incoming invocation is admitted. */
   ready(connection: ControlConnection): Promise<void>;
   invoke(message: WireInvokeV2, signal: AbortSignal): Promise<unknown>;
@@ -170,6 +184,12 @@ export class ControlConnection {
   #events: Promise<void> = Promise.resolve();
   #eventCount = 0;
   #abort: () => void;
+  #openedAt = Date.now();
+  #lastPingAt: number | undefined;
+  #heartbeatTimer: ReturnType<typeof setInterval>;
+  #closeReason: NonNullable<ConnectionDiagnosticDetails["reason"]> =
+    "socket_closed";
+  #closeCode: number | undefined;
   private constructor(
     socket: WebSocket,
     binding: WireConnectionV2,
@@ -183,12 +203,49 @@ export class ControlConnection {
     this.#abort = () => this.close();
     options.signal.addEventListener("abort", this.#abort, { once: true });
     socket.on("message", (data, binary) => this.#receive(data, binary));
-    socket.on("close", () => this.#closed());
+    socket.on("ping", () => {
+      if (!this.#stopped) this.#lastPingAt = Date.now();
+    });
+    socket.on("close", (code) => {
+      this.#closeCode = code;
+      this.#closed();
+    });
     // A WebSocket error is followed by close. Do not report an early fake closure.
     socket.on("error", () => {
+      if (!this.#stopped) this.#closeReason = "socket_error";
       if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
     });
+    const silenceMs = options.liveness?.silenceMs ?? heartbeatSilenceMs;
+    const checkMs = options.liveness?.checkMs ?? heartbeatCheckMs;
+    requireCondition(
+      Number.isSafeInteger(silenceMs) &&
+        Number.isSafeInteger(checkMs) &&
+        checkMs > 0 &&
+        silenceMs > checkMs,
+      "invalid_configuration",
+      "The Agent connection heartbeat budget is invalid.",
+    );
+    this.#heartbeatTimer = setInterval(() => {
+      if (
+        !this.#stopped &&
+        Date.now() - (this.#lastPingAt ?? this.#openedAt) >= silenceMs
+      ) {
+        this.#closeReason = "heartbeat_timeout";
+        this.close();
+      }
+    }, checkMs);
+    this.#heartbeatTimer.unref();
     if (options.signal.aborted) this.close();
+  }
+  get closeInfo(): ConnectionDiagnosticDetails {
+    return {
+      reason: this.#closeReason,
+      lastPingAt:
+        this.#lastPingAt === undefined
+          ? null
+          : new Date(this.#lastPingAt).toISOString(),
+      closeCode: this.#closeCode,
+    };
   }
   static async connect(
     options: ControlConnectionOptions,
@@ -585,7 +642,10 @@ export class ControlConnection {
   }
   close(): void {
     if (this.#stopped) return;
+    if (this.#closeReason === "socket_closed")
+      this.#closeReason = "local_close";
     this.#stopped = true;
+    clearInterval(this.#heartbeatTimer);
     this.#controller.abort(
       new AgentError(
         "connection_closed",
@@ -596,6 +656,7 @@ export class ControlConnection {
   }
   #closed(): void {
     this.#stopped = true;
+    clearInterval(this.#heartbeatTimer);
     this.#controller.abort(
       new AgentError("connection_closed", "The observation connection closed."),
     );
@@ -620,14 +681,39 @@ export class ControlConnection {
 /** Reconnection only; the callback never replays previously accepted application requests. */
 export async function reconnectControl(
   options: ControlConnectionOptions,
-  diagnose: (code: string, retry: boolean) => void,
+  diagnose: (
+    code: string,
+    retry: boolean,
+    details?: ConnectionDiagnosticDetails,
+  ) => void,
 ): Promise<"stopped" | "permanent" | "upgrade"> {
   let failures = 0;
+  let offlineSince: number | undefined;
+  let attempts = 0;
   while (!options.signal.aborted) {
     try {
+      if (offlineSince !== undefined) {
+        diagnose("agent_reconnect_attempt", true, {
+          attempt: ++attempts,
+          offlineMs: Math.max(0, Date.now() - offlineSince),
+        });
+      }
       const connection = await ControlConnection.connect(options);
       failures = 0;
+      if (offlineSince !== undefined) {
+        diagnose("agent_reconnect_succeeded", false, {
+          offlineMs: Math.max(0, Date.now() - offlineSince),
+          attempt: attempts,
+        });
+        offlineSince = undefined;
+        attempts = 0;
+      }
       await connection.closed;
+      if (!options.signal.aborted) {
+        offlineSince = Date.now();
+        attempts = 0;
+        diagnose("agent_connection_lost", true, connection.closeInfo);
+      }
     } catch (cause) {
       if (options.signal.aborted) break;
       if (
@@ -644,6 +730,8 @@ export async function reconnectControl(
           "invalid_configuration";
       const stop =
         local || (cause instanceof ConnectionRejection && cause.stopNoRestart);
+      offlineSince ??= Date.now();
+      if (attempts === 0) attempts = 1;
       diagnose(
         local
           ? "invalid_configuration"
@@ -651,13 +739,21 @@ export async function reconnectControl(
             ? (cause.rejectionCode ?? "connection_rejected")
             : "connection_failed",
         !stop,
+        cause instanceof ConnectionRejection
+          ? { httpStatus: cause.status, attempt: attempts }
+          : { attempt: attempts },
       );
       if (stop) return "permanent";
     }
     if (options.signal.aborted) break;
     const wait = Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
+    const retryDelayMs = wait + Math.floor(Math.random() * 250);
+    diagnose("agent_reconnect_wait", true, {
+      attempt: attempts + 1,
+      retryDelayMs,
+    });
     try {
-      await delay(wait + Math.floor(Math.random() * 250), undefined, {
+      await delay(retryDelayMs, undefined, {
         signal: options.signal,
       });
     } catch {

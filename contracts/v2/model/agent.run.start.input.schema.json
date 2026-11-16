@@ -6,6 +6,11 @@
     "contextId": {
       "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
     },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
     "script": {
       "type": "string",
       "minLength": 1,

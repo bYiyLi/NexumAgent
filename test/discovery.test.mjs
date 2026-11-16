@@ -217,6 +217,16 @@ test("Skill YAML is parsed as data with a bounded header; extended metadata neve
     parseSkillFrontmatter(Buffer.from(crlf), "sample").description,
     /folded/,
   );
+  const quotedCrLf = skill(
+    "sample",
+    '"A long, quoted description with Windows line endings: '
+      + 'Use when creating or editing images and UI mockups."',
+    'metadata:\n  short-description: "A quoted value"\n',
+  ).replaceAll("\n", "\r\n");
+  assert.match(
+    parseSkillFrontmatter(Buffer.from(quotedCrLf), "sample").description,
+    /Windows line endings/,
+  );
   for (const input of [
     skill("wrong"),
     skill("sample", "&a description", "metadata: *a\n"),

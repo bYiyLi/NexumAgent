@@ -8,7 +8,10 @@ import { AgentError, isAgentError } from "../contracts/errors.js";
 import { newId } from "../contracts/json.js";
 import type { Profile } from "../contracts/types.js";
 import { loadProfileConfig, profileRoot } from "./config.js";
-import { reconnectControl } from "./connection.js";
+import {
+  reconnectControl,
+  type ConnectionDiagnosticDetails,
+} from "./connection.js";
 import { AgentRuntime, type AgentRuntimeOptions } from "./runtime.js";
 import { maintenanceRuntimeOptions } from "./maintenance.js";
 import { WorkGitSchedule } from "./work-git.js";
@@ -20,7 +23,11 @@ export interface AgentProgramOptions {
   /** Trusted embedding/test home; the installed CLI uses the actual OS home. */
   readonly home?: string;
   readonly runtime?: AgentRuntimeOptions;
-  diagnose?(code: string, retry: boolean): void;
+  diagnose?(
+    code: string,
+    retry: boolean,
+    details?: ConnectionDiagnosticDetails,
+  ): void;
 }
 
 /** Native process entry: one boot/Core survives reconnects; only observations are replaced. */
@@ -38,16 +45,20 @@ export async function runAgent(
   const signal = lifetime.signal;
   let failure: unknown;
   let diagnosticRoot: string | undefined;
-  const diagnose = (code: string, retry: boolean) => {
+  const diagnose = (
+    code: string,
+    retry: boolean,
+    details?: ConnectionDiagnosticDetails,
+  ) => {
     // Never serialize native/plugin errors, request data, configuration or credentials.
     if (diagnosticRoot) {
       try {
-        appendDiagnostic(diagnosticRoot, profile, code, retry);
+        appendDiagnostic(diagnosticRoot, profile, code, retry, details);
       } catch {
         process.stderr.write("agent_log_unavailable\n");
       }
     }
-    options.diagnose?.(code, retry);
+    options.diagnose?.(code, retry, details);
     process.stderr.write(`${code}${retry ? ": retrying" : ""}\n`);
   };
   const shutdown = (): Promise<void> => {
