@@ -1,11 +1,11 @@
 # Nexum browser SDK 契约
 
-本文件是 Nexum browser 的完整公开能力设计，产品名固定为 **Nexum browser**，npm 技术包名为 `nexum-browser`，公开受管命名空间为 `browser`。当前为设计与验收输入，不宣称代码已实现、已发布或所有浏览器均支持。
+本文件是 Nexum browser 的完整公开能力设计，产品名固定为 **Nexum browser**，npm 技术包名为 `@nexum/browser`，公开受管命名空间为 `browser`。当前为设计与验收输入，不宣称代码已实现、已发布或所有浏览器均支持。
 
 ## 调用入口与对象边界
 
 ```javascript
-import { createBrowserClient } from "nexum-browser";
+import { createBrowserClient } from "@nexum/browser";
 
 const client = createBrowserClient(browser);
 const choices = await client.browsers.list();

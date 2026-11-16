@@ -8,7 +8,7 @@ import type {
   Invocation,
   ManagedResource,
   MethodDefinition,
-} from "@nexum/extension-api";
+} from "@nexum/sdk";
 import { browserRoutes } from "../client/routes.js";
 import {
   normalizeBrowserValue,

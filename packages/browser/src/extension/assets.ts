@@ -11,7 +11,7 @@ import {
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import type { ExtensionHost } from "@nexum/extension-api";
+import type { ExtensionHost } from "@nexum/sdk";
 import { check, identifier, record } from "./protocol.js";
 
 export interface PluginBuild {

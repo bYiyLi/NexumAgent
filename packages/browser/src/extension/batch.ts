@@ -1,4 +1,4 @@
-import type { Invocation } from "@nexum/extension-api";
+import type { Invocation } from "@nexum/sdk";
 import type { TabsContentResult } from "../client/types.js";
 import { validateTarget } from "../client/serialize.js";
 import { BrowserRuntime } from "./scope.js";

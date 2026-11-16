@@ -12,7 +12,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { types } from "node:util";
-import type { Invocation } from "@nexum/extension-api";
+import type { Invocation } from "@nexum/sdk";
 import type {
   BrowserArtifact,
   BrowserFileSource,

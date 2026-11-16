@@ -51,7 +51,7 @@ for (const source of sources) {
       const f = await nativeFixture(t);
       t.diagnostic(JSON.stringify({ kind: source.kind, stage: "open" }));
       const opened = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.new(context.input.url);await tab.playwright.waitForLoadState({state:'load',timeoutMs:30000});if(context.input.kind==='presentation')await tab.playwright.locator('#filmstrip [id^="filmstrip-slide-0-"]').first().waitFor({state:'visible',timeoutMs:20000});return {id:tab.id,url:await tab.url()};`,
+        `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.new(context.input.url);await tab.playwright.waitForLoadState({state:'load',timeoutMs:30000});if(context.input.kind==='presentation')await tab.playwright.locator('#filmstrip [id^="filmstrip-slide-0-"]').first().waitFor({state:'visible',timeoutMs:20000});return {id:tab.id,url:await tab.url()};`,
         { url: source.url, kind: source.kind },
       );
       const actual = new URL(opened.result.data.url);
@@ -68,7 +68,7 @@ for (const source of sources) {
           }),
         );
         const result = await f.run(
-          `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);return await ${alias ? "tab.exportGsuite" : "tab.content.exportGsuite"}(context.input.format);`,
+          `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),tab=await selected.tabs.get(context.input.id);return await ${alias ? "tab.exportGsuite" : "tab.content.exportGsuite"}(context.input.format);`,
           { id: opened.result.data.id, format },
         );
         const artifact = result.result.data,

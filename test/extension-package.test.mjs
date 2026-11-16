@@ -98,7 +98,7 @@ test("public extension tarball is generated from source, standalone, type-only a
   );
   await writeFile(
     path.join(consumer, "consumer.ts"),
-    `import type {ExtensionFactory, Invocation, TransferService, HostRequestServices} from '@nexum/extension-api';\nconst factory: ExtensionFactory = host => ({methods:{hello:{description:'hello',permissions:[],schemaDialect:'2020-12',inputSchema:{type:'object'},handle:(_input,call:Invocation)=>{const transfer:TransferService=call.transfer;return {ready:!!transfer,context:host.context};}}}});\nexport default factory;\n`,
+    `import type {ExtensionFactory, Invocation, TransferService, HostRequestServices} from '@nexum/sdk';\nconst factory: ExtensionFactory = host => ({methods:{hello:{description:'hello',permissions:[],schemaDialect:'2020-12',inputSchema:{type:'object'},handle:(_input,call:Invocation)=>{const transfer:TransferService=call.transfer;return {ready:!!transfer,context:host.context};}}}});\nexport default factory;\n`,
   );
   command(
     [
@@ -119,7 +119,7 @@ test("public extension tarball is generated from source, standalone, type-only a
     ],
     consumer,
   );
-  const installed = path.join(consumer, "node_modules/@nexum/extension-api");
+  const installed = path.join(consumer, "node_modules/@nexum/sdk");
   const before = (await readdir(consumer)).sort();
   assert.equal(
     command(

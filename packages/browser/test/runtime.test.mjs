@@ -154,7 +154,7 @@ async function fixture(
       mkdtempSync(path.join(tmpdir(), "nexum-browser-core-")),
     ),
     work = path.join(root, "work"),
-    packageRoot = path.join(work, "node_modules", "nexum-browser");
+    packageRoot = path.join(work, "node_modules", "@nexum/browser");
   mkdirSync(packageRoot, { recursive: true });
   for (const name of [
     "dist",
@@ -183,7 +183,7 @@ async function fixture(
     path.join(work, "package.json"),
     JSON.stringify({
       type: "module",
-      dependencies: { "nexum-browser": version },
+      dependencies: { "@nexum/browser": version },
     }),
   );
   const store = new SqliteStore(root, {
@@ -207,13 +207,13 @@ async function fixture(
     });
   const policy = {
     builtins: () => [],
-    approvedPackages: () => new Map([["nexum-browser", version]]),
+    approvedPackages: () => new Map([["@nexum/browser", version]]),
   };
   const modules = await ModuleLoader.create(work, store.bootId, policy),
     packages = new ExtensionPackageLoader(registry, modules, {
       policy,
       permissions,
-      enabled: () => new Set(["nexum-browser"]),
+      enabled: () => new Set(["@nexum/browser"]),
     }),
     materials = new ExtensionMaterials(work),
     services = new ExtensionServices(registry, packages, materials);
@@ -299,8 +299,8 @@ async function fixture(
           );
           await engine.observe(caller, runId, 50);
         }
-      const entry = services.get("nexum-browser");
-      if (entry) await services.disable("nexum-browser");
+      const entry = services.get("@nexum/browser");
+      if (entry) await services.disable("@nexum/browser");
       const report = await resources.shutdown(
         new Error("The Core browser fixture is closing."),
       );
@@ -311,7 +311,7 @@ async function fixture(
       rmSync(root, { recursive: true, force: true });
     }
   });
-  const enabled = await services.enable("nexum-browser");
+  const enabled = await services.enable("@nexum/browser");
   assert.equal(enabled.status, "enabled");
   const release = JSON.parse(
       readFileSync(
@@ -581,7 +581,7 @@ async function fixture(
     observe: (id) => engine.observe(caller, id, 50),
   };
 }
-const select = `const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
+const select = `const {createBrowserClient}=await import("@nexum/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
 
 test("visual degradation reaches extension logs with its actual run and action while the browser action continues", async (t) => {
   const f = await fixture(t, { visualFailure: true });
@@ -633,7 +633,7 @@ test("the installed optional package loads through the public factory, publishes
   assert.equal(f.materials.published().skills.length, 1);
   assert.equal(f.materials.scriptSources().length, 1);
   assert.ok(f.materials.published().docs.length > 0);
-  const disabled = await f.services.disable("nexum-browser");
+  const disabled = await f.services.disable("@nexum/browser");
   assert.equal(disabled.status, "disabled");
   assert.deepEqual(f.materials.scriptSources(), []);
   assert.equal(f.materials.published().instructions.length, 0);
@@ -654,10 +654,10 @@ test("normal return waits for actual remote detach and busy disable preserves al
   }
   assert.equal(result.run.endedAt, null);
   assert.equal(f.attached.size, 1);
-  await assert.rejects(f.services.disable("nexum-browser"), {
+  await assert.rejects(f.services.disable("@nexum/browser"), {
     code: "extension_busy",
   });
-  assert.equal(f.services.get("nexum-browser").status, "enabled");
+  assert.equal(f.services.get("@nexum/browser").status, "enabled");
   assert.equal(f.materials.published().skills.length, 1);
   f.detachGate.resolve();
   while (result.run.endedAt === null) {
@@ -674,7 +674,7 @@ test("normal return waits for actual remote detach and busy disable preserves al
   );
   assert.equal(f.attached.size, 0);
   assert.equal(f.counts.removed, 0);
-  assert.equal((await f.services.disable("nexum-browser")).status, "disabled");
+  assert.equal((await f.services.disable("@nexum/browser")).status, "disabled");
 });
 
 test("separate actual Core runs cannot take the same controlled tab and cancellation waits for remote cleanup", async (t) => {

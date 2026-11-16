@@ -212,7 +212,7 @@ test("native multiple-MIME ClipboardItem and AX Markdown paste/secondary actions
 test("native explicit input continuation issues a new tab epoch, rejects old handles and leaves another controlled tab intact", async (t) => {
   const f = await nativeFixture(t);
   const setup = await f.run(
-    'const {createBrowserClient}=await import("nexum-browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const other=await selected.tabs.new(context.input.base+"?other",{active:false});return {otherId:other.id};',
+    'const {createBrowserClient}=await import("@nexum/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const other=await selected.tabs.new(context.input.base+"?other",{active:false});return {otherId:other.id};',
     { base: f.base },
   );
   const otherId = setup.result.data.otherId;
@@ -227,7 +227,7 @@ test("native explicit input continuation issues a new tab epoch, rejects old han
     state = await f.observe(state.run.runId);
   }
   const held = await f.run(
-    'const {createBrowserClient}=await import("nexum-browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const other=await selected.tabs.get(context.input.otherId);let code,contextCode;try{await other.title();}catch(error){code=error.code;}try{await selected.user.getTabContext(context.input.otherId);}catch(error){contextCode=error.code;}return {code,contextCode};',
+    'const {createBrowserClient}=await import("@nexum/browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const other=await selected.tabs.get(context.input.otherId);let code,contextCode;try{await other.title();}catch(error){code=error.code;}try{await selected.user.getTabContext(context.input.otherId);}catch(error){contextCode=error.code;}return {code,contextCode};',
     { otherId },
   );
   assert.equal(held.result.data.code, "TAB_ALREADY_CLAIMED");
@@ -252,7 +252,7 @@ test("native explicit input continuation issues a new tab epoch, rejects old han
   assert.equal(data.value, "Fresh epoch");
   assert.equal(data.otherValue, "Other preserved");
   await f.run(
-    'const {createBrowserClient}=await import("nexum-browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);await(await selected.tabs.get(context.input.otherId)).close();',
+    'const {createBrowserClient}=await import("@nexum/browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);await(await selected.tabs.get(context.input.otherId)).close();',
     { otherId },
   );
 });
@@ -459,7 +459,7 @@ test("native tab creation retains only its exact target after the confirmed brow
   assert.equal(state.run.status, "succeeded", JSON.stringify(state.run.error));
   assert.equal(state.result.data.other, "Nexum native acceptance");
   await f.run(
-    'const {createBrowserClient}=await import("nexum-browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();await(await selected.tabs.get(context.input.ownedId)).close();',
+    'const {createBrowserClient}=await import("@nexum/browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();await(await selected.tabs.get(context.input.ownedId)).close();',
     { base: f.base, ownedId: user.result.data.ownedId },
   );
 });

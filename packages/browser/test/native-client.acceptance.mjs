@@ -63,7 +63,7 @@ test(
   async (t) => {
     const sessionIdSeed = 1000000;
     const f = await nativeFixture(t, { html, sessionIdSeed });
-    const discovery = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const peers=await client.browsers.list();const profiles=await Promise.all(peers.map(async peer=>({peer,tabs:(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base||tab.url===context.input.base+'second-profile')})));return profiles.filter(item=>item.tabs.length);`;
+    const discovery = `const {createBrowserClient}=await import('@nexum/browser');const client=createBrowserClient(browser);const peers=await client.browsers.list();const profiles=await Promise.all(peers.map(async peer=>({peer,tabs:(await(await client.browsers.get(peer.id)).tabs.list()).filter(tab=>tab.url===context.input.base||tab.url===context.input.base+'second-profile')})));return profiles.filter(item=>item.tabs.length);`;
     const initial = (await f.run(discovery, { base: f.base })).result.data;
     assert.equal(initial.length, 1);
     const original = initial[0].peer;
@@ -151,7 +151,7 @@ test(
           secondNativeTabId: secondTab.id,
         }),
       );
-      const target = `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser),selected=await client.browsers.get(context.input.browserId),tab=await selected.tabs.get(context.input.tabId);`;
+      const target = `const {createBrowserClient}=await import('@nexum/browser');const client=createBrowserClient(browser),selected=await client.browsers.get(context.input.browserId),tab=await selected.tabs.get(context.input.tabId);`;
       held = await f.start(
         target +
           `await tab.playwright.getByLabel('Keyboard field',{exact:true}).fill('profile one');await tab.playwright.waitForURL(context.input.base+'never-arrived',{timeoutMs:45000});`,
@@ -195,7 +195,7 @@ test(
       assert.equal(held.run.status, "cancelled", JSON.stringify(held));
       assert.deepEqual(held.run.cleanup.unconfirmed, []);
       const values = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const client=createBrowserClient(browser);const values=[];for(const target of context.input.targets){const selected=await client.browsers.get(target.browserId),tab=await selected.tabs.get(target.tabId);values.push(await tab.playwright.getByTestId('keyboard-value').innerText());}return {values,allIds:(await client.browsers.list()).map(peer=>peer.id),defaultId:(await client.browsers.getDefault()).browserId,byUrl:(await client.browsers.getForUrl(context.input.url)).browserId};`,
+        `const {createBrowserClient}=await import('@nexum/browser');const client=createBrowserClient(browser);const values=[];for(const target of context.input.targets){const selected=await client.browsers.get(target.browserId),tab=await selected.tabs.get(target.tabId);values.push(await tab.playwright.getByTestId('keyboard-value').innerText());}return {values,allIds:(await client.browsers.list()).map(peer=>peer.id),defaultId:(await client.browsers.getDefault()).browserId,byUrl:(await client.browsers.getForUrl(context.input.url)).browserId};`,
         {
           targets: [
             { browserId: original.id, tabId: firstTab.id },
@@ -536,7 +536,7 @@ test(
         held = await f.observe(held.run.runId, 50);
       }
       const checked = await f.run(
-        `const {createBrowserClient}=await import('nexum-browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),failure=async action=>{try{await action();return null;}catch(error){return error.code;}};const group=await failure(()=>selected.tabGroups.update(context.input.group.id,{title:'Must not change',color:'red'})),window=await failure(()=>selected.windows.update(context.input.window.id,{width:840}));return {group,window,actualGroup:await selected.tabGroups.get(context.input.group.id),actualWindow:(await selected.windows.getAll()).find(value=>value.id===context.input.window.id),audit:await selected.management.getAuditTrail({limit:10})};`,
+        `const {createBrowserClient}=await import('@nexum/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId),failure=async action=>{try{await action();return null;}catch(error){return error.code;}};const group=await failure(()=>selected.tabGroups.update(context.input.group.id,{title:'Must not change',color:'red'})),window=await failure(()=>selected.windows.update(context.input.window.id,{width:840}));return {group,window,actualGroup:await selected.tabGroups.get(context.input.group.id),actualWindow:(await selected.windows.getAll()).find(value=>value.id===context.input.window.id),audit:await selected.management.getAuditTrail({limit:10})};`,
         setup.result.data,
       );
       const value = checked.result.data;

@@ -1,10 +1,19 @@
 {
-  "name": "nexum-browser",
-  "version": "0.1.0-development.0",
-  "private": true,
+  "name": "@nexum/browser",
+  "version": "0.1.0-next.0",
+  "private": false,
   "description": "Nexum 可选浏览器客户端与受管扩展",
   "type": "module",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bYiyLi/NexumAgent.git",
+    "directory": "packages/browser"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
   "engines": {
     "node": ">=24.22.1 <25"
   },
@@ -55,15 +64,15 @@
     "ws": "8.23.0"
   },
   "peerDependencies": {
-    "@nexum/extension-api": ">=0.0.1-development.0 <0.1.0"
+    "@nexum/sdk": ">=0.0.1-next.0 <0.1.0"
   },
   "peerDependenciesMeta": {
-    "@nexum/extension-api": {
+    "@nexum/sdk": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@nexum/extension-api": "file:../extension-api",
+    "@nexum/sdk": "file:../extension-api",
     "@types/node": "24.19.2",
     "@types/turndown": "5.0.6",
     "@types/ws": "8.18.2",

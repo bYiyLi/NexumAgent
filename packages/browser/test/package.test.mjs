@@ -26,25 +26,24 @@ function temporary(t) {
 
 test("both public package entries and external declarations are usable without invoking a factory or exposing internal subpaths", (t) => {
   const root = temporary(t);
-  mkdirSync(path.join(root, "node_modules"));
+  mkdirSync(path.join(root, "node_modules", "@nexum"), { recursive: true });
   symlinkSync(
     source,
-    path.join(root, "node_modules", "nexum-browser"),
+    path.join(root, "node_modules", "@nexum/browser"),
     "junction",
   );
-  mkdirSync(path.join(root, "node_modules", "@nexum"));
   symlinkSync(
     fileURLToPath(
-      new URL("../node_modules/@nexum/extension-api", import.meta.url),
+      new URL("../node_modules/@nexum/sdk", import.meta.url),
     ),
-    path.join(root, "node_modules", "@nexum", "extension-api"),
+    path.join(root, "node_modules", "@nexum", "sdk"),
     "junction",
   );
   writeFileSync(path.join(root, "package.json"), '{"type":"module"}');
   writeFileSync(
     path.join(root, "probe.ts"),
-    `import {createBrowserClient,type BrowserClient,type PlaywrightLocator,type BrowserArtifact} from "nexum-browser";
-import factory from "nexum-browser/nexum";import type {ExtensionFactory} from "@nexum/extension-api";
+    `import {createBrowserClient,type BrowserClient,type PlaywrightLocator,type BrowserArtifact} from "@nexum/browser";
+import factory from "@nexum/browser/nexum";import type {ExtensionFactory} from "@nexum/sdk";
 const extension:ExtensionFactory=factory;const client:BrowserClient=createBrowserClient({});
 async function example(){const selected=await client.browsers.get("actual-browser");const tab=await selected.tabs.get("actual-tab");const locator:PlaywrightLocator=tab.playwright.getByRole("button",{name:"submit"});await locator.click();await tab.cdp.send("Runtime.enable");const artifact:BrowserArtifact=await tab.saveDownload("actual-download");const image=await tab.ax.write("both");return {artifact,image};}
 void extension;void example;`,
@@ -68,7 +67,7 @@ void extension;void example;`,
     { cwd: root, env, encoding: "utf8" },
   );
   assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
-  const script = `import assert from "node:assert/strict";import {readdirSync} from "node:fs";const before=process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length;const {createBrowserClient}=await import("nexum-browser");const extension=await import("nexum-browser/nexum");assert.equal(typeof extension.default,"function");assert.equal(typeof createBrowserClient({}).browsers.list,"function");assert.equal(process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length,before);await assert.rejects(import("nexum-browser/dist/extension/service.js"),{code:"ERR_PACKAGE_PATH_NOT_EXPORTED"});assert.deepEqual(readdirSync(process.env.HOME),[]);`;
+  const script = `import assert from "node:assert/strict";import {readdirSync} from "node:fs";const before=process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length;const {createBrowserClient}=await import("@nexum/browser");const extension=await import("@nexum/browser/nexum");assert.equal(typeof extension.default,"function");assert.equal(typeof createBrowserClient({}).browsers.list,"function");assert.equal(process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length,before);await assert.rejects(import("@nexum/browser/dist/extension/service.js"),{code:"ERR_PACKAGE_PATH_NOT_EXPORTED"});assert.deepEqual(readdirSync(process.env.HOME),[]);`;
   const home = path.join(root, "home");
   mkdirSync(home);
   const runtime = spawnSync(
@@ -144,6 +143,6 @@ test("the actual private candidate tarball contains its own five contributions a
   assert.equal(ledger.published, false);
   assert.equal(
     JSON.parse(readFileSync(path.join(source, "package.json"))).private,
-    true,
+    false,
   );
 });

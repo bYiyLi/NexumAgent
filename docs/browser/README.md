@@ -1,6 +1,6 @@
 # Nexum browser
 
-Nexum browser 是 Nexum 官方维护的可选浏览器控制扩展，源码与完整开发资料归 Agent 项目，作为独立 npm 包 `nexum-browser` 发布。它使用 Nexum 公共扩展协议，不是 Agent 默认依赖，不随 Agent 默认安装，也不因包已下载就自动启用。本文件及下列正文定义产品合同；候选代码、组件与部分原生验证已经存在，完整验收和 npm 发布尚未完成，实际进展见[原生验收记录](../development/browser-native-acceptance.md)。
+Nexum browser 是 Nexum 官方维护的可选浏览器控制扩展，源码与完整开发资料归 Agent 项目，作为独立 npm 包 `@nexum/browser` 发布。它使用 Nexum 公共扩展协议，不是 Agent 默认依赖，不随 Agent 默认安装，也不因包已下载就自动启用。本文件及下列正文定义产品合同；候选代码、组件与部分原生验证已经存在，完整验收和 npm 发布尚未完成，实际进展见[原生验收记录](../development/browser-native-acceptance.md)。
 
 ## 交付边界
 

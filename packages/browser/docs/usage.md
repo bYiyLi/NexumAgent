@@ -7,7 +7,7 @@
 `locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `TIMEOUT`，不会点击覆盖层。
 
 ```javascript
-const { createBrowserClient } = await import("nexum-browser");
+const { createBrowserClient } = await import("@nexum/browser");
 const client = createBrowserClient(browser);
 const selected = await client.browsers.get(context.input.browserId);
 const tab = await selected.tabs.get(context.input.tabId);

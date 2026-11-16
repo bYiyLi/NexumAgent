@@ -32,7 +32,7 @@ Nexum 方法返回业务数据，不返回自定义控制原型、函数或 host
 
 ```text
 packages/browser/                 # 独立浏览器包
-  package.json                    # 独立 npm 包 nexum-browser
+  package.json                    # 独立 npm 包 @nexum/browser
   src/client/                     # 普通 Node 门面和类型
   src/extension/                  # 公共工厂、方法表、连接/目标/锁/资源实现
   browser-extension/              # 配套 MV3 插件源码

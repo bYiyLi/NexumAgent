@@ -27,7 +27,7 @@ test(
         'const other=await selected.tabs.new(context.input.base+"?receipt-second",{active:false});await other.playwright.waitForURL(context.input.base+"?receipt-second");return {first:tab.id,second:other.id};',
       { base: f.base },
     );
-    const script = `try { const {createBrowserClient}=await import('nexum-browser');
+    const script = `try { const {createBrowserClient}=await import('@nexum/browser');
     const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);
     const tab=await selected.tabs.get(context.input.tabId);
     await tab.playwright.evaluate('() => { window.receiptProbe = true; return true; }');

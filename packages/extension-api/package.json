@@ -1,9 +1,18 @@
 {
-  "name": "@nexum/extension-api",
-  "version": "0.0.1-development.0",
-  "private": true,
+  "name": "@nexum/sdk",
+  "version": "0.0.1-next.0",
+  "private": false,
   "description": "Nexum SDK 扩展公共类型协议",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bYiyLi/NexumAgent.git",
+    "directory": "packages/extension-api"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
   "type": "module",
   "engines": {
     "node": ">=24.22.1 <25"
