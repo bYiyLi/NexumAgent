@@ -40,6 +40,8 @@ jobs:
       - if: inputs.package == 'sdk'
         run: node --test test/extension-package.test.mjs
       - if: inputs.package == 'browser'
+        run: pnpm build
+      - if: inputs.package == 'browser'
         run: pnpm --dir packages/browser install --ignore-workspace --frozen-lockfile
       - if: inputs.package == 'browser'
         run: pnpm --dir packages/browser check
