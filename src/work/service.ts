@@ -848,7 +848,9 @@ export class WorkService {
       "project_not_found",
       "The current Project policy does not match the close target.",
     );
-    this.#authorize(caller, { action: "close", project, path: project.root });
+    // Closing a registered Project only retires its trusted identity and work.
+    // The owner must be able to close it after directory permission is revoked.
+    this.#authorize(caller, { action: "close" });
     return this.#store.closeProject(projectId);
   }
   async drain(): Promise<void> {

@@ -1779,6 +1779,9 @@ export class AgentRuntime {
       },
       "agent.run.list": (input) => {
         const page = this.#engine.list(caller, input);
+        const stats = input.contextId
+          ? this.#store.runStats(callerKey(caller), input.contextId)
+          : undefined;
         return {
           runs: page.runs.map((row) =>
             projectRunRecord(this.#store.getRun(row.runId), {
@@ -1800,6 +1803,7 @@ export class AgentRuntime {
           ),
           nextCursor: page.nextCursor,
           observedAt: new Date().toISOString(),
+          ...(stats ? { stats } : {}),
         };
       },
       "agent.context.read": (input) => this.#readContext(caller, input, signal),
@@ -2308,7 +2312,11 @@ export class AgentRuntime {
         reservation.context.authorization.projectId ?? null,
       );
       if (input.stream.direction === "agent-to-cloud") {
-        const stream = data.openWrite(input.stream, transferScope.signal, claim);
+        const stream = data.openWrite(
+          input.stream,
+          transferScope.signal,
+          claim,
+        );
         enteredCore = true;
         return await this.#transfers.commitClaim(reservation.core, {
           download: stream.writable,

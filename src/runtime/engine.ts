@@ -14,7 +14,11 @@ import {
 import { types } from "node:util";
 import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
-import { AgentError, requireCondition } from "../contracts/errors.js";
+import {
+  AgentError,
+  isAgentError,
+  requireCondition,
+} from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
 import { canonicalJson, digest } from "../contracts/json.js";
 import type {
@@ -66,6 +70,15 @@ export interface GetInput {
   runId?: string;
   requestId?: string;
   waitMs?: number;
+  read?: { kind: "code" | "input" | "logs"; offset: number; maxBytes: number };
+}
+export interface RunPart {
+  readonly kind: "code" | "input" | "logs";
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly size: number;
+  readonly complete: boolean;
+  readonly text: string;
 }
 export interface ListInput {
   agentId: string;
@@ -101,6 +114,7 @@ export interface RunDetails extends RunView {
     readonly input: RetainedSnapshot;
     readonly logs: RetainedSnapshot;
   };
+  readonly part?: RunPart;
 }
 export interface RunSummary extends JsonObject {
   runId: string;
@@ -383,6 +397,7 @@ export class RunEngine extends EventEmitter {
         input: this.#snapshot(view.run, "input", true),
         logs: this.#snapshot(view.run, "logs", true),
       },
+      ...(input.read ? { part: this.#readPart(view.run, input.read) } : {}),
     };
   }
 
@@ -512,6 +527,165 @@ export class RunEngine extends EventEmitter {
       if (!page.more) return { runs, nextCursor: null };
     }
     return { runs, nextCursor: cursor ?? null };
+  }
+
+  #readPart(run: RunRecord, request: NonNullable<GetInput["read"]>): RunPart {
+    const { kind, offset, maxBytes } = request;
+    requireCondition(
+      ["code", "input", "logs"].includes(kind) &&
+        Number.isSafeInteger(offset) &&
+        offset >= 0 &&
+        Number.isSafeInteger(maxBytes) &&
+        maxBytes >= 4 &&
+        maxBytes <= 16384,
+      "invalid_arguments",
+      "The retained content range is invalid.",
+    );
+    const ref = run[`${kind}Ref`];
+    requireCondition(
+      ref,
+      "snapshot_unavailable",
+      "This retained Run content is unavailable.",
+    );
+    try {
+      const expected = path.join(
+        this.store.root,
+        ...(kind === "logs"
+          ? ["logs", "runs", run.runId]
+          : ["work", "tmp", "runs", run.runId]),
+      );
+      const root = realpathSync.native(expected);
+      const filename = realpathSync.native(path.resolve(this.store.root, ref));
+      requireCondition(
+        root === expected && contains(root, filename),
+        "snapshot_unavailable",
+        "The snapshot source changed.",
+      );
+      const fd = openSync(
+        filename,
+        constants.O_RDONLY |
+          (constants.O_NOFOLLOW ?? 0) |
+          (constants.O_NONBLOCK ?? 0),
+      );
+      try {
+        const stat = fstatSync(fd);
+        requireCondition(
+          stat.isFile() && stat.nlink === 1,
+          "snapshot_unavailable",
+          "The snapshot file is unavailable.",
+        );
+        if (kind === "logs") {
+          const range = readRunLogRange(fd, stat.size);
+          const start = offset === 0 ? range.startOffset : offset;
+          requireCondition(
+            start >= range.startOffset && start <= range.endOffset,
+            "snapshot_range_unavailable",
+            "The requested log range was cropped or changed.",
+          );
+          const size = Math.min(maxBytes, range.endOffset - start);
+          const bytes = Buffer.alloc(size);
+          const received = readSync(
+            fd,
+            bytes,
+            0,
+            size,
+            range.dataOffset + start - range.startOffset,
+          );
+          const value = new StringDecoder("utf8").write(
+            bytes.subarray(0, received),
+          );
+          const consumed = Buffer.byteLength(value);
+          requireCondition(
+            consumed > 0 || received === 0,
+            "snapshot_range_unavailable",
+            "Unable to read a complete UTF-8 codepoint.",
+          );
+          return {
+            kind,
+            offset: start,
+            nextOffset: start + consumed,
+            size: range.endOffset,
+            complete: start + consumed >= range.endOffset,
+            text: value,
+          };
+        }
+        // Fixed code/input snapshots are JSON-encoded. Decode with a hard cap
+        // so chunks contain real script/input text, not escaped JSON fragments.
+        requireCondition(
+          stat.size <= 8 * 1024 * 1024,
+          "snapshot_too_large",
+          "The retained JSON snapshot exceeds the bounded viewer limit.",
+        );
+        const bytes = Buffer.alloc(stat.size);
+        let received = 0;
+        while (received < bytes.length) {
+          const count = readSync(
+            fd,
+            bytes,
+            received,
+            bytes.length - received,
+            received,
+          );
+          requireCondition(
+            count > 0,
+            "snapshot_unavailable",
+            "The snapshot changed while reading.",
+          );
+          received += count;
+        }
+        const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+        const source =
+          kind === "code"
+            ? parsed && typeof parsed === "object" && !Array.isArray(parsed)
+              ? (parsed as Record<string, unknown>).code
+              : undefined
+            : parsed;
+        requireCondition(
+          kind !== "code" || typeof source === "string",
+          "snapshot_unavailable",
+          "The original script is unavailable.",
+        );
+        const content = Buffer.from(
+          kind === "code"
+            ? (source as string)
+            : JSON.stringify(source, null, 2),
+        );
+        requireCondition(
+          offset <= content.length,
+          "invalid_arguments",
+          "The offset exceeds the saved snapshot.",
+        );
+        const slice = content.subarray(
+          offset,
+          Math.min(offset + maxBytes, content.length),
+        );
+        const value = new StringDecoder("utf8").write(slice);
+        const consumed = Buffer.byteLength(value);
+        requireCondition(
+          consumed > 0 || slice.length === 0,
+          "snapshot_range_unavailable",
+          "Unable to read a complete UTF-8 codepoint.",
+        );
+        return {
+          kind,
+          offset,
+          nextOffset: offset + consumed,
+          size: content.length,
+          complete: offset + consumed >= content.length,
+          text: value,
+        };
+      } finally {
+        closeSync(fd);
+      }
+    } catch (cause) {
+      if (isAgentError(cause)) throw cause;
+      throw new AgentError(
+        "snapshot_unavailable",
+        "The retained Run content could not be read.",
+        undefined,
+        { cause },
+      );
+    }
   }
 
   #snapshot(

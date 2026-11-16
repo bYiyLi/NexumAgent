@@ -512,6 +512,56 @@ test("get reports lost, corrupt, redirected or oversized retained details withou
   );
 });
 
+test("retained code, input and logs can be read in bounded UTF-8 chunks without rerunning scripts", async (t) => {
+  const f = await fixture(t);
+  const code =
+    'console.log("日志：" + "x".repeat(20000));\n' +
+    "// historical code snapshot\n".repeat(800) +
+    'return "ok";';
+  const input = { title: "测试".repeat(4500), options: { strict: true } };
+  const done = await f.execute({ script: code, input });
+  assert.equal(done.run.status, "succeeded");
+  const readAll = async (kind) => {
+    let offset = 0,
+      text = "";
+    for (let i = 0; i < 100; i++) {
+      const view = await f.engine.get(caller, {
+        agentId: "a",
+        runId: done.run.runId,
+        read: { kind, offset, maxBytes: 8192 },
+      });
+      assert.equal(view.run.runId, done.run.runId);
+      assert.equal(view.part.kind, kind);
+      assert(view.part.nextOffset >= offset);
+      text += view.part.text;
+      offset = view.part.nextOffset;
+      if (view.part.complete) return text;
+    }
+    assert.fail("bounded reader did not converge");
+  };
+  assert.equal(await readAll("code"), code);
+  assert.equal(JSON.parse(await readAll("input")).input.title, input.title);
+  assert.match(await readAll("logs"), /日志：/);
+  assert.deepEqual(f.store.runStats(callerKey(caller), f.initial.contextId), {
+    total: 1,
+    active: 0,
+  });
+  f.accepted();
+  assert.deepEqual(f.store.runStats(callerKey(caller), f.initial.contextId), {
+    total: 2,
+    active: 1,
+  });
+  f.denied.add(done.run.runId);
+  await assert.rejects(
+    f.engine.get(caller, {
+      agentId: "a",
+      runId: done.run.runId,
+      read: { kind: "code", offset: 0, maxBytes: 8192 },
+    }),
+    { code: "forbidden" },
+  );
+});
+
 test("get observations preserve waits and deadlines, and list rechecks status after deadline observation", async (t) => {
   const f = await fixture(t);
   const waiting = await f.start({

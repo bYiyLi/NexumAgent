@@ -1519,6 +1519,92 @@ test("current Agent authorization can resume and cancel accepted Project Runs af
   assert.equal((await f.finish(stopped.view)).run.status, "cancelled");
 });
 
+test("Console owner can close a Project after its directory authorization is revoked", async (t) => {
+  const f = await fixture(t),
+    projectId = newId("project"),
+    policy = {
+      projectId,
+      projectRoot: f.project,
+      projectName: "Fixture",
+      allowedRoots: [f.project],
+    },
+    first = await f.open({ projectId }, policy),
+    second = await f.open({ projectId }, policy),
+    revoked = { ...policy, allowedRoots: [] },
+    sessionRef = hash(Buffer.from("owner-project-close-after-revocation")),
+    owner = {
+      principalId: "owner",
+      clientId: "nexum-console:" + sessionRef,
+      source: "owner_session",
+      sessionRef,
+    };
+
+  await assert.rejects(
+    f.open({ projectId }, revoked),
+    { code: "path_not_allowed" },
+  );
+  await assert.rejects(
+    f.invoke("agent.project.close", { projectId }, revoked),
+    { code: "invalid_wire" },
+  );
+  await assert.rejects(
+    f.invoke("agent.project.close", { projectId: "different_project" }, revoked, owner),
+    { code: "invalid_wire" },
+  );
+
+  const closed = await f.invoke(
+    "agent.project.close",
+    { projectId },
+    revoked,
+    owner,
+  );
+  assert.equal(closed.agentConfirmed, true);
+  assert.equal(closed.projectId, projectId);
+  assert.equal(closed.affectedContextCount, 2);
+  await assert.rejects(
+    f.invoke("agent.run.start", {
+      contextId: second.contextId,
+      script: "return true;",
+    }, policy),
+    { code: "context_closed" },
+  );
+  await assert.rejects(
+    f.invoke("agent.run.start", {
+      contextId: first.contextId,
+      script: "return true;",
+    }, policy),
+    { code: "context_closed" },
+  );
+});
+
+test("Console owner can retire a stale catalog Project even if its path no longer exists", async (t) => {
+  const f = await fixture(t),
+    projectId = newId("project"),
+    stale = path.join(f.root, "no-longer-existing-project"),
+    sessionRef = hash(Buffer.from("owner-project-close-stale-root")),
+    owner = {
+      principalId: "owner",
+      clientId: "nexum-console:" + sessionRef,
+      source: "owner_session",
+      sessionRef,
+    };
+  assert.equal(existsSync(stale), false);
+  const closed = await f.invoke(
+    "agent.project.close",
+    { projectId },
+    {
+      projectId,
+      projectRoot: stale,
+      projectName: "Stale Project",
+      allowedRoots: [],
+    },
+    owner,
+  );
+  assert.equal(closed.projectId, projectId);
+  assert.equal(closed.agentConfirmed, true);
+  assert.equal(closed.affectedContextCount, 0);
+});
+
 test("the current Console owner controls the actual background sh resource after Project close", async (t) => {
   const f = await fixture(t),
     projectId = newId("project");

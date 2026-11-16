@@ -3193,6 +3193,21 @@ export class SqliteStore {
     });
   }
 
+  /** One caller's retained run totals for a single explicit work context. */
+  runStats(
+    callerKey: string,
+    contextId: string,
+  ): { total: number; active: number } {
+    const row = this.#db
+      .prepare(
+        `SELECT count(*) AS total,
+       count(*) FILTER (WHERE status IN ('accepted','preparing_inputs','running','waiting_input','cancelling')) AS active
+       FROM runs WHERE caller_key=? AND context_id=?`,
+      )
+      .get(callerKey, contextId) as { total: number; active: number };
+    return { total: row.total, active: row.active };
+  }
+
   /** Internal bounded scan; cursors hide even records denied by the current policy. */
   scanRuns(
     filter: HistoryFilter,

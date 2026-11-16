@@ -214,12 +214,7 @@
           "maxLength": 256
         }
       },
-      "required": [
-        "agentId",
-        "allowedRoots",
-        "budgets",
-        "revision"
-      ],
+      "required": ["agentId", "allowedRoots", "budgets", "revision"],
       "additionalProperties": false,
       "dependentRequired": {
         "projectId": ["projectRoot", "projectName"],
@@ -1178,6 +1173,26 @@
         },
         "code": {
           "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TextPage"
+        },
+        "part": {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["code", "input", "logs"] },
+            "offset": { "type": "integer", "minimum": 0 },
+            "nextOffset": { "type": "integer", "minimum": 0 },
+            "size": { "type": "integer", "minimum": 0 },
+            "complete": { "type": "boolean" },
+            "text": { "type": "string", "maxLength": 16384 }
+          },
+          "required": [
+            "kind",
+            "offset",
+            "nextOffset",
+            "size",
+            "complete",
+            "text"
+          ],
+          "additionalProperties": false
         },
         "input": {},
         "logs": {
@@ -2549,11 +2564,7 @@
           "maxLength": 256
         },
         "lifetime": {
-          "enum": [
-            "run",
-            "background",
-            "instance"
-          ]
+          "enum": ["run", "background", "instance"]
         },
         "createdAt": {
           "type": "integer",

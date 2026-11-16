@@ -205,6 +205,11 @@ export interface WireRunGetInputV2 {
   readonly runId?: string;
   readonly requestId?: string;
   readonly waitMs?: number;
+  readonly read?: {
+    readonly kind: "code" | "input" | "logs";
+    readonly offset: number;
+    readonly maxBytes: number;
+  };
 }
 export interface WireRunInputInputV2 {
   readonly agentId: string;
@@ -377,6 +382,14 @@ export interface WireRunViewV2 {
     readonly complete: boolean;
   };
   readonly unavailable?: WireErrorV2;
+  readonly part?: {
+    readonly kind: "code" | "input" | "logs";
+    readonly offset: number;
+    readonly nextOffset: number;
+    readonly size: number;
+    readonly complete: boolean;
+    readonly text: string;
+  };
   readonly code?: {
     readonly text: string;
     readonly complete: boolean;
@@ -445,6 +458,7 @@ export interface WireRunListOutputV2 {
   readonly runs: readonly WireRunV2[];
   readonly nextCursor: string | null;
   readonly observedAt: string;
+  readonly stats?: { readonly total: number; readonly active: number };
 }
 export type WireProcessSnapshotV2 = {
   readonly processId: string;

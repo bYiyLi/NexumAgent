@@ -207,6 +207,7 @@ export async function projectRunView(
     ...(view.unavailable ? { unavailable: error(view.unavailable)! } : {}),
   };
   const output = projected as unknown as JsonObject;
+  if ("part" in view && view.part) output.part = json({ ...view.part });
   const notes: JsonObject = {};
   if ("snapshots" in view) {
     const snapshots = view.snapshots;
