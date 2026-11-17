@@ -22,7 +22,20 @@ import {
   loadServicePlan,
 } from "../scripts/service.mjs";
 import { npmRegistries } from "../scripts/npm-install.mjs";
+import { windowsConsoleProbe } from "../scripts/native-console-probe.mjs";
 
+test("native console probe has real PowerShell here-string newlines and distinct failure codes", () => {
+  const script = windowsConsoleProbe(12345);
+  assert.ok(script.includes("@'\n"), "opening here-string must end with a real line break");
+  assert.ok(script.includes("\n'@\n"), "closing here-string must start on its own line");
+  assert.ok(!script.includes("\\n"), "literal slash-n makes PowerShell parse fail");
+  assert.ok(script.includes("AttachConsole([uint32]12345)"));
+  assert.match(script, /exit 11/); // real console association
+  assert.match(script, /exit 12/); // unexpected native API error
+  assert.match(script, /exit 0/); // no console association
+  assert.throws(() => windowsConsoleProbe(0));
+  assert.throws(() => windowsConsoleProbe(1.5));
+});
 const temporary = async (t) => {
   const root = realpathSync.native(
     await mkdtemp(path.join(tmpdir(), "nexum-services-")),

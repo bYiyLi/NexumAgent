@@ -14,6 +14,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { servicePlan, serviceAction, currentWindowsSid } from "./service.mjs";
+import { windowsConsoleProbe } from "./native-console-probe.mjs";
 
 assert.equal(
   process.env.GITHUB_ACTIONS,
@@ -69,23 +70,20 @@ const alive = (pid) => {
 // Real CI checks both Node launcher and the nested Agent.
 const assertNoConsole = (pid) => {
   if (process.platform !== "win32") return;
-  const script =
-    "$ErrorActionPreference='Stop';" +
-    "Add-Type -Namespace NexumNativeProbe -Name Console -MemberDefinition @'\\n" +
-    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool FreeConsole();\\n' +
-    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool AttachConsole(uint pid);\\n' +
-    "'@\\n" +
-    "[NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
-    "$attached=[NexumNativeProbe.Console]::AttachConsole([uint32]" + pid + ");" +
-    "$last=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error();" +
-    "if($attached){[NexumNativeProbe.Console]::FreeConsole()|Out-Null;exit 1};" +
-    "if($last -ne 6){exit 2}";
   const result = run(
     path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"),
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", windowsConsoleProbe(pid)],
     true,
   );
-  assert.equal(result.status, 0, "Native Agent has an attached console.");
+  assert.equal(
+    result.status,
+    0,
+    result.status === 11
+      ? "The native Agent process has a real console association."
+      : "The Windows console probe could not determine attachment (exit=" +
+          String(result.status) + ", stderr=" +
+          (result.stderr || "").slice(0, 800) + ").",
+  );
 };
 let ledger, control;
 const readLedger = async () => {
