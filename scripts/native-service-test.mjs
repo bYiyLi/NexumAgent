@@ -65,40 +65,27 @@ const alive = (pid) => {
     throw error;
   }
 };
-// A real scheduled Agent must have no visible console window: closing a
-// foreground console must not be able to terminate its connection.
-const assertWindowless = (pid) => {
+// Windows console association is forbidden, even when the window is hidden.
+// Real CI checks both Node launcher and the nested Agent.
+const assertNoConsole = (pid) => {
   if (process.platform !== "win32") return;
   const script =
     "$ErrorActionPreference='Stop';" +
-    "Add-Type -Namespace NexumNativeProbe -Name Console -MemberDefinition @'\n" +
-    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool FreeConsole();\n' +
-    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool AttachConsole(uint pid);\n' +
-    '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();\n' +
-    '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr handle);\n' +
-    "'@\n" +
+    "Add-Type -Namespace NexumNativeProbe -Name Console -MemberDefinition @'\\n" +
+    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool FreeConsole();\\n' +
+    '[System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)] public static extern bool AttachConsole(uint pid);\\n' +
+    "'@\\n" +
     "[NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
-    " \$attached=[NexumNativeProbe.Console]::AttachConsole([uint32]" + pid + ");" +
-    " \$errorCode=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error();" +
-    " if(\$attached){" +
-    " \$window=[NexumNativeProbe.Console]::GetConsoleWindow();" +
-    " \$visible=(\$window -ne [IntPtr]::Zero) -and [NexumNativeProbe.Console]::IsWindowVisible(\$window);" +
-    " [NexumNativeProbe.Console]::FreeConsole()|Out-Null;" +
-    " if(\$visible){exit 1};exit 0};" +
-    " if(\$errorCode -ne 6){exit 2}";
+    "$attached=[NexumNativeProbe.Console]::AttachConsole([uint32]" + pid + ");" +
+    "$last=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error();" +
+    "if($attached){[NexumNativeProbe.Console]::FreeConsole()|Out-Null;exit 1};" +
+    "if($last -ne 6){exit 2}";
   const result = run(
-    path.join(
-      process.env.SystemRoot,
-      "System32/WindowsPowerShell/v1.0/powershell.exe",
-    ),
+    path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"),
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
     true,
   );
-  assert.equal(
-    result.status,
-    0,
-    "The scheduled Agent has a visible console window, or its console state could not be verified.",
-  );
+  assert.equal(result.status, 0, "Native Agent has an attached console.");
 };
 let ledger, control;
 const readLedger = async () => {
@@ -195,10 +182,18 @@ try {
   );
   for (const name of ["service.mjs", "npm-install.mjs", "service-runner.mjs"])
     await cp(new URL("./" + name, import.meta.url), path.join(program, name));
+  const osName = process.platform === "win32" ? "windows" : process.platform;
+  const nativeName = process.platform === "win32" ? "nexum-agent.exe" : "nexum-agent";
+  await cp(new URL("../native/" + osName + "-" + process.arch + "/" + nativeName, import.meta.url),
+    path.join(program, nativeName));
+  if (process.platform !== "win32") {
+    const {chmod} = await import("node:fs/promises");
+    await chmod(path.join(program, nativeName), 0o700);
+  }
   ledger = path.join(home, "ledger.json");
   control = path.join(home, "control.json");
   await command(null);
-  const code = `import fs from 'node:fs';const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};process.stderr.write('native-service-fixture-started\\n');fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
+  const code = `import fs from 'node:fs';if(process.argv.includes('--version')){console.log('0.0.1');process.exit(0)};const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,parentPid:process.ppid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};process.stderr.write('native-service-fixture-started\\n');fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
   await writeFile(path.join(appPackage, "dist/cli.js"), code);
   plan = servicePlan({
     profile: "development",
@@ -224,7 +219,8 @@ try {
   await serviceAction(plan, "start", { isolatedHome: true });
   await waitFor(async () => alive((await readLedger()).pid), "first startup");
   let record = await readLedger();
-  assertWindowless(record.pid);
+  assertNoConsole(record.pid);
+  assertNoConsole(record.boots.at(-1).parentPid);
   assert.equal(
     record.boots.length,
     1,

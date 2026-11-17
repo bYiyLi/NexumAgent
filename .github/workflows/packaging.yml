@@ -24,6 +24,11 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache: false
+      - run: node scripts/build-native.mjs
       - run: node --test test/installer.test.mjs test/service.test.mjs test/npm-install.test.mjs test/extension-package.test.mjs
       - name: Exercise the actual native user service in an isolated home and unique namespace
         run: node scripts/native-service-test.mjs

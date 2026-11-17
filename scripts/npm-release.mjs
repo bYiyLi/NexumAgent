@@ -173,6 +173,12 @@ function inspectRelease() {
         "scripts/service.mjs",
         "scripts/npm-install.mjs",
         "scripts/service-runner.mjs",
+        "native/windows-x64/nexum-agent.exe",
+        "native/windows-arm64/nexum-agent.exe",
+        "native/darwin-x64/nexum-agent",
+        "native/darwin-arm64/nexum-agent",
+        "native/linux-x64/nexum-agent",
+        "native/linux-arm64/nexum-agent",
       ],
       browser: [
         "dist/client/index.js",

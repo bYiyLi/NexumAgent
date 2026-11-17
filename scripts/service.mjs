@@ -161,6 +161,8 @@ export function servicePlan({
   const args = npmManaged
     ? [entry, "--profile", profile]
     : ["--experimental-vm-modules", entry, "run", "--profile", profile];
+  const native = p.join(program, platform === "win32" ? "nexum-agent.exe" : "nexum-agent");
+  const nativeArgs = ["--profile", profile, "--home", home];
   const runtimePath =
     p.dirname(node) +
     (platform === "win32" ? ";" : ":") +
@@ -180,22 +182,20 @@ export function servicePlan({
     args,
     logs,
     state,
+    ...(npmManaged ? { native, nativeArgs } : {}),
   };
   if (platform === "darwin") {
     if (!Number.isSafeInteger(userId) || userId < 0)
       throw new Error("Use the current target user's uid.");
     const label = `com.nexum.agent.${profile}.${createHash("sha256").update(root).digest("hex").slice(0, 12)}`;
-    const program = [
-      "/usr/bin/env",
-      "-u",
-      "NODE_OPTIONS",
-      "-u",
-      "NODE_PATH",
-      "-u",
-      "NODE_REPL_EXTERNAL_MODULE",
-      node,
-      ...args,
-    ];
+    const program = npmManaged
+      ? [native, ...nativeArgs]
+      : [
+          "/usr/bin/env",
+          "-u", "NODE_OPTIONS", "-u", "NODE_PATH",
+          "-u", "NODE_REPL_EXTERNAL_MODULE",
+          node, ...args,
+        ];
     const content = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${program.map((x) => `<string>${xml(x)}</string>`).join("")}</array><key>WorkingDirectory</key><string>${xml(root)}</string><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(home)}</string><key>PATH</key><string>${xml(runtimePath)}</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>10</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>\n`;
     return {
       ...base,
@@ -210,7 +210,7 @@ export function servicePlan({
   }
   if (platform === "linux") {
     const label = `nexum-agent-${profile}-${createHash("sha256").update(root).digest("hex").slice(0, 12)}.service`;
-    const content = `[Unit]\nDescription=Nexum Agent (${profile})\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=:${[node, ...args].map(unit).join(" ")}\nWorkingDirectory=${clean(root).replaceAll("%", "%%")}\nEnvironment=${unit("HOME=" + home)}\nEnvironment=${unit("PATH=" + runtimePath)}\nUnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE\nRestart=on-failure\nRestartSec=10s\nTimeoutStopSec=60s\nKillMode=mixed\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
+    const content = `[Unit]\nDescription=Nexum Agent (${profile})\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=:${(npmManaged ? [native, ...nativeArgs] : [node, ...args]).map(unit).join(" ")}\nWorkingDirectory=${clean(root).replaceAll("%", "%%")}\nEnvironment=${unit("HOME=" + home)}\nEnvironment=${unit("PATH=" + runtimePath)}\nUnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE\nRestart=on-failure\nRestartSec=10s\nTimeoutStopSec=60s\nKillMode=mixed\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
     return {
       ...base,
       label,
@@ -226,6 +226,18 @@ export function servicePlan({
     .update(windowsSid + "\n" + root)
     .digest("hex")
     .slice(0, 12)}`;
+  if (npmManaged) {
+    const argumentsString = nativeArgs.map(windowsArgument).join(" ");
+    const content = `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>Nexum Agent (${profile}), current-user authority</Description></RegistrationInfo><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(windowsSid)}</UserId></LogonTrigger></Triggers><Principals><Principal id="TargetUser"><UserId>${xml(windowsSid)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><RunOnlyIfIdle>false</RunOnlyIfIdle><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>255</Count></RestartOnFailure></Settings><Actions Context="TargetUser"><Exec><Command>${xml(native)}</Command><Arguments>${xml(argumentsString)}</Arguments><WorkingDirectory>${xml(root)}</WorkingDirectory></Exec></Actions></Task>\n`;
+    return {
+      ...base,
+      label,
+      windowsSid,
+      manifestPath: p.join(state, preview ? "service-preview.xml" : "service-task.xml"),
+      content,
+    };
+  }
+  // Archived candidate installations retain their historical supervisor.
   const launcherPath = p.join(
     state,
     preview ? "service-preview-launch.ps1" : "service-launch.ps1",
@@ -583,10 +595,15 @@ export async function serviceAction(
   }
   const name = ps(plan.label);
   const stateScript = `try{$t=Get-ScheduledTask -TaskName ${name} -ErrorAction Stop}catch{if($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*'){[Console]::Write('{"registered":false,"state":"absent"}');exit 0}else{throw}};$i=Get-ScheduledTaskInfo -TaskName ${name};@{registered=$true;state=[string]$t.State;lastResult=$i.LastTaskResult}|ConvertTo-Json -Compress`;
-  if (action === "install")
-    return powershell(
+  if (action === "install") {
+    const registered = powershell(
       `Register-ScheduledTask -TaskName ${name} -Xml ([System.IO.File]::ReadAllText(${ps(plan.manifestPath)})) -Force | Out-Null`,
     );
+    // The former long-running PowerShell action is no longer registered.
+    // Only discard its own generated script after the new task is installed.
+    if (plan.native) await rm(path.join(plan.state, "service-launch.ps1"), { force: true });
+    return registered;
+  }
   if (action === "status") return JSON.parse(powershell(stateScript).stdout);
   if (action === "start")
     return powershell(
@@ -621,7 +638,7 @@ export async function serviceAction(
     if (current.registered)
       powershell(`Unregister-ScheduledTask -TaskName ${name} -Confirm:$false`);
     await rm(plan.manifestPath, { force: true });
-    await rm(plan.launcherPath, { force: true });
+    if (plan.launcherPath) await rm(plan.launcherPath, { force: true });
   }
 }
 

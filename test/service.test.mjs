@@ -143,10 +143,21 @@ test("npm-managed native service launches a stable local runner rather than npx 
       "--profile",
       "development",
     ]);
-    assert.ok(
-      plan.content.includes("service-runner.mjs") ||
-        (platform === "win32" && plan.launcher.includes("service-runner.mjs")),
+    assert.equal(
+      plan.native,
+      p.join(root, platform === "win32" ? "nexum-agent.exe" : "nexum-agent"),
     );
+    assert.deepEqual(plan.nativeArgs, ["--profile", "development", "--home", home]);
+    assert.ok(plan.content.includes("nexum-agent"));
+    assert.doesNotMatch(plan.content, /service-runner\.mjs/);
+    if (platform === "win32") {
+      assert.equal(plan.launcher, undefined);
+      assert.equal(plan.launcherPath, undefined);
+      assert.match(plan.content, /<LogonType>InteractiveToken/);
+      assert.match(plan.content, /<MultipleInstancesPolicy>IgnoreNew/);
+      assert.match(plan.content, /nexum-agent\.exe/);
+      assert.doesNotMatch(plan.content, /powershell\.exe|service-launch\.ps1/i);
+    }
     assert.doesNotMatch(plan.content, /npx|0\.0\.2-next\.123/);
   }
   const home = await temporary(t);
@@ -159,6 +170,8 @@ test("npm-managed native service launches a stable local runner rather than npx 
   const loaded = await loadServicePlan("development", home);
   assert.equal(loaded.entry, path.join(program, "service-runner.mjs"));
   assert.equal(loaded.programDir, program);
+  assert.equal(loaded.native, path.join(program,
+    process.platform === "win32" ? "nexum-agent.exe" : "nexum-agent"));
 });
 
 test("preparing a service preview cannot overwrite the selected manifest or its Windows launcher", async (t) => {

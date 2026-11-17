@@ -308,8 +308,9 @@ async function installPackage(program, version, managedNode, source) {
     await directory(pkg);
     for (const name of [
       "dist", "contracts", "package.json", "scripts/service.mjs",
-      "scripts/npm-install.mjs", "scripts/service-runner.mjs",
+      "scripts/npm-install.mjs", "scripts/service-runner.mjs", "native",
     ]) {
+      if (name === "native" && !existsSync(path.join(source, name))) continue;
       await mkdir(path.dirname(path.join(pkg, name)), { recursive: true });
       await cp(path.join(source, name), path.join(pkg, name), {
         recursive: true, force: true, verbatimSymlinks: true,
@@ -351,6 +352,56 @@ export async function clearOldInstallation(program) {
     if (/^\.runtime-[0-9a-f-]+$|^\.install-[0-9a-f-]+$/.test(name))
       await rm(path.join(program, name), { recursive: true, force: true });
   }
+}
+
+export async function verifyNativeExecutable(file, platform = process.platform, arch = process.arch) {
+  const info = await lstat(file);
+  fail(info.isFile() && !info.isSymbolicLink() &&
+    info.size >= 10000 && info.size < 20 * 1024 * 1024,
+    "The native Agent executable size or file type is invalid.");
+  fail((await realpath(path.dirname(file))) === path.dirname(file),
+    "The native Agent directory must not redirect.");
+  const binary = await readFile(file);
+  let valid = false;
+  try {
+    if (platform === "win32") {
+      const pe = binary.readUInt32LE(0x3c);
+      valid = binary.subarray(0, 2).toString() === "MZ" &&
+        binary.subarray(pe, pe + 4).toString("hex") === "50450000" &&
+        binary.readUInt16LE(pe + 4) === (arch === "arm64" ? 0xaa64 : 0x8664) &&
+        binary.readUInt16LE(pe + 24 + 68) === 2; // GUI subsystem.
+    } else if (platform === "linux") {
+      valid = binary.subarray(0, 4).toString("hex") === "7f454c46" &&
+        binary.readUInt16LE(18) === (arch === "arm64" ? 183 : 62);
+    } else if (platform === "darwin") {
+      valid = binary.readUInt32LE(0) === 0xfeedfacf &&
+        binary.readUInt32LE(4) === (arch === "arm64" ? 0x0100000c : 0x01000007);
+    }
+  } catch {
+    // Truncated or malformed executable.
+  }
+  fail(valid, "The published native Agent executable does not match this platform.");
+  return true;
+}
+
+export async function installNativeEntry(program, {
+  platform = process.platform, arch = process.arch,
+} = {}) {
+  const supported = { win32: "windows", darwin: "darwin", linux: "linux" }[platform];
+  fail(supported && ["x64", "arm64"].includes(arch),
+    "Unsupported native Agent platform.");
+  const binary = platform === "win32" ? "nexum-agent.exe" : "nexum-agent";
+  const source = path.join(
+    packagePath(program), "native", supported + "-" + arch, binary,
+  );
+  await verifyNativeExecutable(source, platform, arch);
+  const executable = path.join(program, binary);
+  await cp(source, executable, { force: true });
+  if (platform !== "win32") {
+    const { chmod } = await import("node:fs/promises");
+    await chmod(executable, 0o700);
+  }
+  return executable;
 }
 
 export async function installNpmAgent({
@@ -432,9 +483,11 @@ export async function installNpmAgent({
       );
       await writeState(receiptPath, { version, directory: "app" });
     }
-    // The standalone service launcher is intentionally not changed by an
-    // automatic Agent upgrade. Manual installs refresh the launcher explicitly.
+    // Explicit installs replace the native entrypoint only after the OS
+    // manager has confirmed that the previous service instance stopped.
+    // Automatic npm upgrades leave the stable executable untouched.
     if (register) {
+      await installNativeEntry(program);
       for (const name of ["service-runner.mjs", "npm-install.mjs", "service.mjs"]) {
         await cp(path.join(packagePath(program), "scripts", name), path.join(program, name), {
           force: true,

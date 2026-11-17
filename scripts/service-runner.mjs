@@ -57,7 +57,13 @@ async function runAgent() {
     const child = spawn(
       node,
       ["--experimental-vm-modules", cli, "run", "--profile", profile],
-      { stdio: "inherit", windowsHide: true },
+      {
+        stdio: "inherit",
+        windowsHide: true,
+        // The native Windows entry is detached from the console. Its child
+        // must not create a hidden but still attached console either.
+        ...(process.platform === "win32" ? { detached: true } : {}),
+      },
     );
     const forward = () => child.kill("SIGTERM");
     process.on("SIGINT", forward);
