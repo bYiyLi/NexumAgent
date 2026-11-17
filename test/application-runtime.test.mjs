@@ -252,6 +252,7 @@ async function fixture(t, options = {}) {
     home: null,
     ...(options.runtime ?? {}),
   });
+  if (!options.skipOptionalStartup) await runtime.startOptionalComponents();
   async function invoke(
     operation,
     input,
@@ -393,15 +394,284 @@ async function fixture(t, options = {}) {
   };
 }
 
+test("unresponsive maintenance initialization does not block Core admission", async (t) => {
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const f = await fixture(t, {
+    skipOptionalStartup: true,
+    runtime: {
+      async configureMaintenance() {
+        entered.resolve();
+        await finish.promise;
+        return undefined;
+      },
+    },
+  });
+  const started = f.runtime.startOptionalComponents();
+  try {
+    await entered.promise;
+    const opened = await f.open();
+    assert.ok(opened.contextId);
+    const result = await f.run("return {coreReady:true};", null, opened);
+    assert.equal(result.run.status, "succeeded",
+      "external maintenance activation cannot delay Core Run execution");
+    assert.equal(result.result.data.coreReady, true);
+  } finally {
+    finish.resolve();
+    await started;
+  }
+});
+
+test("CPU-bound script Worker cannot block Core access, other Runs, or diagnostics", async (t) => {
+  const f = await fixture(t);
+  const opened = await f.open();
+  const blocked = await f.invoke("agent.run.start", {
+    contextId: opened.contextId,
+    script: "while (true) {}",
+    waitMs: 0,
+    timeoutMs: 10000,
+  });
+  const deadline = Date.now() + 6000;
+  let observed = blocked;
+  while (observed.run.status !== "running" && Date.now() < deadline) {
+    observed = await f.invoke("agent.run.get", {
+      agentId: "agent_fixture", runId: blocked.run.runId, waitMs: 50,
+    });
+  }
+  assert.equal(observed.run.status, "running");
+  const before = Date.now();
+  const healthy = await f.open();
+  assert.ok(healthy.contextId, "Core remains reachable during CPU-blocked JS");
+  const parallel = await f.run("return 23;", null, opened);
+  assert.equal(parallel.run.status, "succeeded");
+  assert.equal(parallel.result.data, 23);
+  assert.ok(Date.now() - before < 5000,
+    "Core operations and a second Worker should remain responsive");
+  const stop = await f.invoke("agent.run.cancel", {
+    agentId: "agent_fixture", runId: blocked.run.runId,
+  });
+  assert.equal(stop.accepted, true);
+  const terminated = await f.finish(stop.view);
+  assert.equal(terminated.run.status, "cancelled");
+  const rows = readFileSync(path.join(f.root, "logs", "agent.log"), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(rows.some((entry) => entry.code === "worker_spawn" &&
+    entry.runId === blocked.run.runId && entry.workerId?.startsWith("runworker_")));
+  assert.ok(rows.some((entry) => entry.code === "worker_shutdown" &&
+    entry.runId === blocked.run.runId));
+});
+
+test("runtime.restart dispatches to OS supervisor only after the requesting Run is durable", async (t) => {
+  const requests = [];
+  let f;
+  f = await fixture(t, {
+    runtime: {
+      async requestRestart(restartId, reason) {
+        const recent = f.events.filter((entry) =>
+          entry.name === "agent.run.changed").at(-1);
+        requests.push({ restartId, reason, recent });
+      },
+    },
+  });
+  const completed = await f.run(
+    'return await runtime.restart({reason:"apply-approved-updates"});',
+  );
+  assert.equal(completed.run.status, "succeeded", JSON.stringify(completed));
+  assert.equal(completed.result.data.accepted, true);
+  assert.equal(completed.result.data.state, "scheduled");
+  await delay(1100);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].restartId, /^restart_[0-9a-f]{32}$/);
+  assert.equal(requests[0].reason, "apply-approved-updates");
+  const last = await f.invoke("agent.run.get", {
+    agentId: "agent_fixture", runId: completed.run.runId,
+  });
+  assert.equal(last.run.status, "succeeded",
+    "Supervisor handoff must follow an actual durable terminal Run");
+  const rows = readFileSync(path.join(f.root, "logs", "agent.log"), "utf8")
+    .trim().split("\n").map((row) => JSON.parse(row));
+  assert.ok(rows.some((row) => row.code === "restart_scheduled"));
+  assert.ok(rows.some((row) => row.code === "restart_ready"));
+});
+
+test("a failing npm extension Worker cannot prevent Core access or conceal its actual error", async (t) => {
+  const name = "failing-browser-worker";
+  const f = await fixture(t, {
+    skipOptionalStartup: true,
+    runtime: {
+      modulePolicy: {
+        builtins: () => defaultBuiltins,
+        approvedPackages: () => new Map([[name, "1.0.0"]]),
+      },
+    },
+    prepare({ root, work, write }) {
+      write(path.join(work, "package.json"), {
+        private: true, type: "module",
+        dependencies: { [name]: "1.0.0" },
+      });
+      const pkg = path.join(work, "node_modules", name);
+      write(path.join(pkg, "package.json"), {
+        name, version: "1.0.0", type: "module",
+        exports: {
+          "./nexum": { types: "./extension.d.ts", import: "./extension.js" },
+        },
+        nexum: {
+          apiVersion: 1, namespace: "brokenbrowser",
+          permissions: [], docs: "./docs",
+        },
+      });
+      write(path.join(pkg, "extension.d.ts"),
+        "export default function createExtension(host:unknown):unknown;");
+      write(path.join(pkg, "docs/README.md"), "# Broken Browser");
+      write(path.join(pkg, "extension.js"),
+        "export default function(){const e=new Error('private-details');" +
+        "e.code='PORT_IN_USE';throw e;}");
+      write(path.join(root, "state/maintenance/extensions.json"), {
+        [name]: {
+          enabled: true, objectId: "extension_broken_worker",
+          revision: "revision_broken_worker", config: {},
+        },
+      });
+    },
+  });
+  const before = await f.open();
+  assert.ok(before.contextId, "Core is already available before extension setup");
+  await f.runtime.startOptionalComponents();
+  const after = await f.open();
+  const diagnostic = after.agent.instructions.find((item) =>
+    item.instructionId === "platform-startup-diagnostics");
+  assert.ok(diagnostic, "Core must publish a trusted failure instruction");
+  assert.match(diagnostic.content, /PORT_IN_USE/);
+  assert.match(diagnostic.content, /failing-browser-worker/);
+  assert.doesNotMatch(diagnostic.content, /private-details/);
+  const healthy = await f.run("return {core:'ready'};", null, after);
+  assert.equal(healthy.run.status, "succeeded");
+  const log = readFileSync(path.join(f.root, "logs", "agent.log"), "utf8");
+  assert.match(log, /extension_worker_failed/);
+  assert.match(log, /PORT_IN_USE/);
+  assert.doesNotMatch(log, /private-details/);
+});
+
+test("a running extension Worker exit withdraws its methods without taking Core offline", async (t) => {
+  const name = "worker-exit-fixture";
+  const f = await fixture(t, {
+    runtime: {
+      modulePolicy: {
+        builtins: () => defaultBuiltins,
+        approvedPackages: () => new Map([[name, "1.0.0"]]),
+      },
+    },
+    prepare({ root, work, write }) {
+      write(path.join(work, "package.json"), {
+        private: true, type: "module", dependencies: { [name]: "1.0.0" },
+      });
+      const pkg = path.join(work, "node_modules", name);
+      write(path.join(pkg, "package.json"), {
+        name, version: "1.0.0", type: "module",
+        exports: {
+          "./nexum": { types: "./extension.d.ts", import: "./extension.js" },
+        },
+        nexum: {
+          apiVersion: 1, namespace: "workerexit",
+          permissions: [], docs: "./docs",
+        },
+      });
+      write(path.join(pkg, "extension.d.ts"),
+        "export default function createExtension(host:unknown):unknown;");
+      write(path.join(pkg, "docs/README.md"), "# Worker exit test");
+      write(path.join(pkg, "extension.js"),
+        "export default function(){return {methods:{crash:{" +
+        "description:'Terminate own extension Worker',permissions:[]," +
+        "schemaDialect:'draft7',inputSchema:{type:'object',additionalProperties:false}," +
+        "handle(){process.exit(23);}}}};}");
+      write(path.join(root, "state/maintenance/extensions.json"), {
+        [name]: {
+          enabled: true, objectId: "extension_worker_exit",
+          revision: "revision_worker_exit", config: {},
+        },
+      });
+    },
+  });
+  const opened = await f.open();
+  const initial = await f.run("return await workerexit.crash({});", null, opened);
+  assert.equal(initial.run.status, "failed");
+  assert.ok(
+    ["extension_worker_exited", "extension_worker_unavailable"].includes(
+      initial.run.error?.code,
+    ),
+    JSON.stringify(initial.run.error),
+  );
+  const updated = await f.open();
+  const instruction = updated.agent.instructions.find((item) =>
+    item.instructionId === "platform-startup-diagnostics");
+  assert.ok(instruction);
+  assert.match(instruction.content, /extension_worker_exited/);
+  const unaffected = await f.run("return 28;", null, updated);
+  assert.equal(unaffected.run.status, "succeeded");
+  assert.equal(unaffected.result.data, 28);
+  assert.match(
+    readFileSync(path.join(f.root, "logs", "agent.log"), "utf8"),
+    /extension_worker_failed/,
+  );
+});
+
 test("Agent-generated platform documents show actual positional JavaScript calls", async (t) => {
   const f = await fixture(t);
   const stateDocs = readFileSync(path.join(f.work, "docs", "platform", "state.md"), "utf8");
   const runtimeDocs = readFileSync(path.join(f.work, "docs", "platform", "runtime.md"), "utf8");
+  const outputDocs = readFileSync(path.join(f.work, "docs", "platform", "output.md"), "utf8");
+  const shDocs = readFileSync(path.join(f.work, "docs", "platform", "sh.md"), "utf8");
+  const transferDocs = readFileSync(path.join(f.work, "docs", "platform", "transfer.md"), "utf8");
+  const maintenanceDocs = readFileSync(path.join(f.work, "docs", "platform", "maintenance.md"), "utf8");
   assert.match(stateDocs, /state\.agent\.get\(key: string\)/);
   assert.match(stateDocs, /state\.user\.set\(key: string, value: JSON, options:/);
   assert.match(stateDocs, /expectedVersion: current\?\.version \?\? null/);
   assert.match(runtimeDocs, /runtime\.sleep\(milliseconds\)/);
   assert.match(runtimeDocs, /inputSchema.*归一化/);
+  assert.match(outputDocs, /output\.image\(/);
+  assert.match(outputDocs, /output\.file\(/);
+  assert.match(shDocs, /sh\.exec\(/);
+  assert.match(shDocs, /context\.input\.command/);
+  assert.match(transferDocs, /transfer\.createDownload\(/);
+  assert.match(transferDocs, /transfer\.get\(/);
+  assert.match(maintenanceDocs, /maintenance\.list\(/);
+  assert.match(maintenanceDocs, /maintenance\.packages\.install\(/);
+  assert.match(shDocs, /## 已注册方法/);
+  assert.match(shDocs, /sh\.exec/);
+  assert.match(stateDocs, /state\.agent\.get/);
+  assert.match(outputDocs, /## 具体参数与返回/);
+  for (const document of [stateDocs, runtimeDocs, outputDocs, shDocs, transferDocs, maintenanceDocs]) {
+    const methods = [...document.split("## 具体参数与返回")[1].matchAll(/```json\n([\s\S]*?)\n```/g)]
+      .map(([, source]) => JSON.parse(source));
+    assert.ok(methods.length > 0);
+    for (const method of methods)
+      assert.equal(Object.hasOwn(method, "permissions"), false, "SDK docs must not publish internal registration permissions");
+  }
+  const opened = await f.open();
+  const authoring = opened.agent.skills.find((entry) => entry.skillId === "nexum/script-authoring");
+  assert.ok(authoring, "script-authoring is an actually published Agent Skill");
+  assert.equal(authoring.name, "script-authoring");
+  assert.match(authoring.description, /scriptName/);
+  assert.ok(authoring.skillFile.startsWith(f.work + path.sep));
+  assert.match(readFileSync(authoring.skillFile, "utf8"), /仅保存/);
+  assert.match(readFileSync(path.join(authoring.path, "references", "authoring.md"), "utf8"), /scriptInputSchema/);
+  assert.match(opened.agent.docs.content, /agent\.scripts\.items/);
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  for (const [name, document] of Object.entries({
+    state: stateDocs,
+    output: outputDocs,
+    sh: shDocs,
+    transfer: transferDocs,
+    maintenance: maintenanceDocs,
+  })) {
+    const samples = [...document.matchAll(/~~~javascript\n([\s\S]*?)\n~~~/g)];
+    assert.ok(samples.length > 0, `${name} exposes a JavaScript example`);
+    for (const [, source] of samples)
+      assert.doesNotThrow(
+        () => new AsyncFunction("context", "state", "sh", "output", "transfer", "maintenance", source),
+        `${name} example must be valid JavaScript`,
+      );
+  }
 });
 
 test("actual application composes one work, VM, registry, local state and output encoder", async (t) => {
@@ -707,6 +977,7 @@ test("an explicitly approved enabled npm SDK contributes capabilities, materials
     opened.agent.instructions.some((item) =>
       item.content.includes("Probe rules"),
     ),
+    readFileSync(path.join(f.root, "logs", "agent.log"), "utf8"),
   );
   const result = await f.run("return await probe.sample({});", null, opened);
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
@@ -1005,6 +1276,14 @@ else send(q.id,{});});`,
   const run = await f.run("return await mcp.fixture.tools.version({});");
   assert.equal(run.run.status, "succeeded", JSON.stringify(run));
   assert.equal(run.result.content[0].text, "1");
+  const latestDocs = readFileSync((await f.open()).agent.docs.entry, "utf8");
+  const docUrl = latestDocs.match(/\[mcp\.fixture\]\(<(file:[^>]+)>\)/)?.[1];
+  assert.ok(docUrl, "the approved MCP source publishes a readable manual");
+  const mcpDocs = readFileSync(new URL(docUrl), "utf8");
+  const methodCatalog = JSON.parse(mcpDocs.match(/```json\n([\s\S]*?)\n```/)?.[1] ?? "null");
+  assert.ok(methodCatalog?.methods?.length > 0);
+  for (const method of methodCatalog.methods)
+    assert.equal(Object.hasOwn(method, "permissions"), false, "MCP manuals should omit registration permissions");
   assert.ok(
     (await f.open()).agent.instructions.some(
       (value) => value.content === "Approved MCP guide 1",
@@ -1059,7 +1338,7 @@ else send(q.id,{});});`,
   );
 });
 
-test("close reports an unsettled native Promise and keeps its Store available until an explicit retry joins it", async (t) => {
+test("close confirms the Worker ended despite an uncooperative native Promise", async (t) => {
   const f = await fixture(t, { runtime: { shutdownWaitMs: 30 } }),
     opened = await f.open();
   const gate = path.join(f.work, "release-native-promise"),
@@ -1077,21 +1356,13 @@ test("close reports an unsettled native Promise and keeps its Store available un
       true,
       "the actual native Promise must enter before shutdown",
     );
-    await assert.rejects(f.runtime.close(), { code: "shutdown_unconfirmed" });
+    // Guest JS is now in a separate Worker. Shutdown succeeds only after
+    // worker.terminate() confirms its actual exit.
+    await f.runtime.close();
   } finally {
     writeFileSync(gate, "release");
   }
-  const closedDeadline = Date.now() + 10000;
-  for (;;) {
-    try {
-      await f.runtime.close();
-      break;
-    } catch (cause) {
-      if (cause.code !== "shutdown_unconfirmed" || Date.now() >= closedDeadline)
-        throw cause;
-      await delay(20);
-    }
-  }
+  await f.runtime.close();
   assert.ok(started.run.runId);
 });
 
@@ -1855,7 +2126,8 @@ test("shutdown drains the final bounded native extension log writes and closes s
       });
     },
   });
-  const source = await import(pathToFileURL(entry).href);
+  // Extension code now exists only in its own Worker realm. Importing the
+  // source in the Core realm would create a different module/global instance.
   await f.runtime.close();
   const rows = readFileSync(path.join(f.root, "logs/extensions.log"), "utf8")
     .trim()
@@ -1866,7 +2138,15 @@ test("shutdown drains the final bounded native extension log writes and closes s
     rows.map((row) => row.data.index),
     Array.from({ length: 64 }, (_, index) => index),
   );
-  assert.throws(() => source.late(), { code: "log_closed" });
+  const committed = readFileSync(
+    path.join(f.root, "logs/extensions.log"), "utf8",
+  );
+  await delay(30);
+  assert.equal(readFileSync(
+    path.join(f.root, "logs/extensions.log"), "utf8",
+  ), committed, "closed Worker cannot append late native log entries");
+  const diagnostics = readFileSync(path.join(f.root, "logs/agent.log"), "utf8");
+  assert.match(diagnostics, /extension_worker_stopped/);
 });
 
 test("a control disconnect before transfer I/O admission releases the actual reservation instead of occupying a shared slot", async (t) => {

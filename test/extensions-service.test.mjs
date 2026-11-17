@@ -191,6 +191,16 @@ export default async function createExtension(host){
     policy,
     permissions,
     enabled: () => enabled,
+    // This suite exercises the synchronous Registry and resource contract.
+    // Real Worker isolation is covered separately by application-runtime tests.
+    async createInstance(descriptor, host) {
+      const source = await modules.importExtension({
+        packageName: descriptor.packageName,
+        entry: descriptor.entry.url,
+        revision: descriptor.revision,
+      });
+      return source.default(host);
+    },
   });
   const materials = new ExtensionMaterials(work, options.materialLimits);
   const prepareMaterials = materials.prepare.bind(materials);

@@ -277,6 +277,10 @@ test("Task update consumes the original wait identity; cancel remains a receipt 
   const run = await f.start(
     "return await requestInput({message:'Name',inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'}},additionalProperties:false}});",
   );
+  // A Worker has a separate event loop: a newly created Task may still be
+  // working until the original Run has truly opened its input wait.
+  const awaitingInput = await f.engine.observe(caller, run.run.runId, 3000);
+  assert.ok(awaitingInput.wait);
   const task = await f.tasks.create(caller, { runId: run.run.runId });
   assert.equal(task.status, "input_required");
   const before = await f.tasks.get(caller, task.taskId),

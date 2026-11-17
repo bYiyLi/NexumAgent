@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -98,14 +98,15 @@ import {
   type MaintenanceRequests,
   type MaintenanceScope,
 } from "../maintenance/requests.js";
-import { runtimeExtension, runtimeSdkUsage } from "../sdk/runtime.js";
+import { createRuntimeExtension, runtimeSdkUsage } from "../sdk/runtime.js";
 import { stateExtension, stateSdkUsage } from "../sdk/state.js";
-import { outputExtension } from "../sdk/output-extension.js";
-import { shExtension } from "../sdk/sh.js";
-import { transferExtension } from "../sdk/transfer.js";
-import { maintenanceExtension } from "../sdk/maintenance.js";
+import { outputExtension, outputSdkUsage } from "../sdk/output-extension.js";
+import { shExtension, shSdkUsage } from "../sdk/sh.js";
+import { transferExtension, transferSdkUsage } from "../sdk/transfer.js";
+import { maintenanceExtension, maintenanceSdkUsage } from "../sdk/maintenance.js";
 import { DocumentCatalog } from "../work/catalog.js";
 import { WorkService, type PublishedMaterials } from "../work/service.js";
+import { parseSkillFrontmatter } from "../work/discovery.js";
 import { AgentAuthority } from "./authority.js";
 import { ConfigurationSources } from "./activation.js";
 import { CredentialVault } from "../maintenance/credentials.js";
@@ -117,6 +118,11 @@ import { AgentDataPlane } from "./data-plane.js";
 import { CloudUserStateBackend } from "./user-state.js";
 import type { ProfileConfiguration } from "./config.js";
 import { AgentCatalog } from "./catalog.js";
+import { appendDiagnostic } from "./diagnostics.js";
+import {
+  failureCode, formatStartupInstruction, readStartupReport,
+  type StartupIssue, type StartupReport,
+} from "./startup-report.js";
 import { ApplicationProcesses } from "./processes.js";
 import { prepareRunAttachments, type AttachmentSource } from "./attachments.js";
 import { dispatchApplication, type ApplicationHandler } from "./dispatcher.js";
@@ -174,6 +180,8 @@ export interface AgentRuntimeOptions {
   readonly extensionPermissions?: ReadonlySet<string>;
   readonly userState?: UserStateBackend;
   readonly shutdownWaitMs?: number;
+  /** Trusted native supervisor handoff, never a model-supplied function. */
+  requestRestart?(restartId: string, reason: string): Promise<void>;
   configureMaintenance?(
     components: ApplicationComponents,
   ): MaintenanceRequests | Promise<MaintenanceRequests>;
@@ -244,6 +252,7 @@ export class AgentRuntime {
   #configurationSources!: ConfigurationSources;
   #restoredOwners = new Set<string>();
   #restoringOwners = new Map<string, Promise<void>>();
+  #restoreRetryAt = new Map<string, number>();
   #platform: ExtensionHandle[] = [];
   #platformMaterials: PublishedMaterials = {
     instructions: [],
@@ -269,6 +278,11 @@ export class AgentRuntime {
   #logErrorCode: string | null = null;
   #logWriterClosed = false;
   #catalog: AgentCatalog;
+  #startupReport: StartupReport | null = null;
+  #extensionIssues = new Map<string, StartupIssue>();
+  #ownerIssues = new Map<string, Map<string, StartupIssue>>();
+  #optionalStartup?: Promise<void>;
+  #restartIntent?: { runId: string; restartId: string; reason: string };
   #closing = false;
   #closed = false;
   #closeTask?: Promise<void>;
@@ -297,6 +311,7 @@ export class AgentRuntime {
     );
     const root = realpathSync.native(config.root),
       work = privateDirectory(root, "work");
+    this.#startupReport = readStartupReport(root, config.profile);
     for (const directory of ["modules", "tmp"])
       privateDirectory(work, directory);
     privateDirectory(root, "logs");
@@ -471,6 +486,7 @@ export class AgentRuntime {
       "resource",
       "url",
       "runtime.input",
+      "maintenance.execute",
       "storage.reserve",
       "output",
       "sh.execute",
@@ -560,6 +576,33 @@ export class AgentRuntime {
       policy,
       permissions,
       enabled: () => this.#enablement.enabled(),
+      onWorkerEvent: (packageName, phase, code, durationMs) => {
+        this.#logStartup(
+          "extension_worker_" + phase, packageName, phase, code, durationMs,
+        );
+        if (phase === "ready") {
+          this.#extensionIssues.delete(packageName);
+        } else if (phase === "failed") {
+          this.#extensionIssues.set(packageName, {
+            component: "extension", stage: "worker_runtime",
+            code, packageName, observedAt: new Date().toISOString(),
+          });
+          // Runtime worker exit must withdraw previously exposed SDK methods.
+          // An initialization failure is handled by startOptionalComponents.
+          if (this.#extensions?.get(packageName)?.status === "enabled") {
+            void this.#extensions.disable(packageName)
+              .then(async (result) => {
+                this.#logStartup("extension_worker_cleanup", packageName,
+                  "cleanup", String(result.status));
+                await this.#documents.refresh(this.#published().docs);
+              })
+              .catch((cause) => {
+                this.#logStartup("extension_worker_cleanup_failed",
+                  packageName, "cleanup", failureCode(cause));
+              });
+          }
+        }
+      },
     });
     this.#extensions = new ExtensionServices(
       this.#registry,
@@ -627,7 +670,7 @@ export class AgentRuntime {
           disabledItems: policy.projectContextVisibility?.disabledItems ?? [],
         };
       },
-      materials: () => this.#published(),
+      materials: (caller) => this.#published(caller),
       scriptUsage: (caller) => this.#store.scriptUsage(callerKey(caller)),
       canUseScript: (caller) => {
         try {
@@ -648,6 +691,16 @@ export class AgentRuntime {
       bindings: (services) => {
         this.#accepted(services);
         return this.#registry.bindings(services);
+      },
+      onWorkerDiagnostic: (event) => {
+        this.#logStartup(
+          "worker_" + event.stage, "worker", event.stage,
+          event.code, event.durationMs, {
+            runId: event.runId,
+            workerId: event.workerId,
+            threadId: event.threadId,
+          },
+        );
       },
       prepareAttachments: (references, directory, services) => {
         this.#accepted(services);
@@ -684,7 +737,8 @@ export class AgentRuntime {
       reserve: (bytes, options) => this.#retention.reserve(bytes, options),
     });
     for (const [namespace, factory] of Object.entries({
-      runtime: runtimeExtension,
+      runtime: createRuntimeExtension((reason, call) =>
+        this.#requestRestart(reason, String(call.context.runId))),
       state: stateExtension,
       output: outputExtension,
       sh: shExtension,
@@ -708,9 +762,18 @@ export class AgentRuntime {
         `> 以下 inputSchema 表示方法内部归一化后的校验结构，不代表 JavaScript 的实际参数顺序。\n\n` +
         (namespace === "state" ? stateSdkUsage + "\n\n" : "") +
         (namespace === "runtime" ? runtimeSdkUsage + "\n\n" : "") +
+        (namespace === "output" ? outputSdkUsage + "\n\n" : "") +
+        (namespace === "sh" ? shSdkUsage + "\n\n" : "") +
+        (namespace === "transfer" ? transferSdkUsage + "\n\n" : "") +
+        (namespace === "maintenance" ? maintenanceSdkUsage + "\n\n" : "") +
+        "## 已注册方法\n\n" +
+        handle.methods
+          .map((method) => `- \`${namespace}.${String(method.name)}\`：${String(method.description ?? "")}`)
+          .join("\n") +
+        "\n\n## 具体参数与返回\n\n" +
         handle.methods
           .map(
-            (method) => "```json\n" + canonicalJson(method, 65536) + "\n```\n",
+            (method) => "```json\n" + canonicalJson(Object.fromEntries(Object.entries(method).filter(([field]) => field !== "permissions" && field !== "description")), 65536) + "\n```\n",
           )
           .join("\n");
       const ticket = await this.#retention.reserve(
@@ -734,7 +797,7 @@ export class AgentRuntime {
       ];
     }
     const instruction =
-      "本地文件和操作系统基础能力使用当前允许的 Node/npm。SDK 原子能力由 runtime、state、output、sh、transfer、maintenance 提供，参数以 work/docs/platform 文档为准。脚本返回真实值或 output 包装，由平台适配 MCP；本地路径字符串不会自动变成图片。长任务用现有运行和资源身份继续控制，观察等待结束不代表任务已停止。需要等待时优先使用 await runtime.sleep(ms)；原生 setTimeout 和不支持取消的第三方 Promise 不会因 Run 取消而自动结束。";
+      "Run 脚本从 context.input/context.attachments 读取输入，以 context.pwd/context.paths 定位工作文件；普通文件及数据操作使用当前获准的 Node/npm。需要受管进程、用户输入或可取消延迟、跨 Run 共享状态、图片/文件交付、跨端传输、配置维护时，分别从本次 agent.docs 读取 sh/runtime/state/output/transfer/maintenance 的实际 JavaScript 用法。扩展和外部 MCP/API 仅使用当前已经启用的方法。文字/JSON 可直接 return；图片、音频与文件必须由 output 显式交付。等待业务结果应检查真实状态，必要延迟用 runtime.sleep；观察超时或取消请求不能证明外部工作已停止，未确认副作用时不要重做。";
     this.#platformMaterials.instructions = [
       {
         instructionId: "platform-runtime",
@@ -746,27 +809,207 @@ export class AgentRuntime {
         truncated: false,
       },
     ];
-    if (this.#options.configureMaintenance)
-      this.#maintenance = await this.#options.configureMaintenance(
-        this.#components(),
+    const scriptSkillText = readFileSync(
+      new URL("../../skills/script-authoring/SKILL.md", import.meta.url),
+      "utf8",
+    );
+    const scriptSkillReference = readFileSync(
+      new URL("../../skills/script-authoring/references/authoring.md", import.meta.url),
+      "utf8",
+    );
+    const scriptSkillRoot = privateDirectory(
+      work,
+      "docs",
+      "platform",
+      "skills",
+      "script-authoring",
+    );
+    const scriptSkillReferences = privateDirectory(scriptSkillRoot, "references");
+    const scriptSkillTicket = await this.#retention.reserve(
+      Buffer.byteLength(scriptSkillText) +
+        Buffer.byteLength(scriptSkillReference) +
+        2048,
+      { control: true },
+    );
+    try {
+      atomicText(path.join(scriptSkillRoot, "SKILL.md"), scriptSkillText);
+      atomicText(
+        path.join(scriptSkillReferences, "authoring.md"),
+        scriptSkillReference,
       );
-    for (const name of this.#enablement.enabled())
-      await this.#extensions.enable(
-        name,
-        this.#enablement.get(name)?.config ?? {},
-      );
+    } finally {
+      scriptSkillTicket.release();
+    }
+    const scriptSkill = parseSkillFrontmatter(
+      Buffer.from(scriptSkillText),
+      "script-authoring",
+    );
+    this.#platformMaterials.skills = [
+      {
+        ...scriptSkill,
+        skillId: "nexum/script-authoring",
+        path: scriptSkillRoot,
+        skillFile: path.join(scriptSkillRoot, "SKILL.md"),
+        scope: { type: "agent", root: work },
+        origin: { ...platformOrigin("nexum"), revision: digest(scriptSkillText) },
+      },
+    ];
     await this.#documents.refresh(this.#published().docs);
   }
-  #published(): PublishedMaterials {
+  /** After Core is admitted, optional extensions start independently.
+   * A bad package must never cause a second Agent boot or tear down Cloud. */
+  startOptionalComponents(): Promise<void> {
+    if (this.#optionalStartup || this.#closing)
+      return this.#optionalStartup ?? Promise.resolve();
+    const names = [...this.#enablement.enabled()];
+    const tasks = names.map(async (name) => {
+      const started = Date.now();
+      this.#logStartup("extension_starting", name, "initialization", "starting");
+      try {
+        await this.#extensions.enable(
+          name, this.#enablement.get(name)?.config ?? {},
+        );
+        this.#extensionIssues.delete(name);
+        this.#logStartup("extension_ready", name, "initialization", "ready",
+          Date.now() - started);
+      } catch (cause) {
+        const code = failureCode(cause);
+        this.#extensionIssues.set(name, {
+          component: "extension", stage: "initialization",
+          code, packageName: name,
+          observedAt: new Date().toISOString(),
+        });
+        this.#logStartup("extension_initialization_failed", name,
+          "initialization", code, Date.now() - started);
+      }
+    });
+    if (this.#options.configureMaintenance) {
+      tasks.push((async () => {
+        const started = Date.now();
+        this.#logStartup("maintenance_setup_starting", "maintenance",
+          "maintenance_setup", "starting");
+        try {
+          this.#maintenance = await this.#options.configureMaintenance!(
+            this.#components(),
+          );
+          if (this.#closing) return;
+          this.#extensionIssues.delete("maintenance");
+          this.#logStartup("maintenance_setup_ready", "maintenance",
+            "maintenance_setup", "ready", Date.now() - started);
+        } catch (cause) {
+          if (this.#closing) return;
+          this.#extensionIssues.set("maintenance", {
+            component: "extension", stage: "maintenance_setup",
+            code: failureCode(cause), observedAt: new Date().toISOString(),
+          });
+          this.#logStartup("maintenance_setup_failed", "maintenance",
+            "maintenance_setup", failureCode(cause), Date.now() - started);
+        }
+      })());
+    }
+    this.#optionalStartup = Promise.allSettled(tasks).then(async () => {
+      if (this.#closing) return;
+      try {
+        await this.#documents.refresh(this.#published().docs);
+      } catch (cause) {
+        this.#logStartup("extension_docs_failed", "catalog",
+          "documentation", failureCode(cause));
+      }
+    });
+    void this.#optionalStartup.catch((cause) => {
+      this.#logStartup("extension_recovery_failed", "catalog",
+        "initialization", failureCode(cause));
+    });
+    return this.#optionalStartup;
+  }
+  #logStartup(
+    code: string, component: string, phase: string,
+    failure: string, durationMs?: number,
+    identity?: { runId?: string; workerId?: string; threadId?: number },
+  ): void {
+    try {
+      appendDiagnostic(this.#store.root, this.#config.profile, code, false, {
+        component, phase, failureCode: failure,
+        ...(durationMs === undefined ? {} : { durationMs }),
+        ...identity,
+      });
+    } catch {
+      // Diagnostics must never change the result of a package activation.
+    }
+  }
+  #requestRestart(reason: string, runId: string): JsonObject {
+    requireCondition(this.#options.requestRestart, "restart_unavailable",
+      "This Agent cannot request a supervised restart.");
+    requireCondition(!this.#closing && !this.#restartIntent,
+      "restart_busy", "A restart or shutdown is already pending.");
+    const pending = [...this.#runs.values()].filter((entry) =>
+      !terminalStatuses.has(this.#store.getRun(entry.services.runId).status));
+    requireCondition(pending.length === 1 &&
+      pending[0]?.services.runId === runId, "restart_busy",
+      "A safe restart needs exactly the requesting Run to remain active.");
+    const restartId = newId("restart");
+    this.#restartIntent = { runId, restartId, reason };
+    this.#logStartup("restart_scheduled", "core", "restart", "accepted");
+    return { accepted: true, restartId, state: "scheduled" };
+  }
+  #settleRestart(runId: string, status: string): void {
+    const intent = this.#restartIntent;
+    if (!intent || intent.runId !== runId) return;
+    this.#restartIntent = undefined;
+    if (status !== "succeeded") {
+      this.#logStartup("restart_aborted", "core", "restart", status);
+      return;
+    }
+    // Ensure the requesting Run reached its persisted terminal state before
+    // allowing the externally supervised process to exit. No script replay.
+    this.#logStartup("restart_ready", "core", "restart", "succeeded");
+    const timer = setTimeout(() => {
+      if (this.#closing) return;
+      const active = [...this.#runs.values()].some((entry) =>
+        !terminalStatuses.has(this.#store.getRun(entry.services.runId).status));
+      if (active) {
+        this.#logStartup("restart_aborted", "core", "restart", "restart_busy");
+        return;
+      }
+      void this.#options.requestRestart?.(intent.restartId, intent.reason)
+        .catch((cause) => {
+          this.#logStartup("restart_failed", "core", "restart",
+            failureCode(cause));
+        });
+    }, 1000);
+    timer.unref();
+  }
+  #published(caller?: Caller): PublishedMaterials {
     const extra = this.#materials.published();
     const adapters = this.#configurationSources?.published() ?? {
       instructions: [],
       docs: [],
       skills: [],
     };
+    const owner = caller
+      ? [...(this.#ownerIssues.get(this.#configurationCallerKey(caller))
+        ?.values() ?? [])] : [];
+    const report = formatStartupInstruction(
+      this.#startupReport,
+      [...this.#extensionIssues.values(), ...owner],
+    );
     return {
       instructions: [
         ...this.#platformMaterials.instructions,
+        ...(report ? [{
+          instructionId: "platform-startup-diagnostics",
+          kind: "platform" as const,
+          path: null,
+          scope: {
+            type: "agent" as const, root: path.join(this.#store.root, "work"),
+          },
+          origin: {
+            ...platformOrigin("nexum"),
+            revision: digest(report),
+          },
+          content: report,
+          truncated: false as const,
+        }] : []),
         ...extra.instructions,
         ...adapters.instructions,
       ],
@@ -812,24 +1055,55 @@ export class AgentRuntime {
       throw cause;
     }));
   }
+  #configurationCallerKey(caller: Caller): string {
+    // One principal may have different Clients and renewed Grants. A private
+    // MCP/API startup failure must never be carried into another Grant's AI
+    // instruction merely because both callers belong to the same user.
+    return digest({
+      caller: callerKey(caller),
+      grantId: caller.grantId ?? null,
+    });
+  }
   async #restoreConfigurations(caller: Caller): Promise<void> {
-    if (!this.#configuration || this.#restoredOwners.has(caller.principalId))
+    const key = this.#configurationCallerKey(caller);
+    if (!this.#configuration || this.#restoredOwners.has(key))
       return;
-    const pending = this.#restoringOwners.get(caller.principalId);
+    if ((this.#restoreRetryAt.get(key) ?? 0) > Date.now())
+      return;
+    const pending = this.#restoringOwners.get(key);
     if (pending) return pending;
     const task = (async () => {
       const result = await this.#configuration!.restore(
         this.#scope(caller, this.#stopping.signal),
       );
-      if (result.every((value) => value.state === "ready"))
-        this.#restoredOwners.add(caller.principalId);
+      const issues = new Map<string, StartupIssue>();
+      for (const item of result) {
+        if (item.state === "ready") {
+          this.#logStartup("configuration_ready", item.name,
+            "activation", "ready");
+          continue;
+        }
+        const code = item.errorCode ?? "configuration_restore_failed";
+        issues.set(item.kind + ":" + item.name, {
+          component: item.kind,
+          stage: "activation",
+          code, packageName: item.name,
+          observedAt: new Date().toISOString(),
+        });
+        this.#logStartup("configuration_restore_failed", item.name,
+          "activation", code);
+      }
+      this.#ownerIssues.set(key, issues);
+      if (!issues.size)
+        this.#restoredOwners.add(key);
+      else this.#restoreRetryAt.set(key, Date.now() + 60_000);
       await this.#documents.refresh(this.#published().docs);
     })();
-    this.#restoringOwners.set(caller.principalId, task);
+    this.#restoringOwners.set(key, task);
     try {
       await task;
     } finally {
-      this.#restoringOwners.delete(caller.principalId);
+      this.#restoringOwners.delete(key);
     }
   }
   #control(): AgentControlPort {
@@ -1223,6 +1497,7 @@ export class AgentRuntime {
         if (terminalStatuses.has(row.status)) {
           this.#engine.off(services.runId, entry.notify);
           this.#runs.delete(services.runId);
+          this.#settleRestart(services.runId, row.status);
         }
       },
     };
@@ -1624,8 +1899,15 @@ export class AgentRuntime {
       );
     this.#authority.observe(message.context);
     return this.#invocation.run(copy(message), async () => {
+      // A broken or unreachable MCP/API is not allowed to block the caller's
+      // basic Core request. Restore only with the current caller's authority.
       if (message.context.caller.source !== "owner_session")
-        await this.#restoreConfigurations(message.context.caller);
+        void this.#restoreConfigurations(
+          message.context.caller as unknown as Caller,
+        ).catch((cause) => {
+          this.#logStartup("configuration_restore_failed", "configuration",
+            "activation", failureCode(cause));
+        });
       return dispatchApplication(
         message,
         this.#connection.binding,

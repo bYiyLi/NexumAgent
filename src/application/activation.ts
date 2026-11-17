@@ -178,7 +178,7 @@ export class ConfigurationSources implements ConfigurationActivation {
       const api = input.api;
       const markdown = api
         ? api.documentation.markdown
-        : `# MCP ${input.name}\n\n\`mcp[${JSON.stringify(input.name)}]\`\n\n\`\`\`json\n${canonicalJson({ catalog, methods: handle.methods }, 16 * 1024 * 1024)}\n\`\`\`\n`;
+        : `# MCP ${input.name}\n\n已在此 Agent/profile 生效的 MCP 连接。实际可调用工具、Resources 与 Prompts 以本次 catalog 和 methods 为准；先按输入 Schema 选择需要的原生工具，不要根据名称猜测参数。\n\n工具调用入口：\`mcp[${JSON.stringify(input.name)}].tools[实际已注册工具名](arguments)\`；Resources/Prompts 只能使用实际列出的分组及原名称。请求超时或取消不代表远端副作用已撤销。\n\n\`\`\`json\n${canonicalJson({ catalog, methods: handle.methods.map((method) => Object.fromEntries(Object.entries(method).filter(([field]) => field !== "permissions"))) }, 16 * 1024 * 1024)}\n\`\`\`\n`;
       const space = await this.reserve?.(
         Buffer.byteLength(markdown) +
           Buffer.byteLength(api?.documentation.types ?? "") +

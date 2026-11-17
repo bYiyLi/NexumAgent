@@ -215,6 +215,20 @@ async function fixture(
       policy,
       permissions,
       enabled: () => new Set(["@nexum-hub/browser"]),
+      // These native-browser contract tests intentionally own the HTTP
+      // listener and a synthetic Chrome peer in the same test process. Keep
+      // the original Core/Registry authorization and resource lifecycle while
+      // injecting the factory in-process so the fixture's loopback port
+      // intercept never touches the installed Agent's actual Worker path.
+      // Worker admission/crash/isolation has separate real-Worker tests.
+      async createInstance(descriptor, host) {
+        const namespace = await modules.importExtension({
+          packageName: descriptor.packageName,
+          entry: descriptor.entry.url,
+          revision: descriptor.revision,
+        });
+        return namespace.default(host);
+      },
     }),
     materials = new ExtensionMaterials(work),
     services = new ExtensionServices(registry, packages, materials);

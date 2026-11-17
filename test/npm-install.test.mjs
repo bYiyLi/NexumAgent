@@ -8,11 +8,15 @@ import {
   readFile,
   rm,
   stat,
+  rename,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { installNpmAgent, npmExec } from "../scripts/npm-install.mjs";
+import {
+  installNpmAgent, installedAgentVersion, npmExec,
+  restoreInterruptedCoreUpdate,
+} from "../scripts/npm-install.mjs";
 
 async function packageSource(home, version) {
   const source = path.join(home, "source-" + version);
@@ -36,6 +40,51 @@ async function packageSource(home, version) {
   }
   return source;
 }
+
+test("interrupted npm Core swaps restore the exact verified previous version", {
+  timeout: 120000,
+}, async (t) => {
+  const scratch = realpathSync.native(
+    await mkdtemp(path.join(tmpdir(), "nexum-npm-recovery-")),
+  );
+  t.after(() => rm(scratch, { recursive: true, force: true, maxRetries: 3 }));
+  const home = path.join(scratch, "home");
+  await mkdir(home, { mode: 0o700 });
+  const source = await packageSource(scratch, "0.0.1");
+  await installNpmAgent({
+    profile: "development", version: "0.0.1", home,
+    source, register: false,
+    config: { server_url: "http://127.0.0.1:8123/",
+      token: "fixture-token" },
+  });
+  const program = path.join(home, ".nexum-dev", "program");
+  const node = path.join(program, "runtime");
+  const active = path.join(program, "app");
+  assert.equal(await installedAgentVersion(program, node), "0.0.1");
+
+  // Crash #1: the old app has moved aside, but the new stage is not active.
+  const firstBackup = path.join(program,
+    ".previous-00000000-0000-4000-8000-000000000001");
+  await rename(active, firstBackup);
+  assert.equal(await installedAgentVersion(program, node), null);
+  assert.equal(await restoreInterruptedCoreUpdate(program, node), true);
+  assert.equal(await installedAgentVersion(program, node), "0.0.1");
+  assert.equal(existsSync(firstBackup), false);
+
+  // Crash #2: the new app has been renamed into place, but the durable
+  // receipt still names the prior version. Only the prior exact Core may run.
+  const secondBackup = path.join(program,
+    ".previous-00000000-0000-4000-8000-000000000002");
+  await rename(active, secondBackup);
+  const unverified = path.join(active, "node_modules", "@nexum-hub", "agent");
+  await mkdir(unverified, { recursive: true });
+  await writeFile(path.join(unverified, "package.json"),
+    '{"name":"@nexum-hub/agent","version":"0.0.2"}');
+  assert.equal(await installedAgentVersion(program, node), null);
+  assert.equal(await restoreInterruptedCoreUpdate(program, node), true);
+  assert.equal(await installedAgentVersion(program, node), "0.0.1");
+  assert.equal(existsSync(secondBackup), false);
+});
 
 test(
   "npm installer installs one verified app without locks, keeps credentials and never registers a real service in isolation",

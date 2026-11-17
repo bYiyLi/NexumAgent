@@ -33,6 +33,7 @@ import {
 } from "../maintenance/requests.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
+import { isIsolatedHandler } from "./worker-bridge.js";
 import {
   createOutput,
   outputIntent,
@@ -1418,7 +1419,16 @@ export class ExtensionRegistry {
       "This extension is no longer admitting SDK calls.",
     );
     let input: unknown;
-    if (method.normalize) {
+    const isolated = isIsolatedHandler(method.handle);
+    if (isolated) {
+      // A Worker normalizer cannot execute on Core's event loop. Retain exact
+      // positional arguments and perform the approved declared normalization
+      // and Schema validation inside that Worker. Core still authorizes this
+      // method and every privileged SDK callback at the trusted call boundary.
+      requireCondition(args.length <= 8,
+        "invalid_arguments", "Worker SDK argument count is too large.");
+      input = { __nexumWorkerArgs: [...args] };
+    } else if (method.normalize) {
       try {
         input = Reflect.apply(method.normalize, undefined, [
           Object.freeze([...args]),
@@ -1441,7 +1451,7 @@ export class ExtensionRegistry {
       );
       input = args.length ? args[0] : {};
     }
-    method.input(input);
+    if (!isolated) method.input(input);
     const policy: RegistryPolicy = {
       origin: entry.source.origin,
       action: "invoke",

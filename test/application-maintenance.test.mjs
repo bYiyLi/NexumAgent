@@ -440,6 +440,10 @@ async function fixture(t) {
       dispatchMaintenance: (message, scope, _components, _service, signal) =>
         application.dispatch(message, scope, signal),
     });
+    // The installed Agent now initializes optional maintenance AFTER Core
+    // admission. This maintenance fixture explicitly joins that phase before
+    // testing the original Cloud approval and native cleanup contracts.
+    await runtime.startOptionalComponents();
   }
   await start();
   t.after(async () => {

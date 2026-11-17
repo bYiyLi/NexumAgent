@@ -306,12 +306,18 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
     /Nexum Agent 使用手册/,
   );
   assert.match(first.agent.docs.content, /按任务选择资料/);
+  assert.match(first.agent.docs.content, /agent\.scripts\.items/);
+  assert.match(first.agent.docs.content, /script-authoring/);
+  assert.match(first.agent.docs.content, /\[可复用脚本\]/);
   assert.match(first.agent.docs.content, /skillFile/);
   assert.match(first.agent.docs.content, /input.reference/);
   assert.match(first.agent.docs.content, /nextLine/);
   assert.equal((first.agent.docs.content.match(/```/g) ?? []).length, 2);
   assert.match(first.agent.docs.content, /## 资料索引/);
   const manual = readFileSync(first.agent.docs.entry, "utf8");
+  assert.match(manual, /## 资料索引/);
+  assert.match(manual, /goal\.manage/);
+  assert.match(manual, /maintenance/);
   const example = manual.match(/```javascript\n([\s\S]*?)\n```/);
   assert.ok(example, "the model-visible manual provides a complete JavaScript example");
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;

@@ -31,6 +31,18 @@ import {
 } from "../process/environment.js";
 import { ProcessOutputLog } from "../process/output-log.js";
 
+export const shSdkUsage = `## JavaScript 进程示例
+
+只有需要受管命令、PTY、进程身份或跨 Run 观察时使用 sh；普通文件读写使用 Node。
+
+~~~javascript
+const result = await sh.exec({ command: context.input.command, args: context.input.args ?? [], cwd: context.pwd });
+return result;
+~~~
+
+运行前在 agent.run.start.input 提供已确认的 command 和可选 args；CLI 路径不明确时先查 sh.which。需要跨 Run 保留进程时明确使用 sh.start({ command, args, background: true })，之后按实际 processId 调用 sh.get({ processId }) / sh.stop({ processId })。观察超时不是进程退出；停止请求返回后仍以真实关闭状态为准。
+`;
+
 const kind = "sh.process";
 const dialect = "https://json-schema.org/draft/2020-12/schema";
 const idSchema = { type: "string", pattern: "^res_[0-9a-f]{32}$" };

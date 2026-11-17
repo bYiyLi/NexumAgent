@@ -2357,10 +2357,12 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
   async restore(
     scope: MaintenanceScope,
   ): Promise<
-    readonly { kind: Kind; name: string; state: "ready" | "unavailable" }[]
+    readonly { kind: Kind; name: string; state: "ready" | "unavailable";
+      errorCode?: string }[]
   > {
     const state = await this.#approved(),
-      result: { kind: Kind; name: string; state: "ready" | "unavailable" }[] =
+      result: { kind: Kind; name: string; state: "ready" | "unavailable";
+        errorCode?: string }[] =
         [];
     for (const kind of ["mcp", "api"] as const)
       for (const [namespace, record] of Object.entries(state[kind]))
@@ -2378,9 +2380,13 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
             current(scope);
             prepared.publish();
             result.push({ kind, name: namespace, state: "ready" });
-          } catch {
+          } catch (cause) {
             await prepared?.dispose();
-            result.push({ kind, name: namespace, state: "unavailable" });
+            result.push({
+              kind, name: namespace, state: "unavailable",
+              errorCode: isAgentError(cause)
+                ? cause.code : "configuration_restore_failed",
+            });
           }
         }
     return result;

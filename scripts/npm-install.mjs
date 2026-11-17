@@ -291,7 +291,62 @@ export async function installedAgentVersion(program, managedNode) {
   }
 }
 
-async function installPackage(program, version, managedNode, source) {
+/**
+ * Recover the last verified Core after an interrupted app/receipt swap.
+ * A backup is never trusted merely because it exists on disk.
+ */
+export async function restoreInterruptedCoreUpdate(program, managedNode) {
+  const receipt = await readState(path.join(program, "installed.json"));
+  if (!receipt || receipt.directory !== "app" ||
+      !precise.test(receipt.version) ||
+      await installedAgentVersion(program, managedNode) === receipt.version)
+    return false;
+  const candidates = (await readdir(program)).filter((name) =>
+    /^\.previous-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(name));
+  const active = path.join(program, "app");
+  for (const name of candidates) {
+    const backup = path.join(program, name);
+    const info = await lstat(backup);
+    if (!info.isDirectory() || info.isSymbolicLink()) continue;
+    const rejected = path.join(program, ".recovery-" + randomUUID());
+    let movedActive = false, movedBackup = false;
+    try {
+      if (existsSync(active)) {
+        const actual = await lstat(active);
+        fail(actual.isDirectory() && !actual.isSymbolicLink(),
+          "The active Agent app is not a regular directory.");
+        await rename(active, rejected);
+        movedActive = true;
+      }
+      await rename(backup, active);
+      movedBackup = true;
+      if (await installedAgentVersion(program, managedNode) === receipt.version) {
+        if (movedActive)
+          await rm(rejected, { recursive: true, force: true }).catch(() => {});
+        return true;
+      }
+      await rename(active, backup);
+      movedBackup = false;
+      if (movedActive) {
+        await rename(rejected, active);
+        movedActive = false;
+      }
+    } catch (cause) {
+      // Inspect actual paths before any rollback; an unknown existing app is
+      // never overwritten by a recovery attempt.
+      if (movedBackup && existsSync(active) && !existsSync(backup))
+        await rename(active, backup);
+      if (movedActive && existsSync(rejected) && !existsSync(active))
+        await rename(rejected, active);
+      throw cause;
+    }
+  }
+  return false;
+}
+
+async function installPackage(
+  program, version, managedNode, source, timeoutMs = 900000,
+) {
   const app = path.join(program, "app");
   const pkg = packagePath(program);
   await directory(app);
@@ -308,9 +363,11 @@ async function installPackage(program, version, managedNode, source) {
     await directory(pkg);
     for (const name of [
       "dist", "contracts", "package.json", "scripts/service.mjs",
-      "scripts/npm-install.mjs", "scripts/service-runner.mjs", "native",
+      "scripts/npm-install.mjs", "scripts/service-runner.mjs",
+      "scripts/startup-report.mjs", "native",
     ]) {
-      if (name === "native" && !existsSync(path.join(source, name))) continue;
+      if ((name === "native" || name === "scripts/startup-report.mjs") &&
+        !existsSync(path.join(source, name))) continue;
       await mkdir(path.dirname(path.join(pkg, name)), { recursive: true });
       await cp(path.join(source, name), path.join(pkg, name), {
         recursive: true, force: true, verbatimSymlinks: true,
@@ -318,18 +375,24 @@ async function installPackage(program, version, managedNode, source) {
     }
   } else {
     const registries = npmRegistries();
+    const deadline = Date.now() + timeoutMs;
     for (const [index, registry] of registries.entries()) {
       // Reset the same application directory before each registry attempt.
       // npm never races another Nexum installation within the managed service.
       await rm(app, { recursive: true, force: true });
       await directory(app);
       try {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0)
+          throw Object.assign(new Error("The npm startup update exceeded its budget."), {
+            code: "npm_update_timeout",
+          });
         await npmExec(nodeBin(managedNode), [
           npmBin(managedNode), "install", "--prefix", app,
           "--no-save", "--no-package-lock", "--omit=dev",
           "--no-audit", "--no-fund", "--registry=" + registry,
           "@nexum-hub/agent@" + version,
-        ]);
+        ], app, remaining);
         break;
       } catch (error) {
         if (index === registries.length - 1) throw error;
@@ -407,6 +470,7 @@ export async function installNativeEntry(program, {
 export async function installNpmAgent({
   profile, version, config, home = homedir(),
   register = true, start = true, source, fromUpdate = false,
+  updateTimeoutMs = 900000,
 } = {}) {
   fail(["production", "development"].includes(profile), "Invalid Agent profile.");
   fail(precise.test(version), "Expected a precise Agent npm version.");
@@ -465,30 +529,68 @@ export async function installNpmAgent({
     }
 
     const managedNode = await runtime(program);
+    if (fromUpdate)
+      await restoreInterruptedCoreUpdate(program, managedNode);
     const receiptPath = path.join(program, "installed.json");
     if ((await installedAgentVersion(program, managedNode)) !== version) {
       // Persist the requested version *before* removing an incomplete or old
       // installation. After a crash, the stable launcher must still know what
       // to install, even when no complete installed.json receipt remains.
       await writeState(path.join(program, "update.json"), { version });
-      await rm(receiptPath, { force: true });
-      await rm(path.join(program, "app"), { recursive: true, force: true });
-      const requestedSource = fromUpdate ? undefined : source ?? self;
-      const sourceInsideApp = requestedSource &&
-        (path.resolve(requestedSource) === path.resolve(path.join(program, "app")) ||
-          path.resolve(requestedSource).startsWith(path.resolve(path.join(program, "app")) + path.sep));
-      await installPackage(
-        program, version, managedNode,
-        sourceInsideApp ? undefined : requestedSource,
-      );
-      await writeState(receiptPath, { version, directory: "app" });
+      if (fromUpdate) {
+        // An unsuccessful automatic npm update must not destroy the last
+        // verified Core. Download and verify outside the active app first.
+        const stage = path.join(program, ".install-" + randomUUID());
+        const backup = path.join(program, ".previous-" + randomUUID());
+        const active = path.join(program, "app");
+        await directory(stage);
+        let movedOld = false, activated = false;
+        try {
+          await installPackage(stage, version, managedNode, undefined,
+            updateTimeoutMs);
+          if (existsSync(active)) {
+            await rename(active, backup);
+            movedOld = true;
+          }
+          try {
+            await rename(path.join(stage, "app"), active);
+            activated = true;
+            await writeState(receiptPath, { version, directory: "app" });
+          } catch (cause) {
+            if (activated) await rename(active, path.join(stage, "app"));
+            if (movedOld) await rename(backup, active);
+            throw cause;
+          }
+          // Cleanup failure is not an installation failure: the verified new
+          // Core is active and the old backup is no longer executable.
+          if (movedOld)
+            await rm(backup, { recursive: true, force: true }).catch(() => {});
+        } finally {
+          await rm(stage, { recursive: true, force: true }).catch(() => {});
+        }
+      } else {
+        await rm(receiptPath, { force: true });
+        await rm(path.join(program, "app"), { recursive: true, force: true });
+        const requestedSource = source ?? self;
+        const sourceInsideApp = requestedSource &&
+          (path.resolve(requestedSource) === path.resolve(path.join(program, "app")) ||
+            path.resolve(requestedSource).startsWith(path.resolve(path.join(program, "app")) + path.sep));
+        await installPackage(
+          program, version, managedNode,
+          sourceInsideApp ? undefined : requestedSource,
+        );
+        await writeState(receiptPath, { version, directory: "app" });
+      }
     }
     // Explicit installs replace the native entrypoint only after the OS
     // manager has confirmed that the previous service instance stopped.
     // Automatic npm upgrades leave the stable executable untouched.
     if (register) {
       await installNativeEntry(program);
-      for (const name of ["service-runner.mjs", "npm-install.mjs", "service.mjs"]) {
+      for (const name of [
+        "service-runner.mjs", "npm-install.mjs", "service.mjs",
+        "startup-report.mjs",
+      ]) {
         await cp(path.join(packagePath(program), "scripts", name), path.join(program, name), {
           force: true,
         });
@@ -527,9 +629,12 @@ export async function installNpmAgent({
   }
 }
 
-export async function updateNpmAgent({ profile, version, home = homedir() }) {
+export async function updateNpmAgent({
+  profile, version, home = homedir(), timeoutMs = 60000,
+}) {
   const result = await installNpmAgent({
     profile, version, home, register: false, fromUpdate: true,
+    updateTimeoutMs: timeoutMs,
   });
   const update = path.join(rootFor(home, profile), "program", "update.json");
   if ((await readState(update))?.version === version)

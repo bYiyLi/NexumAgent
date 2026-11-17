@@ -172,6 +172,14 @@ export interface EngineOptions {
   loadWork(work: WorkRecord): JsonObject | Promise<JsonObject>;
   encodeResult(value: unknown, services: RunServices): Promise<JsonObject>;
   bindings(services: RunServices): Readonly<Record<string, unknown>>;
+  onWorkerDiagnostic?(event: {
+    runId: string;
+    stage: string;
+    code: string;
+    workerId: string;
+    threadId: number;
+    durationMs: number;
+  }): void;
   prepareAttachments?(
     references: readonly JsonObject[],
     directory: string,
@@ -241,7 +249,11 @@ function failure(
     }),
     phase,
   };
-  if (!isAgentError(error) && scriptDiagnostic && (phase === "compile" || phase === "execute")) {
+  const bridgedGuestFailure = isAgentError(error) &&
+    (error.code === "script_execution_failed" ||
+      error.code === "script_syntax_error");
+  if ((!isAgentError(error) || bridgedGuestFailure) && scriptDiagnostic &&
+      (phase === "compile" || phase === "execute")) {
     const at = scriptDiagnostic.location;
     result.message = "JavaScript " + scriptDiagnostic.exceptionType +
       (at
@@ -1141,6 +1153,8 @@ export class RunEngine extends EventEmitter {
     let result: JsonObject | undefined, error: JsonObject | undefined;
     let resultRef: string | undefined;
     let releaseScript: (() => void) | undefined;
+    let releaseWorker: (() => Promise<void>) | undefined;
+    let flushWorkerCallbacks: (() => Promise<void>) | undefined;
     let scriptDiagnostic: {
       exceptionType: string;
       location?: { source: string; line: number; column?: number };
@@ -1356,7 +1370,7 @@ export class RunEngine extends EventEmitter {
       });
       phase = "compile";
       await scope.operations.settle();
-      const execute = this.loader.compile(
+      const execute = await this.loader.compileIsolated(
         snapshot.code,
         { ...this.#options.bindings(scope.services), context: scope.context },
         {
@@ -1368,8 +1382,16 @@ export class RunEngine extends EventEmitter {
               moduleUses.set(use.entry, use);
             else modulesIncomplete = true;
           },
+          signal: scope.controller.signal,
+          onRootReturned: () => { scope.accepting = false; },
+          onDiagnostic: (event) => this.#options.onWorkerDiagnostic?.({
+            runId: scope.runId,
+            ...event,
+          }),
         },
       );
+      releaseWorker = execute.close;
+      flushWorkerCallbacks = execute.flushCallbacks;
       this.#assertActive(scope);
       run = this.store.getRun(run.runId);
       this.store.transitionRun(
@@ -1413,6 +1435,11 @@ export class RunEngine extends EventEmitter {
       }
       phase = "operations";
       await scope.operations.settle();
+      await execute.flushCallbacks();
+      await scope.operations.settle();
+      await execute.audit();
+      await execute.close();
+      releaseWorker = undefined;
       if (scope.log?.failure)
         throw new AgentError(
           "run_log_failed",
@@ -1460,6 +1487,16 @@ export class RunEngine extends EventEmitter {
       await scope.operations.settle();
     } catch (cause) {
       error ??= failure(cause, "operations");
+    }
+    if (releaseWorker) {
+      try {
+        if (!scope.controller.signal.aborted)
+          await flushWorkerCallbacks?.();
+        await releaseWorker();
+        releaseWorker = undefined;
+      } catch (cause) {
+        error ??= failure(cause, "cleanup");
+      }
     }
     await Promise.allSettled([...scope.deliveries]);
     let cleanup: JsonObject = {};

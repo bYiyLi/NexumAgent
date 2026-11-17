@@ -1,0 +1,163 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import test from "node:test";
+import { isolatedExtensionFactory } from "../dist/extensions/worker-bridge.js";
+import { AgentError } from "../dist/contracts/errors.js";
+
+async function fixture(t, source, options = {}) {
+  const dir = await mkdtemp(path.join(tmpdir(), "nexum-extension-worker-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const entry = path.join(dir, "extension.mjs");
+  await writeFile(entry, source);
+  const abort = new AbortController();
+  const events = [];
+  const host = {
+    context: { agentId: "test", paths: { work: dir } },
+    config: {},
+    signal: abort.signal,
+    resources: {},
+    storage: {},
+    authorize() {},
+    log() {},
+  };
+  const factory = isolatedExtensionFactory(pathToFileURL(entry).href, {
+    onEvent: (phase, code) => events.push({ phase, code }),
+    ...options,
+  });
+  return { dir, host, abort, factory, events };
+}
+
+test("revoking approval during native top-level import blocks the factory before effects", {
+  timeout: 15000,
+}, async (t) => {
+  const markerDir = await mkdtemp(path.join(tmpdir(), "nexum-import-gate-"));
+  t.after(() => rm(markerDir, { recursive: true, force: true }));
+  const marker = path.join(markerDir, "factory-executed");
+  let permitted = true;
+  let checks = 0;
+  const f = await fixture(t, [
+    'import { writeFileSync } from "node:fs";',
+    "await new Promise((resolve) => setTimeout(resolve, 120));",
+    "export default function () {",
+    "  writeFileSync(" + JSON.stringify(marker) + ', "executed");',
+    "  return { methods: {} };",
+    "}",
+  ].join("\n"), {
+    async verifyAfterImport() {
+      checks++;
+      if (!permitted)
+        throw new AgentError("extension_not_enabled",
+          "The previously approved package is no longer enabled.");
+    },
+  });
+  const pending = f.factory(f.host);
+  // The Worker must not run the factory even though it was permitted before
+  // the top-level await; the real Core decision occurs after import returns.
+  setTimeout(() => { permitted = false; }, 35);
+  await assert.rejects(pending, { code: "extension_not_enabled" });
+  assert.equal(checks, 1);
+  assert.equal(existsSync(marker), false,
+    "a revoked extension may not execute any factory effects");
+  assert.ok(f.events.some((event) => event.phase === "import_denied"));
+});
+
+function invocation(signal = new AbortController().signal) {
+  return {
+    signal,
+    context: { runId: "run_fixture", pwd: "/tmp" },
+    operationId: "op_fixture",
+    deadline: Date.now() + 10000,
+    resources: {},
+    storage: {},
+    output: {},
+    authorize() {},
+    log() {},
+    progress() {},
+  };
+}
+
+test("extension normalizers cannot weaken the original Core Schema gate", {
+  timeout: 15000,
+}, async (t) => {
+  const markerDir = await mkdtemp(path.join(tmpdir(), "nexum-core-gate-"));
+  t.after(() => rm(markerDir, { recursive: true, force: true }));
+  const marker = path.join(markerDir, "executed");
+  const source = [
+    'import { writeFileSync } from "node:fs";',
+    "const method = {",
+    '  description: "Validated method", permissions: [], schemaDialect: "draft7",',
+    '  inputSchema: { type: "object",',
+    '    properties: { value: { type: "integer" } },',
+    '    required: ["value"], additionalProperties: false },',
+    "  normalize(args) { return args[0]; },",
+    "  handle(input) {",
+    "    writeFileSync(" + JSON.stringify(marker) + ", String(input.value));",
+    "    return { value: input.value };",
+    "  },",
+    "};",
+    "export default function () {",
+    "  setTimeout(() => { method.inputSchema = { type: 'object' }; }, 35);",
+    "  return { methods: { inspect: method } };",
+    "}",
+  ].join("\n");
+  const f = await fixture(t, source);
+  const instance = await f.factory(f.host);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    await assert.rejects(
+      instance.methods.inspect.handle({
+        __nexumWorkerArgs: [{ value: "not-an-integer" }],
+      }, invocation()),
+    );
+    assert.equal(existsSync(marker), false,
+      "a Worker changing its Schema must not bypass Core validation");
+    const valid = await instance.methods.inspect.handle({
+      __nexumWorkerArgs: [{ value: 7 }],
+    }, invocation());
+    assert.equal(valid.value, 7);
+    assert.equal(await readFile(marker, "utf8"), "7");
+  } finally {
+    await instance.dispose();
+  }
+});
+
+test("cancelled extension initialization terminates a hanging Worker promptly", {
+  timeout: 15000,
+}, async (t) => {
+  const f = await fixture(t,
+    "export default async function(){await new Promise(()=>{})}");
+  const pending = f.factory(f.host);
+  setTimeout(() => f.abort.abort(), 40);
+  const started = performance.now();
+  await assert.rejects(pending, { code: "extension_worker_aborted" });
+  assert.ok(performance.now() - started < 2000);
+  assert.ok(f.events.some((e) =>
+    e.phase === "failed" && e.code === "extension_worker_aborted"));
+});
+
+test("crashing an extension method does not exit the Core process", {
+  timeout: 15000,
+}, async (t) => {
+  const f = await fixture(t, [
+    "export default function () {",
+    "  return { methods: { crash: {",
+    '    description: "Crash only this Worker", permissions: [], schemaDialect: "draft7",',
+    '    inputSchema: { type: "object" },',
+    "    handle() { process.exit(13); },",
+    "  } } };",
+    "}",
+  ].join("\n"));
+  const instance = await f.factory(f.host);
+  await assert.rejects(
+    instance.methods.crash.handle({ __nexumWorkerArgs: [{}] },
+      invocation()),
+    { code: "extension_worker_exited" },
+  );
+  assert.ok(f.events.some((e) =>
+    e.phase === "failed" && e.code === "extension_worker_exited"));
+  await instance.dispose();
+});

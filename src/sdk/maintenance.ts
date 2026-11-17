@@ -2,6 +2,17 @@ import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
 import { maintenanceMethods } from "../maintenance/requests.js";
 
+export const maintenanceSdkUsage = `## JavaScript 维护申请示例
+
+先检查当前状态，再根据实际需要提出安装、更新或配置申请；创建申请不代表批准或安装成功。
+
+~~~javascript
+return await maintenance.list({ target: "package", limit: 20 });
+~~~
+
+例如实际安装 npm 包时使用 maintenance.packages.install({ name, version }) 提交申请；返回的 requestId 用 maintenance.get(requestId) 回读审批与执行结果。MCP/API 配置、扩展启停均按下方实际方法表构造参数，不推测配置字段或绕过用户批准。
+`;
+
 /** Public call-bound facade, identical for built-in and external extensions. */
 export const maintenanceExtension: ExtensionFactory = () => {
   const methods: Record<string, MethodDefinition> = {};

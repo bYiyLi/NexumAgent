@@ -45,6 +45,7 @@ export async function runAgent(
   const lifetime = new AbortController();
   const signal = lifetime.signal;
   let failure: unknown;
+  let restartRequested = false;
   let diagnosticRoot: string | undefined;
   const diagnose = (
     code: string,
@@ -169,6 +170,16 @@ export async function runAgent(
                   reserve = components.reserve;
                   return await configure(components);
                 },
+                async requestRestart(restartId, reason) {
+                  if (stopping || restartRequested) return;
+                  restartRequested = true;
+                  diagnose("agent_restart_requested", false, {
+                    phase: "restart",
+                    component: "core",
+                    failureCode: "restart_scheduled",
+                  });
+                  void shutdown().catch(() => {});
+                },
               });
               try {
                 runtime = await initializing;
@@ -186,6 +197,11 @@ export async function runAgent(
             }
             if (stopping) return;
             diagnose("agent_connected", false);
+            // Return the ready handshake first. Optional packages may fail,
+            // block or require user authority without losing Core presence.
+            setImmediate(() => {
+              if (!stopping) runtime?.startOptionalComponents();
+            });
           } catch (cause) {
             if (!stopping) failure = cause;
             void shutdown();
@@ -212,7 +228,7 @@ export async function runAgent(
       diagnose,
     );
     if (failure) throw failure;
-    return reconnectResult === "upgrade" ? 75 : 0;
+    return restartRequested ? 76 : reconnectResult === "upgrade" ? 75 : 0;
   } catch (cause) {
     const code = isAgentError(cause) ? cause.code : "agent_failed";
     diagnose(/^[a-z0-9_]{1,128}$/.test(code) ? code : "agent_failed", false);

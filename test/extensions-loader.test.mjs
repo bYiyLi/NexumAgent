@@ -16,7 +16,9 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { ExtensionPackageLoader } from "../dist/extensions/package-loader.js";
-import { inspectExtensionPackage } from "../dist/extensions/packages.js";
+import {
+  inspectExtensionPackage, verifyExtensionPackage,
+} from "../dist/extensions/packages.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
@@ -149,6 +151,38 @@ export default async function createExtension(host){
     policy,
     permissions,
     enabled: () => enabled,
+    // This fixture tests the original in-process Registry/module-cache
+    // contract using deliberate shared global phase gates. Installed Agents
+    // use the default isolated Worker; its behavior has dedicated tests.
+    async createInstance(descriptor, host) {
+      const namespace = await modules.importExtension({
+        packageName: descriptor.packageName,
+        entry: descriptor.entry.url,
+        revision: descriptor.revision,
+      });
+      // Reproduce the native loader's original post-import admission. A
+      // revoked intent or mutated package must not run its factory even if
+      // top-level module evaluation was already in progress.
+      if (!enabled.has(descriptor.packageName))
+        throw new AgentError("extension_not_enabled",
+          "The package is no longer enabled.");
+      modules.assertExtension({
+        packageName: descriptor.packageName,
+        entry: descriptor.entry.url,
+        revision: descriptor.revision,
+      });
+      await verifyExtensionPackage(descriptor, {
+        work, packageName: descriptor.packageName,
+        policy, permissions, signal: host.signal,
+        resolveImport: (specifier) => modules.resolveImport(specifier),
+      });
+      const exported = Object.getOwnPropertyDescriptor(namespace, "default");
+      if (!exported || !("value" in exported) ||
+          typeof exported.value !== "function")
+        throw new AgentError("invalid_extension_export",
+          "The native extension must default-export a factory.");
+      return Reflect.apply(exported.value, undefined, [host]);
+    },
   });
   const scripts = new ScriptCatalog(work, "agent", () => []);
   write(path.join(work, "snapshot.json"), { project: null });

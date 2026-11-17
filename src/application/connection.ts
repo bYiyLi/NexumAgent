@@ -64,6 +64,15 @@ export type ConnectionDiagnosticDetails = {
   readonly attempt?: number;
   readonly retryDelayMs?: number;
   readonly offlineMs?: number;
+  /** Safe component metadata from Core-owned startup/recovery checks. */
+  readonly component?: string;
+  readonly phase?: string;
+  readonly failureCode?: string;
+  readonly durationMs?: number;
+  readonly activeVersion?: string;
+  readonly runId?: string;
+  readonly workerId?: string;
+  readonly threadId?: number;
 };
 
 export interface ControlConnectionOptions {

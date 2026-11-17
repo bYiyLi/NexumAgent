@@ -471,10 +471,10 @@ export class ScriptCatalog {
     const { entries, warnings } = discovery;
     const blocks = entries.map(
       (entry) =>
-        `## ${entry.scriptName}\n\n${entry.scriptDesc}\n\n适用：${entry.scriptWhenUse}\n\n来源：${entry.origin.owner}；版本：${entry.origin.version ?? "本地"}；修订：${entry.origin.revision}；默认展示：${entry.scriptOpenDefault}\n\n源文件：${entry.path}\n\n\`\`\`json\n${JSON.stringify(entry.scriptInputSchema, null, 2)}\n\`\`\``,
+        `## ${entry.scriptName}\n\n${entry.scriptDesc}\n\n适用：${entry.scriptWhenUse}\n\n来源：${entry.origin.owner}；版本：${entry.origin.version ?? "本地"}；修订：${entry.origin.revision}\n\n源文件：${entry.path}\n\n\`\`\`json\n${JSON.stringify(entry.scriptInputSchema, null, 2)}\n\`\`\``,
     );
     const text =
-      "# 脚本目录\n\n由运行时从当前有效 .js 头部生成；定义以源文件为准。\n\n" +
+      "# 可用脚本\n\n选择任务匹配的公开 scriptName，按下方输入 Schema 构造 input 并用 agent.run.start 执行。若没有合适脚本，用内联 script；需要创建或修改可复用脚本时选择 script-authoring。\n\n" +
       blocks.join("\n\n") +
       (warnings.length
         ? "\n\n发现提示：\n" +

@@ -37,7 +37,34 @@ function safeDiagnosticDetails(details?: ConnectionDiagnosticDetails): object {
         : undefined;
   const safeNumber = (value: unknown): value is number =>
     typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  const component = typeof details.component === "string" &&
+    details.component.length <= 214 &&
+    /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(details.component)
+    ? details.component : undefined;
+  const phase = typeof details.phase === "string" &&
+    /^[a-z][a-z0-9_]{0,60}$/.test(details.phase)
+    ? details.phase : undefined;
+  const failureCode = typeof details.failureCode === "string" &&
+    /^[a-zA-Z][a-zA-Z0-9_-]{0,100}$/.test(details.failureCode)
+    ? details.failureCode : undefined;
+  const activeVersion = typeof details.activeVersion === "string" &&
+    /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(details.activeVersion)
+    ? details.activeVersion : undefined;
+  const runId = typeof details.runId === "string" &&
+    /^run_[0-9a-f]{32}$/.test(details.runId)
+    ? details.runId : undefined;
+  const workerId = typeof details.workerId === "string" &&
+    /^runworker_[0-9a-f]{32}$/.test(details.workerId)
+    ? details.workerId : undefined;
   return {
+    ...(component ? { component } : {}),
+    ...(phase ? { phase } : {}),
+    ...(failureCode ? { failureCode } : {}),
+    ...(activeVersion ? { activeVersion } : {}),
+    ...(runId ? { runId } : {}),
+    ...(workerId ? { workerId } : {}),
+    ...(safeNumber(details.threadId) ? { threadId: details.threadId } : {}),
+    ...(safeNumber(details.durationMs) ? { durationMs: details.durationMs } : {}),
     ...(reason ? { reason } : {}),
     ...(lastPingAt !== undefined ? { lastPingAt } : {}),
     ...(safeNumber(details.closeCode) && details.closeCode <= 65535

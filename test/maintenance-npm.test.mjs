@@ -225,6 +225,23 @@ async function fixture(t) {
       policy,
       permissions: new Set(["read"]),
       enabled: () => enablement.enabled(),
+      // This suite verifies the original npm install/update and Registry
+      // mutation gates with shared global fixture clocks. Installed Agents
+      // use isolated Extension Workers; their boundaries are covered by
+      // application-runtime and extension-worker-boundary integration tests.
+      async createInstance(descriptor, host) {
+        const namespace = await modules.importExtension({
+          packageName: descriptor.packageName,
+          entry: descriptor.entry.url,
+          revision: descriptor.revision,
+        });
+        const factory = Object.getOwnPropertyDescriptor(namespace, "default");
+        if (!factory || !("value" in factory) ||
+            typeof factory.value !== "function")
+          throw new AgentError("invalid_extension_export",
+            "A native extension must export a real factory.");
+        return Reflect.apply(factory.value, undefined, [host]);
+      },
     }),
     materials = new ExtensionMaterials(work),
     extensions = new ExtensionServices(registry, packages, materials);
@@ -428,9 +445,9 @@ test("changed work preconditions and busy extensions reject before npm or file m
     0,
   );
   await f.control.entered.promise;
-  await assert.rejects(f.apply("packages.update", candidate), {
-    code: "extension_busy",
-  });
+  await assert.rejects(f.apply("packages.update", candidate), (cause) =>
+    ["extension_busy", "module_busy"].includes(cause?.code),
+    "active Run Worker or extension occupancy must block npm mutation");
   assert.equal(readFileSync(path.join(f.work, "package.json"), "utf8"), before);
   f.control.gate.resolve();
   assert.equal(

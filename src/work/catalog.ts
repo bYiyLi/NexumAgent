@@ -260,9 +260,9 @@ export class DocumentCatalog {
         "## 按任务选择资料",
         "",
         "1. 先使用 `agent.open` 已交付的适用入口指令；嵌套目录指令只在访问该目录前读取。",
-        "2. 需要复用工作方法时，按 `agent.skills` / `project.skills` 的 `description` 选择；只读取选中项的 `skillFile`，附属资源按 Skill 正文路由。",
-        "3. 需要 SDK、npm 包或扩展时，先在下方索引找对应来源和版本，再查具体手册或方法；长篇 API 只读相关片段。",
-        "4. 已有脚本先查 `agent.scripts` 的实际输入 Schema；观察旧运行用 `agent.run.get/list`，不为查看资料而重放带副作用的运行。",
+        "2. 优先从 `agent.scripts.items` 用 `scriptWhenUse` 和输入 Schema 匹配可复用脚本，按 `scriptName` 执行；若 `complete=false`，从 `agent.scripts.index` 补读完整目录。",
+        "3. 需要创建/修改可复用脚本时选择 `script-authoring` Skill；其它专门方法按 `agent.skills` / `project.skills` 的 `description` 选择，只读取选中项及其相关资源。",
+        "4. 文件与数据用 Node/npm，进程用 `sh`，用户输入或延迟用 `runtime`，共享状态用 `state`，结果用 `output`，传输用 `transfer`，安装配置用 `maintenance`；外部 MCP/API/浏览器只按真实已启用方法表选择。",
         "",
         "## 分段读取选中的文件",
         "",
@@ -295,7 +295,7 @@ export class DocumentCatalog {
               `- [${label(link.name)}](<${pathToFileURL(link.path).href}>)：${label(link.description)}（${label(link.owner)} ${label(link.version)}）`,
           )
           .join("\n") +
-        "\n\n## 基本工作方式\n\n打开 Agent 或项目后使用返回的 contextId 创建运行。script、scriptName、replayRunId 三者只选一个；新工作不继承旧脚本变量。\n\nNode 文件操作显式基于 context.pwd 或 context.paths 解析绝对路径；包环境始终来自该 Agent 的 work。普通本地文件操作使用 Node/npm。\n\n观察等待到期后按原 runId 查询或控制；取消和运行总期限由运行系统管理。历史重放会创建新运行，可能再次产生副作用。\n\n## 文档与资料\n\n入口指令已随打开结果交付。Skills 先提供选择元数据；选中后读取对应 SKILL.md，再按需读取其资源。文件 URL 可交给 Node URL/fileURLToPath 处理，它指向 Agent 本地文件。\n"
+        "\n\n## 状态与结果\n\n- 观察原 Run 用 `agent.run.get`，仅收到该 Run 的 `waitId` 时才用 `agent.run.input`；`replayRunId` 会创建新 Run。观察超时、连接中断或取消请求都不证明副作用已停止；回执丢失先查原 `requestId/runId`。\n- JavaScript 文件操作以 `context.pwd` 为准；文字/JSON 可直接 return，图片和文件用 `output` 返回。`resource_link` 需要 Host 读取资源，`transfer` Offer 不等于内容已传到接收方。\n- 已启用 MCP/API 的方法按本次来源文档使用；`maintenance` 创建申请并不代表已批准或生效。`goal.manage` 仅在 MCP 提供且需要跨 Run/回合管理目标时使用。\n\n## 读取资料\n\n选择 Skill 后只读对应 `skillFile` 及必要引用；`file:` 链接可由 `fileURLToPath` 解析。"
       );
     }
     const immutableText = navigation("packages.md", "scripts.md");

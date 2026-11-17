@@ -220,11 +220,12 @@ test("cancellation cannot manufacture completion for an uncooperative operation"
   assert.equal(done.operations.items[0].status, "succeeded");
 });
 
-test("existing operations can admit nested work after root return while the script's stale entry is closed", async (t) => {
+test("existing operations can admit nested work after root return while the script's stale entry is closed", { timeout: 12000 }, async (t) => {
   const entered = Promise.withResolvers(),
     parentGate = Promise.withResolvers(),
     childGate = Promise.withResolvers(),
-    childStarted = Promise.withResolvers();
+    childStarted = Promise.withResolvers(),
+    rootReturned = Promise.withResolvers();
   const f = await fixture(t, (services, method) => ({
     parent: method("parent", async () => {
       entered.resolve();
@@ -236,13 +237,19 @@ test("existing operations can admit nested work after root return while the scri
       return 1;
     }),
     fresh: method("fresh", () => 1),
-  }));
+  }), {
+    onWorkerDiagnostic(event) {
+      if (event.stage === "root_returned") rootReturned.resolve();
+    },
+  });
   const started = await f.start({
     script: "sdk.parent();return 3;",
     waitMs: 0,
   });
   await entered.promise;
-  await tick();
+  // The guest Worker has a separate event loop. Observe its actual return,
+  // not a guessed one-turn scheduling delay in the Core.
+  await rootReturned.promise;
   assert.throws(() => f.bound.fresh(), { code: "run_stopping" });
   parentGate.resolve();
   await childStarted.promise;

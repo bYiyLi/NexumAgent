@@ -2,6 +2,24 @@ import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
 import type { OutputAPI } from "./output.js";
 
+export const outputSdkUsage = `## JavaScript 返回示例
+
+普通文本或 JSON 可直接 return 原值。需要图片、音频、文件和资源时显式使用 output；返回本地路径不会自动交付文件。
+
+~~~javascript
+const { readFile } = await import("node:fs/promises");
+const path = await import("node:path");
+const bytes = await readFile(path.resolve(context.pwd, "screenshot.png"));
+return output.image({ data: bytes, mimeType: "image/png" });
+~~~
+
+~~~javascript
+return output.file("report.pdf", { name: "report.pdf" });
+~~~
+
+文件须真实存在且可在当前权限下读取；资源引用不等于模型已读取内容。需要混合内容与结构化数据时使用 output.result，具体形状查下方方法说明。
+`;
+
 type ScriptOutputMethod = Exclude<
   keyof OutputAPI,
   "mcpResult" | "mcpResourceResult"

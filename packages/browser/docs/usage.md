@@ -20,15 +20,15 @@ return await tab.observe({ full: true });
 
 ## 观察、定位与业务确认
 
-页面操作先观察。语义定位使用 `getByRole/getByText/getByLabel/locator`，操作后等待一个能够证明目标状态的信号。Locator 是查询描述，每次操作重解；快照 ref、DOM/AX 节点、dialog、chooser 和 WebMCP 注册另有固定修订。过期后重新观察，不把旧索引改成碰巧同名的新元素。
+页面操作先 `tab.observe({full:true})`，再用 `tab.playwright.getByRole/getByLabel/getByText/locator` 定位当前元素。Locator 会在操作时重新查询；固定 ref、dialog、chooser 等过期后需重新观察，不能把旧 ID 改猜成另一个元素。
 
 `locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `TIMEOUT`，不会点击覆盖层。
 
-默认可靠交互：高层点击先等待加载和两次一致的布局观察，再按同一浏览器会话顺序协调原生变更操作；鼠标释放后等待目标文档捕获的可信点击事件，并预留 120ms 处理窗口。跨域/嵌套 Frame 通过真实子文档坐标、Frame ID 和文档 token 验证回执，不用主文档事件冒充成功。未观察到事件时返回 `INPUT_UNCONFIRMED`，其 `effect: unknown` 表示原生输入可能已送达，**禁止自动重试点击**。输入和下拉选择在同步事件分发后核对控件实际值。截图等待 `load` 状态并短暂稳定后捕获。
+点击或输入后检查返回的实际状态。若出现 `INPUT_UNCONFIRMED` 或 `effect: unknown`，输入可能已送达：先重新观察，不自动再次点击、提交或选择文件。
 
-上述确认仅证明可信点击事件被网页接收（或页面发生了实际导航），**不证明任意异步业务完成**：例如保存、支付、提交仍需用 `tab.waitFor`、`locator.waitFor`、`playwright.waitForURL` 或业务结果回读显式验证。等待使用有限期限，不对网页执行自动点击重放；页面持续加载、扩展权限拒绝或结果未知时应如实反馈。
+点击成功只说明网页接收了输入，不代表异步业务完成。保存、支付或提交后，应等待或回读可观察的完成结果（例如确认文字或目标 URL）；确认不了就报告未知，不重复提交。
 
-AI 日常控制建议优先调用 `tab.observe({full:true})` 获取同一份 URL、标题、AX 状态；后续调用 `tab.observe()` 会利用 AX 差异减少大段重复内容。对于有业务完成标志的点击，可直接复用已有等待条件（不新增底层工具）：
+首次观察用 `tab.observe({full:true})`，后续可用 `tab.observe()` 获取变化；需要验证点击后的业务结果时，在点击之前提供等待条件：
 
 以下片段的 `tab` 必须先在同一次脚本中按上方方式获取，不能单独提交为完整脚本。
 
@@ -41,7 +41,7 @@ const result = await tab.playwright.getByRole("button", { name: "保存" }).clic
 return { before: before.url, matched: result.matched, after: await tab.observe() };
 ```
 
-`click({expect})` 会在原生点击成功后等待指定的 `WaitCondition`，只有条件匹配才返回带页面快照的 `WaitResult`；导航 `{kind:"navigation"}` 在点击前原子登记等待，避免快速跳转漏掉事件，限主文档。跨域 iframe 的 Locator 点击现在按真实子文档局部坐标登记可信回执；iframe 内跳转使用 `{kind:"url",value:"..."}` 或 Frame 内其他可观察条件。尚未确认的业务条件返回 `EXPECTATION_UNCONFIRMED`，保留已发送输入可能带来的副作用，**不能自动重放**。普通无 `expect` 点击仍仅保证可观察的输入完成。
+`click({expect})` 会等待已指定的页面条件；例如文字、导航或 URL 匹配。返回 `EXPECTATION_UNCONFIRMED` 表示业务完成尚未证实，原输入可能已经发生，不能自动重放。无 `expect` 的点击不证明异步业务结果。
 
 只需要 DOM 结构时，将上方完整入口的最后一行换成 `return await tab.playwright.domSnapshot();`，不必加载全部 API 声明。
 
@@ -66,7 +66,7 @@ return output.image({ data: image, mimeType: "image/jpeg" });
 
 `tab.navigate(url,{waitUntil})` 等待实际顶层导航的指定阶段，允许站点正常重定向；完成后用 `await tab.url()` 观察最终地址。`waitForURL` 或显式带 `url` 的导航等待仍按指定地址精确匹配；它们不会因某个不同地址已经加载而返回成功。
 
-明确等待受控标签发起的 HTTP 附件下载时，扩展为原始响应中的文件名添加唯一编号，并建议浏览器保存到默认下载目录的 `Nexum` 子目录，不修改浏览器全局下载位置。点击页面上带 `download` 属性的 HTTP/Blob/data 链接，或页面在该次点击中同步创建并点击此类链接时，扩展只在此次点击期间设置带编号的下载名称，随后恢复页面链接属性。两种方式都用编号绑定页面下载事件与浏览器的下载记录，等待浏览器实际完成，再按当前路径权限读取和固定文件；浏览器中的原文件保留。
+需要下载附件时，等待真实下载完成再使用下载文件；单纯的页面点击或下载开始事件不是文件已写入成功的证据。
 
 如果网页下载没有被当前等待器关联，可以直接查看当前浏览器配置的下载列表。`selected.downloads.list()` 返回原生记录，`filename` 是浏览器报告的本机路径；列表包含其他标签和目录的记录，默认最多 1000 条，可用 `limit` 调整数量，`0` 表示全部。按需要选中一条 `state === "complete"` 的记录，再交给 `output.file`：
 

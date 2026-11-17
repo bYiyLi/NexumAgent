@@ -540,7 +540,7 @@ test("local input timeout is catchable; an abandoned input wait fails rather tha
   assert.equal(failed.wait, null);
 });
 
-test("a stop closes managed entry immediately and keeps cancelling until an uncooperative root actually settles", async (t) => {
+test("cancelling a Worker prevents an uncooperative Core callback from resuming guest JavaScript", async (t) => {
   const entered = Promise.withResolvers();
   const gate = Promise.withResolvers();
   const { start, engine, finish } = await fixture(t, {
@@ -566,14 +566,16 @@ test("a stop closes managed entry immediately and keeps cancelling until an unco
     engine.cancel(caller, initial.run.runId).run.status,
     "cancelling",
   );
-  assert.equal(
-    (await engine.observe(caller, initial.run.runId, 10)).run.status,
-    "cancelling",
-  );
-  gate.resolve();
+  const observed = (await engine.observe(caller, initial.run.runId, 10)).run.status;
+  assert.ok(["cancelling", "cancelled"].includes(observed),
+    "cancellation may complete once the actual Worker has exited");
   const stopped = await finish(initial.run.runId);
   assert.equal(stopped.run.status, "cancelled");
   assert.equal(stopped.result, null);
+  gate.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal((await engine.observe(caller, initial.run.runId)).wait, null,
+    "a late original callback cannot start a second input wait after Worker exit");
   assert.equal(
     engine.cancel(caller, initial.run.runId).run.status,
     "cancelled",

@@ -948,6 +948,7 @@ test("SDK byte snapshots preserve native types and exact subview ranges while st
     await f.start({
       script: `
     const result=demo.bytes();
+
     function describe(value) {
       const view=ArrayBuffer.isView(value);
       const data=view?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):new Uint8Array(value);
@@ -964,7 +965,7 @@ test("SDK byte snapshots preserve native types and exact subview ranges while st
   `,
     }),
   );
-  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
   assert.deepEqual(result.result.data.values, expected);
   assert.equal(result.result.data.metadata, false);
   for (const key of ["exact", "aliases", "map", "set", "image", "typed"])
@@ -1038,7 +1039,7 @@ test("VM-created native views retain their typed semantics through SDK echo", as
   `,
     }),
   );
-  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
   assert.deepEqual(result.result.data.names, [
     "Int8Array",
     "Uint8Array",
@@ -1054,8 +1055,8 @@ test("VM-created native views retain their typed semantics through SDK echo", as
     "BigUint64Array",
     "DataView",
   ]);
-  assert.equal(result.result.data.copied, true);
-  assert.equal(result.result.data.exact, true);
+  assert.equal(result.result.data.copied, true, JSON.stringify(result.result.data));
+  assert.equal(result.result.data.exact, true, JSON.stringify(result.result.data));
   assert.equal(original.length, 13);
   await f.registry.disable(handle);
 });
@@ -1082,7 +1083,7 @@ test("byte snapshots sanitize thrown values without weakening private-control re
   });
   // The submission snapshot may still be preparing under CI load; wait for the real outcome.
   const result = await f.engine.observe(caller, accepted.run.runId, 30000);
-  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
   assert.deepEqual(result.result.data, {
     bytes: [3, 4, 5],
     hidden: false,
@@ -1137,7 +1138,7 @@ test("result graph copying preserves Blob/File data and never reuses an internal
     waitMs: 0,
   });
   const result = await observeRunTerminal(f.engine, caller, accepted);
-  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
   assert.deepEqual(result.result.data, {
     name: "report.txt",
     type: "text/plain",

@@ -5,7 +5,9 @@ import { safeErrorData } from "../contracts/error-data.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 import { ModuleLoader, type ModulePolicy } from "../runtime/modules.js";
-import type { ExtensionFactory } from "./api.js";
+import type {
+  ExtensionFactory, ExtensionHost, ExtensionInstance,
+} from "./api.js";
 import {
   inspectExtensionPackage,
   verifyExtensionPackage,
@@ -13,6 +15,7 @@ import {
   type ExtensionPackageOptions,
 } from "./packages.js";
 import { ExtensionRegistry, type ExtensionHandle } from "./registry.js";
+import { isolatedExtensionFactory } from "./worker-bridge.js";
 
 export interface ExtensionPackageLoaderOptions {
   readonly policy: ModulePolicy;
@@ -20,6 +23,15 @@ export interface ExtensionPackageLoaderOptions {
   /** Current, explicit enable intent. Installing or importing a package does not enable it. */
   readonly enabled: () => ReadonlySet<string>;
   readonly limits?: ExtensionPackageOptions["limits"];
+  onWorkerEvent?(
+    packageName: string, phase: string, code: string, durationMs: number,
+  ): void;
+  /** Trusted internal embedding override for existing in-process Registry
+   * contract tests. Installed Agents always use the isolated Worker default. */
+  createInstance?(
+    descriptor: ExtensionPackageDescriptor,
+    host: ExtensionHost,
+  ): ExtensionInstance | Promise<ExtensionInstance>;
 }
 export interface PreparedExtensionPackage {
   readonly descriptor: ExtensionPackageDescriptor;
@@ -192,20 +204,19 @@ export class ExtensionPackageLoader {
     if (!record) {
       const factory: ExtensionFactory = async (host) => {
         await this.#verify(descriptor, host.signal);
-        const namespace = await this.modules.importExtension(
-          this.#entry(descriptor),
-        );
-        await this.#verify(descriptor, host.signal);
-        const exported = Object.getOwnPropertyDescriptor(namespace, "default");
-        requireCondition(
-          exported &&
-            "value" in exported &&
-            typeof exported.value === "function",
-          "invalid_extension_export",
-          "The native ./nexum entry must default-export createExtension(host).",
-        );
-        // Registry must receive the candidate before any later asynchronous validation can fail.
-        return Reflect.apply(exported.value, undefined, [host]);
+        const candidate = this.options.createInstance
+          ? await this.options.createInstance(descriptor, host)
+          : await isolatedExtensionFactory(descriptor.entry.url, {
+              onEvent: (phase, code, durationMs) =>
+                this.options.onWorkerEvent?.(
+                  descriptor.packageName, phase, code, durationMs,
+                ),
+              verifyAfterImport: () => this.#verify(descriptor, host.signal),
+            })(host);
+        // The coordinator verifies the complete candidate after Registry
+        // preparation and retains its handle for safe disposal on revocation.
+        // A post-factory check here would lose that cleanup identity.
+        return candidate;
       };
       record = { descriptor, sourceKey: key, factory };
       this.#factories.set(key, record);

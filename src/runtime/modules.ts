@@ -10,6 +10,9 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import { executionGlobals } from "./globals.js";
 import { inspectScriptError, type ScriptDiagnostic } from "./script-diagnostics.js";
+import {
+  compileWorker, type WorkerCompile, type IsolatedExecution,
+} from "./worker-execution.js";
 
 export const defaultBuiltins = Object.freeze([
   "assert",
@@ -109,6 +112,7 @@ export class ModuleLoader {
   readonly #require: NodeJS.Require;
   readonly #bridge: Bridge;
   readonly #loaded: Map<string, EvaluatedModule>;
+  #activeWorkers = 0;
 
   private constructor(work: string, policy: ModulePolicy, bridge: Bridge) {
     this.work = work;
@@ -358,6 +362,8 @@ export class ModuleLoader {
 
   /** One approved native package mutation per work; unrelated imports cannot enter mid-change. */
   async withPackageChanges<T>(action: () => Promise<T>): Promise<T> {
+    requireCondition(this.#activeWorkers === 0, "module_busy",
+      "Approved npm updates must wait for existing script Workers to finish.");
     const active = packageChangesByWork.get(this.work);
     if (active && packageChangeOwners.getStore() === active) return action();
     requireCondition(
@@ -585,6 +591,45 @@ export class ModuleLoader {
         throw cause;
       }
     };
+  }
+
+  /** Prepare a per-Run Worker using the same ModuleLoader policy. */
+  async compileIsolated(
+    code: string,
+    parameters: Readonly<Record<string, unknown>>,
+    options: Parameters<ModuleLoader["compile"]>[2] &
+      { signal?: AbortSignal;
+        onDiagnostic?: WorkerCompile["onDiagnostic"];
+        onRootReturned?: WorkerCompile["onRootReturned"] } = {},
+  ): Promise<IsolatedExecution> {
+    const { context, ...bindings } = parameters;
+    requireCondition(!packageChangesByWork.has(this.work), "module_busy",
+      "A package change is applying to this Agent environment.");
+    ++this.#activeWorkers;
+    let counted = true;
+    const release = () => {
+      if (!counted) return;
+      counted = false;
+      --this.#activeWorkers;
+    };
+    try {
+      return await compileWorker({
+        work: this.work,
+        code, context, bindings,
+        policy: {
+          builtins: this.#policy.builtins(),
+          approvedPackages: [...this.#policy.approvedPackages()],
+        },
+        ...options,
+        onDiagnostic: (event) => {
+          if (event.stage === "shutdown") release();
+          options.onDiagnostic?.(event);
+        },
+      });
+    } catch (cause) {
+      release();
+      throw cause;
+    }
   }
 
   async execute(

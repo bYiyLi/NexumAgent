@@ -98,7 +98,7 @@ export interface WorkOptions {
     target: { projectId?: string; path?: string },
     signal: AbortSignal,
   ): Promise<ProjectResolution>;
-  materials?: () => PublishedMaterials;
+  materials?: (caller: Caller) => PublishedMaterials;
   scriptUsage?: (caller: Caller) => readonly ScriptUsage[];
   canUseScript?: (caller: Caller, origin: ContributionOrigin) => boolean;
 }
@@ -425,7 +425,7 @@ export class WorkService {
       });
     const effective = enabledMaterials(discovered);
     const published = json(
-      this.#options.materials?.() ?? {
+      this.#options.materials?.(caller) ?? {
         instructions: [],
         skills: [],
         docs: [],

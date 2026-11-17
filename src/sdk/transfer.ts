@@ -1,6 +1,19 @@
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
 
+export const transferSdkUsage = `## JavaScript 传输示例
+
+已有文件需要提供跨端下载时创建一次性下载 Offer：
+
+~~~javascript
+const path = await import("node:path");
+const file = path.resolve(context.pwd, "report.pdf");
+return await transfer.createDownload({ path: file, name: "report.pdf" });
+~~~
+
+接收外部上传用 transfer.createUpload({ path: targetPath })，已知大小时另传 expectedSize；用 transfer.get(transferId, { waitMs: 10000 }) 或 transfer.list() 查实际传输状态，传输未完成不等于文件已送达。transferId 必须来自真实结果；Offer 的 URL 不是本机文件路径。
+`;
+
 const boundedText = { type: "string", minLength: 1, maxLength: 4096 };
 const upload = {
   type: "object",
