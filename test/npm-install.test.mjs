@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { installNpmAgent } from "../scripts/npm-install.mjs";
+import { installNpmAgent, npmExec } from "../scripts/npm-install.mjs";
 
 async function packageSource(home, version) {
   const source = path.join(home, "source-" + version);
@@ -38,7 +38,7 @@ async function packageSource(home, version) {
 }
 
 test(
-  "npm installer stages a pinned runtime/version, retains credentials and does not register a real service in isolation",
+  "npm installer installs one verified app without locks, keeps credentials and never registers a real service in isolation",
   { timeout: 120000 },
   async (t) => {
     const scratch = realpathSync.native(
@@ -70,7 +70,7 @@ test(
     });
     const root = path.join(home, ".nexum-dev");
     assert.equal(
-      JSON.parse(await readFile(path.join(root, "program/active.json"), "utf8"))
+      JSON.parse(await readFile(path.join(root, "program/installed.json"), "utf8"))
         .version,
       "0.0.1",
     );
@@ -122,7 +122,7 @@ test(
     );
     assert.ok(
       (
-        await stat(path.join(root, "program/versions/0.0.1/app/dist/cli.js"))
+        await stat(path.join(root, "program/app/node_modules/@nexum-hub/agent/dist/cli.js"))
       ).isFile(),
     );
     const secondSource = await packageSource(scratch, "0.0.2");
@@ -135,7 +135,7 @@ test(
     });
     assert.equal(second.version, "0.0.2");
     assert.equal(
-      JSON.parse(await readFile(path.join(root, "program/active.json"), "utf8"))
+      JSON.parse(await readFile(path.join(root, "program/installed.json"), "utf8"))
         .version,
       "0.0.2",
     );
@@ -144,11 +144,15 @@ test(
       "private-test-token",
     );
     assert.ok(
-      (
-        await stat(path.join(root, "program/versions/0.0.1/app/package.json"))
-      ).isFile(),
-      "old version must remain for recovery",
+      (await stat(path.join(root, "program/app/node_modules/@nexum-hub/agent/package.json"))).isFile(),
+      "one verified Agent package is installed",
     );
+    assert.equal(
+      JSON.parse(await readFile(path.join(root, "program/installed.json"), "utf8")).version,
+      "0.0.2",
+    );
+    assert.equal(existsSync(path.join(root, "program/install.lock")), false);
+    assert.equal(existsSync(path.join(root, "program/versions")), false);
     await assert.rejects(
       () =>
         installNpmAgent({
@@ -161,3 +165,100 @@ test(
     );
   },
 );
+
+test(
+  "an interrupted fixed-directory install is rebuilt on retry and legacy debris is removed without deleting state",
+  { timeout: 120000 },
+  async (t) => {
+    const scratch = realpathSync.native(
+      await mkdtemp(path.join(tmpdir(), "nexum-npm-recovery-")),
+    );
+    t.after(() => rm(scratch, { recursive: true, force: true, maxRetries: 3 }));
+    const home = path.join(scratch, "home");
+    await mkdir(home, { mode: 0o700 });
+    const root = path.join(home, ".nexum-dev");
+    const program = path.join(root, "program");
+    const firstSource = await packageSource(scratch, "0.0.1");
+    await installNpmAgent({
+      profile: "development", version: "0.0.1", home,
+      source: firstSource, register: false,
+      config: { server_url: "http://127.0.0.1:8123/", token: "private-test-token" },
+    });
+    await mkdir(path.join(root, "work"), { recursive: true });
+    await writeFile(path.join(root, "work", "protected-state"), "untouched");
+    await mkdir(path.join(program, "versions", ".install-old"), { recursive: true });
+    await writeFile(path.join(program, "install.lock"), "424242");
+    const secondSource = await packageSource(scratch, "0.0.2");
+    await rm(path.join(secondSource, "dist", "cli.js"));
+    await assert.rejects(() => installNpmAgent({
+      profile: "development", version: "0.0.2", home,
+      source: secondSource, register: false,
+    }));
+    assert.equal(existsSync(path.join(program, "installed.json")), false);
+    assert.deepEqual(
+      JSON.parse(await readFile(path.join(program, "update.json"), "utf8")),
+      { version: "0.0.2" },
+      "a failed install must persist its next recoverable target",
+    );
+    assert.equal(existsSync(path.join(program, "install.lock")), true);
+    assert.equal(await readFile(path.join(root, "work", "protected-state"), "utf8"), "untouched");
+    await writeFile(
+      path.join(secondSource, "dist", "cli.js"),
+      'console.log("0.0.2");\n',
+    );
+    const repaired = await installNpmAgent({
+      profile: "development", version: "0.0.2", home,
+      source: secondSource, register: false,
+    });
+    assert.equal(repaired.version, "0.0.2");
+    assert.equal(existsSync(path.join(program, "install.lock")), false);
+    assert.equal(existsSync(path.join(program, "versions")), false);
+    assert.equal(existsSync(path.join(program, "active.json")), false);
+    assert.equal(await readFile(path.join(root, "work", "protected-state"), "utf8"), "untouched");
+    assert.equal(
+      JSON.parse(await readFile(path.join(program, "installed.json"), "utf8")).version,
+      "0.0.2",
+    );
+  },
+);
+
+test("a timed-out installer command kills its own real native descendant tree before retry", {
+  timeout: 20000,
+}, async (t) => {
+  const scratch = realpathSync.native(
+    await mkdtemp(path.join(tmpdir(), "nexum-installer-process-")),
+  );
+  t.after(() => rm(scratch, { recursive: true, force: true, maxRetries: 3 }));
+  const pidFile = path.join(scratch, "child.pid");
+  const code =
+    "const fs=require('node:fs'), cp=require('node:child_process');" +
+    "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});" +
+    "fs.writeFileSync(" + JSON.stringify(pidFile) + ",String(child.pid));" +
+    "setInterval(()=>{},1000);";
+  await assert.rejects(
+    npmExec(process.execPath, ["-e", code], scratch, 2500),
+    { code: "ETIMEDOUT" },
+  );
+  const pid = Number(await readFile(pidFile, "utf8"));
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  const active = async () => {
+    try {
+      process.kill(pid, 0);
+      if (process.platform === "linux") {
+        const { readFile: read } = await import("node:fs/promises");
+        const proc = await read("/proc/" + pid + "/stat", "utf8").catch(() => "");
+        if (/\)\s+Z\s/.test(proc)) return false;
+      }
+      return true;
+    } catch (error) {
+      if (error.code === "ESRCH") return false;
+      throw error;
+    }
+  };
+  let exited = false;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (!(await active())) { exited = true; break; }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(exited, "timed-out npm descendants must be observed stopped");
+});

@@ -170,14 +170,9 @@ try {
   }
   if (process.platform === "darwin")
     run("/bin/launchctl", ["print", `gui/${process.getuid()}`]);
-  const program = path.join(
-    home,
-    ".nexum-dev",
-    "program",
-    "versions",
-    "f".repeat(64),
-  );
-  await mkdir(path.join(program, "app/dist"), { recursive: true });
+  const program = path.join(home, ".nexum-dev", "program");
+  const appPackage = path.join(program, "app/node_modules/@nexum-hub/agent");
+  await mkdir(path.join(appPackage, "dist"), { recursive: true });
   await mkdir(
     path.join(program, "runtime", process.platform === "win32" ? "." : "bin"),
     { recursive: true },
@@ -190,16 +185,26 @@ try {
       process.platform === "win32" ? "node.exe" : "bin/node",
     ),
   );
-  await writeFile(path.join(program, "app/package.json"), '{"type":"module"}');
+  await writeFile(
+    path.join(appPackage, "package.json"),
+    '{"name":"@nexum-hub/agent","version":"0.0.1","type":"module"}',
+  );
+  await writeFile(
+    path.join(program, "installed.json"),
+    '{"version":"0.0.1","directory":"app"}',
+  );
+  for (const name of ["service.mjs", "npm-install.mjs", "service-runner.mjs"])
+    await cp(new URL("./" + name, import.meta.url), path.join(program, name));
   ledger = path.join(home, "ledger.json");
   control = path.join(home, "control.json");
   await command(null);
   const code = `import fs from 'node:fs';const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};process.stderr.write('native-service-fixture-started\\n');fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
-  await writeFile(path.join(program, "app/dist/cli.js"), code);
+  await writeFile(path.join(appPackage, "dist/cli.js"), code);
   plan = servicePlan({
     profile: "development",
     home,
     programDir: program,
+    npmManaged: true,
     windowsSid: process.platform === "win32" ? currentWindowsSid() : undefined,
   });
   console.log(

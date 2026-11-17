@@ -110,6 +110,18 @@ function fixture(t) {
   };
   const realm = (document, url) => {
     document.getElementById = () => null;
+    const listeners = new Map();
+    document.addEventListener = (type, fn) => {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(fn);
+    };
+    document.removeEventListener = (type, fn) => {
+      listeners.get(type)?.delete(fn);
+    };
+    document.dispatchNativeClick = (x, y, button = 0) => {
+      for (const fn of listeners.get("click") ?? [])
+        fn({ isTrusted: true, clientX: x, clientY: y, button });
+    };
     return vm.createContext({
       document,
       location: { href: url },
@@ -208,6 +220,23 @@ function fixture(t) {
       },
       async sendCommand(source, method, params) {
         calls.push({ source, method, params });
+        if (
+          method === "Input.dispatchMouseEvent" &&
+          params.type === "mouseReleased"
+        )
+          for (const id of [20, 30]) {
+            const frameWorld = worlds.get(id);
+            const receipts =
+              frameWorld?.[Symbol.for("nexum.browser.document.v1")]
+                ?.clickReceipts;
+            if (!receipts) continue;
+            for (const receipt of receipts.values())
+              frameWorld.document.dispatchNativeClick(
+                receipt.x ?? params.x,
+                receipt.y ?? params.y,
+                params.button === "left" ? 0 : 2,
+              );
+          }
         const remote = (value, world) => {
           if (value !== null && ["object", "function"].includes(typeof value)) {
             const objectId = `actual-object-${++objectSequence}`;

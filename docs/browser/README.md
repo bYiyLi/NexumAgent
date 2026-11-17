@@ -4,6 +4,8 @@ Nexum browser 是 Nexum 官方维护的可选浏览器控制扩展，源码与�
 
 ## 交付边界
 
+浏览器交互默认以可靠性优先：AI 负责定位页面目标与描述可验证的业务预期；Browser SDK 负责原生输入调度、页面/Frame 就绪、真实事件回执、有限稳定窗口和条件等待。高层 `locator.click({expect})` 复用原有 `WaitCondition`，只在匹配页面条件后返回验证快照；`tab.observe()` 复用 AX 全量/差异、标题与 URL。可信点击事件确认与业务成功是不同层级，不能把 Chrome 原生命令成功冒充业务完成；未知效果不自动重放。原生 Chrome/Edge 和三平台验证仍须按当前发行版本分别取证。
+
 - 官方内置能力包表示由 Nexum 维护、与 Agent 在同一仓库开发、使用同一公开协议；不表示固化到 Agent 二进制或启动路径。独立版本、npm 制品和浏览器插件版本分别记录。
 - 范围为 Avru 已确认的完整浏览器控制：22 接口/148 成员及 102 条额外验收项（便捷入口/属性/别名/接线），包括原始接口外的浏览器管理/资产/导出/WebMCP/CDP，以及控制可视化、文件与媒体、恢复、审计和真实验收。已确认的 botDetection 不实现、Host 专属 iab/mcpapps/siwc 后端不适用；对应通用浏览器能力按本文档原生实现，不能借不适用删掉 148 行。
 - 运行链为 AI Host → Nexum MCP/Cloud → Agent Node 运行 → browser 受管 SDK → 本机 WebSocket → 浏览器插件 → 已打开的浏览器。Agent 不内置 browser 包名、端口、CDP、标签页、Locator、专属表或专属生命周期 hook。

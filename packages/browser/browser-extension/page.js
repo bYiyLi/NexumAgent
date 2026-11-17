@@ -18,6 +18,10 @@ export async function pageCommand(input) {
       state.document !== document ||
       state.version !== input.pageVersion
     ) {
+      for (const receipt of state?.clickReceipts?.values?.() ?? []) {
+        document.removeEventListener(receipt.type, receipt.listener, true);
+        clearTimeout(receipt.timer);
+      }
       state = {
         document,
         version: input.pageVersion,
@@ -27,6 +31,7 @@ export async function pageCommand(input) {
         next: 0,
         refs: new Map(),
         reverse: new WeakMap(),
+        clickReceipts: new Map(),
       };
       Object.defineProperty(globalThis, slot, {
         value: state,
@@ -415,6 +420,71 @@ export async function pageCommand(input) {
     };
     let value;
     switch (input.command) {
+      case "inputReceipt": {
+        check(
+          typeof input.token === "string" &&
+            input.token.length > 0 &&
+            input.token.length <= 128,
+        );
+        const receipts = (state.clickReceipts ??= new Map());
+        const release = (receipt) => {
+          if (!receipt) return;
+          document.removeEventListener(receipt.type, receipt.listener, true);
+          clearTimeout(receipt.timer);
+          receipts.delete(input.token);
+        };
+        if (input.action === "arm") {
+          check(!receipts.has(input.token) && receipts.size < 32, "QUEUE_FULL");
+          check(
+            Number.isFinite(input.x) &&
+              Number.isFinite(input.y) &&
+              [0, 1, 2].includes(input.button) &&
+              Number.isFinite(input.expiresAt) &&
+              input.expiresAt > Date.now(),
+          );
+          const type =
+            input.button === 2
+              ? "contextmenu"
+              : input.button === 1
+                ? "auxclick"
+                : "click";
+          const receipt = {
+            type,
+            count: 0,
+            expiresAt: input.expiresAt,
+            x: input.x,
+            y: input.y,
+            button: input.button,
+          };
+          receipt.listener = (event) => {
+            if (
+              event.isTrusted &&
+              event.button === input.button &&
+              Math.abs(event.clientX - input.x) <= 6 &&
+              Math.abs(event.clientY - input.y) <= 6
+            )
+              receipt.count++;
+          };
+          receipt.timer = setTimeout(
+            () => release(receipt),
+            Math.min(30000, input.expiresAt - Date.now()),
+          );
+          document.addEventListener(type, receipt.listener, true);
+          receipts.set(input.token, receipt);
+          value = { armed: true, documentToken: state.token };
+        } else if (input.action === "peek" || input.action === "drop") {
+          check(
+            !input.expectedDocumentToken ||
+              input.expectedDocumentToken === state.token,
+            "STALE_REF",
+            "The receipt belongs to a replaced document.",
+          );
+          const receipt = receipts.get(input.token);
+          value = { observed: receipt?.count ?? 0 };
+          if (input.action === "drop") release(receipt);
+        } else check(false);
+        break;
+      }
       // Core-only native bridge: the caller retains the actual remote Node(s), never serializes them.
       case "nativeNodes":
         return input.multiple ? all() : unique();
@@ -610,14 +680,27 @@ export async function pageCommand(input) {
         const node = unique(false, true),
           geometry = node && actionGeometry(node, true);
         value = geometry
-          ? { ...describe(node), ...geometry, tagName: node.tagName }
+          ? {
+              ...describe(node),
+              ...geometry,
+              tagName: node.tagName,
+              documentToken: state.token,
+            }
           : null;
         break;
       }
-      case "fill":
-        setValue(unique(true), input.value ?? input.text);
+      case "fill": {
+        const node = unique(true),
+          expected = input.value ?? input.text;
+        setValue(node, expected);
+        check(
+          (node.isContentEditable ? node.textContent : node.value) === expected,
+          "INVALID_TARGET",
+          "The input did not retain the requested value.",
+        );
         value = null;
         break;
+      }
       case "focus":
         unique(true).focus();
         value = null;
@@ -652,6 +735,13 @@ export async function pageCommand(input) {
         node.dispatchEvent(new Event("input", { bubbles: true }));
         node.dispatchEvent(new Event("change", { bubbles: true }));
         value = matches.map((o) => o.value);
+        const actual = [...node.selectedOptions].map((o) => o.value);
+        check(
+          actual.length === value.length &&
+            actual.every((item) => value.includes(item)),
+          "INVALID_TARGET",
+          "The select did not retain the requested option values.",
+        );
         break;
       }
       case "checked": {

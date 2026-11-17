@@ -40,6 +40,8 @@ function fixture(t, config = {}) {
   const calls = [],
     attached = new Set(),
     emitted = [];
+  const clickReceipts = new Map();
+  let resolveReads = 0;
   const tabs = new Map([
     [
       1,
@@ -213,6 +215,20 @@ function fixture(t, config = {}) {
       },
       async sendCommand(source, method, params) {
         calls.push(["debugger.sendCommand", source, method, params]);
+        if (
+          config.expectedNavigationUrl &&
+          method === "Input.dispatchMouseEvent" &&
+          params.type === "mouseReleased"
+        ) {
+          const details = {
+            tabId: source.tabId,
+            frameId: 0,
+            url: config.expectedNavigationUrl,
+            documentId: "input-navigated-document",
+          };
+          onCommitted.emit(details);
+          onCompleted.emit(details);
+        }
         if (method === "Page.getLayoutMetrics")
           return {
             cssVisualViewport: {
@@ -232,6 +248,76 @@ function fixture(t, config = {}) {
         calls.push(["scripting.executeScript", input]);
         if (input.func?.name === "manageLocalDownloadClick")
           return [{ frameId: 0, result: true }];
+        const payload = input.args?.[0];
+        if (
+          config.expectationMatched !== undefined ||
+          config.expectedNavigationUrl
+        ) {
+          const value =
+            payload?.command === "resolve"
+              ? (() => {
+                  const x = config.movingTarget
+                    ? [65, 95, 95][Math.min(resolveReads++, 2)]
+                    : 65;
+                  return {
+                    point: { x, y: 80 },
+                    rect: { x: x - 20, y: 65, width: 40, height: 30 },
+                    documentToken: "fixture-document",
+                  };
+                })()
+              : payload?.command === "waitProbe"
+                ? {
+                    matched:
+                      config.expectationMatched &&
+                      calls.some(
+                        (entry) =>
+                          entry[0] === "debugger.sendCommand" &&
+                          entry[2] === "Input.dispatchMouseEvent" &&
+                          entry[3].type === "mouseReleased",
+                      ),
+                    documentToken: "fixture-document",
+                    readyState: "complete",
+                  }
+                : payload?.command === "snapshot"
+                  ? { url: "https://example.com/fixture", title: "Fixture", root: { role: "generic" } }
+                  : undefined;
+          if (value !== undefined)
+            return [{ frameId: 0, result: { ok: true, value } }];
+        }
+        if (payload?.command === "inputReceipt") {
+          if (payload.action === "arm") {
+            clickReceipts.set(payload.token, {
+              tabId: input.target.tabId,
+              before: calls.filter(
+                (entry) =>
+                  entry[0] === "debugger.sendCommand" &&
+                  entry[1].tabId === input.target.tabId &&
+                  entry[2] === "Input.dispatchMouseEvent" &&
+                  entry[3].type === "mouseReleased",
+              ).length,
+            });
+          }
+          const receipt = clickReceipts.get(payload.token);
+          const count =
+            calls.filter(
+              (entry) =>
+                entry[0] === "debugger.sendCommand" &&
+                entry[1].tabId === receipt?.tabId &&
+                entry[2] === "Input.dispatchMouseEvent" &&
+                entry[3].type === "mouseReleased",
+            ).length - (receipt?.before ?? 0);
+          if (payload.action === "drop") clickReceipts.delete(payload.token);
+          return [{
+            frameId: 0,
+            result: {
+              ok: true,
+              value:
+                payload.action === "arm"
+                  ? { armed: true, documentToken: "fixture-document" }
+                  : { observed: config.missingClickReceipt ? 0 : count },
+            },
+          }];
+        }
         return [
           {
             frameId: 0,
@@ -2727,6 +2813,217 @@ test("native pointer sequences serialize per target while event arms can buffer 
   );
 });
 
+test("native mutations across two tabs share one browser input sequence", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const entered = Promise.withResolvers(),
+    release = Promise.withResolvers(),
+    send = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (
+      source.tabId === 1 &&
+      method === "Input.dispatchMouseEvent" &&
+      params.type === "mousePressed"
+    ) {
+      entered.resolve();
+      await release.promise;
+    }
+    return send(source, method, params);
+  };
+  const first = f.call("cua.click", { options: { x: 60, y: 80 } }, { id: "1", budgetMs: 5000 });
+  await entered.promise;
+  const second = f.call("cua.click", { options: { x: 90, y: 100 } }, { id: "2", budgetMs: 5000 });
+  await delay(20);
+  assert.equal(
+    f.calls.some((v) =>
+      v[0] === "debugger.sendCommand" &&
+      v[1].tabId === 2 &&
+      v[2] === "Input.dispatchMouseEvent"
+    ),
+    false,
+    "a second tab must not send native input while the first is pressing",
+  );
+  release.resolve();
+  await Promise.all([first, second]);
+  const presses = f.calls
+    .filter((v) => v[0] === "debugger.sendCommand" &&
+      v[2] === "Input.dispatchMouseEvent" &&
+      v[3].type === "mousePressed")
+    .map((v) => v[1].tabId);
+  assert.deepEqual(presses, [1, 2]);
+});
+
+test("a missing trusted click receipt never replays native input or reports success", async (t) => {
+  const f = fixture(t, { missingClickReceipt: true });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await assert.rejects(
+    f.call("cua.click", { options: { x: 40, y: 70 } }, { budgetMs: 3000 }),
+    { code: "INPUT_UNCONFIRMED", effect: "unknown" },
+  );
+  const native = f.calls.filter((v) =>
+    v[0] === "debugger.sendCommand" &&
+    v[2] === "Input.dispatchMouseEvent"
+  );
+  assert.equal(native.filter((v) => v[3].type === "mousePressed").length, 1);
+  assert.equal(native.filter((v) => v[3].type === "mouseReleased").length, 1);
+});
+
+test("locator click with an expected page condition returns a verified snapshot", async (t) => {
+  const f = fixture(t, { expectationMatched: true });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const result = await f.call(
+    "locator.click",
+    {
+      locator: {
+        target: f.target(),
+        framePath: [],
+        query: { kind: "selector", selector: "#save" },
+      },
+      options: {
+        expect: { kind: "text", value: "Saved", timeoutMs: 500 },
+      },
+    },
+    { budgetMs: 3000 },
+  );
+  assert.equal(result.matched, true);
+  assert.equal(result.snapshot.url, "https://example.com/fixture");
+  assert.equal(
+    f.calls.filter((x) => x[0] === "debugger.sendCommand" &&
+      x[2] === "Input.dispatchMouseEvent" &&
+      x[3].type === "mousePressed").length,
+    1,
+  );
+});
+
+test("the locator waits for two stable layout observations before sending input", async (t) => {
+  const f = fixture(t, { expectationMatched: true, movingTarget: true });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("locator.click", {
+    locator: {
+      target: f.target(),
+      framePath: [],
+      query: { kind: "selector", selector: "#moving" },
+    },
+  }, { budgetMs: 3000 });
+  const samples = f.calls.filter((x) =>
+    x[0] === "scripting.executeScript" &&
+    x[1].args[0].command === "resolve");
+  assert.equal(samples.length, 3);
+  const native = f.calls.find((x) =>
+    x[0] === "debugger.sendCommand" &&
+    x[2] === "Input.dispatchMouseEvent" &&
+    x[3].type === "mousePressed");
+  assert.equal(native[3].x, 95);
+});
+
+test("navigation expectation is armed before input and captures a fast document change", async (t) => {
+  const url = "https://example.com/next";
+  const f = fixture(t, { expectedNavigationUrl: url });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const outcome = await f.call(
+    "locator.click",
+    {
+      locator: {
+        target: f.target(),
+        framePath: [],
+        query: { kind: "selector", selector: "#navigate" },
+      },
+      options: {
+        expect: { kind: "navigation", url, waitUntil: "load", timeoutMs: 1000 },
+      },
+    },
+    { budgetMs: 3500 },
+  );
+  assert.equal(outcome.matched, true);
+  const native = f.calls.filter((x) => x[0] === "debugger.sendCommand");
+  assert.ok(native.findIndex((x) => x[2] === "Page.enable") <
+    native.findIndex((x) =>
+      x[2] === "Input.dispatchMouseEvent" && x[3].type === "mousePressed"
+    ));
+  assert.equal(native.filter((x) =>
+    x[2] === "Input.dispatchMouseEvent" && x[3].type === "mousePressed").length, 1);
+});
+
+test("a click whose expected business condition is absent never replays the action", async (t) => {
+  const f = fixture(t, { expectationMatched: false });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await assert.rejects(
+    f.call(
+      "locator.click",
+      {
+        locator: {
+          target: f.target(),
+          framePath: [],
+          query: { kind: "selector", selector: "#save" },
+        },
+        options: {
+          expect: { kind: "text", value: "Saved", timeoutMs: 180 },
+        },
+      },
+      { budgetMs: 3000 },
+    ),
+    { code: "EXPECTATION_UNCONFIRMED", effect: "unknown" },
+  );
+  assert.equal(
+    f.calls.filter((x) => x[0] === "debugger.sendCommand" &&
+      x[2] === "Input.dispatchMouseEvent" &&
+      x[3].type === "mousePressed").length,
+    1,
+  );
+});
+
+test("the isolated page receipt accepts only the current trusted pointer event and clears its listener", async () => {
+  const listeners = new Map();
+  const document = {
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type, listener) {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
+  };
+  const scope = vm.createContext({
+    document,
+    crypto: globalThis.crypto,
+    setTimeout,
+    clearTimeout,
+  });
+  const execute = vm.runInContext(`(${pageCommand.toString()})`, scope);
+  const base = {
+    command: "inputReceipt",
+    pageVersion: 1,
+    leaseId: "fixture",
+    token: "receipt-1",
+    x: 140,
+    y: 90,
+    button: 0,
+    expiresAt: Date.now() + 2000,
+  };
+  assert.equal((await execute({ ...base, action: "arm" })).value.armed, true);
+  const click = listeners.get("click");
+  assert.equal(typeof click, "function");
+  click({ isTrusted: false, button: 0, clientX: 140, clientY: 90 });
+  click({ isTrusted: true, button: 0, clientX: 200, clientY: 90 });
+  click({ isTrusted: true, button: 2, clientX: 140, clientY: 90 });
+  assert.equal((await execute({ ...base, action: "peek" })).value.observed, 0);
+  click({ isTrusted: true, button: 0, clientX: 140, clientY: 90 });
+  assert.equal((await execute({ ...base, action: "peek" })).value.observed, 1);
+  assert.equal((await execute({ ...base, action: "drop" })).value.observed, 1);
+  assert.equal(listeners.size, 0);
+});
+
 test("native keyboard chords release only their own keys after cancellation and raw CDP held input is closed with its original lease", async (t) => {
   const f = fixture(t);
   f.router.start();
@@ -3096,8 +3393,15 @@ test("native AX indices retain the exact backend node and document and never reb
     f.calls
       .filter((value) => value[0] === "scripting.executeScript")
       .map((value) => value[1].args[0].command),
-    ["devicePixelRatio"],
-    "Only screenshot density is read in the isolated world; AX actions retain native node identity.",
+    [
+      "readyState",
+      "inputReceipt",
+      "inputReceipt",
+      "inputReceipt",
+      "readyState",
+      "devicePixelRatio",
+    ],
+    "AX node identity stays native; only input readiness/receipt and screenshot state use the isolated page.",
   );
 });
 

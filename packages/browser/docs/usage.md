@@ -6,6 +6,23 @@
 
 `locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `TIMEOUT`，不会点击覆盖层。
 
+默认可靠交互：高层点击先等待加载和两次一致的布局观察，再按同一浏览器会话顺序协调原生变更操作；鼠标释放后等待目标文档捕获的可信点击事件，并预留 120ms 处理窗口。跨域/嵌套 Frame 通过真实子文档坐标、Frame ID 和文档 token 验证回执，不用主文档事件冒充成功。未观察到事件时返回 `INPUT_UNCONFIRMED`，其 `effect: unknown` 表示原生输入可能已送达，**禁止自动重试点击**。输入和下拉选择在同步事件分发后核对控件实际值。截图等待 `load` 状态并短暂稳定后捕获。
+
+上述确认仅证明可信点击事件被网页接收（或页面发生了实际导航），**不证明任意异步业务完成**：例如保存、支付、提交仍需用 `tab.waitFor`、`locator.waitFor`、`playwright.waitForURL` 或业务结果回读显式验证。等待使用有限期限，不对网页执行自动点击重放；页面持续加载、扩展权限拒绝或结果未知时应如实反馈。
+
+AI 日常控制建议优先调用 `tab.observe({full:true})` 获取同一份 URL、标题、AX 状态；后续调用 `tab.observe()` 会利用 AX 差异减少大段重复内容。对于有业务完成标志的点击，可直接复用已有等待条件（不新增底层工具）：
+
+```javascript
+const before = await tab.observe({ full: true });
+const result = await tab.playwright.getByRole("button", { name: "保存" }).click({
+  expect: { kind: "text", value: "保存成功", timeoutMs: 15000 },
+  timeoutMs: 20000,
+});
+return { before: before.url, matched: result.matched, after: await tab.observe() };
+```
+
+`click({expect})` 会在原生点击成功后等待指定的 `WaitCondition`，只有条件匹配才返回带页面快照的 `WaitResult`；导航 `{kind:"navigation"}` 在点击前原子登记等待，避免快速跳转漏掉事件，限主文档。跨域 iframe 的 Locator 点击现在按真实子文档局部坐标登记可信回执；iframe 内跳转使用 `{kind:"url",value:"..."}` 或 Frame 内其他可观察条件。尚未确认的业务条件返回 `EXPECTATION_UNCONFIRMED`，保留已发送输入可能带来的副作用，**不能自动重放**。普通无 `expect` 点击仍仅保证可观察的输入完成。
+
 ```javascript
 const { createBrowserClient } = await import("@nexum-hub/browser");
 const client = createBrowserClient(browser);

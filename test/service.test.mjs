@@ -101,9 +101,9 @@ test("all native manifests use explicit profiles, absolute pinned Node argv and 
       assert.match(plan.content, /<ExecutionTimeLimit>PT0S/);
       assert.match(plan.content, /<Count>255/);
       assert.match(plan.content, /<MultipleInstancesPolicy>IgnoreNew/);
-      assert.ok(plan.launcher.includes("$nexumAttempt -le 255"));
+      assert.ok(plan.launcher.includes("while ($true)"));
       assert.ok(plan.launcher.includes("$nexumExit -eq 0"));
-      assert.ok(plan.launcher.includes("exit $nexumExit"));
+      assert.ok(plan.launcher.includes("exit 0"));
       assert.ok(plan.launcher.includes("Start-Sleep -Seconds 10"));
       assert.ok(plan.launcher.includes("Remove-Item Env:NODE_OPTIONS"));
     }
@@ -132,7 +132,7 @@ test("npm-managed native service launches a stable local runner rather than npx 
       npmManaged: true,
       userId: 501,
       windowsSid: "S-1-5-21-1-2-3-1001",
-      programDir: p.join(root, "versions", "0.0.2-next.123"),
+      programDir: root,
     });
     assert.equal(
       plan.node,
@@ -153,12 +153,12 @@ test("npm-managed native service launches a stable local runner rather than npx 
   const program = path.join(home, ".nexum-dev", "program");
   await mkdir(program, { recursive: true });
   await writeFile(
-    path.join(program, "active.json"),
-    JSON.stringify({ version: "0.0.2", directory: "0.0.2" }),
+    path.join(program, "installed.json"),
+    JSON.stringify({ version: "0.0.2", directory: "app" }),
   );
   const loaded = await loadServicePlan("development", home);
   assert.equal(loaded.entry, path.join(program, "service-runner.mjs"));
-  assert.equal(loaded.programDir, path.join(program, "versions", "0.0.2"));
+  assert.equal(loaded.programDir, program);
 });
 
 test("preparing a service preview cannot overwrite the selected manifest or its Windows launcher", async (t) => {

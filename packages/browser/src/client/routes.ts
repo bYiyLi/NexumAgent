@@ -261,6 +261,10 @@ const waitCondition = {
     },
   ],
 };
+const verifiedClick = optionalObject({
+  ...(click.properties as Record<string, Schema>),
+  expect: waitCondition,
+});
 const cdpTarget = {
   anyOf: [
     object({ sessionId: id }, ["sessionId"]),
@@ -725,7 +729,8 @@ for (const name of [
     ].includes(name)
   )
     fields.options = timed;
-  if (name === "click" || name === "dblclick") fields.options = click;
+  if (name === "click" || name === "dblclick")
+    fields.options = verifiedClick;
   if (["fill", "press", "pressSequentially", "type"].includes(name)) {
     fields.value = string;
     required.push("value");

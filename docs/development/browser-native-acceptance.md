@@ -2,6 +2,14 @@
 
 当前状态为 `in_progress`。候选公开入口、受管方法、MV3 插件和五类贡献已经存在；完整 250 项、Chrome/Edge 与三平台矩阵尚未完成，未发布 npm。用户已在现有 Chrome 手动加载开发扩展并完成局部场景，范围与限制见下文。设计与稳定 ID 由 [browser 设计](../browser/README.md)及[成员映射](../browser/capability-matrix.json)拥有，本文件只记录实际证据与缺口。
 
+## 2026-11-17：AI 可靠交互候选回归（本地，未发布）
+
+- 在现有 Browser 候选基础上，增加同一浏览器会话的原生变更顺序协调、点击前双次布局一致性检查、主文档及跨域/嵌套 Frame 的可信点击回执（Frame ID/文档 token 绑定）、短暂稳定窗口与表单输入/选择同步状态核验。不可确认的点击返回 `INPUT_UNCONFIRMED`，不自动重放。
+- 公开 Locator 可选 `click({expect: WaitCondition})` / `dblclick({expect})`；点击前预登记顶层导航事件，点击后观察明确的业务页面条件，成功返回真实 `WaitResult` 快照，未观察到返回 `EXPECTATION_UNCONFIRMED` 与未知效果，不重放输入。新增 `tab.observe()` / `tab.observe({full:true})` 组合现有 load、URL、标题和 AX 全量/差异供 AI 简化观察。更新 Browser Skill 和用法文档；无新 MCP Tools。
+- 本机 macOS/arm64、Node 24.22.1、pnpm 10.34.5：`corepack pnpm typecheck`、`corepack pnpm build` 及 `corepack pnpm test` 成功，Browser **219 项通过、0 失败/跳过/取消**。新增用例覆盖跨域 Frame 可信回执、点击目标位置稳定、跨标签输入互斥、快导航预登记、业务期望匹配与超时不重放、AI `observe()` 的调用和返回。真实浏览器及异步业务成功语义不从这些夹具测试推断。
+- 独立 Chrome 原生验收需要占用当前 development Browser 端口；已有 Nexum Dev Agent 正在使用，原生夹具的 `PORT_IN_USE` 拒绝不应以停止现有 Agent 绕过。本次**未部署/重启 Dev Agent、未升级其 Browser SDK 或浏览器插件，不能将旧 Dev Agent 的成功调用计作新候选验收**。
+- 后续阻塞：需发布新的匹配测试包/插件到受控 Dev 环境，再以真实 macOS Chrome/Edge 检查跨 Frame 原生事件、两个 Tab 并发点击、页面 SPA 异步状态、未知结果处理、取消和清理；Linux/Windows 与完整 250 成员仍依托各自实际证据验收。此记录不宣告发布、推送或整体验收通过。
+
 ## 2026-11-14：组件与跨平台候选
 
 - Node 24.22.1、pnpm 10.34.5，本机 macOS/arm64 的 `pnpm --dir packages/browser check`：类型、构建及 131 项组件检查通过，0 跳过。它们包含真实 Core/Registry、loopback MV3 peer 和受控浏览器 API 夹具，不能当原生 Chrome/Edge 全量验收。

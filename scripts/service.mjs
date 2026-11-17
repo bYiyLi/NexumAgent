@@ -136,25 +136,27 @@ export function servicePlan({
       home,
       profile === "development" ? ".nexum-dev" : ".nexum",
     ),
-    versions = p.join(root, "program", "versions");
+    program = p.join(root, "program"),
+    versions = p.join(program, "versions");
   const relative = p.relative(versions, programDir);
   if (
-    !relative ||
-    relative.startsWith("..") ||
-    p.isAbsolute(relative) ||
-    relative.includes(p.sep)
+    !(npmManaged && programDir === program) &&
+    (!relative ||
+      relative.startsWith("..") ||
+      p.isAbsolute(relative) ||
+      relative.includes(p.sep))
   )
     throw new Error(
-      "Use one immutable version inside this profile's program directory.",
+      "Use this profile's managed program or an immutable native version.",
     );
   const node = p.join(
       npmManaged
-        ? p.join(root, "program", "runtime")
+        ? p.join(program, "runtime")
         : p.join(programDir, "runtime"),
       platform === "win32" ? "node.exe" : "bin/node",
     ),
     entry = npmManaged
-      ? p.join(root, "program", "service-runner.mjs")
+      ? p.join(program, "service-runner.mjs")
       : p.join(programDir, "app", "dist", "cli.js");
   const args = npmManaged
     ? [entry, "--profile", profile]
@@ -228,8 +230,9 @@ export function servicePlan({
     state,
     preview ? "service-preview-launch.ps1" : "service-launch.ps1",
   );
-  // Task Scheduler retries failure to start an action, not a completed app's
-  // nonzero exit. Keep app retries here, bounded, under that same user task.
+  // Task Scheduler does not reliably restart an action after its child exits
+  // nonzero. The one user-session task supervises its launcher indefinitely;
+  // a user/OS stop still tears down this complete native Job.
   // Native PowerShell invocation can allocate a new visible console for
   // node.exe, even if the task's PowerShell window itself is hidden.
   // CreateNoWindow and redirected pipes keep the Agent independent of a
@@ -253,7 +256,7 @@ $nexumStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
 $nexumStart.RedirectStandardInput = $true
 $nexumStart.RedirectStandardOutput = $true
 $nexumStart.RedirectStandardError = $true
-for ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {
+while ($true) {
   $nexumExit = 1
   $nexumProcess = $null
   try {
@@ -278,7 +281,7 @@ for ($nexumAttempt = 0; $nexumAttempt -le 255; $nexumAttempt++) {
   } finally {
     if ($null -ne $nexumProcess) { $nexumProcess.Dispose() }
   }
-  if ($nexumExit -eq 0 -or $nexumAttempt -eq 255) { exit $nexumExit }
+  if ($nexumExit -eq 0) { exit 0 }
   Start-Sleep -Seconds 10
 }
 `;
@@ -597,6 +600,23 @@ export async function serviceAction(
     else if (!["Ready", "Disabled"].includes(current.state))
       throw new Error("The task's stop state is unknown.");
   }
+  if (current.registered) {
+    // A Disabled task can still have a Running instance. The authoritative
+    // close check is Task Scheduler's actual instance count, not Task.State.
+    const instancesScript = "$s=New-Object -ComObject 'Schedule.Service';" +
+      "$s.Connect();$t=$s.GetFolder('\\').GetTask(" + name + ");" +
+      "[Console]::Write($t.GetInstances(0).Count)";
+    const deadline = performance.now() + 30000;
+    for (;;) {
+      const count = powershell(instancesScript).stdout.trim();
+      if (!/^\d+$/.test(count))
+        throw new Error("The Windows task instance count is unknown.");
+      if (Number(count) === 0) break;
+      if (performance.now() >= deadline)
+        throw new Error("The previous Windows task did not confirm its process tree stopped.");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
   if (action === "remove") {
     if (current.registered)
       powershell(`Unregister-ScheduledTask -TaskName ${name} -Confirm:$false`);
@@ -612,20 +632,33 @@ export async function loadServicePlan(profile, home = homedir()) {
     home,
     profile === "development" ? ".nexum-dev" : ".nexum",
   );
-  const active = JSON.parse(
-    await readFile(path.join(root, "program", "active.json"), "utf8"),
-  );
+  const program = path.join(root, "program");
+  let installed;
+  try {
+    installed = JSON.parse(await readFile(path.join(program, "installed.json"), "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (installed?.directory === "app" && typeof installed.version === "string") {
+    return servicePlan({
+      profile,
+      home,
+      programDir: program,
+      npmManaged: true,
+      windowsSid: process.platform === "win32" ? currentWindowsSid() : undefined,
+    });
+  }
+  // Pre-migration layouts remain inspectable by their original service CLI.
+  const active = JSON.parse(await readFile(path.join(program, "active.json"), "utf8"));
   const npmManaged =
     typeof active.directory === "string" &&
     active.directory === active.version &&
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.[0-9]+)?$/.test(
-      active.version,
-    );
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.[0-9]+)?$/.test(active.version);
   return servicePlan({
     profile,
     home,
     programDir: npmManaged
-      ? path.join(root, "program", "versions", active.directory)
+      ? path.join(program, "versions", active.directory)
       : active.programDir,
     npmManaged,
     windowsSid: process.platform === "win32" ? currentWindowsSid() : undefined,

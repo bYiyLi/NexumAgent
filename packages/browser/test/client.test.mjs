@@ -200,6 +200,53 @@ test("locator combinations are bounded immutable AST with native regexp flags an
   );
 });
 
+test("locator click declares the expected page outcome without a second public tool", async () => {
+  const evidence = {
+    matched: true,
+    snapshot: { url: "https://example.test/saved", title: "Saved" },
+  };
+  const f = fixture({ "locator.click": async () => evidence });
+  const tab = await f.tab();
+  const expected = { kind: "text", value: "Saved", timeoutMs: 2000 };
+  const result = await tab.playwright.getByRole("button", { name: "Save" }).click({
+    expect: expected,
+    timeoutMs: 3000,
+  });
+  assert.deepEqual(result, evidence);
+  assert.equal(f.calls.at(-1).path, "locator.click");
+  assert.deepEqual(f.calls.at(-1).input.options.expect, expected);
+});
+
+test("one AI-oriented observation returns current URL, title and full/diff accessibility text", async () => {
+  let observations = 0;
+  const f = fixture({
+    "tab.url": async () => "https://example.test/settings",
+    "tab.title": async () => "Settings",
+    "ax.get": async () =>
+      observations++ === 0
+        ? 'AX full\nbutton "Save"'
+        : 'AX diff\nChanged: text "Saved"',
+  });
+  const tab = await f.tab();
+  const first = await tab.observe();
+  assert.equal(first.tabId, target.tabId);
+  assert.equal(first.url, "https://example.test/settings");
+  assert.equal(first.title, "Settings");
+  assert.equal(first.mode, "full");
+  assert.match(first.accessibility, /Save/);
+  assert.equal(
+    f.calls.find((x) => x.path === "playwright.waitForLoadState").input.options.state,
+    "load",
+  );
+  const next = await tab.observe({ timeoutMs: 3000, full: true });
+  assert.equal(next.mode, "diff");
+  assert.match(next.accessibility, /Saved/);
+  assert.deepEqual(
+    f.calls.filter((x) => x.path === "ax.get").at(-1).input.options,
+    { disableDiffing: true },
+  );
+});
+
 test("locator all snapshots preserve concrete refs and never turn a DOM reordering into a new nth target", async () => {
   const f = fixture({
     "locator.all": async ({ locator }) =>

@@ -232,9 +232,11 @@ function locatorObject(
         options: opts("allTextContents", value),
       }),
     click: (value?: t.LocatorClickOptions) =>
-      invoke<void>("click", { options: opts("click", value) }),
+      invoke<void | t.WaitResult>("click", { options: opts("click", value) }),
     dblclick: (value?: t.LocatorClickOptions) =>
-      invoke<void>("dblclick", { options: opts("dblclick", value) }),
+      invoke<void | t.WaitResult>("dblclick", {
+        options: opts("dblclick", value),
+      }),
     check: (value?: t.LocatorCheckOptions) =>
       invoke<void>("check", { options: opts("check", value) }),
     uncheck: (value?: t.LocatorCheckOptions) =>
@@ -1195,6 +1197,28 @@ function makeTab(
     close: () => call<void>("tab.close"),
     title: () => call<string | undefined>("tab.title"),
     url: () => call<string | undefined>("tab.url"),
+    observe: async (value?: { timeoutMs?: number; full?: boolean }) => {
+      const o = value === undefined ? {} : dataObject(value, ["timeoutMs", "full"]);
+      await playwright.waitForLoadState({
+        state: "load",
+        timeoutMs: o.timeoutMs === undefined ? 15000 : o.timeoutMs as number,
+      });
+      const [url, title, accessibility] = await Promise.all([
+        call<string | undefined>("tab.url"),
+        call<string | undefined>("tab.title"),
+        call<string>("ax.get", {
+          mode: "state",
+          options: { disableDiffing: o.full === true },
+        }),
+      ]);
+      return freeze({
+        tabId: target.tabId,
+        title,
+        url,
+        accessibility,
+        mode: accessibility.startsWith("AX diff") ? "diff" as const : "full" as const,
+      }) satisfies t.PageObservation;
+    },
     screenshot: (options?: t.ScreenshotOptions) =>
       call<Uint8Array>("tab.screenshot", {
         options: opts("tab.screenshot", options),

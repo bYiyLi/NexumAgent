@@ -1127,6 +1127,27 @@ async function point(ctx, args) {
   return { x: args.x, y: args.y };
 }
 
+async function readyForInput(ctx, framePath = []) {
+  const ready = await ctx.router.page(ctx, {
+    command: "readyState",
+    framePath,
+  });
+  if (ready === "loading" || ready === "interactive") {
+    const remaining = ctx.budgetMs - (performance.now() - ctx.started);
+    requireValue(remaining > 0, "TIMEOUT", "The page did not become ready.");
+    if (framePath.length)
+      await ctx.router.poll(ctx, async () =>
+        (await ctx.router.page(ctx, { command: "readyState", framePath })) ===
+        "complete",
+      );
+    else
+      await ctx.router.waitForLoadState(ctx, {
+        state: "load",
+        timeoutMs: remaining,
+      });
+  }
+}
+
 // Build the points for real Chrome Input.dispatchMouseEvent calls, not a
 // decorative animation that runs independently of the actual input.
 export function humanPointerPath(from, to) {
@@ -1152,32 +1173,111 @@ export function humanPointerPath(from, to) {
   return points;
 }
 async function click(ctx, args, double = false) {
+  if (!args.resolvedTarget) await readyForInput(ctx);
   const p = await point(ctx, args),
     button = buttons[args.button ?? "left"];
   requireValue(button);
   const count = double ? 2 : (args.clickCount ?? 1);
   requireValue(Number.isInteger(count) && count >= 1 && count <= 3);
-  await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    ...p,
-    button: "none",
+  const framePath = args.framePath ?? [];
+  const originalVersion = ctx.router.version(ctx.target.tabId);
+  const receiptInput = {
+    command: "inputReceipt",
+    token: ctx.actionId,
+    x: args.framePoint?.x ?? p.x,
+    y: args.framePoint?.y ?? p.y,
+    button: { left: 0, middle: 1, right: 2 }[args.button ?? "left"],
+    expiresAt: Date.now() + Math.min(3000, ctx.budgetMs),
+    framePath,
+    ...(args.frameId ? { expectedFrameId: args.frameId } : {}),
+  };
+  const armed = await ctx.router.page(ctx, {
+    ...receiptInput,
+    action: "arm",
   });
-  for (let i = 1; i <= count; i++) {
+  requireValue(
+    armed?.armed === true && typeof armed.documentToken === "string",
+    "INVALID_TARGET",
+    "The browser could not arm a receipt for the exact input document.",
+  );
+  const receipt = {
+    ...receiptInput,
+    expectedDocumentToken: armed.documentToken,
+  };
+  try {
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
-      type: "mousePressed",
+      type: "mouseMoved",
       ...p,
-      button,
-      clickCount: i,
-      modifiers: modifierMask(args.modifiers ?? args.keypress),
+      button: "none",
     });
-    if (args.duration > 0) await ctx.router.delay(ctx, args.duration * 1000);
-    await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      ...p,
-      button,
-      clickCount: i,
-      modifiers: modifierMask(args.modifiers ?? args.keypress),
-    });
+    for (let i = 1; i <= count; i++) {
+      await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        ...p,
+        button,
+        clickCount: i,
+        modifiers: modifierMask(args.modifiers ?? args.keypress),
+      });
+      if (args.duration > 0) await ctx.router.delay(ctx, args.duration * 1000);
+      await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        ...p,
+        button,
+        clickCount: i,
+        modifiers: modifierMask(args.modifiers ?? args.keypress),
+      });
+    }
+    let observed = false;
+    const expires = Math.min(
+      performance.now() + 450,
+      ctx.started + ctx.budgetMs,
+    );
+    while (performance.now() < expires) {
+      if (
+        !framePath.length &&
+        ctx.router.version(ctx.target.tabId) !== originalVersion
+      ) {
+        observed = true; // The main document navigated after input.
+        break;
+      }
+      try {
+        const result = await ctx.router.page(ctx, {
+          ...receipt,
+          action: "peek",
+        });
+        if (result.observed >= count) {
+          observed = true;
+          break;
+        }
+      } catch {
+        ctx.signal?.throwIfAborted();
+        if (
+          !framePath.length &&
+          ctx.router.version(ctx.target.tabId) !== originalVersion
+        ) {
+          observed = true;
+          break;
+        }
+        // A detached or replaced frame does not prove the target received
+        // input. The action may still have happened, so never replay it.
+        break;
+      }
+      await ctx.router.delay(ctx, Math.min(40, expires - performance.now()));
+    }
+    if (!observed)
+      throw new BrowserActionError(
+        "INPUT_UNCONFIRMED",
+        "Native pointer delivery returned, but the target document did not confirm the expected trusted click event.",
+        { dispatched: true, effect: "unknown" },
+      );
+    // Let the browser process the resulting task/render turn before the next
+    // input, without misrepresenting arbitrary asynchronous business work.
+    const remaining = ctx.budgetMs - (performance.now() - ctx.started);
+    if (remaining > 120) await ctx.router.delay(ctx, 120);
+  } finally {
+    await ctx.router
+      .page(ctx, { ...receipt, action: "drop" })
+      .catch(() => {});
   }
   return null;
 }
@@ -1335,22 +1435,105 @@ route(
   { needsTab: true, mutating: true },
 );
 async function resolveActionTarget(ctx, args) {
-  let found;
-  // Only repeat the pre-input observation. Native pointer dispatch happens once
-  // after an unobstructed current target is observed, never after a failed action.
+  let found, previous;
+  await readyForInput(ctx, args.locator?.framePath ?? args.framePath ?? []);
+  // Two matching native observations give the layout a chance to settle
+  // after scrolling. Only pre-input observations may repeat, never the click.
   await ctx.router.poll(ctx, async () => {
-    found = await ctx.router.page(ctx, {
+    const next = await ctx.router.page(ctx, {
       ...args,
       ...options(args),
       command: "resolve",
     });
-    return found !== null;
+    if (!next) {
+      previous = undefined;
+      return false;
+    }
+    const stable =
+      previous &&
+      ["x", "y"].every((key) =>
+        Math.abs(previous.point[key] - next.point[key]) <= 1,
+      ) &&
+      ["x", "y", "width", "height"].every((key) =>
+        Math.abs(previous.rect[key] - next.rect[key]) <= 1,
+      ) &&
+      previous.documentToken === next.documentToken &&
+      previous.frameId === next.frameId;
+    previous = next;
+    if (stable) found = next;
+    return !!stable;
   });
   return found;
 }
 async function locatorClick(ctx, args, double = false) {
   const found = await resolveActionTarget(ctx, args);
-  return click(ctx, { ...options(args), ...found.point }, double);
+  const input = options(args),
+    expect = input.expect,
+    framePath = args.locator?.framePath ?? args.framePath ?? [];
+  // The native navigation event must be armed before input; top-level only.
+  requireValue(
+    !(expect?.kind === "navigation" && framePath.length),
+    "INVALID_ARGUMENT",
+    "For a nested frame, wait for its URL or a frame-local page condition.",
+  );
+  let navigation;
+  if (expect?.kind === "navigation")
+    navigation = await ctx.router.armWaiter(ctx, {
+      event: "navigation",
+      url: expect.url,
+      waitUntil: expect.waitUntil ?? "load",
+      timeoutMs:
+        expect.timeoutMs ??
+        Math.min(15000, ctx.budgetMs - (performance.now() - ctx.started)),
+    });
+  try {
+    await click(
+      ctx,
+      {
+        ...input,
+        ...found.point,
+        resolvedTarget: true,
+        framePath,
+        framePoint: found.framePoint,
+        frameId: found.frameId,
+      },
+      double,
+    );
+    if (!expect) return null;
+    try {
+      if (navigation) {
+        await ctx.router.getWaiter(ctx, navigation.id);
+        return {
+          matched: true,
+          snapshot: {
+            ...ctx.router.target(ctx.target.tabId, ctx.lease),
+            ...(await ctx.router.page(ctx, { command: "snapshot" })),
+          },
+        };
+      }
+      return await ctx.router.waitForCondition(ctx, {
+        condition: expect,
+        framePath,
+      });
+    } catch (cause) {
+      ctx.signal?.throwIfAborted();
+      if (
+        cause instanceof BrowserActionError &&
+        ["TIMEOUT", "STALE_REF", "INVALID_TARGET", "WAITER_GONE"].includes(
+          cause.code,
+        )
+      )
+        throw new BrowserActionError(
+          "EXPECTATION_UNCONFIRMED",
+          "The page did not confirm the expected result. Input was already sent; observe before taking further action.",
+          { dispatched: true, effect: "unknown" },
+        );
+      throw cause;
+    }
+  } finally {
+    if (navigation)
+      await ctx.router.cancelWaiter(ctx, navigation.id).catch(() => {});
+  }
 }
 route("locator.click", (ctx, args) => locatorClick(ctx, args), {
   needsTab: true,
@@ -3454,9 +3637,14 @@ export function createBrowserRouter(
           "tabs.closeTemporary",
           "tab.getJsDialog",
         ].includes(input.method);
+      // Native mutations can activate a tab and send shared browser input.
+      // A per-tab queue cannot protect two simultaneous actions that switch
+      // the active tab underneath one another. Reads and event waiters remain
+      // independently schedulable.
       const queueKey =
-        input.target.tabId ??
-        (definition.mutating ? "browser-management" : undefined);
+        definition.mutating && !nonBlocking
+          ? `native-mutation:${input.target.browserId}:${input.target.browserSessionId}`
+          : input.target.tabId;
       let task;
       if (queueKey && !nonBlocking) {
         task = (queues.get(queueKey) ?? Promise.resolve()).then(perform);
@@ -5018,6 +5206,9 @@ export function createBrowserRouter(
     },
     async screenshot(ctx, input) {
       requireValue(!(input.fullPage && input.clip));
+      await readyForInput(ctx);
+      const readyBudget = ctx.budgetMs - (performance.now() - ctx.started);
+      if (readyBudget > 130) await router.delay(ctx, 120);
       const quality = input.quality ?? 80,
         maxEdgePx = input.maxEdgePx ?? 1920;
       requireValue(

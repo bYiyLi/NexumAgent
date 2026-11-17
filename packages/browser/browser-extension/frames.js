@@ -150,6 +150,14 @@ export async function framePage(ctx, payload, selectors, execute) {
       ctx.router.noteFrameParent(ctx, node.node.frameId, frameId);
       frameId = node.node.frameId;
     }
+    // A frame may be replaced between hit-testing and arming the input
+    // receipt. Never transfer the receipt to a different frame by selector.
+    if (payload.expectedFrameId)
+      requireValue(
+        payload.expectedFrameId === frameId,
+        "STALE_REF",
+        "The input frame changed after its native target was observed.",
+      );
     const input = {
       ...payload,
       framePath: [],
@@ -179,6 +187,7 @@ export async function framePage(ctx, payload, selectors, execute) {
     if (!result.ok)
       throw new BrowserActionError(result.error.code, result.error.message);
     if (input.command === "resolve" && result.value?.rect) {
+      const framePoint = { ...result.value.point };
       // scrollIntoView in the resolved descendant can scroll every native ancestor.
       // Coordinates read during traversal are no longer an observation of this input target.
       for (const owner of owners) {
@@ -243,6 +252,8 @@ export async function framePage(ctx, payload, selectors, execute) {
       }
       result.value.point = point;
       result.value.rect = mappedRect(result.value.rect, owners);
+      result.value.framePoint = framePoint;
+      result.value.frameId = frameId;
     }
     if (input.command === "elementInfo" && Array.isArray(result.value))
       for (const entry of result.value)

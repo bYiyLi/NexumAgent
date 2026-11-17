@@ -269,6 +269,8 @@ export type LocatorClickOptions = {
   position?: { x: number; y: number };
   modifiers?: Array<KeyboardModifier>;
   timeoutMs?: number;
+  /** Optional observable completion condition. Never replay input on timeout. */
+  expect?: WaitCondition;
 };
 
 export type LocatorDownloadMediaOptions = {
@@ -465,6 +467,14 @@ export type WaitCondition = (
 export interface WaitResult {
   matched: true;
   snapshot: PageSnapshot;
+}
+/** One bounded AI-oriented observation; AX text keeps its existing full/diff semantics. */
+export interface PageObservation {
+  tabId: string;
+  title?: string;
+  url?: string;
+  accessibility: string;
+  mode: "full" | "diff";
 }
 export interface NavigationOptions {
   waitUntil?: WaitUntil;
@@ -1070,6 +1080,7 @@ export interface Tab {
     reason?: "authentication" | "captcha" | "user_requested" | "other",
   ): Promise<void>;
   screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;
+  observe(options?: { timeoutMs?: number; full?: boolean }): Promise<PageObservation>;
   title(): Promise<undefined | string>;
   url(): Promise<undefined | string>;
 }
@@ -1212,8 +1223,10 @@ export interface PlaywrightLocator {
   allTextContents(options?: { timeoutMs?: number }): Promise<Array<string>>;
   and(locator: PlaywrightLocator): PlaywrightLocator;
   check(options?: LocatorCheckOptions): Promise<void>;
+  click(options: LocatorClickOptions & { expect: WaitCondition }): Promise<WaitResult>;
   click(options?: LocatorClickOptions): Promise<void>;
   count(): Promise<number>;
+  dblclick(options: LocatorClickOptions & { expect: WaitCondition }): Promise<WaitResult>;
   dblclick(options?: LocatorClickOptions): Promise<void>;
   downloadMedia(
     options?: LocatorDownloadMediaOptions,
