@@ -42,7 +42,7 @@
     "build:candidate": "node scripts/build-agent.mjs",
     "build:extension-api": "node scripts/build-extension-api.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --experimental-vm-modules --test --test-concurrency=4 \"test/*.test.mjs\"",
+    "test": "pnpm build && node --experimental-vm-modules --test --test-concurrency=2 \"test/*.test.mjs\"",
     "check": "pnpm typecheck && pnpm test"
   },
   "devDependencies": {

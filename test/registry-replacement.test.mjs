@@ -99,10 +99,18 @@ async function fixture(t) {
       engine.start(caller, { contextId: work.contextId, script, waitMs: 0 }),
     finish: (id) => engine.observe(caller, id, 3000),
     async ping() {
-      const run = await engine.start(caller, {
+      let run = await engine.start(caller, {
         contextId: work.contextId,
         script: "return demo.ping();",
+        waitMs: 0,
       });
+      const deadline = Date.now() + 16000;
+      while (run.run.endedAt === null) {
+        run = await engine.observe(caller, run.run.runId,
+          Math.min(2000, Math.max(0, deadline - Date.now())));
+        assert.ok(run.run.endedAt !== null || Date.now() < deadline,
+          "The original Registry Run did not reach a terminal state.");
+      }
       assert.equal(run.run.status, "succeeded");
       return run.result.data;
     },

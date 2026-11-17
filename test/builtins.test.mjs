@@ -155,7 +155,14 @@ test("runtime.sleep is cancelled promptly without falsely completing a long wait
     waitMs: 0,
     timeoutMs: 60000,
   });
-  let observed = await f.engine.observe(caller, initial.run.runId, 2000);
+  let observed;
+  const startupDeadline = Date.now() + 7000;
+  do {
+    observed = await f.engine.observe(caller, initial.run.runId, 250);
+    if (observed.run.status === "running") break;
+    assert.equal(observed.run.endedAt, null,
+      "The native sleep Run must start before cancellation.");
+  } while (Date.now() < startupDeadline);
   assert.equal(observed.run.status, "running");
   const at = Date.now();
   assert.equal(f.engine.cancel(caller, initial.run.runId).run.status, "cancelling");

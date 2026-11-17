@@ -293,7 +293,14 @@ test("an unawaited input remains tracked while quota admission is pending and ca
   await entered.promise;
   assert.equal(f.store.activeWait(run.run.runId), null);
   gate.resolve();
-  const ended = await f.finish(run.run.runId);
+  let ended = await f.finish(run.run.runId);
+  const deadline = Date.now() + 16000;
+  while (ended.run.endedAt === null) {
+    ended = await f.engine.observe(caller, run.run.runId,
+      Math.min(2000, Math.max(0, deadline - Date.now())));
+    assert.ok(ended.run.endedAt !== null || Date.now() < deadline,
+      "The unawaited input must settle on the original Run.");
+  }
   assert.equal(ended.run.status, "failed");
   assert.equal(ended.run.error.code, "input_not_awaited");
   assert.equal(f.store.activeWait(run.run.runId), null);

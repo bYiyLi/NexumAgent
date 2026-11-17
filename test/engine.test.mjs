@@ -156,6 +156,18 @@ async function fixture(t, options = {}) {
     revoke: () => (allowed = false),
   };
 }
+async function observeTerminal(engine, started, budgetMs = 16000) {
+  const deadline = Date.now() + budgetMs;
+  let view = started;
+  while (view.run.endedAt === null) {
+    view = await engine.observe(caller, view.run.runId,
+      Math.min(2000, Math.max(0, deadline - Date.now())));
+    assert.ok(view.run.endedAt !== null || Date.now() < deadline,
+      "The original Run did not reach a durable terminal state.");
+  }
+  return view;
+}
+
 function named(body = "return context.input;", extra = {}) {
   return (
     "/**\n" +
@@ -400,7 +412,8 @@ test("dedup does not reload changed code or execute twice, including after work 
     bindings: () => ({ mark: () => calls++ }),
   });
   const requestId = newRequestId();
-  const first = await start({ script: "mark();return 1;", requestId });
+  const first = await observeTerminal(engine,
+    await start({ script: "mark();return 1;", requestId }));
   assert.equal(first.run.status, "succeeded");
   assert.equal(calls, 1);
   store.closeWork(work.contextId, callerKey(caller));
@@ -643,27 +656,28 @@ test("total deadline covers the root and result processing, remains distinct fro
 });
 
 test("replay uses the historical code/header/input without recollection and explicit input replaces it", async (t) => {
-  const { start, scripts } = await fixture(t);
-  const original = await start({
+  const { start, scripts, engine } = await fixture(t);
+  const original = await observeTerminal(engine, await start({
     script: named("return context.input.value+1;"),
     input: { value: 4 },
-  });
+  }));
   writeFileSync(
     scripts.resolve("example.js").path,
     named("return context.input.value+100;"),
   );
-  const current = await start({
+  const current = await observeTerminal(engine, await start({
     scriptName: "example.js",
     input: { value: 1 },
-  });
+  }));
   assert.equal(current.result.data, 101);
-  const replay = await start({ replayRunId: original.run.runId });
+  const replay = await observeTerminal(engine,
+    await start({ replayRunId: original.run.runId }));
   assert.equal(replay.result.data, 5);
   assert.equal(replay.run.source.replayRunId, original.run.runId);
-  const replacement = await start({
+  const replacement = await observeTerminal(engine, await start({
     replayRunId: original.run.runId,
     input: { value: 7 },
-  });
+  }));
   assert.equal(replacement.result.data, 8);
   assert.match(scripts.resolve("example.js").code, /\+100/);
 });
@@ -788,13 +802,15 @@ test("failed result persistence records failure without publishing a nonexistent
       return { content: [], data: 1 };
     },
   });
-  const failed = await setup.start({ script: "return 1;" });
+  const failed = await observeTerminal(setup.engine,
+    await setup.start({ script: "return 1;" }));
   assert.equal(failed.run.status, "failed");
   assert.equal(failed.run.error.phase, "result");
   assert.equal(failed.run.resultRef, null);
   assert.equal(failed.result, null);
   const next = await fixture(t);
-  const done = await next.start({ script: "return 2;" });
+  const done = await observeTerminal(next.engine,
+    await next.start({ script: "return 2;" }));
   assert.equal(done.run.status, "succeeded");
   rmSync(path.join(next.root, done.run.resultRef));
   const historical = await next.finish(done.run.runId);

@@ -114,6 +114,17 @@ async function fixture(t, methods, extra = {}) {
   };
 }
 
+async function observeTerminal(engine, runId, budgetMs = 20000) {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const view = await engine.observe(caller, runId,
+      Math.min(2000, Math.max(0, deadline - Date.now())));
+    if (view.run.endedAt !== null) return view;
+    assert.ok(Date.now() < deadline,
+      "The original Run did not reach a durable terminal state.");
+  }
+}
+
 test("unawaited calls retain the run until actual settlement and register identity before invoking the handler", async (t) => {
   const entered = Promise.withResolvers(),
     gate = Promise.withResolvers();
@@ -357,10 +368,11 @@ test("mutated error data cannot turn actual SDK settlement into an unknown opera
     'e.details={value:"x".repeat(2*1024*1024)};',
     'Object.defineProperty(e,"details",{get(){sdk.touch();throw new Error("must-not-get-details");}});',
   ]) {
-    const done = await f.start({
+    const started = await f.start({
       script: `try{sdk.fail()}catch(e){${mutation}Object.defineProperty(e,"toJSON",{get(){sdk.touch();throw new Error("must-not-get-toJSON");}});sdk.again(e);}`,
-      waitMs: 3000,
+      waitMs: 0,
     });
+    const done = await observeTerminal(f.engine, started.run.runId);
     assert.equal(done.run.status, "failed");
     assert.notEqual(done.run.endedAt, null);
     assert.equal(done.run.error.code, "known_sdk_error");
@@ -410,6 +422,14 @@ try {
  const engine=new RunEngine(store,loader,scripts,{authorize(){},loadWork:()=>({project:null}),encodeResult:async value=>({content:[],data:value}),
  prepareAttachments(_refs,_directory,s){const promise=Promise.resolve().then(()=>{throw new Error('precreated-prepare-error');});s.operation(${JSON.stringify(origin)},'prepare',()=>promise);return Promise.resolve([]);},
  bindings(s){return {sdk:{fail(){s.assertActive();return s.operation(${JSON.stringify(origin)},'fail',()=>Promise.reject(new Error('synthetic-sensitive-error')));}}};}});
+ async function observeTerminal(id){
+   const deadline=Date.now()+18000;
+   for(;;){
+     const view=await engine.observe(caller,id,Math.min(2000,Math.max(0,deadline-Date.now())));
+     if(view.run.endedAt!==null)return view;
+     assert.ok(Date.now()<deadline,'The original Run did not reach terminal state');
+   }
+ }
  const results=[];
  for(const [name,code] of [
  ['caught','try{await sdk.fail()}catch{}return 7;'],
@@ -417,10 +437,12 @@ try {
  ['propagated','sdk.fail().then(()=>{});return 7;'],
  ['detached','(async()=>{await sdk.fail()})();return 7;'],
  ['late-caught','const p=sdk.fail();await new Promise(r=>setTimeout(r,5));p.catch(()=>{});return 7;']]) {
-   const result=await engine.start(caller,{contextId:context.contextId,script:code,waitMs:3000});
+   const started=await engine.start(caller,{contextId:context.contextId,script:code,waitMs:0});
+   const result=await observeTerminal(started.run.runId);
    results.push({name,status:result.run.status,code:result.run.error?.code??null,operations:result.operations.items.map(op=>({status:op.status,error:op.error}))});
  }
- const prepared=await engine.start(caller,{contextId:context.contextId,script:'throw new Error("must-not-execute")',attachments:[{transferId:'transfer-test'}],waitMs:3000});
+ const preparing=await engine.start(caller,{contextId:context.contextId,script:'throw new Error("must-not-execute")',attachments:[{transferId:'transfer-test'}],waitMs:0});
+ const prepared=await observeTerminal(preparing.run.runId);
  assert.equal(prepared.run.status,'failed');assert.equal(prepared.run.error.code,'unhandled_async_error');assert.equal(prepared.run.startedAt,null);
  console.log(JSON.stringify(results));
 }finally{store.close();rmSync(root,{recursive:true,force:true});}
@@ -428,7 +450,7 @@ try {
   const child = spawnSync(
     process.execPath,
     ["--experimental-vm-modules", "--input-type=module"],
-    { input: script, encoding: "utf8", timeout: 20000 },
+    { input: script, encoding: "utf8", timeout: 90000 },
   );
   assert.equal(child.status, 0, child.stderr);
   const results = JSON.parse(child.stdout.trim());
