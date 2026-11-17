@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import {
   mkdtemp,
@@ -77,9 +78,25 @@ test(
       JSON.parse(await readFile(path.join(root, "config.json"), "utf8")).token,
       "private-test-token",
     );
+    const identityIntent = JSON.parse(
+      await readFile(
+        path.join(root, "program/identity-replacement.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(identityIntent.profile, "development");
+    assert.equal(identityIntent.serverUrl, "http://127.0.0.1:8123/");
+    assert.equal(
+      identityIntent.tokenDigest,
+      createHash("sha256").update("private-test-token").digest("hex"),
+    );
+    assert.match(identityIntent.archiveId, /^[0-9a-f-]{36}$/);
     // Windows fs.stat().mode emulates Unix bits and does not report NTFS ACLs.
     if (process.platform !== "win32")
-      assert.equal((await stat(path.join(root, "config.json"))).mode & 0o077, 0);
+      assert.equal(
+        (await stat(path.join(root, "config.json"))).mode & 0o077,
+        0,
+      );
     const runtime = path.join(
       root,
       "program/runtime",
@@ -87,6 +104,16 @@ test(
     );
     assert.ok((await stat(runtime)).isFile());
     assert.equal((await installNpmAgent(inputs)).version, "0.0.1");
+    assert.equal(
+      JSON.parse(
+        await readFile(
+          path.join(root, "program/identity-replacement.json"),
+          "utf8",
+        ),
+      ).archiveId,
+      identityIntent.archiveId,
+      "retrying the same install keeps its archive identity",
+    );
     assert.equal(
       (await readFile(path.join(root, "config.json"), "utf8")).includes(
         "private-test-token",

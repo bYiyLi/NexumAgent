@@ -16,6 +16,7 @@ import { AgentRuntime, type AgentRuntimeOptions } from "./runtime.js";
 import { maintenanceRuntimeOptions } from "./maintenance.js";
 import { WorkGitSchedule } from "./work-git.js";
 import { appendDiagnostic } from "./diagnostics.js";
+import { acceptInstalledAgentIdentity } from "./profile-replacement.js";
 
 export interface AgentProgramOptions {
   readonly version: string;
@@ -152,6 +153,13 @@ export async function runAgent(
               throw new AgentError("runtime_closed", "The Agent is stopping.");
             if (runtime) runtime.attachConnection(connection);
             else {
+              if (
+                await acceptInstalledAgentIdentity(
+                  config,
+                  connection.binding.agentId,
+                )
+              )
+                diagnose("agent_identity_replaced", false);
               initializing = AgentRuntime.create(config, connection, bootId, {
                 version: options.version,
                 home: options.home,

@@ -1200,6 +1200,37 @@ test("Task association controls the same waiting Run and retains its original no
   assert.deepEqual(historical.view.result, completed.view.result);
 });
 
+test("project resolution requires an existing absolute directory before offering authorization", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    f.invoke("agent.project.resolve", { path: "relative/project" }),
+    { code: "invalid_arguments" },
+  );
+  await assert.rejects(
+    f.invoke("agent.project.resolve", {
+      path: path.join(f.project, "not-created"),
+    }),
+    (error) =>
+      error.code === "project_not_found" && !error.details?.canonicalPath,
+  );
+  await assert.rejects(
+    f.invoke("agent.project.resolve", {
+      path: path.join(f.work, "package.json"),
+    }),
+    { code: "project_not_found" },
+  );
+  await assert.rejects(
+    f.invoke(
+      "agent.project.resolve",
+      { path: f.project },
+      { allowedRoots: [] },
+    ),
+    (error) =>
+      error.code === "project_not_allowed" &&
+      error.details?.canonicalPath === f.project,
+  );
+});
+
 test("the Console owner session inspects its actual project snapshot and materials while every execution entry stays closed", async (t) => {
   const f = await fixture(t, {
     prepare({ project, write }) {

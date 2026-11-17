@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
@@ -326,6 +326,33 @@ export async function installNpmAgent({
     if (register && old) {
       const state = await serviceAction(plan, "status");
       if (state.registered) await serviceAction(plan, "stop");
+    }
+    // An explicit install may select another Cloud Agent for this same user/profile.
+    // The authenticated connection resolves its identity before any old data is
+    // retired. Automatic npm upgrades never authorize an identity replacement.
+    if (config && !fromUpdate) {
+      const marker = path.join(program, "identity-replacement.json");
+      const tokenDigest = createHash("sha256")
+        .update(nextConfig.token)
+        .digest("hex");
+      const previous = await readState(marker);
+      if (previous) {
+        fail(
+          previous.profile === profile &&
+            previous.serverUrl === nextConfig.server_url &&
+            previous.tokenDigest === tokenDigest &&
+            typeof previous.archiveId === "string" &&
+            /^[0-9a-f-]{36}$/.test(previous.archiveId),
+          "A previous Agent identity replacement must finish before installing another identity.",
+        );
+      } else {
+        await writeState(marker, {
+          profile,
+          serverUrl: nextConfig.server_url,
+          tokenDigest,
+          archiveId: randomUUID(),
+        });
+      }
     }
     if (
       !previousConfig ||

@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Server as HttpServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -311,8 +312,34 @@ async function fixture(
       rmSync(root, { recursive: true, force: true });
     }
   });
-  const enabled = await services.enable("@nexum-hub/browser");
+  // The published extension still requires its fixed profile port. Only this
+  // test process redirects the native listener to an OS-assigned loopback
+  // port, so the Core conformance tests cannot collide with a running Dev
+  // Agent or with another test process.
+  let testPort;
+  const originalListen = HttpServer.prototype.listen,
+    previousDescriptor = Object.getOwnPropertyDescriptor(
+      HttpServer.prototype,
+      "listen",
+    );
+  HttpServer.prototype.listen = function (port, ...args) {
+    if (port !== 43832) return originalListen.call(this, port, ...args);
+    this.once("listening", () => {
+      const address = this.address();
+      testPort = address?.port;
+    });
+    return originalListen.call(this, 0, ...args);
+  };
+  let enabled;
+  try {
+    enabled = await services.enable("@nexum-hub/browser");
+  } finally {
+    if (previousDescriptor)
+      Object.defineProperty(HttpServer.prototype, "listen", previousDescriptor);
+    else delete HttpServer.prototype.listen;
+  }
   assert.equal(enabled.status, "enabled");
+  assert.ok(Number.isInteger(testPort) && testPort > 0 && testPort !== 43832);
   const release = JSON.parse(
       readFileSync(
         path.join(packageRoot, "browser-extension", "release-info.json"),
@@ -363,9 +390,15 @@ async function fixture(
         chrome.debugger.onDetach.emit(target, "canceled_by_user");
       },
       sendCommand: async (_source, method, params) => {
-        counts.commands++;
-        commandStarted.resolve();
-        if (gateCommand) await commandGate.promise;
+        // Page.enable is now part of attaching the debugger so a modal can be
+        // observed before the page executes any JavaScript. The command gate
+        // deliberately holds the scenario's user Runtime.enable, not the
+        // prerequisite Page event subscription.
+        if (method !== "Page.enable") {
+          counts.commands++;
+          commandStarted.resolve();
+          if (gateCommand) await commandGate.promise;
+        }
         if (
           method === "Fetch.continueResponse" &&
           nativeDownloads === "matched"
@@ -479,7 +512,10 @@ async function fixture(
   };
   class ExtensionSocket extends WebSocket {
     constructor(url) {
-      super(url, { origin: `chrome-extension://${extensionId}` });
+      assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+      super(`ws://127.0.0.1:${testPort}/nexum-browser/v1`, {
+        origin: `chrome-extension://${extensionId}`,
+      });
       this.binaryType = "arraybuffer";
       this.addEventListener("message", (event) => {
         if (typeof event.data === "string") {

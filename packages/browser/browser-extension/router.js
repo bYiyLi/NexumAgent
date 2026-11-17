@@ -371,14 +371,15 @@ route("tabs.get", async (ctx, args) =>
 );
 route(
   "tabs.new",
-  async (ctx, args) =>
-    tabInfo(
-      ctx,
-      await ctx.chrome.tabs.create({
-        ...(args.url === undefined ? {} : { url: httpUrl(args.url) }),
-        active: options(args).active ?? true,
-      }),
-    ),
+  async (ctx, args) => {
+    const tab = await ctx.chrome.tabs.create({
+      ...(args.url === undefined ? {} : { url: httpUrl(args.url) }),
+      active: options(args).active ?? true,
+    });
+    const info = tabInfo(ctx, tab);
+    await ctx.router.trackVisualTab({ ...ctx, target: info.target });
+    return info;
+  },
   { mutating: true },
 );
 route("tabs.selected", async (ctx) => {
@@ -394,6 +395,10 @@ route(
     const id = tabIdOf(ctx, args);
     ctx.router.claim(ctx.lease, id);
     await ctx.chrome.tabs.update(id, { active: true });
+    await ctx.router.trackVisualTab({
+      ...ctx,
+      target: ctx.router.target(String(id), ctx.lease),
+    });
     return ctx.router.actionResult(ctx, id);
   },
   { mutating: true },
@@ -1121,6 +1126,31 @@ async function point(ctx, args) {
   requireValue(Number.isFinite(args.x) && Number.isFinite(args.y));
   return { x: args.x, y: args.y };
 }
+
+// Build the points for real Chrome Input.dispatchMouseEvent calls, not a
+// decorative animation that runs independently of the actual input.
+export function humanPointerPath(from, to) {
+  const dx = to.x - from.x,
+    dy = to.y - from.y,
+    distance = Math.hypot(dx, dy);
+  if (distance < 12) return [{ x: to.x, y: to.y, delayMs: 0 }];
+  const steps = Math.min(28, Math.max(3, Math.ceil(distance / 28))),
+    durationMs = Math.min(420, Math.max(110, 85 + distance * 0.35)),
+    bend = Math.min(18, distance * 0.08) *
+      (Math.sin(from.x * 0.013 + to.y * 0.017) < 0 ? -1 : 1);
+  const points = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps,
+      eased = t * t * (3 - 2 * t),
+      arc = Math.sin(Math.PI * t) * bend;
+    points.push({
+      x: i === steps ? to.x : from.x + dx * eased - (dy / distance) * arc,
+      y: i === steps ? to.y : from.y + dy * eased + (dx / distance) * arc,
+      delayMs: i === steps ? 0 : durationMs / steps,
+    });
+  }
+  return points;
+}
 async function click(ctx, args, double = false) {
   const p = await point(ctx, args),
     button = buttons[args.button ?? "left"];
@@ -1179,6 +1209,13 @@ route(
     requireValue(
       Number.isFinite(input.scrollX) && Number.isFinite(input.scrollY),
     );
+    // Position the real pointer along the same human trajectory before
+    // applying the wheel at that point; never teleport the visual cursor.
+    await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      ...(await point(ctx, input)),
+      modifiers: modifierMask(input.keypress),
+    });
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
       type: "mouseWheel",
       ...(await point(ctx, input)),
@@ -1684,6 +1721,7 @@ export function createBrowserRouter(
     journalTail = Promise.resolve();
   const versions = new Map(),
     documents = new Map(),
+    pointerPositions = new Map(),
     leases = new Map(),
     closedLeases = new Map(),
     owners = new Map(),
@@ -2255,11 +2293,51 @@ export function createBrowserRouter(
         throw cause;
     }
   };
-  const releaseControl = async (lease, tabId, { detach = true } = {}) => {
+  // Chrome may hold a native command indefinitely while a JavaScript dialog
+  // pauses its renderer. A cancelled action must not hold the run's pending
+  // queue forever; the native command may still have an unknown page effect,
+  // so actual debugger detach remains a separate required cleanup step.
+  const nativeWithStop = async (signal, invoke) => {
+    signal?.throwIfAborted();
+    const native = Promise.resolve().then(() => {
+      signal?.throwIfAborted();
+      return invoke();
+    });
+    if (!signal) return native;
+    let onAbort;
+    const cancelled = new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      if (signal.aborted) onAbort();
+      return await Promise.race([native, cancelled]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
+  };
+  const releaseControl = async (
+    lease,
+    tabId,
+    { detach = true, dismissDialog = false } = {},
+  ) => {
     if (!lease.attached.has(tabId) && !lease.intents.has(tabId)) return;
     for (const waiter of waiters.values())
       if (waiter.leaseId === lease.id && waiter.tabId === tabId)
         cancelWaiter(waiter);
+    // An observed JavaScript dialog pauses its renderer. Dismiss the dialog
+    // for a terminating run before other native cleanup commands; explicit
+    // handoff keeps the dialog available for the user instead.
+    const dialog = dialogs.get(String(tabId));
+    if (dismissDialog && dialog && lease.attached.has(tabId)) {
+      await chrome.debugger.sendCommand(
+        { tabId },
+        "Page.handleJavaScriptDialog",
+        { accept: false },
+      );
+      if (dialogs.get(String(tabId)) === dialog)
+        dialogs.delete(String(tabId));
+    }
     await stopLocalDownloadClick(lease, tabId);
     if (lease.attached.has(tabId)) await syncDownloadIntercept(lease, tabId);
     if (!lease.attached.has(tabId) && !lease.externallyDetached.has(tabId)) {
@@ -2522,6 +2600,7 @@ export function createBrowserRouter(
         finishNavigation(details, "load"),
       );
       on(chrome.tabs.onRemoved, (id) => {
+        pointerPositions.delete(id);
         versions.set(String(id), version(id) + 1);
         dialogs.delete(String(id));
         emit({
@@ -3081,7 +3160,7 @@ export function createBrowserRouter(
             .filter((id) => id !== undefined),
         ))
           try {
-            await releaseControl(lease, tabId);
+            await releaseControl(lease, tabId, { dismissDialog: true });
           } catch (cause) {
             tempErrors.push(cause);
           }
@@ -3100,7 +3179,7 @@ export function createBrowserRouter(
         }
         for (const tabId of new Set([...lease.attached, ...lease.intents])) {
           try {
-            await releaseControl(lease, tabId);
+            await releaseControl(lease, tabId, { dismissDialog: true });
           } catch (cause) {
             errors.push(cause);
           }
@@ -3331,6 +3410,14 @@ export function createBrowserRouter(
             ].includes(input.method)
           )
             await router.prepareVisual(ctx);
+          if (
+            visual &&
+            definition.needsTab &&
+            !definition.mutating &&
+            input.target.tabId !== undefined &&
+            !lease.temporaryTabs?.has(nativeId(input.target.tabId))
+          )
+            await router.trackVisualTab(ctx);
           actionSignal.throwIfAborted();
           managementHandling = true;
           value = await definition.handle(ctx, input.args ?? {});
@@ -3671,12 +3758,14 @@ export function createBrowserRouter(
       const framePath = payload.locator?.framePath ?? payload.framePath ?? [];
       if (framePath.length > 0) return framePage(ctx, payload, framePath);
       ctx.dispatched();
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: nativeId(ctx.target.tabId) },
-        world: "ISOLATED",
-        func: pageCommand,
-        args: [input],
-      });
+      const result = await nativeWithStop(ctx.signal, () =>
+        chrome.scripting.executeScript({
+          target: { tabId: nativeId(ctx.target.tabId) },
+          world: "ISOLATED",
+          func: pageCommand,
+          args: [input],
+        }),
+      );
       // A main-frame replacement can finish an injection with no result. Only
       // a readiness observation may wait for a browser-confirmed transition;
       // actions and empty results from settled pages must still fail.
@@ -3865,6 +3954,17 @@ export function createBrowserRouter(
         ctx.dispatched();
         await chrome.debugger.attach({ tabId: id }, "1.3");
         ctx.lease.attached.add(id);
+        // Observe Page.javascriptDialogOpening before *any* page action can
+        // synchronously open a prompt/confirm. Waiting until getJsDialog is
+        // called loses the event while Runtime.evaluate may remain blocked.
+        try {
+          await nativeWithStop(ctx.signal, () =>
+            chrome.debugger.sendCommand({ tabId: id }, "Page.enable", {}),
+          );
+        } catch (cause) {
+          await releaseControl(ctx.lease, id).catch(() => {});
+          throw cause;
+        }
         if (ctx.lease.ended) {
           await releaseControl(ctx.lease, id);
           throw new BrowserActionError(
@@ -3880,9 +3980,36 @@ export function createBrowserRouter(
         ctx.lease.attaching.delete(id);
       }
     },
-    async send(ctx, method, params, child) {
+    async send(ctx, method, params, child, nativePointerStep = false) {
       active(ctx.lease);
       ctx.signal?.throwIfAborted();
+      // Every high-level mouse move, click, hover and drag shares the same
+      // physical trajectory. Raw cdp.send remains exact and unmodified.
+      if (
+        !nativePointerStep &&
+        !child &&
+        ctx.method !== "cdp.send" &&
+        method === "Input.dispatchMouseEvent" &&
+        params.type === "mouseMoved" &&
+        Number.isFinite(params.x) &&
+        Number.isFinite(params.y)
+      ) {
+        const tabId = nativeId(ctx.target.tabId),
+          previous = pointerPositions.get(tabId) ?? { x: 32, y: 72 },
+          path = humanPointerPath(previous, { x: params.x, y: params.y });
+        let result;
+        for (const step of path) {
+          result = await router.send(
+            ctx,
+            method,
+            { ...params, x: step.x, y: step.y },
+            child,
+            true,
+          );
+          if (step.delayMs > 0) await router.delay(ctx, step.delayMs);
+        }
+        return result;
+      }
       await router.attach(ctx);
       ctx.signal?.throwIfAborted();
       if (
@@ -4035,7 +4162,16 @@ export function createBrowserRouter(
         ctx.pendingInfo.nativeNetworkTabId = tabId;
       let result;
       try {
-        result = await chrome.debugger.sendCommand(source, method, params);
+        // A native Runtime.evaluate can stay suspended behind a modal dialog
+        // after its action is cancelled. Other native commands (notably IO.read
+        // and IO.close) must retain their actual settlement: dropping their
+        // replies early can abandon a native stream or misreport cleanup.
+        result =
+          method === "Runtime.evaluate"
+            ? await nativeWithStop(ctx.signal, () =>
+                chrome.debugger.sendCommand(source, method, params),
+              )
+            : await chrome.debugger.sendCommand(source, method, params);
       } catch (cause) {
         if (armedLocalDownload) await stopLocalDownloadClick(ctx.lease, tabId);
         throw cause;
@@ -4044,6 +4180,14 @@ export function createBrowserRouter(
           delete ctx.pendingInfo.nativeNetworkTabId;
         if (watchEnd) await stopLocalDownloadClick(ctx.lease, tabId);
       }
+      if (
+        !child &&
+        method === "Input.dispatchMouseEvent" &&
+        params.type === "mouseMoved" &&
+        Number.isFinite(params.x) &&
+        Number.isFinite(params.y)
+      )
+        pointerPositions.set(tabId, { x: params.x, y: params.y });
       if (rawFetch && method === "Fetch.disable") {
         ctx.lease.rawFetch?.delete(tabId);
         await syncDownloadIntercept(ctx.lease, tabId);
@@ -5295,6 +5439,22 @@ export function createBrowserRouter(
         const visualContext = router.visualContext(ctx);
         await visual?.beforeAction(visualContext);
         ctx.visualPreparedTarget = { ...visualContext.target };
+      } catch {
+        ctx.signal?.throwIfAborted();
+        emit({
+          type: "event",
+          event: "visual_degraded",
+          leaseId: ctx.lease.id,
+          runId: ctx.runId,
+          operationId: ctx.operationId,
+          target: ctx.target,
+          reason: "VISUAL_UNAVAILABLE",
+        });
+      }
+    },
+    async trackVisualTab(ctx) {
+      try {
+        await visual?.trackTab(router.visualContext(ctx));
       } catch {
         ctx.signal?.throwIfAborted();
         emit({

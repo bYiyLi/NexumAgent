@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import path from "node:path";
 import type { IncomingMessage } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import WebSocket, { type RawData } from "ws";
@@ -118,10 +119,13 @@ function header(response: IncomingMessage, name: string): string {
   );
   return value;
 }
-function remoteError(error: unknown): {
+function remoteError(
+  error: unknown,
+  operation: WireOperationV2,
+): {
   code: string;
   message: string;
-  details?: { runId: string; status: string };
+  details?: { runId: string; status: string } | { canonicalPath: string };
 } {
   const safe = safeErrorData(error, {
     code: "agent_error",
@@ -131,7 +135,7 @@ function remoteError(error: unknown): {
   const result: {
     code: string;
     message: string;
-    details?: { runId: string; status: string };
+    details?: { runId: string; status: string } | { canonicalPath: string };
   } = {
     code:
       typeof safe.code === "string" && /^[a-z0-9_]{1,128}$/.test(safe.code)
@@ -139,10 +143,22 @@ function remoteError(error: unknown): {
         : "agent_error",
     message: "The Agent operation failed.",
   };
-  // A response projection failure must not hide the already accepted Run's
-  // identity. Only these two public facts are safe; plugin/native details stay local.
+  // Only operation-specific, bounded recovery evidence crosses the socket.
+  // The Cloud must never generate a directory approval from raw Host input.
   const details = safe.details;
   if (
+    operation === "agent.project.resolve" &&
+    result.code === "project_not_allowed" &&
+    isPlainRecord(details) &&
+    typeof details.canonicalPath === "string" &&
+    details.canonicalPath.length > 0 &&
+    details.canonicalPath.length <= 1024 &&
+    !details.canonicalPath.includes("\0") &&
+    path.isAbsolute(details.canonicalPath) &&
+    path.normalize(details.canonicalPath) === details.canonicalPath
+  ) {
+    result.details = { canonicalPath: details.canonicalPath };
+  } else if (
     result.code === "run_context_too_large" &&
     isPlainRecord(details) &&
     typeof details.runId === "string" &&
@@ -602,7 +618,7 @@ export class ControlConnection {
               this.send({
                 type: "error",
                 id: message.id,
-                error: remoteError(cause),
+                error: remoteError(cause, message.operation),
               }),
           )
           .catch(() => {

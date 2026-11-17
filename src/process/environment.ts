@@ -321,7 +321,7 @@ async function probe(
 export async function discoverEnvironment(
   options: DiscoverEnvironmentOptions,
 ): Promise<EnvironmentSnapshot> {
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? 15000;
   const maxBytes = options.maxBytes ?? 1024 * 1024;
   requireCondition(
     options.signal instanceof AbortSignal &&

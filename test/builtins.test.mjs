@@ -166,6 +166,30 @@ test("runtime.sleep is cancelled promptly without falsely completing a long wait
   assert.ok(Date.now() - at < 2000);
 });
 
+test("a native timer keeps cancelling until the JavaScript Promise really settles", async (t) => {
+  const f = await fixture(t);
+  const initial = await f.start(
+    'await new Promise(resolve => setTimeout(resolve, 1000));return "must-not-complete";',
+    { waitMs: 0, timeoutMs: 4000 },
+  );
+  let current;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    current = await f.engine.observe(caller, initial.run.runId, 0);
+    if (current.run.status === "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(current.run.status, "running");
+  const stopped = f.engine.cancel(caller, initial.run.runId);
+  assert.equal(stopped.accepted, true);
+  assert.equal(stopped.run.status, "cancelling");
+  current = await f.engine.observe(caller, initial.run.runId, 0);
+  assert.equal(current.run.status, "cancelling");
+  const finished = await f.engine.observe(caller, initial.run.runId, 2000);
+  assert.equal(finished.run.status, "cancelled");
+  assert.equal(finished.result, null);
+  assert.equal(finished.run.error.code, "run_cancelled");
+});
+
 test("state SDK uses the public invocation service and keeps snapshots and returned data independent", async (t) => {
   const f = await fixture(t);
   let result = await f.start(

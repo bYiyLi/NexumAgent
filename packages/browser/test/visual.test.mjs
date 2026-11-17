@@ -168,7 +168,7 @@ test("host wakeups enforce visual timeouts when worker timers are stalled", asyn
   }
 });
 
-test("visual construction is cold and every run/window owns its blue group while user groups and OS focus stay unchanged", async () => {
+test("AI-touched tabs retain their blue group after the run while user groups and OS focus stay unchanged", async () => {
   const f = fixture();
   assert.deepEqual(f.calls, []);
   await f.controller.start({ browserSessionId: "session" });
@@ -203,12 +203,48 @@ test("visual construction is cold and every run/window owns its blue group while
   );
   assert.equal(f.groups.get(77).title, "User group");
   await f.controller.releaseTab(context("1"));
-  assert.equal(f.tabs.get(1).groupId, -1);
+  assert.equal(f.tabs.get(1).groupId, own[0].id);
   assert.equal(f.tabs.get(3).groupId, 77);
   await f.controller.dispose();
+  assert.equal(f.tabs.get(1).groupId, own[0].id);
   assert.equal(f.chrome.tabs.onActivated.size, 0);
   assert.equal(f.chrome.tabs.onUpdated.size, 0);
   assert.equal(f.chrome.tabs.onRemoved.size, 0);
+});
+
+test("a newly created tab keeps its group and favicon without pointer movement and restores after worker restart", async () => {
+  const f = fixture();
+  await f.controller.start({ browserSessionId: "session" });
+  assert.deepEqual(await f.controller.trackTab(context("2")), { degraded: false });
+  const groupId = f.tabs.get(2).groupId;
+  assert.ok(groupId >= 0);
+  assert.equal(f.groups.get(groupId).color, "blue");
+  assert.equal(f.saved.at(-1)[0].tabId, 2);
+  assert.ok(
+    f.calls.some(
+      (value) => value[0] === "execute" && value[1].args[0].command === "restore",
+    ),
+  );
+  await f.controller.releaseTab(context("2"));
+  await f.controller.dispose();
+  assert.equal(f.tabs.get(2).groupId, groupId);
+
+  const recovered = fixture();
+  recovered.tabs.get(2).groupId = groupId;
+  await recovered.controller.start({
+    browserSessionId: "session",
+    markers: f.saved.at(-1),
+  });
+  assert.ok(
+    recovered.calls.some(
+      (value) => value[0] === "execute" && value[1].args[0].command === "restore",
+    ),
+  );
+  assert.equal(
+    recovered.calls.filter((value) => value[0] === "tabs.group").length,
+    0,
+  );
+  await recovered.controller.dispose();
 });
 
 test("favicon preparation begins while the exact tab group is still being prepared", async () => {
@@ -483,7 +519,7 @@ test("unavailable rendering and slow native setup degrade within 250ms; cancella
   await cancel.controller.dispose();
 });
 
-test("result favicon records use actual documents, survive control release and clear on user activation without retaining input", async () => {
+test("AI-touched favicon records survive control release, user activation and navigation without retaining input", async () => {
   let doc = "document-before";
   const f = fixture({ frame: async () => ({ documentId: doc }) });
   await f.controller.start({ browserSessionId: "session" });
@@ -495,7 +531,7 @@ test("result favicon records use actual documents, survive control release and c
   assert.doesNotMatch(JSON.stringify(f.saved), /point|password|https?:/);
   assert.equal(
     f.calls.filter((value) => value[0] === "execute").at(-1)[1].args[0].command,
-    "result",
+    "release",
   );
   doc = "document-after";
   f.chrome.tabs.onUpdated.emit(1, { status: "complete" });
@@ -506,10 +542,10 @@ test("result favicon records use actual documents, survive control release and c
     doc,
   );
   f.chrome.tabs.onActivated.emit({ tabId: 1, windowId: 10 });
-  await until(() => f.saved.at(-1)?.length === 0);
+  assert.equal(f.saved.at(-1).length, 1);
   assert.equal(
     f.calls.filter((value) => value[0] === "execute").at(-1)[1].args[0].command,
-    "clear",
+    "restore",
   );
   const wrong = fixture();
   await wrong.controller.start({
@@ -841,7 +877,8 @@ test("serialized native page visuals draw a non-interactive cursor, preserve ori
   assert.match(visualStyles, /prefers-reduced-motion/);
   assert.match(visualStyles, /pointer-events:none!important/);
   await f.execute({ ...base, command: "result" });
-  assert.equal(f.root.children.length, 0);
+  assert.equal(f.root.children.length, 1);
+  assert.equal(layer.attributes["data-nexum-visual-state"], "idle");
   assert.equal(f.head.children.length, 2);
   await f.execute({ ...base, command: "clear" });
   assert.deepEqual(f.head.children, [f.original]);
@@ -858,6 +895,52 @@ test("serialized native page visuals draw a non-interactive cursor, preserve ori
     false,
   );
   assert.equal(f.root.children.length, 0);
+});
+
+test("a finished run leaves a passive cursor that old input cannot move and the next run can reuse", async () => {
+  const f = pageFixture({ iconBytes: 128 }),
+    first = { token: "first-run", deadline: Date.now() + 5000 },
+    next = { token: "next-run", deadline: Date.now() + 5000 };
+  assert.equal((await f.execute({ ...first, command: "active" })).ok, true);
+  await f.execute({
+    ...first,
+    command: "move",
+    point: { x: 170, y: 110 },
+    moveSequence: 1,
+  });
+  await f.execute({ ...first, command: "release", retain: true });
+  assert.equal(f.root.children.length, 1);
+  assert.equal(
+    f.root.children[0].attributes["data-nexum-visual-state"],
+    "idle",
+  );
+  assert.equal(f.root.children[0].style.transform, "translate3d(170px,110px,0)");
+  assert.equal(
+    (await f.execute({
+      ...first,
+      command: "move",
+      point: { x: 350, y: 350 },
+      moveSequence: 2,
+    })).ok,
+    false,
+  );
+  assert.equal((await f.execute({ ...first, command: "restore" })).ok, true);
+  assert.equal(f.root.children.length, 1);
+  assert.equal((await f.execute({ ...next, command: "active" })).ok, true);
+  assert.equal(
+    (await f.execute({
+      ...next,
+      command: "move",
+      point: { x: 90, y: 75 },
+      moveSequence: 1,
+    })).ok,
+    true,
+  );
+  assert.equal(f.root.children.length, 1);
+  await f.execute({ ...next, command: "release", retain: true });
+  await f.execute({ ...next, command: "clear" });
+  assert.equal(f.root.children.length, 0);
+  assert.deepEqual(f.head.children, [f.original]);
 });
 
 test("favicon byte reads enforce 64KiB before decoding, and late deadlines never create a new overlay", async () => {
@@ -989,13 +1072,13 @@ test("a 250ms degraded pointer result does not pretend its still-pending native 
   await f.controller.dispose();
 });
 
-test("user activation clears a live-run result permanently and later release cannot repaint that cleared result", async () => {
+test("user activation keeps the live-run result and release preserves both group and marker", async () => {
   const f = fixture();
   await f.controller.start({ browserSessionId: "session" });
   await f.controller.beforeAction(context());
   await f.controller.markDeliverable(context());
   f.chrome.tabs.onActivated.emit({ tabId: 1, windowId: 10 });
-  await until(() => f.saved.at(-1)?.length === 0);
+  assert.equal(f.saved.at(-1).length, 1);
   const before = f.calls.filter((value) => value[0] === "execute").length;
   await f.controller.releaseTab(context());
   const after = f.calls.filter((value) => value[0] === "execute").slice(before);
@@ -1004,7 +1087,7 @@ test("user activation clears a live-run result permanently and later release can
     after.some((value) => value[1].args[0].command === "result"),
     false,
   );
-  assert.equal(f.tabs.get(1).groupId, -1);
-  assert.equal(f.saved.at(-1).length, 0);
+  assert.equal(f.tabs.get(1).groupId, 100);
+  assert.equal(f.saved.at(-1).length, 1);
   await f.controller.dispose();
 });

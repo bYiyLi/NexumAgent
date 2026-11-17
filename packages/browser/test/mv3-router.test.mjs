@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { pageCommand } from "../browser-extension/page.js";
 import {
   createBrowserRouter,
+  humanPointerPath,
   routeDefinitions,
 } from "../browser-extension/router.js";
 import {
@@ -425,6 +426,7 @@ test("bound wakeups also notify the visual deadline controller", async (t) => {
 test("native visual hooks receive the current run/target, precede pointer input and hold lease cleanup until their actual release", async (t) => {
   const events = [],
     gate = Promise.withResolvers();
+  t.after(() => gate.resolve());
   const visual = {
     async start(value) {
       events.push(["start", value]);
@@ -465,14 +467,17 @@ test("native visual hooks receive the current run/target, precede pointer input 
     return native(...args);
   };
   await f.call("cua.click", { x: 10, y: 20 });
-  const pointer = events.find((entry) => entry[0] === "beforePointer")[1];
+  // Native pointer paths may contain multiple intermediate steps. The last
+  // visual event, rather than the first, reaches the actual requested point.
+  const pointerSteps = events.filter((entry) => entry[0] === "beforePointer");
+  const pointer = pointerSteps.at(-1)[1];
   assert.equal(pointer.runId, "lease");
   assert.equal(pointer.leaseId, "lease");
   assert.equal(pointer.target.tabId, "1");
   assert.equal(pointer.target.pageVersion, 1);
   assert.deepEqual(pointer.point, { x: 10, y: 20 });
-  assert.equal(pointer.wait, true);
-  assert.equal(pointer.visualPrepared, true);
+  assert.equal(pointerSteps[0][1].wait, true);
+  assert.equal(pointerSteps[0][1].visualPrepared, true);
   assert.ok(
     events.findIndex((entry) => entry[0] === "beforePointer") <
       events.findIndex(
@@ -1009,7 +1014,10 @@ test("an attached native control stays owned until actual detach confirms cleanu
   await delay(0);
   const stop = f.router.endLease("late");
   attach.resolve();
-  await assert.rejects(pending, { code: "INVALID_TARGET" });
+  // Native attach was already dispatched when cancellation arrived. The
+  // control effect is unknown until detach, even though Runtime.enable itself
+  // must never be dispatched after the lease has stopped.
+  await assert.rejects(pending, { code: "UNKNOWN_RESULT" });
   assert.equal((await stop).closed, true);
   assert.equal(f.attached.size, 0);
   assert.equal(
@@ -1018,6 +1026,111 @@ test("an attached native control stays owned until actual detach confirms cleanu
     ).length,
     0,
   );
+});
+
+test("a held native dialog command can be cancelled and releases the real debugger before its old callback settles", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const entered = Promise.withResolvers(),
+    native = Promise.withResolvers(),
+    original = f.chrome.debugger.sendCommand;
+  let pageEnabled = false;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Page.enable") pageEnabled = true;
+    if (method === "Runtime.evaluate") {
+      entered.resolve();
+      return native.promise;
+    }
+    return original(source, method, params);
+  };
+  const stop = new AbortController(),
+    request = f.call(
+      "tab.evaluate",
+      { expression: "() => prompt('Test native dialog')" },
+      { signal: stop.signal },
+    );
+  const rejected = assert.rejects(request, (cause) => cause.message === "cancel native dialog");
+  try {
+    await Promise.race([
+      entered.promise,
+      delay(1000).then(() => { throw Error("The native dialog command did not start."); }),
+    ]);
+    assert.equal(pageEnabled, true, "Page events must be enabled before a page can create a dialog");
+    stop.abort(Error("cancel native dialog"));
+    const close = f.router.endLease("lease");
+    const receipt = await Promise.race([
+      close,
+      delay(600).then(() => { throw Error("Cancellation waited for a native command held by the dialog."); }),
+    ]);
+    assert.equal(receipt.closed, true);
+    assert.equal(f.attached.size, 0, "the native debugger must have detached");
+    await rejected;
+  } finally {
+    native.resolve({ result: { value: null } });
+    await rejected.catch(() => {});
+  }
+});
+
+test("native Page dialog is observed and dismissed during run cleanup before debugger detach", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const entered = Promise.withResolvers(),
+    native = Promise.withResolvers(),
+    send = f.chrome.debugger.sendCommand,
+    detach = f.chrome.debugger.detach;
+  let pageEnabled = false,
+    dialogOpen = false,
+    dismisses = 0;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Page.enable") pageEnabled = true;
+    if (method === "Runtime.evaluate") {
+      assert.equal(pageEnabled, true);
+      dialogOpen = true;
+      f.chrome.debugger.onEvent.emit(source, "Page.javascriptDialogOpening", {
+        type: "prompt",
+        message: "Test native dialog",
+      });
+      entered.resolve();
+      return native.promise;
+    }
+    if (method === "Page.handleJavaScriptDialog") {
+      assert.equal(params.accept, false, "run cancellation must not accept a pending prompt");
+      dismisses++;
+      dialogOpen = false;
+      f.chrome.debugger.onEvent.emit(source, "Page.javascriptDialogClosed", {});
+      native.resolve({ result: { value: null } });
+      return {};
+    }
+    return send(source, method, params);
+  };
+  f.chrome.debugger.detach = async (source) => {
+    assert.equal(dialogOpen, false, "the native dialog must be dismissed before detach");
+    return detach(source);
+  };
+  const stop = new AbortController(),
+    pending = f.call(
+      "tab.evaluate",
+      { expression: "() => prompt('Test native dialog')" },
+      { signal: stop.signal },
+    ),
+    rejected = assert.rejects(pending, (cause) => cause.message === "cancel with prompt");
+  await entered.promise;
+  const visible = await f.call("tab.getJsDialog");
+  assert.equal(visible.type, "prompt");
+  assert.equal(visible.message, "Test native dialog");
+  stop.abort(Error("cancel with prompt"));
+  const receipt = await Promise.race([
+    f.router.endLease("lease"),
+    delay(600).then(() => { throw Error("The native modal prevented lease cleanup."); }),
+  ]);
+  await rejected;
+  assert.equal(receipt.closed, true);
+  assert.equal(dismisses, 1);
+  assert.equal(f.attached.size, 0);
 });
 
 test("ending or handing off a held native network call releases input before detach and keeps the target owned until actual cleanup", async (t) => {
@@ -2470,6 +2583,68 @@ test("attachment intent is committed before native attach and worker recovery de
   await recovered.dispose();
 });
 
+test("native pointer trajectory uses curved eased intermediate positions and ends at the requested location", () => {
+  const start = { x: 32, y: 72 },
+    end = { x: 600, y: 410 },
+    path = humanPointerPath(start, end);
+  assert.ok(path.length >= 12 && path.length <= 28);
+  assert.deepEqual({ x: path.at(-1).x, y: path.at(-1).y }, end);
+  assert.ok(path.slice(0, -1).every((point) => point.delayMs > 0));
+  assert.equal(path.at(-1).delayMs, 0);
+  const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+  assert.ok(distance(start, path[0]) < distance(path[9], path[10]));
+  assert.ok(distance(path.at(-2), end) < distance(path[9], path[10]));
+  assert.ok(
+    path.some((point) =>
+      Math.abs((point.x - start.x) * (end.y - start.y) -
+      (point.y - start.y) * (end.x - start.x)) > 100,
+    ),
+    "the native path has an actual curved component",
+  );
+  assert.deepEqual(humanPointerPath(end, end), [{ ...end, delayMs: 0 }]);
+});
+
+test("high-level mouse input dispatches real intermediate events before click and during held-button drag", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("cua.click", { options: { x: 470, y: 330 } });
+  const inputEvents = () => f.calls
+    .filter((item) => item[0] === "debugger.sendCommand" && item[2] === "Input.dispatchMouseEvent")
+    .map((item) => item[3]);
+  const clicked = inputEvents();
+  assert.ok(clicked.length > 10);
+  assert.ok(clicked.slice(0, -2).every((item) => item.type === "mouseMoved"));
+  assert.equal(clicked.at(-3).x, 470);
+  assert.equal(clicked.at(-3).y, 330);
+  assert.equal(clicked.at(-2).type, "mousePressed");
+  assert.equal(clicked.at(-1).type, "mouseReleased");
+  const beforeDrag = clicked.length;
+  await f.call("cua.drag", { options: { path: [{ x: 470, y: 330 }, { x: 630, y: 480 }] } });
+  const drag = inputEvents().slice(beforeDrag);
+  const pressIndex = drag.findIndex((item) => item.type === "mousePressed"),
+    releaseIndex = drag.findIndex((item) => item.type === "mouseReleased");
+  assert.ok(pressIndex >= 0 && releaseIndex > pressIndex + 3);
+  assert.ok(drag.slice(pressIndex + 1, releaseIndex).every((item) =>
+    item.type === "mouseMoved" && item.button === "left" && item.buttons === 1,
+  ));
+  assert.equal(drag[releaseIndex].x, 630);
+  assert.equal(drag[releaseIndex].y, 480);
+  const beforeRaw = inputEvents().length;
+  await f.call("cdp.send", { method: "Input.dispatchMouseEvent", params: { type: "mouseMoved", x: 700, y: 500 } });
+  assert.equal(inputEvents().length, beforeRaw + 1, "raw CDP events are not interpolated");
+  const beforeScroll = inputEvents().length;
+  await f.call("cua.scroll", { options: { x: 120, y: 160, scrollX: 0, scrollY: 320 } });
+  const scroll = inputEvents().slice(beforeScroll);
+  assert.ok(scroll.length > 5);
+  assert.ok(scroll.slice(0, -1).every((event) => event.type === "mouseMoved"));
+  assert.deepEqual(
+    { type: scroll.at(-1).type, x: scroll.at(-1).x, y: scroll.at(-1).y },
+    { type: "mouseWheel", x: 120, y: 160 },
+  );
+});
+
 test("native pointer sequences serialize per target while event arms can buffer before readiness returns", async (t) => {
   const f = fixture(t);
   f.router.start();
@@ -2510,8 +2685,10 @@ test("native pointer sequences serialize per target while event arms can buffer 
         v[0] === "debugger.sendCommand" && v[2] === "Input.dispatchMouseEvent",
     )
     .map((v) => [v[3].x, v[3].type]);
-  assert.deepEqual(pointer, [
-    [1, "mouseMoved"],
+  const firstPress = pointer.findIndex(([x, type]) => x === 1 && type === "mousePressed");
+  assert.ok(firstPress >= 2, "the first click travels through intermediate native positions");
+  assert.ok(pointer.slice(0, firstPress).every(([, type]) => type === "mouseMoved"));
+  assert.deepEqual(pointer.slice(firstPress), [
     [1, "mousePressed"],
     [1, "mouseReleased"],
     [2, "mouseMoved"],

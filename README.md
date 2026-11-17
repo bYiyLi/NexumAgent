@@ -61,6 +61,8 @@ Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册
 
 Windows 的计划任务启动器保存在选定 profile 内，Agent 版本自动升级不会重新注册该任务。若先前安装的 Agent 出现显示 `agent_connected` 的独立黑色窗口，须在 Dev/正式 Cloud 目标版本更新后**重新执行一次该 Agent 的「复制安装/更新命令」**，以更新并重新启动原用户计划任务；不需要手动删除旧 Agent 或 Token。新启动器通过 `CreateNoWindow` 启动受管 Node，运行期间不依赖可关闭的控制台窗口。安装完成后应确认 Agent 在线再关闭安装命令所在的终端。
 
+同一 Windows 用户、同一 `development` / `production` profile 再次执行安装命令时，安装器会先停止原用户服务；**新的 Cloud Agent ID 经 WSS 认证确认后**才接管原安装。不同 ID 的旧 `state`、`work`、`logs` 保留在 `previous-agents/<archive-id>/`，新身份创建独立本地记录，避免沿用旧 SQLite 的 `storage_binding_mismatch` 循环。只更换同一 Agent 的 Token 不会清空数据；自动 npm 版本升级不会触发身份替换。不会因为相同 hostname 自动撤销其他 Windows 账户或机器上的 Cloud Agent 记录。该机制需要包含此代码的新版 npm Agent 及重新执行安装命令才能在已安装机器上生效，旧版 Agent 不会自动获得这个新行为。
+
 后台服务不在每次启动时运行 npx；它通过本地 `program/service-runner.mjs` 执行 `active.json` 指向的确定版本。Cloud 启动时必须成功从 npm 查询最新版本，运行期间由管理员手动「刷新 Agent 版本」；旧版 Agent 的 WSS 被断开，在下一次握手收到 `426 upgrade_required` 和目标精确版本。Agent 写入待升级状态、退出旧进程，启动器在没有旧进程占用时由 npm 下载和准备新程序，再切换 `active.json`、启动新进程。升级失败保留旧版本与 Token/本地记录，但 Cloud 不允许旧版重新上线。此流程已经接线并进行本机隔离测试，**未发布包含这些新安装脚本的 npm 版本，亦未完成三平台真实用户安装/登录恢复/更新和生产上线验收**；不可把当前 Registry 旧包视为已交付该新 CLI。
 
 ## 本地开发

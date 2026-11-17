@@ -1020,3 +1020,86 @@ test("a projection failure preserves only the actual public Run identity for lat
   assert(!JSON.stringify(reply).includes("/private/profile"));
   c.close();
 });
+
+test("only project resolution denials expose canonical directory evidence for approval", async (t) => {
+  const canonicalPath = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-approval-evidence-")),
+  );
+  t.after(() => rmSync(canonicalPath, { recursive: true, force: true }));
+  const denied = (code, pathValue) =>
+    new AgentError(code, "private native error", {
+      canonicalPath: pathValue,
+      privateValue: "do-not-publish",
+      authorizationUrl: "https://invalid.example/forged",
+    });
+  const cases = [
+    {
+      id: "real_directory_denial",
+      operation: "agent.project.resolve",
+      error: denied("project_not_allowed", canonicalPath),
+      expected: { canonicalPath },
+    },
+    {
+      id: "unrelated_operation",
+      operation: "agent.open",
+      error: denied("project_not_allowed", canonicalPath),
+    },
+    {
+      id: "unrelated_error_code",
+      operation: "agent.project.resolve",
+      error: denied("path_not_allowed", canonicalPath),
+    },
+    {
+      id: "noncanonical_directory",
+      operation: "agent.project.resolve",
+      error: denied(
+        "project_not_allowed",
+        canonicalPath + "/../" + path.basename(canonicalPath),
+      ),
+    },
+    {
+      id: "relative_directory",
+      operation: "agent.project.resolve",
+      error: denied("project_not_allowed", "not/an/absolute/path"),
+    },
+    {
+      id: "oversize_directory",
+      operation: "agent.project.resolve",
+      error: denied("project_not_allowed", canonicalPath + "/".repeat(1100)),
+    },
+  ];
+  const f = await fixture(t);
+  const c = await f.connect({
+    invoke: async (message) => {
+      const entry = cases.find((item) => item.id === message.id);
+      if (!entry) throw new Error("unexpected invocation");
+      throw entry.error;
+    },
+  });
+  const { peer, binding } = await f.peer();
+  for (const entry of cases) {
+    peer.send(
+      canonicalJson({
+        type: "invoke",
+        id: entry.id,
+        operation: entry.operation,
+        context: context(binding),
+        input:
+          entry.operation === "agent.open"
+            ? { agentId: "agent", path: canonicalPath }
+            : { path: canonicalPath },
+      }),
+    );
+    const reply = await f.waitMessage(
+      (value) => value.type === "error" && value.id === entry.id,
+    );
+    assert.deepEqual(reply.error, {
+      code: entry.error.code,
+      message: "The Agent operation failed.",
+      ...(entry.expected ? { details: entry.expected } : {}),
+    });
+    assert(!JSON.stringify(reply).includes("do-not-publish"));
+    assert(!JSON.stringify(reply).includes("forged"));
+  }
+  c.close();
+});

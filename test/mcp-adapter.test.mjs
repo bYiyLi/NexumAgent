@@ -941,6 +941,9 @@ async function fixture(t, options = {}) {
   };
 }
 function stdioFixture(t, f, options = {}) {
+  // stdio adapter tests exercise MCP and process behavior, not personal login
+  // shell startup. Real user environment discovery is tested separately.
+  controlledProbeShell(t, f);
   const filename = path.join(f.root, `mcp-${options.name ?? "fixture"}.mjs`);
   const trace = `${filename}.events`;
   const childOptions = {
@@ -1020,9 +1023,8 @@ if (options.mode === "idle") {
     pid: () => events(trace).find((event) => event.method === "spawn")?.pid,
   };
 }
-// These two tests target process cleanup after an initialized native launch,
-// not the developer's login plugins. Keep a real bounded environment probe but
-// give it a fixture-owned OS shell entry; environment.test covers the real user.
+// All stdio fixtures retain a real bounded environment probe but use a
+// fixture-owned shell so developer login plugins do not affect MCP tests.
 function controlledProbeShell(t, f) {
   if (process.platform === "win32") return;
   const shell = path.join(f.root, "sh");
@@ -1364,8 +1366,6 @@ test("real Streamable HTTP uses configured static headers without publishing cre
 
 test("failed stdio initialization closes registered resources and waits for actual process exit", async (t) => {
   const f = await fixture(t);
-  // Exercise real stdio cleanup, not a delayed interactive login-shell probe.
-  controlledProbeShell(t, f);
   const peer = stdioFixture(t, f, { mode: "idle" });
   await assert.rejects(f.prepare(peer.config, { connectTimeoutMs: 2500 }));
   const pid = await until(
@@ -1434,7 +1434,6 @@ test(
   { skip: process.platform === "win32" },
   async (t) => {
     const f = await fixture(t);
-    controlledProbeShell(t, f);
     const rootReleaseFile = path.join(f.root, "release-root-exit");
     const peer = stdioFixture(t, f, {
       mode: "root-exit-with-child",
@@ -1635,7 +1634,6 @@ test("external run cancellation waits for real stdio backpressure and a cancelle
 
 test("resource reporting failure cannot escape a native event or prevent actual stdio process cleanup", async (t) => {
   const f = await fixture(t);
-  controlledProbeShell(t, f);
   const peer = stdioFixture(t, f);
   let rejectReports = false,
     failures = 0;

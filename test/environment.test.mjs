@@ -113,6 +113,27 @@ console.log(JSON.stringify({first:first.variables.TEST_DISCOVER_VALUE,second:sec
   },
 );
 
+test(
+  "default environment probe allows a login shell to finish beyond five seconds",
+  { skip: windows },
+  (t) => {
+    const root = setup(t),
+      shell = path.join(root, "zsh");
+    writeFileSync(
+      shell,
+      '#!/bin/sh\nsleep 6\nexec /bin/sh -c "$4"\n',
+      { mode: 0o700 },
+    );
+    const result = isolated(
+      shell,
+      `const result = await discoverEnvironment({ signal: new AbortController().signal, cwd: ${JSON.stringify(root)} }); console.log(result.source);`,
+      { timeout: 20000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "login-shell");
+  },
+);
+
 test("child overrides preserve Node business options, remove explicit values, and cannot reintroduce Agent/IPC controls", () => {
   const source = snapshot({
     PATH: "/original",

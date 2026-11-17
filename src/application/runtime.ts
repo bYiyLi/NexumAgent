@@ -734,7 +734,7 @@ export class AgentRuntime {
       ];
     }
     const instruction =
-      "本地文件和操作系统基础能力使用当前允许的 Node/npm。SDK 原子能力由 runtime、state、output、sh、transfer、maintenance 提供，参数以 work/docs/platform 文档为准。脚本返回真实值或 output 包装，由平台适配 MCP；本地路径字符串不会自动变成图片。长任务用现有运行和资源身份继续控制，观察等待结束不代表任务已停止。";
+      "本地文件和操作系统基础能力使用当前允许的 Node/npm。SDK 原子能力由 runtime、state、output、sh、transfer、maintenance 提供，参数以 work/docs/platform 文档为准。脚本返回真实值或 output 包装，由平台适配 MCP；本地路径字符串不会自动变成图片。长任务用现有运行和资源身份继续控制，观察等待结束不代表任务已停止。需要等待时优先使用 await runtime.sleep(ms)；原生 setTimeout 和不支持取消的第三方 Promise 不会因 Run 取消而自动结束。";
     this.#platformMaterials.instructions = [
       {
         instructionId: "platform-runtime",
@@ -1670,12 +1670,30 @@ export class AgentRuntime {
         },
       }),
       "agent.project.resolve": (input) => {
-        const root = realpathSync.native(input.path);
         requireCondition(
-          statSync(root).isDirectory(),
-          "project_not_found",
-          "A project root must be a real directory.",
+          path.isAbsolute(input.path) && !input.path.includes("\0"),
+          "invalid_arguments",
+          "A project root must be an absolute directory path.",
         );
+        let root: string;
+        try {
+          root = realpathSync.native(input.path);
+          requireCondition(
+            statSync(root).isDirectory(),
+            "project_not_found",
+            "A project root must be a real directory.",
+          );
+        } catch (cause) {
+          if (isAgentError(cause)) throw cause;
+          const code = (cause as NodeJS.ErrnoException).code;
+          const missing = code === "ENOENT" || code === "ENOTDIR";
+          throw new AgentError(
+            missing ? "project_not_found" : "path_not_allowed",
+            missing
+              ? "A project root must be an existing directory."
+              : "The project directory cannot be resolved safely.",
+          );
+        }
         try {
           this.#authorizeCaller(caller, {
             type: "path",

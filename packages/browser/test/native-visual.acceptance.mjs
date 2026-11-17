@@ -55,6 +55,16 @@ return {observed,actual,selectedId,originalId:tab.id};`,
         (move) => move.trusted && move.x === 180 && move.y === 140,
       ),
     );
+    const nativePath = data.actual.moves.filter((move) => move.trusted);
+    assert.ok(nativePath.length >= 3, "the actual page must receive intermediate native mousemove events");
+    assert.ok(
+      nativePath.slice(0, -1).some((move) => move.x !== 180 || move.y !== 140),
+      "the real pointer must travel to the destination rather than teleport",
+    );
+    assert.deepEqual(
+      { x: nativePath.at(-1).x, y: nativePath.at(-1).y },
+      { x: 180, y: 140 },
+    );
     assert.deepEqual(result.run.cleanup.unconfirmed, []);
     const native = await f.cleanupFacts();
     assert.deepEqual(native.owned, [], JSON.stringify(native));
@@ -100,7 +110,7 @@ test(
   },
 );
 
-test("native visual feedback preserves user groups, follows only when enabled and releases the real result marker on tab activation", async (t) => {
+test("native visual feedback preserves user groups and keeps AI markers after run cleanup and tab activation", async (t) => {
   const events = [];
   const f = await nativeFixture(t, {
     html: `<!doctype html><html><head><title>Native visual page</title><link id="original-icon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' fill='green'/%3E%3C/svg%3E"></head><body><h1>Visual native page</h1><button id="click" onclick="this.textContent='Native pointer clicked'">Native pointer target</button><script>
@@ -197,10 +207,10 @@ test("native visual feedback preserves user groups, follows only when enabled an
   const latest = () =>
     events.filter((event) => event.url === f.base + "?visual-other").at(-1);
   const until = Date.now() + 5000;
-  while (!latest()?.icon || latest()?.layer) {
+  while (!latest()?.icon || !latest()?.layer) {
     assert.ok(
       Date.now() < until,
-      "The actual page did not retain its result favicon after control release.",
+      "The actual page did not retain its cursor and favicon after control release.",
     );
     await delay(10);
   }
@@ -210,12 +220,7 @@ test("native visual feedback preserves user groups, follows only when enabled an
     `const {createBrowserClient}=await import('@nexum-hub/browser');const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);await selected.tabs.select(context.input.originalId);await selected.tabs.select(context.input.otherId);`,
     ids,
   );
-  while (latest()?.icon || latest()?.layer) {
-    assert.ok(
-      Date.now() < until,
-      "The native tab activation did not clear its result marker.",
-    );
-    await delay(10);
-  }
+  assert.equal(latest().icon, true);
+  assert.equal(latest().layer, true);
   assert.match(latest().original, /^data:image\/svg\+xml,/);
 });

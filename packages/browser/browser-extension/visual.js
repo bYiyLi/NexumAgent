@@ -6,7 +6,13 @@ export const visualStyles = `[data-nexum-visual-layer="v1"]{position:fixed!impor
 export async function visualPage(input) {
   const slot = Symbol.for("nexum.browser.visual.v1");
   const now = Date.now();
-  const state = (globalThis[slot] ??= { current: null, closed: new Map() });
+  // A managed tab remains visually identifiable after its control lease ends.
+  // Only the live cursor animation is owned by the lease.
+  const state = (globalThis[slot] ??= {
+    current: null,
+    pinned: null,
+    closed: new Map(),
+  });
   // An updated worker can encounter tombstones left by the previous build.
   // Preserve them for the maximum native dispatch window, then release them.
   if (state.closed instanceof Set)
@@ -31,27 +37,49 @@ export async function visualPage(input) {
     if (state.current?.token === token) {
       const current = state.current;
       current.stopped = true;
-      current.layer?.remove();
-      current.icon?.remove();
+      if (input.command === "release" && input.retain) {
+        current.layer?.setAttribute("data-nexum-visual-state", "idle");
+        state.pinned = {
+          layer: current.layer,
+          icon: current.icon,
+          x: current.x,
+          y: current.y,
+        };
+      } else {
+        current.layer?.remove();
+        current.icon?.remove();
+      }
       state.current = null;
+    }
+    if (input.command === "clear") {
+      state.pinned?.layer?.remove();
+      state.pinned?.icon?.remove();
+      state.pinned = null;
     }
     return { ok: true };
   }
-  if (state.closed.has(token) || Date.now() >= input.deadline)
+  const restoring = input.command === "restore";
+  if (!restoring && (state.closed.has(token) || Date.now() >= input.deadline))
     return { ok: false, reason: "VISUAL_TARGET_RELEASED" };
+  // A navigation restore may not supersede a live AI action on the same tab.
+  if (restoring && state.current) return { ok: true, active: true };
   if (state.current?.token !== token) {
     if (state.current) {
       state.current.stopped = true;
       state.current.layer?.remove();
       state.current.icon?.remove();
     }
+    const pinned = state.pinned;
+    state.pinned = null;
     state.current = {
       token,
       sequence: -1,
-      x: 0,
-      y: 0,
+      x: pinned?.x ?? 32,
+      y: pinned?.y ?? 72,
       stopped: false,
       maxDeadline: inputDeadline,
+      layer: pinned?.layer,
+      icon: pinned?.icon,
     };
   }
   const current = state.current;
@@ -59,7 +87,7 @@ export async function visualPage(input) {
   const valid = () =>
     state.current === current &&
     !current.stopped &&
-    !state.closed.has(token) &&
+    (restoring || !state.closed.has(token)) &&
     Date.now() < input.deadline;
   const icon = async (mode) => {
     if (!current.original)
@@ -172,19 +200,8 @@ export async function visualPage(input) {
     current.icon.href = canvas.toDataURL("image/png");
     return true;
   };
-  if (input.command === "active" || input.command === "result") {
-    if (input.command === "result") {
-      current.layer?.remove();
-      current.layer = null;
-    }
-    return { ok: await icon(input.command) };
-  }
-  if (input.command !== "move" || !valid())
-    return { ok: false, reason: "VISUAL_UNAVAILABLE" };
-  if (input.moveSequence <= current.sequence) return { ok: true, stale: true };
-  current.sequence = input.moveSequence;
-  const sequence = current.sequence;
-  if (!current.layer) {
+  const ensureLayer = () => {
+    if (current.layer) return current.layer;
     const layer = document.createElement("div");
     layer.setAttribute("data-nexum-visual-layer", "v1");
     layer.setAttribute("aria-hidden", "true");
@@ -196,9 +213,30 @@ export async function visualPage(input) {
     document.documentElement.append(layer);
     layer.getBoundingClientRect?.();
     layer.style.opacity = "1";
+    layer.style.transform = `translate3d(${current.x}px,${current.y}px,0)`;
     current.layer = layer;
+    return layer;
+  };
+  if (input.command === "active" || input.command === "result" || restoring) {
+    const result = await icon(input.command === "active" ? "active" : "result");
+    const layer = ensureLayer();
+    layer.setAttribute(
+      "data-nexum-visual-state",
+      input.command === "active" ? "thinking" : "idle",
+    );
+    if (restoring) {
+      current.stopped = true;
+      state.pinned = { layer, icon: current.icon, x: current.x, y: current.y };
+      state.current = null;
+    }
+    return { ok: result };
   }
-  const layer = current.layer;
+  if (input.command !== "move" || !valid())
+    return { ok: false, reason: "VISUAL_UNAVAILABLE" };
+  if (input.moveSequence <= current.sequence) return { ok: true, stale: true };
+  current.sequence = input.moveSequence;
+  const sequence = current.sequence;
+  const layer = ensureLayer();
   layer.setAttribute("data-nexum-visual-state", "moving");
   const startX = current.x,
     startY = current.y,
@@ -206,6 +244,7 @@ export async function visualPage(input) {
     dy = input.point.y - startY,
     distance = Math.hypot(dx, dy);
   const duration =
+    input.nativeStep === true ||
     globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
     document.visibilityState === "hidden" ||
     distance < 80
@@ -307,7 +346,6 @@ export function createVisualController(
     groups = new Map(),
     names = new Map(),
     markers = new Map(),
-    ownActivations = new Map(),
     closedKeys = new Map(),
     styles = new Map(),
     listeners = [],
@@ -401,13 +439,14 @@ export function createVisualController(
   };
   const page = async (record, command, ctx, extra = {}) => {
     const cleanup = command === "release" || command === "clear";
+    const restoring = command === "restore";
     const marker = markers.get(record.tabId),
       passive =
         command === "result" &&
         marker?.documentId === record.documentId &&
         key(markerCtx(marker)) === record.token;
     const admit = () => {
-      if (passive) {
+      if (passive || restoring) {
         requireValue(!stopped, "EXTENSION_OFFLINE");
         current(ctx);
       } else assertCtx(ctx);
@@ -418,7 +457,7 @@ export function createVisualController(
     const deadline = Math.min(ctx.deadline, Date.now() + 250);
     const target = { tabId: record.tabId, documentIds: [record.documentId] };
     const flow = (async () => {
-      if (command === "move") {
+      if (command === "move" || restoring) {
         let style = styles.get(record.tabId);
         if (style?.documentId !== record.documentId) {
           const created = {
@@ -566,7 +605,17 @@ export function createVisualController(
       const tab = await chrome.tabs.get(record.tabId);
       assertCtx(ctx);
       record.result = false;
-      if (markers.delete(record.tabId)) await save();
+      // The AI-touched identity belongs to the tab, not to this run.
+      markers.set(record.tabId, {
+        tabId: record.tabId,
+        browserSessionId: ctx.target.browserSessionId,
+        documentId: record.documentId,
+        target: identity(ctx),
+        leaseId: ctx.leaseId,
+        runId: ctx.runId,
+        operationId: ctx.operationId,
+      });
+      await save();
       // Grouping and the favicon use the same checked document but do not
       // depend on one another. Both must settle before a business action.
       const [result] = await Promise.all([
@@ -575,7 +624,6 @@ export function createVisualController(
           await group(record, ctx, tab);
           assertCtx(ctx);
           if (ctx.followSessionTab !== false && !tab.active) {
-            ownActivations.set(record.tabId, Date.now() + 1000);
             await chrome.tabs.update(record.tabId, { active: true });
             assertCtx(ctx);
           }
@@ -638,6 +686,39 @@ export function createVisualController(
     }
   };
   const beforeAction = (ctx) => bounded(ctx, beforeActionRaw);
+  // tabs.new and tabs.select are visible AI actions even if no pointer moves.
+  // They should not require a CDP input attachment to leave a durable marker.
+  const trackTab = (ctx) =>
+    bounded(ctx, async (limited) => {
+      const tabId = nativeId(ctx.target.tabId);
+      const tab = await chrome.tabs.get(tabId);
+      assertCtx(limited);
+      const frame = await chrome.webNavigation
+        .getFrame({ tabId, frameId: 0 })
+        .catch(() => null);
+      assertCtx(limited);
+      const record = {
+        tabId,
+        token: key(ctx),
+        documentId: frame?.documentId ?? "pending",
+      };
+      markers.set(tabId, {
+        tabId,
+        browserSessionId: ctx.target.browserSessionId,
+        documentId: record.documentId,
+        target: identity(ctx),
+        leaseId: ctx.leaseId,
+        runId: ctx.runId,
+        operationId: ctx.operationId,
+      });
+      await save();
+      await group(record, limited, tab);
+      if (id(frame?.documentId)) {
+        const restored = await page(record, "restore", limited);
+        if (!restored.ok) notice(ctx, restored.reason || "VISUAL_UNAVAILABLE");
+      }
+      return { degraded: false };
+    });
   const beforePointer = async (ctx) => {
     assertCtx(ctx);
     requireValue(
@@ -661,6 +742,9 @@ export function createVisualController(
       const result = await page(record, "move", limited, {
         point: { x: ctx.point.x, y: ctx.point.y },
         moveSequence: ctx.moveSequence,
+        // The native input already traverses the interpolated path; do not
+        // run a second, out-of-sync decorative animation for each step.
+        nativeStep: true,
       });
       if (!result.ok) notice(ctx, result.reason || "VISUAL_UNAVAILABLE");
       return { degraded: status.degraded || !result.ok };
@@ -721,27 +805,20 @@ export function createVisualController(
       closedKeys.set(token, Date.now() + 1000);
       return { degraded: false };
     }
-    let status;
-    const marker = markers.get(record.tabId);
-    if (record.result && marker && key(markerCtx(marker)) === token)
-      status = await page(
-        { ...record, documentId: marker.documentId },
-        "result",
-        markerCtx(marker),
-      );
-    else {
-      record.result = false;
-      status = await page(record, "release", {
-        ...ctx,
-        deadline: Date.now() + 250,
-        signal: undefined,
-      });
-    }
+    // Close the input identity, but leave its passive pointer and favicon
+    // on any tab the AI has actually touched.
+    const retained = markers.has(record.tabId);
+    const status = await page(
+      record,
+      "release",
+      { ...ctx, deadline: Date.now() + 250, signal: undefined },
+      { retain: retained },
+    );
     await settled(token);
     records.delete(token);
     closedKeys.set(token, Date.now() + 1000);
     const styled = styles.get(record.tabId);
-    if (styled?.documentId === record.documentId) {
+    if (!retained && styled?.documentId === record.documentId) {
       styles.delete(record.tabId);
       try {
         await chrome.scripting.removeCSS({
@@ -752,7 +829,7 @@ export function createVisualController(
         notice(ctx, "VISUAL_UNAVAILABLE");
       }
     }
-    if (!record.result && record.groupId !== undefined)
+    if (!retained && record.groupId !== undefined)
       try {
         const tab = await chrome.tabs.get(record.tabId);
         if (tab.groupId === record.groupId)
@@ -820,34 +897,9 @@ export function createVisualController(
         listeners.push(() => event.removeListener(fn));
       }
     };
-    listen(chrome.tabs.onActivated, (info) => {
-      const until = ownActivations.get(info.tabId);
-      ownActivations.delete(info.tabId);
-      if (until && Date.now() <= until) return;
-      const marker = markers.get(info.tabId);
-      if (!marker) return;
-      markers.delete(info.tabId);
-      const record = records.get(key(markerCtx(marker)));
-      if (record) record.result = false;
-      void observe(
-        (async () => {
-          await page(
-            {
-              tabId: marker.tabId,
-              documentId: marker.documentId,
-              token: key(markerCtx(marker)),
-            },
-            "clear",
-            markerCtx(marker),
-          );
-          await save();
-        })(),
-        key(markerCtx(marker)),
-      ).catch(() => {});
-    });
+    // User switching tabs must not erase the AI-touched indicator.
     listen(chrome.tabs.onRemoved, (tabId) => {
       markers.delete(tabId);
-      ownActivations.delete(tabId);
       for (const [token, record] of records)
         if (record.tabId === tabId) records.delete(token);
       void save().catch(() => {});
@@ -873,7 +925,7 @@ export function createVisualController(
               documentId: marker.documentId,
               token: key(markerCtx(marker)),
             },
-            "result",
+            "restore",
             markerCtx(marker),
           );
           await save();
@@ -894,30 +946,29 @@ export function createVisualController(
           id(value.operationId)
         ) {
           try {
-            const tabId = nativeId(value.target.tabId),
-              frame = await observe(
-                chrome.webNavigation.getFrame({
-                  tabId,
-                  frameId: 0,
-                }),
-                key(markerCtx(value)),
-              );
+            const tabId = nativeId(value.target.tabId);
+            await chrome.tabs.get(tabId); // A closed tab must never be restored.
             if (stopped) return;
-            if (!id(frame?.documentId)) continue;
             const marker = {
               ...value,
               tabId,
-              documentId: frame.documentId,
               target: { ...value.target },
             };
             markers.set(tabId, marker);
+            const frame = await observe(
+              chrome.webNavigation.getFrame({ tabId, frameId: 0 }),
+              key(markerCtx(marker)),
+            );
+            if (stopped) return;
+            if (!id(frame?.documentId)) continue;
+            marker.documentId = frame.documentId;
             await page(
               {
                 tabId,
                 documentId: marker.documentId,
                 token: key(markerCtx(marker)),
               },
-              "result",
+              "restore",
               markerCtx(marker),
             );
           } catch {}
@@ -931,18 +982,24 @@ export function createVisualController(
       closedKeys.set(token, Number.POSITIVE_INFINITY);
     disposal = (async () => {
       await settled();
-      for (const record of records.values())
-        if (!record.result) {
-          await page(record, "release", { deadline: Date.now() + 250 });
-          if (record.groupId !== undefined)
+      for (const record of records.values()) {
+          const retained = markers.has(record.tabId);
+          await page(
+            record,
+            "release",
+            { deadline: Date.now() + 250 },
+            { retain: retained },
+          );
+          if (!retained && record.groupId !== undefined)
             try {
               const tab = await chrome.tabs.get(record.tabId);
               if (tab.groupId === record.groupId)
                 await chrome.tabs.ungroup([record.tabId]);
             } catch {}
-        }
+      }
       await settled();
       for (const [tabId, style] of styles) {
+        if (markers.has(tabId)) continue;
         try {
           await chrome.scripting.removeCSS({
             target: { tabId, documentIds: [style.documentId] },
@@ -951,7 +1008,6 @@ export function createVisualController(
         } catch {}
       }
       records.clear();
-      ownActivations.clear();
       closedKeys.clear();
       styles.clear();
       groups.clear();
@@ -967,6 +1023,7 @@ export function createVisualController(
       for (const wake of [...wakeups]) wake();
     },
     beforeAction,
+    trackTab,
     beforePointer,
     markDeliverable,
     releaseTab,
