@@ -169,16 +169,19 @@ test("runtime.sleep is cancelled promptly without falsely completing a long wait
 test("a native timer keeps cancelling until the JavaScript Promise really settles", async (t) => {
   const f = await fixture(t);
   const initial = await f.start(
-    'await new Promise(resolve => setTimeout(resolve, 1000));return "must-not-complete";',
-    { waitMs: 0, timeoutMs: 4000 },
+    'await new Promise(resolve => setTimeout(resolve, 8000));return "must-not-complete";',
+    { waitMs: 0, timeoutMs: 15000 },
   );
   let current;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    current = await f.engine.observe(caller, initial.run.runId, 0);
+  const startupDeadline = Date.now() + 6000;
+  while (Date.now() < startupDeadline) {
+    current = await f.engine.observe(caller, initial.run.runId, 150);
     if (current.run.status === "running") break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(current.run.endedAt, null,
+      "the original Run must reach running before it can be cancelled");
   }
-  assert.equal(current.run.status, "running");
+  assert.equal(current?.run.status, "running",
+    "wait for the actual Worker state, not a fixed number of Host event-loop ticks");
   const stopped = f.engine.cancel(caller, initial.run.runId);
   assert.equal(stopped.accepted, true);
   assert.equal(stopped.run.status, "cancelling");
