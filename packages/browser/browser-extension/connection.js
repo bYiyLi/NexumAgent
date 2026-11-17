@@ -38,12 +38,17 @@ export function createExtensionConnection({
     "PROFILE_MISMATCH",
     "Use a dedicated production or development extension build.",
   );
-  const expectedUrl = `ws://127.0.0.1:${profile === "production" ? 43831 : 43832}/nexum-browser/v1`;
-  requireValue(
-    url === undefined || url === expectedUrl,
-    "PROFILE_MISMATCH",
-    "The extension cannot cross its fixed profile endpoint.",
+  const firstPort = profile === "production" ? 29040 : 29030;
+  const allowedUrls = Array.from(
+    { length: 10 },
+    (_, index) => `ws://127.0.0.1:${firstPort + index}/nexum-browser/v1`,
   );
+  requireValue(
+    url === undefined || allowedUrls.includes(url),
+    "PROFILE_MISMATCH",
+    "The extension cannot connect outside its profile's port range.",
+  );
+  const endpoints = url === undefined ? allowedUrls : [url];
   let started = false,
     stopped = false,
     socket,
@@ -52,6 +57,10 @@ export function createExtensionConnection({
     initialize,
     reconnectTimer,
     keepAlive,
+    probeTimer,
+    preferredUrl,
+    socketUrl,
+    scanIndex = 0,
     reconnectAttempt = 0,
     attemptSequence = 0,
     lastMessage = 0,
@@ -296,8 +305,11 @@ export function createExtensionConnection({
   };
   const disconnected = async (expected) => {
     if (expected !== socket) return;
+    const wasReady = Boolean(ready);
     socket = undefined;
     ready = undefined;
+    clearTimeout(probeTimer);
+    probeTimer = undefined;
     clearInterval(keepAlive);
     keepAlive = undefined;
     status(false);
@@ -314,7 +326,17 @@ export function createExtensionConnection({
       );
     inbox.discard();
     for (const lease of leases.values()) void closeLease(lease).catch(() => {});
-    if (!stopped) schedule();
+    if (!stopped) {
+      if (wasReady) {
+        scanIndex = 0;
+        schedule();
+      } else if (++scanIndex < endpoints.length) {
+        queueMicrotask(() => void connect().catch(schedule));
+      } else {
+        scanIndex = 0;
+        schedule();
+      }
+    }
   };
   const schedule = () => {
     if (stopped || reconnectTimer) return;
@@ -491,6 +513,10 @@ export function createExtensionConnection({
           "The plugin and package use incompatible wire budgets.",
         );
       ready = Object.freeze(message);
+      preferredUrl = socketUrl;
+      scanIndex = 0;
+      clearTimeout(probeTimer);
+      probeTimer = undefined;
       router.bind(message);
       reconnectAttempt = 0;
       status(true);
@@ -714,8 +740,16 @@ export function createExtensionConnection({
     // Recheck after initialization. A socket, including one still closing,
     // remains the current owner until its close handler starts cleanup.
     if (stopped || socket) return;
-    const expected = new Socket(expectedUrl);
+    const choices = preferredUrl
+      ? [preferredUrl, ...endpoints.filter((candidate) => candidate !== preferredUrl)]
+      : endpoints;
+    socketUrl = choices[scanIndex];
+    const expected = new Socket(socketUrl);
     socket = expected;
+    probeTimer = setTimeout(() => {
+      if (expected === socket && !ready && expected.readyState !== Socket.CLOSED)
+        expected.close();
+    }, 3000);
     expected.binaryType = "arraybuffer";
     expected.addEventListener("open", () => {
       if (expected !== socket || stopped) {
@@ -757,6 +791,7 @@ export function createExtensionConnection({
       });
     });
     expected.addEventListener("close", () => {
+      if (expected === socket) clearTimeout(probeTimer);
       void disconnected(expected).catch(() => schedule());
     });
     expected.addEventListener("error", () => {
@@ -854,6 +889,7 @@ export function createExtensionConnection({
       if (stopped) return;
       stopped = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(probeTimer);
       clearInterval(keepAlive);
       for (const remove of listeners.splice(0)) remove();
       for (const action of actions.values())

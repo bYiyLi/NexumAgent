@@ -56,6 +56,9 @@ export async function buildExtensions(
   for (const [profile, info] of Object.entries(release.profiles)) {
     if (extensionId(info.key) !== info.extensionId || info.profile !== profile)
       throw new Error("Invalid fixed plugin identity.");
+    const start = profile === "development" ? 29030 : 29040;
+    if (info.port !== start || info.portEnd !== start + 9)
+      throw new Error("Invalid fixed plugin port range.");
     const target = path.join(destination, profile);
     await mkdir(target, { recursive: true });
     for (const name of files)
@@ -94,7 +97,7 @@ export async function buildExtensions(
           ],
           host_permissions: ["http://*/*", "https://*/*"],
           content_security_policy: {
-            extension_pages: `script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:${info.port};`,
+            extension_pages: `script-src 'self'; object-src 'self'; connect-src ${Array.from({ length: info.portEnd - info.port + 1 }, (_, i) => `ws://127.0.0.1:${info.port + i}`).join(" ")};`,
           },
         },
         null,

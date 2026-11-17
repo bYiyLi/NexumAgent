@@ -1,6 +1,24 @@
 # 使用与结果交付
 
+## 选择浏览器和标签
+
 在当前脚本中导入 `createBrowserClient`，将当前运行的 `browser` 方法容器交给它。先 `client.browsers.list()`，再按实际 browserId 获取 Browser；从 `selected.tabs.list()` 的真实 tabId 获取 Tab。`getDefault()` 按当前在线默认或稳定顺序选择，`getForUrl(url)` 优先复用已存在的 URL/origin；选择不会自动导航。
+
+下面是可作为 `agent.run.start.script` 的只读入口。首次不传 ID 时返回浏览器列表，提供本次发现的 `input.browserId` 后返回标签列表，再提供 `input.tabId` 才观察页面；不要按名称或旧截图猜测 ID：
+
+```javascript
+const { createBrowserClient } = await import("@nexum-hub/browser");
+const client = createBrowserClient(browser);
+const browsers = await client.browsers.list();
+if (!context.input?.browserId) return { browsers };
+const selected = await client.browsers.get(context.input.browserId);
+const tabs = await selected.tabs.list();
+if (!context.input?.tabId) return { tabs };
+const tab = await selected.tabs.get(context.input.tabId);
+return await tab.observe({ full: true });
+```
+
+## 观察、定位与业务确认
 
 页面操作先观察。语义定位使用 `getByRole/getByText/getByLabel/locator`，操作后等待一个能够证明目标状态的信号。Locator 是查询描述，每次操作重解；快照 ref、DOM/AX 节点、dialog、chooser 和 WebMCP 注册另有固定修订。过期后重新观察，不把旧索引改成碰巧同名的新元素。
 
@@ -11,6 +29,8 @@
 上述确认仅证明可信点击事件被网页接收（或页面发生了实际导航），**不证明任意异步业务完成**：例如保存、支付、提交仍需用 `tab.waitFor`、`locator.waitFor`、`playwright.waitForURL` 或业务结果回读显式验证。等待使用有限期限，不对网页执行自动点击重放；页面持续加载、扩展权限拒绝或结果未知时应如实反馈。
 
 AI 日常控制建议优先调用 `tab.observe({full:true})` 获取同一份 URL、标题、AX 状态；后续调用 `tab.observe()` 会利用 AX 差异减少大段重复内容。对于有业务完成标志的点击，可直接复用已有等待条件（不新增底层工具）：
+
+以下片段的 `tab` 必须先在同一次脚本中按上方方式获取，不能单独提交为完整脚本。
 
 ```javascript
 const before = await tab.observe({ full: true });
@@ -23,13 +43,9 @@ return { before: before.url, matched: result.matched, after: await tab.observe()
 
 `click({expect})` 会在原生点击成功后等待指定的 `WaitCondition`，只有条件匹配才返回带页面快照的 `WaitResult`；导航 `{kind:"navigation"}` 在点击前原子登记等待，避免快速跳转漏掉事件，限主文档。跨域 iframe 的 Locator 点击现在按真实子文档局部坐标登记可信回执；iframe 内跳转使用 `{kind:"url",value:"..."}` 或 Frame 内其他可观察条件。尚未确认的业务条件返回 `EXPECTATION_UNCONFIRMED`，保留已发送输入可能带来的副作用，**不能自动重放**。普通无 `expect` 点击仍仅保证可观察的输入完成。
 
-```javascript
-const { createBrowserClient } = await import("@nexum-hub/browser");
-const client = createBrowserClient(browser);
-const selected = await client.browsers.get(context.input.browserId);
-const tab = await selected.tabs.get(context.input.tabId);
-return await tab.playwright.domSnapshot();
-```
+只需要 DOM 结构时，将上方完整入口的最后一行换成 `return await tab.playwright.domSnapshot();`，不必加载全部 API 声明。
+
+## 截图与可访问性输出
 
 截图返回原生 JPEG 字节，向模型展示时显式使用平台结果包装：
 
@@ -43,6 +59,8 @@ return output.image({ data: image, mimeType: "image/jpeg" });
 `tab.ax.get()` 返回文字；`return await tab.ax.write()` 将同一文字作为平台输出交付。文字包含标题、URL、原生索引及输入值、选中/展开/禁用等实际状态。第一次返回 `AX full`；同一运行、同一标签后续观察在差异更小时返回 `AX diff`，按 `Removed` / `Added` / `Changed` 列出变化，无变化时说明 `No accessibility changes.`。需要完整上下文时使用 `tab.ax.get("state",{disableDiffing:true})`，或对应的 `ax.write`。纯截图模式及 `ax.snapshot()` 不推进文字基准，混合读取失败或取消也不推进；导航、控制交还/续接、新运行或基准淘汰后重新返回完整状态。文字观察超过 60000 UTF-8 字节会报 `OUTPUT_TOO_LARGE`，可改用带截断标记的 `ax.snapshot()` 或按定位器读取所需数据。
 
 返回本机文件路径只说明文件存在，不代表模型已经读取。文件/文档交付使用 `output.file(...)`，外部领取使用平台 `transfer.createDownload`；它们有各自的大小、当前权限和保留规则。
+
+## 导航、下载与资源
 
 `expectNavigation(action)` 的 action 留在 Node，先确认等待已就绪再操作。`const pending = tab.playwright.waitForEvent("download"); await link.click(); await pending;` 的后续动作只等 arm-ready，不会排在整个下载等待后面。下载开始事件不等于文件已经完整保存。
 
@@ -81,6 +99,8 @@ return output.file(file, { name: "报表.pdf" });
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。
 
+## 可视化与用户接管
+
 `selected.visibility` 控制当前浏览器内的任务标签跟随。`false` 时真实控制动作仍执行，但不切换活动标签；恢复 `true` 后，在后续真实控制动作之前切换到目标标签。只读标题、标签列表等元数据不会为了读取而抢走焦点，也不会把浏览器窗口强行带到系统前台。
 
 AI 新建、选中或实际操作过的网页标签会保留蓝色 Nexum 任务分组、修改后的标识图标以及不阻挡鼠标交互的蓝色指针。正在操作时指针随动作移动，运行结束后切换为静态标识；结束 Run、切换标签、切换页面或扩展工作线程恢复均不自动撤销标识。用户已有的分组不被接管，其标签仍可使用页面内标识和 favicon。原生标签关闭后标识与登记一同清理。控制租约照常结束，保留静态标识不代表 AI 仍然拥有控制权。受浏览器保护的内部页面不保证能够注入页面内标识。
@@ -89,8 +109,12 @@ AI 新建、选中或实际操作过的网页标签会保留蓝色 Nexum 任务�
 
 需要用户接管时，`await tab.requestUserTakeover("authentication")` 会交还该标签，并通过平台真实输入等待请求确认。同一运行里的其他标签继续保留。只有用户明确确认、当前运行及权限仍有效、浏览器重新观察原生标签和文档成功后，才签发新的控制身份。旧 Tab、Locator、ref、Dialog 等不会复活；继续时通过 `selected.tabs.get(tab.id)` 取得新 Tab 并重新观察。否决、取消、超时和撤权都不会恢复控制，也不证明站点登录已经成功。
 
+## 资产、导出与高级能力
+
 资产清单先观察，下载按固定清单执行。`tab.assets.list()` 返回库存身份；`tab.assets.bundle({inventoryId, kinds:["image","stylesheet"]})` 保存实际文件和相对路径 manifest，逐项保留失败。`tab.cua.downloadMedia(point)`、`tab.dom.downloadMedia({node_id})` 和 `locator.downloadMedia()` 都从真实观察到的媒体元素读取原始来源，不把截图改名冒充媒体。媒体、资产下载和导出均返回本机固定文件的 `BrowserArtifact`，包含实际大小及 SHA-256。
 
 `tab.exportFile({format:"pdf"|"html"|"markdown"})` 分别读取原生 PDF 流或实际 DOM，Markdown 由实际 HTML 转换。Google Workspace 导出使用当前浏览器文档与登录态读取实际导出响应，支持站点正常的导出重定向；需要登录、权限不足或响应不是所请求文档格式时明确失败。`tab.content.exportYouTubeTranscript()` 与 `tab.exportYouTubeTranscript()` 使用当前播放器身份及可观察字幕源，支持当前和旧版已渲染字幕面板。若站点的字幕轨道响应不可用，可以先通过实际页面打开字幕面板，再导出已显示的字幕；导出本身不自动点击页面，也不生成替代字幕。普通资产和媒体读取仍受页面原生 CORS 约束，不通过 Node 代持浏览器凭据。
+
+## WebMCP 可用性
 
 WebMCP 的协议域存在不代表页面已注册工具。先读取实际能力与 `tab.webmcp.listTools()`；空数组就是本次观察没有可调用的工具。`fetchTools()` 返回的绑定版本只执行原注册，同名工具被替换后会失效。浏览器仍处于实验阶段时，网站可能需要 Origin Trial，或在独立测试配置中启用浏览器提供的 WebMCP 实验能力；不能把测试配置下的可用性推断为所有普通浏览器默认可用。

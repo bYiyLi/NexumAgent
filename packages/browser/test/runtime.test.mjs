@@ -312,7 +312,7 @@ async function fixture(
       rmSync(root, { recursive: true, force: true });
     }
   });
-  // The published extension still requires its fixed profile port. Only this
+  // The published extension still requires its profile port range. Only this
   // test process redirects the native listener to an OS-assigned loopback
   // port, so the Core conformance tests cannot collide with a running Dev
   // Agent or with another test process.
@@ -323,7 +323,7 @@ async function fixture(
       "listen",
     );
   HttpServer.prototype.listen = function (port, ...args) {
-    if (port !== 43832) return originalListen.call(this, port, ...args);
+    if (port !== 29030) return originalListen.call(this, port, ...args);
     this.once("listening", () => {
       const address = this.address();
       testPort = address?.port;
@@ -339,7 +339,7 @@ async function fixture(
     else delete HttpServer.prototype.listen;
   }
   assert.equal(enabled.status, "enabled");
-  assert.ok(Number.isInteger(testPort) && testPort > 0 && testPort !== 43832);
+  assert.ok(Number.isInteger(testPort) && testPort > 0 && testPort !== 29030);
   const release = JSON.parse(
       readFileSync(
         path.join(packageRoot, "browser-extension", "release-info.json"),
@@ -519,7 +519,7 @@ async function fixture(
   };
   class ExtensionSocket extends WebSocket {
     constructor(url) {
-      assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+      assert.equal(url, "ws://127.0.0.1:29030/nexum-browser/v1");
       super(`ws://127.0.0.1:${testPort}/nexum-browser/v1`, {
         origin: `chrome-extension://${extensionId}`,
       });

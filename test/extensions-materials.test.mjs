@@ -202,6 +202,14 @@ test("preparation keeps authored trees, fixed source hashes and complete referen
   assert.equal(skill.skillId, "guidance/audit");
   assert.equal(skill.name, "audit");
   assert.equal(skill.content, undefined);
+  assert.match(
+    readFileSync(skill.skillFile, "utf8"),
+    /\[manual\]\(<\.\.\/\.\.\/manual\/README\.md>\)/,
+  );
+  assert.equal(
+    existsSync(path.resolve(skill.path, "../../manual/README.md")),
+    true,
+  );
   assert.equal(
     readFileSync(path.join(skill.path, "references/check.txt"), "utf8"),
     "real reference bytes",

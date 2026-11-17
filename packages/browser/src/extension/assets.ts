@@ -18,6 +18,7 @@ export interface PluginBuild {
   extensionId: string;
   extensionVersion: string;
   port: number;
+  portEnd: number;
   profile: "production" | "development";
   directory: string;
 }
@@ -58,7 +59,8 @@ export async function preparePlugin(
       /^[a-p]{32}$/.test(build.extensionId) &&
       identifier(release.extensionVersion) &&
       release.protocolVersion === 1 &&
-      build.port === (profile === "production" ? 43831 : 43832),
+      build.port === (profile === "production" ? 29040 : 29030) &&
+      build.portEnd === (profile === "production" ? 29049 : 29039),
     "PROTOCOL_MISMATCH",
     "The matching plugin release metadata is unavailable.",
   );
@@ -136,6 +138,7 @@ export async function preparePlugin(
     return {
       profile,
       port: build.port,
+      portEnd: build.portEnd,
       extensionId: build.extensionId,
       extensionVersion: release.extensionVersion,
       directory: destination,

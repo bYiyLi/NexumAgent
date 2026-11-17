@@ -86,7 +86,10 @@ test("every generated catalog write reserves its actual UTF-8 bytes before writi
   const result = await f.catalog.refresh();
   assert.equal(reservations.length, 6);
   assert.equal(files(f.work).size, 6);
-  assert.equal(readFileSync(result.entry, "utf8"), result.content);
+  const manualLines = readFileSync(result.entry, "utf8").split("\n");
+  assert.equal(result.content, manualLines.slice(0, 40).join("\n"));
+  assert.equal(result.truncated, manualLines.length > 40);
+  assert.equal(result.nextLine, manualLines.length > 40 ? 41 : null);
   assert.ok(reservations.every((entry) => entry.released));
 
   await f.catalog.refresh();

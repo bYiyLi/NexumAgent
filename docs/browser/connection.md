@@ -4,7 +4,7 @@
 
 用户在 Agent 中安装 `@nexum-hub/browser`、确认启用，再在目标 Chrome/Edge 配置安装配套 **Nexum browser** 插件。用户在浏览器原生界面确认扩展安装及其权限。Agent 默认不安装本包、不监听此端口。浏览器启动或插件唤醒后主动连接对应 profile 的本机 WS；包内服务可已就绪而没有任何浏览器在线，空连接集合不影响 Agent 的其他能力。
 
-production 地址为 `ws://127.0.0.1:43831/nexum-browser/v1`；development 为 `ws://127.0.0.1:43832/nexum-browser/v1`。两个插件使用不同、稳定的 manifest key/ID 与 storage。浏览器界面显示产品名 **Nexum browser**，开发构建显示环境后缀。固定 ID 是来源检查条件，不宣称密码学身份。
+development 仅使用 `29030–29039`，production 仅使用 `29040–29049`，都监听 `127.0.0.1`，路径为 `/nexum-browser/v1`。Agent 在当前 profile 的十个端口中依次尝试，遇到端口占用或系统拒绝绑定则尝试下一端口；全段不可用返回 `PORT_IN_USE`。浏览器插件仅依次连接本 profile 的端口段，未获有效 ready 的连接最多探测 3 秒；扫描失败后按原有退避重试，不将固定端口失效当作另一环境的许可。两个插件使用不同、稳定的 manifest key/ID 与 storage。浏览器界面显示产品名 **Nexum browser**，开发构建显示环境后缀。固定 ID 是来源检查条件，不宣称密码学身份。
 
 ## 本机信任与远程边界
 

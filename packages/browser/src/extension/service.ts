@@ -38,6 +38,8 @@ import {
 export interface BrowserServiceOptions {
   profile: "production" | "development";
   port: number;
+  portEnd?: number;
+  authorizePort?: (port: number) => void;
   work: string;
   extensionId: string;
   extensionVersion: string;
@@ -148,6 +150,9 @@ export class BrowserService extends EventEmitter {
         Number.isInteger(options.port) &&
         options.port >= 0 &&
         options.port <= 65535 &&
+        Number.isInteger(options.portEnd ?? options.port) &&
+        (options.portEnd ?? options.port) >= options.port &&
+        (options.portEnd ?? options.port) <= 65535 &&
         path.isAbsolute(options.work) &&
         /^[a-p]{32}$/.test(options.extensionId) &&
         identifier(options.extensionVersion),
@@ -280,17 +285,33 @@ export class BrowserService extends EventEmitter {
       wss.handleUpgrade(request, socket, head, (ws) => this.#connection(ws));
     });
     server.on("error", () => {});
-    try {
-      server.listen(this.options.port, "127.0.0.1");
-      await once(server, "listening", { signal: combined });
-    } catch (cause) {
-      throw (cause as NodeJS.ErrnoException).code === "EADDRINUSE"
-        ? failure(
-            "PORT_IN_USE",
-            "The configured browser extension port is already in use.",
+    let bound = false;
+    for (
+      let port = this.options.port;
+      port <= (this.options.portEnd ?? this.options.port);
+      port++
+    ) {
+      combined.throwIfAborted();
+      this.options.authorizePort?.(port);
+      try {
+        server.listen(port, "127.0.0.1");
+        await once(server, "listening", { signal: combined });
+        bound = true;
+        break;
+      } catch (cause) {
+        if (
+          !["EADDRINUSE", "EACCES"].includes(
+            (cause as NodeJS.ErrnoException).code ?? "",
           )
-        : cause;
+        )
+          throw cause;
+      }
     }
+    check(
+      bound,
+      "PORT_IN_USE",
+      "No browser extension port is available in this profile's range.",
+    );
     const address = server.address();
     check(
       address && typeof address === "object",

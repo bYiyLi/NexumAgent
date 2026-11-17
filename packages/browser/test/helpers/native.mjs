@@ -555,7 +555,7 @@ export async function nativeFixture(t, options = {}) {
           diagnostics += JSON.stringify(
             await rpc("Runtime.evaluate", {
               expression:
-                "new Promise(resolve=>{const socket=new WebSocket('ws://127.0.0.1:43832/nexum-browser/v1');const timer=setTimeout(()=>{socket.close();resolve({state:socket.readyState,timeout:true});},2000);socket.onopen=()=>{clearTimeout(timer);socket.close();resolve({opened:true});};socket.onerror=()=>{clearTimeout(timer);resolve({error:true,state:socket.readyState});};})",
+                "new Promise(resolve=>{const socket=new WebSocket('ws://127.0.0.1:29030/nexum-browser/v1');const timer=setTimeout(()=>{socket.close();resolve({state:socket.readyState,timeout:true});},2000);socket.onopen=()=>{clearTimeout(timer);socket.close();resolve({opened:true});};socket.onerror=()=>{clearTimeout(timer);resolve({error:true,state:socket.readyState});};})",
               awaitPromise: true,
               returnByValue: true,
             }),

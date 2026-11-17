@@ -102,14 +102,15 @@ class BrowserInstallation implements ManagedResource {
       );
       this.routes = manifest as unknown as Route[];
       combined.throwIfAborted();
-      host.authorize({
-        type: "connection",
-        value: `127.0.0.1:${this.build.port}`,
-        access: "listen",
-      });
       this.service = new BrowserService({
         ...this.build,
         work: paths.work,
+        authorizePort: (port) =>
+          host.authorize({
+            type: "connection",
+            value: `127.0.0.1:${port}`,
+            access: "listen",
+          }),
         ...(typeof host.config.defaultBrowserId === "string"
           ? { defaultBrowserId: host.config.defaultBrowserId }
           : {}),
@@ -948,7 +949,7 @@ const createExtension: ExtensionFactory = async (host) => {
     ref.report({
       state: "listening",
       profile: installation.build!.profile,
-      port: installation.build!.port,
+      port: service.address!.port,
       pluginDirectory: installation.build!.directory,
       methodCount: Object.keys(methods).length,
     });

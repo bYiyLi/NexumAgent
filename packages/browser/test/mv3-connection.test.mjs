@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import path from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { BrowserService } from "../dist/extension/service.js";
@@ -39,6 +40,7 @@ function fixture(
     pingMs = 20000,
     offlineMs = 60000,
     extensionId = "extension",
+    profile = "development",
   } = {},
 ) {
   const sockets = [],
@@ -145,7 +147,7 @@ function fixture(
     chrome,
     WebSocket: NativeSocket ?? Socket,
     router,
-    profile: "development",
+    profile,
     extensionVersion: "0.1.0",
     pingMs,
     offlineMs,
@@ -154,7 +156,7 @@ function fixture(
   const ready = () => ({
     v: 1,
     type: "ready",
-    profile: "development",
+    profile,
     bootId: "boot",
     connectionId: "connection",
     browserId: "browser",
@@ -482,7 +484,7 @@ test("construction stays cold and the exact profile handshake precedes any atomi
   await f.connection.start();
   await until(() => f.sockets.length === 1);
   const socket = f.sockets[0];
-  assert.equal(socket.url, "ws://127.0.0.1:43832/nexum-browser/v1");
+  assert.equal(socket.url, "ws://127.0.0.1:29030/nexum-browser/v1");
   socket.open();
   assert.equal(socket.sent.length, 1);
   const hello = socket.sent[0];
@@ -504,6 +506,125 @@ test("construction stays cold and the exact profile handshake precedes any atomi
       (v) => typeof v.method === "string" && !Object.hasOwn(v, "supported"),
     ),
   );
+});
+
+test("packaged plugin CSP permits only the ten ports of its own profile", () => {
+  const release = JSON.parse(
+    readFileSync(new URL("../browser-extension/release-info.json", import.meta.url)),
+  );
+  for (const [profile, first] of [
+    ["development", 29030],
+    ["production", 29040],
+  ]) {
+    const info = release.profiles[profile];
+    assert.equal(info.port, first);
+    assert.equal(info.portEnd, first + 9);
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL(`../browser-extension/dist/${profile}/manifest.json`, import.meta.url),
+      ),
+    );
+    assert.equal(
+      manifest.content_security_policy.extension_pages,
+      `script-src 'self'; object-src 'self'; connect-src ${Array.from({ length: 10 }, (_, index) => `ws://127.0.0.1:${first + index}`).join(" ")};`,
+    );
+  }
+});
+
+test("development discovers an available port within its ten-port range", async (t) => {
+  const f = fixture(t);
+  await f.connection.start();
+  for (let index = 0; index < 4; index++) {
+    await until(() => f.sockets.length === index + 1);
+    assert.equal(
+      f.sockets[index].url,
+      `ws://127.0.0.1:${29030 + index}/nexum-browser/v1`,
+    );
+    f.sockets[index].close();
+  }
+  await until(() => f.sockets.length === 5);
+  const available = f.sockets[4];
+  assert.equal(available.url, "ws://127.0.0.1:29034/nexum-browser/v1");
+  available.open();
+  available.message(f.ready());
+  await until(() => f.connection.state().connected);
+  assert.equal(f.sockets.length, 5);
+  assert.equal(f.snapshots(), 1);
+});
+
+test("unavailable development ports never trigger production probing", async (t) => {
+  const f = fixture(t);
+  await f.connection.start();
+  for (let index = 0; index < 10; index++) {
+    await until(() => f.sockets.length === index + 1);
+    assert.equal(
+      f.sockets[index].url,
+      `ws://127.0.0.1:${29030 + index}/nexum-browser/v1`,
+    );
+    f.sockets[index].close();
+  }
+  assert.equal(f.sockets.length, 10);
+  const production = fixture(t, undefined, { profile: "production" });
+  await production.connection.start();
+  await until(() => production.sockets.length === 1);
+  assert.equal(
+    production.sockets[0].url,
+    "ws://127.0.0.1:29040/nexum-browser/v1",
+  );
+  assert.throws(
+    () =>
+      createExtensionConnection({
+        chrome: f.chrome,
+        router: f.router,
+        profile: "development",
+        extensionVersion: "0.1.0",
+        url: "ws://127.0.0.1:29040/nexum-browser/v1",
+      }),
+    { code: "PROFILE_MISMATCH" },
+  );
+});
+
+test("server skips an occupied profile port and rejects an exhausted range", async (t) => {
+  const work = realpathSync.native(
+    mkdtempSync(path.join(tmpdir(), "nexum-browser-range-")),
+  );
+  const blocker = createServer();
+  blocker.listen(0, "127.0.0.1");
+  await once(blocker, "listening");
+  const first = blocker.address().port;
+  const attempted = [];
+  const service = new BrowserService({
+    profile: "development",
+    port: first,
+    portEnd: Math.min(first + 9, 65535),
+    work,
+    extensionId: "a".repeat(32),
+    extensionVersion: "0.1.0",
+    authorizePort(port) {
+      attempted.push(port);
+    },
+  });
+  t.after(async () => {
+    await service.dispose();
+    await new Promise((resolve) => blocker.close(resolve));
+    rmSync(work, { recursive: true, force: true });
+  });
+  const exhausted = new BrowserService({
+    profile: "development",
+    port: first,
+    work,
+    extensionId: "a".repeat(32),
+    extensionVersion: "0.1.0",
+  });
+  await assert.rejects(exhausted.start(new AbortController().signal), {
+    code: "PORT_IN_USE",
+  });
+  await exhausted.dispose();
+  await service.start(new AbortController().signal);
+  assert.equal(attempted[0], first);
+  assert.equal(attempted.at(-1), service.address.port);
+  assert.ok(service.address.port > first);
+  assert.ok(service.address.port <= Math.min(first + 9, 65535));
 });
 
 test("mismatching ready profile closes the channel without dispatching snapshots", async (t) => {
@@ -545,7 +666,7 @@ for (const mode of ["protocol rejection", "silent peer expiry"])
       const closed = Promise.withResolvers();
       class NativeSocket extends globalThis.WebSocket {
         constructor(url) {
-          assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+          assert.equal(url, "ws://127.0.0.1:29030/nexum-browser/v1");
           // Only the injected test transport selects an ephemeral local port;
           // the production profile's fixed-endpoint check is still exercised.
           super(`ws://127.0.0.1:${server.address().port}`);
@@ -608,7 +729,7 @@ test("actual service and MV3 heartbeats retain their connection binding and a la
   await service.start(new AbortController().signal);
   class ServiceSocket extends WebSocket {
     constructor(url) {
-      assert.equal(url, "ws://127.0.0.1:43832/nexum-browser/v1");
+      assert.equal(url, "ws://127.0.0.1:29030/nexum-browser/v1");
       super(`ws://127.0.0.1:${service.address.port}/nexum-browser/v1`, {
         origin: `chrome-extension://${extensionId}`,
       });

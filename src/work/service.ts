@@ -1,4 +1,5 @@
 import {
+  existsSync,
   lstatSync,
   readFileSync,
   realpathSync,
@@ -111,6 +112,19 @@ interface Bundle {
   published: PublishedMaterials;
   description?: { itemId: string; path: string; revision: string };
 }
+const projectDocumentsId = "project:docs";
+const isMarkdown = (name: string) => /\.(md|mdx|markdown)$/i.test(name);
+const isProjectDocument = (relative: string) =>
+  (relative === "README.md" ||
+    (relative.startsWith("docs/") && isMarkdown(relative))) &&
+  relative
+    .split("/")
+    .every(
+      (part) =>
+        part !== "" && part !== "." && part !== ".." && !part.startsWith("."),
+    ) &&
+  !relative.includes("\\") &&
+  !relative.includes("\0");
 const json = (value: unknown, max = 16 * 1024 * 1024): JsonObject =>
   JSON.parse(canonicalJson(value, max)) as JsonObject;
 function withoutDisabled<T extends { disabled: boolean }>(
@@ -856,6 +870,20 @@ export class WorkService {
   async drain(): Promise<void> {
     await Promise.allSettled([...this.#operations]);
   }
+  #projectDocumentRoot(work: WorkRecord): string {
+    const bundle = this.#bundle(work);
+    const project = bundle.view.project as JsonObject | null;
+    requireCondition(
+      work.projectId !== null &&
+        project?.projectId === work.projectId &&
+        project.root === work.pwd &&
+        realpathSync.native(work.pwd) === work.pwd &&
+        lstatSync(work.pwd).isDirectory(),
+      "material_forbidden",
+      "Project documents require the original authorized Project binding.",
+    );
+    return work.pwd;
+  }
   async readMaterial(
     caller: Caller,
     contextId: string,
@@ -867,6 +895,32 @@ export class WorkService {
     signal?.throwIfAborted();
     const work = this.#store.activeWork(contextId, callerKey(caller));
     this.#authorize(caller, { action: "read-material", work });
+    if (itemId === projectDocumentsId) {
+      requireCondition(
+        relativePath && isProjectDocument(relativePath),
+        "material_path_escape",
+        "Only README.md and Markdown files inside docs/ are project documents.",
+      );
+      const root = this.#projectDocumentRoot(work);
+      const filename = path.resolve(root, relativePath);
+      const actual = realpathSync.native(filename);
+      requireCondition(
+        actual === filename &&
+          contains(root, actual) &&
+          lstatSync(actual).isFile(),
+        "material_path_escape",
+        "The document must remain a regular file inside the authorized Project.",
+      );
+      const result = await boundedFile(actual, 1024 * 1024, signal);
+      this.#authorize(caller, { action: "read-material", work });
+      requireCondition(
+        this.#store.activeWork(contextId, callerKey(caller)).revision ===
+          work.revision,
+        "context_revision_mismatch",
+        "The work changed while its document was read.",
+      );
+      return { path: actual, ...result };
+    }
     const bundle = this.#bundle(work);
     const local =
       caller.source === "owner_session"
@@ -1010,6 +1064,104 @@ export class WorkService {
     signal?.throwIfAborted();
     const work = this.#store.activeWork(contextId, callerKey(caller));
     this.#authorize(caller, { action: "read-material", work });
+    if (itemId === projectDocumentsId) {
+      requireCondition(
+        !relativePath,
+        "material_path_escape",
+        "The document tree starts at the Project root.",
+      );
+      const root = this.#projectDocumentRoot(work);
+      const entries: { displayPath: string; kind: "file" | "directory" }[] = [];
+      let bytes = Buffer.byteLength('{"entries":[]}');
+      const add = (displayPath: string, kind: "file" | "directory") => {
+        const entry = { displayPath, kind };
+        bytes +=
+          Buffer.byteLength(JSON.stringify(entry)) + (entries.length ? 1 : 0);
+        requireCondition(
+          entries.length < 1000 && bytes <= 64 * 1024,
+          "material_tree_too_large",
+          "The project document tree exceeds its discovery budget.",
+        );
+        entries.push(entry);
+      };
+      const readme = path.join(root, "README.md");
+      if (
+        existsSync(readme) &&
+        lstatSync(readme).isFile() &&
+        realpathSync.native(readme) === readme
+      ) {
+        add("README.md", "file");
+      }
+      const docs = path.join(root, "docs");
+      if (existsSync(docs)) {
+        requireCondition(
+          lstatSync(docs).isDirectory() && realpathSync.native(docs) === docs,
+          "material_path_escape",
+          "The document directory must not redirect.",
+        );
+        add("docs", "directory");
+        let visited = 0;
+        const visit = async (
+          directory: string,
+          depth: number,
+        ): Promise<void> => {
+          signal?.throwIfAborted();
+          this.#authorize(caller, { action: "read-material", work });
+          requireCondition(
+            depth <= 16 &&
+              realpathSync.native(directory) === directory &&
+              contains(docs, directory) &&
+              lstatSync(directory).isDirectory(),
+            "material_path_escape",
+            "The document directory must remain inside the authorized Project.",
+          );
+          const children = await readdir(directory, { withFileTypes: true });
+          children.sort(
+            (a, b) =>
+              Number(b.isDirectory()) - Number(a.isDirectory()) ||
+              a.name.localeCompare(b.name),
+          );
+          for (const child of children) {
+            signal?.throwIfAborted();
+            requireCondition(
+              ++visited <= 5000,
+              "material_tree_too_large",
+              "Too many document directory entries.",
+            );
+            if (child.name.startsWith(".") || child.isSymbolicLink()) continue;
+            if (
+              !child.isDirectory() &&
+              (!child.isFile() || !isMarkdown(child.name))
+            )
+              continue;
+            const filename = path.join(directory, child.name);
+            requireCondition(
+              realpathSync.native(filename) === filename &&
+                contains(docs, filename) &&
+                (child.isDirectory()
+                  ? lstatSync(filename).isDirectory()
+                  : lstatSync(filename).isFile()),
+              "material_path_escape",
+              "The document tree changed or redirected.",
+            );
+            add(
+              path.relative(root, filename).split(path.sep).join("/"),
+              child.isDirectory() ? "directory" : "file",
+            );
+            if (child.isDirectory()) await visit(filename, depth + 1);
+          }
+        };
+        await visit(docs, 0);
+      }
+      this.#authorize(caller, { action: "read-material", work });
+      requireCondition(
+        this.#store.activeWork(contextId, callerKey(caller)).revision ===
+          work.revision,
+        "context_revision_mismatch",
+        "The work changed while its document tree was listed.",
+      );
+      return { entries };
+    }
     const bundle = this.#bundle(work),
       local =
         caller.source === "owner_session"

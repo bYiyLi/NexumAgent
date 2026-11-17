@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { SqliteStore } from "../dist/storage/sqlite.js";
@@ -304,6 +305,33 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
     readFileSync(first.agent.docs.entry, "utf8"),
     /Nexum Agent 使用手册/,
   );
+  assert.match(first.agent.docs.content, /按任务选择资料/);
+  assert.match(first.agent.docs.content, /skillFile/);
+  assert.match(first.agent.docs.content, /input.reference/);
+  assert.match(first.agent.docs.content, /nextLine/);
+  assert.equal((first.agent.docs.content.match(/```/g) ?? []).length, 2);
+  assert.match(first.agent.docs.content, /## 资料索引/);
+  const manual = readFileSync(first.agent.docs.entry, "utf8");
+  const example = manual.match(/```javascript\n([\s\S]*?)\n```/);
+  assert.ok(example, "the model-visible manual provides a complete JavaScript example");
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const readPage = new AsyncFunction("context", example[1]);
+  const manualLines = manual.split(/\r?\n/);
+  const firstPage = await readPage({
+    input: { reference: first.agent.docs.entry },
+  });
+  assert.equal(firstPage.content, manualLines.slice(0, 40).join("\n"));
+  assert.equal(firstPage.nextLine, manualLines.length > 40 ? 41 : null);
+  if (firstPage.nextLine !== null) {
+    const secondPage = await readPage({
+      input: {
+        reference: pathToFileURL(first.agent.docs.entry).href,
+        startLine: firstPage.nextLine,
+      },
+    });
+    assert.equal(secondPage.content, manualLines.slice(40, 80).join("\n"));
+    assert.equal(secondPage.nextLine, manualLines.length > 80 ? 81 : null);
+  }
   const packages = readFileSync(first.agent.modules.packagesIndex, "utf8");
   assert.match(packages, /tiny installed library/);
   assert.match(packages, /available/);

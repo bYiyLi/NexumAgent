@@ -48,7 +48,7 @@ docs/browser/                     # 设计与验收台账
 | 项                 | 规则                                                                                                                         |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | 配置来源           | 当前 profile 的显式启用配置经通用 host.config 提供；extension namespace=browser                                              |
-| 监听               | production `127.0.0.1:43831`，development `127.0.0.1:43832`；WS 路径 `/nexum-browser/v1`                                     |
+| 监听               | production `127.0.0.1:29040–29049`，development `127.0.0.1:29030–29039`；WS 路径 `/nexum-browser/v1`                                     |
 | 环境               | 来自可信 host.context.profile；production/development 分开。未知 profile 拒绝启用，不从 npm dist-tag 猜身份                  |
 | 其他自定义 profile | 必须显式配置未冲突端口，并使用该 profile 的专用插件构建/稳定 ID；首发标准矩阵仅 production/development，不能静默共用默认端口 |
 | 扩展持久目录       | `<work>/.nexum-browser/`，只放本包安装身份、浏览器 profile 映射、非敏感偏好和插件资产；不用 Agent 内部库                     |

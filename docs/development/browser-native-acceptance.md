@@ -1,5 +1,22 @@
 # Nexum browser 原生验收记录
 
+## 2026-11-17：IANA 未分配冷门端口段候选（尚未发布）
+
+- 继本日 `43830–43849` 在 Windows + WSL Mirrored 网络模式中与 `43255–47350` 保留区间冲突后，进一步核对 IANA 官方 [Service Name and Transport Protocol Port Number Registry](https://www.iana.org/assignments/service-names-port-numbers)：`29001–29117` 在当前登记表标记为 `Unassigned`（未分配）。选择 Dev `29030–29039`、Production `29040–29049`，保留每个环境十个端口、按顺序尝试、限定本环境 MV3 CSP、现有握手身份校验和失败后的退避。未分配不表示平台独占或永远空闲。
+- 在 Yi Test Win / Development Agent `0.0.3-next.18` 上，以实际 TCP socket 在 `127.0.0.1` 逐个探测新端口段：**20/20 可以监听并正常关闭**；同机 Windows 默认 TCP 动态端口起点为 `49152`，当前 WSL 的临时端口范围是 `43255–47350`。这只确认当次本机可用，不保证其他设备或重启后状态。
+- 本机 macOS/arm64 对新端口候选执行 `corepack pnpm --dir packages/browser typecheck`、`build`、`test`：**223 项通过、0 失败、0 跳过**，包括 Dev/Production 的端口段枚举、监听回退、隔离和插件 CSP。代码及组件检查成功不等于已部署或真实 Windows Browser 控制通过。
+- 同一轮 Agent Core 执行 `corepack pnpm typecheck`、`corepack pnpm build` 与全部 `test/*.test.mjs`：**1386 项通过、0 失败、27 项跳过**。上述只核对当前本地源码，不等价于 npm 发行、Cloud 部署、Windows Chrome/Edge 插件实际连通。
+- 新候选只修改本地 Agent/Browser 源码、插件、对应测试与设计资料；尚未推送/发布 npm，也未升级 Windows Browser 包、重新加载 Chrome/Edge 插件或完成真实 Host 端到端验收。下面 `43830–43849` 的旧候选及失败证据保留作为历史记录。
+
+## 2026-11-17：Profile 十端口段候选（尚未发布）
+
+- 按本轮明确要求，Development 仅在本机 `43830–43839` 中顺序绑定可用端口，Production 仅在 `43840–43849` 中绑定。Chrome/Edge 配套 MV3 插件同步限定各自十个 WebSocket 地址，未完成握手时短暂探测并尝试下一端口；全部不可用时仍明确失败，不越过环境边界或重放网页动作。监听授权按实际候选端口逐次检查，资源状态报告实际监听端口。
+- 本机 macOS/arm64 对候选源码执行 `corepack pnpm --dir packages/browser typecheck`、`build`、`test`，Browser 共 **223 项通过，0 失败、0 跳过**。新增回归覆盖占用后选择下一个端口、整个单端口段不可用、Dev/Production 插件只探测所属范围以及最终 MV3 CSP 只允许本环境十个端口。属于组件/模拟连接验收，不是 Windows 实际安装或用户浏览器端到端成功。
+- 在已授权 Windows 测试机 Yi Test Win 的 Development Agent `0.0.3-next.18` 上，使用独立 Node 程序实际尝试绑定 `43830–43849` 共二十个 loopback TCP 端口，**20/20 返回 `EADDRINUSE`**。因此端口段候选仍不能解决该机器当前全部候选端口不可用的问题；未修改 Windows 网络配置、未更新 Agent/Browser npm 包及用户 Chrome/Edge 插件，未报告真实连接已恢复。
+- 同机进一步只读排查定位原因：Windows 的 `%USERPROFILE%\.wslconfig` 明确启用 `networkingMode=mirrored`，已运行的 WSL Ubuntu 的 `/proc/sys/net/ipv4/ip_local_port_range` 恰为 `43255–47350`（4096 端口）。Windows 独立 Node 与 .NET TcpListener 在区间内分别得到 `EADDRINUSE` 和 Winsock 10048；边界探测 `43254`、`47351` 可监听，`43255`、`47350` 不能监听；`netstat`、`Get-NetTCPConnection` 及 IPv4/IPv6 excludedportrange 均未显示该区间的普通占用。此结果与微软 WSL 团队说明的 Mirrored 模式 HNS 为 Linux 临时端口保留 4096 端口行为一致（[WSL issue #40169](https://github.com/microsoft/WSL/issues/40169)）。因此本次固定端口段完全落入 WSL 保留区间，增加十端口回退仍不足以恢复该 Windows 设备。
+- 只读检测 Windows `42030–42049` 当前 20 个端口均可监听，但这不是对重启后可用性或更换设计的授权；WSL 保留窗口可能在后续启动时变化。未停止 WSL、未调整 `.wslconfig`、未使用其他端口代替用户已指定的范围。Agent Core 类型、构建及全量回归亦通过：1386 项通过、27 项跳过、0 失败。
+- 上线时需同时发布、启用本包与匹配的 MV3 插件，并重新加载现有插件；旧插件仍只连接旧固定端口。完整 250 项与三平台真实 Browser 原生矩阵保持原有未完成状态。
+
 当前状态为 `in_progress`。候选公开入口、受管方法、MV3 插件和五类贡献已经存在；完整 250 项、Chrome/Edge 与三平台矩阵尚未完成，未发布 npm。用户已在现有 Chrome 手动加载开发扩展并完成局部场景，范围与限制见下文。设计与稳定 ID 由 [browser 设计](../browser/README.md)及[成员映射](../browser/capability-matrix.json)拥有，本文件只记录实际证据与缺口。
 
 ## 2026-11-17：AI 可靠交互候选回归（本地，未发布）
