@@ -110,7 +110,7 @@ test("Unix native Agent execs managed runtime without a resident helper", {
   await mkdir(path.join(program, "runtime", "bin"), { recursive: true });
   await writeFile(path.join(program, "service-runner.mjs"), "");
   const command = path.join(program, "runtime", "bin", "node");
-  await writeFile(command, "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$1\" \"$2\" \"$3\" \"$HOME\" \"${NODE_OPTIONS:-empty}\"\n");
+  await writeFile(command, "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$1\" \"$2\" \"$3\" \"$4\" \"$HOME\" \"${NODE_OPTIONS:-empty}\"\n");
   await chmod(command, 0o700);
   const executable = fileFor(
     process.platform, process.arch === "x64" ? "x64" : "arm64", "nexum-agent",
@@ -129,9 +129,10 @@ test("Unix native Agent execs managed runtime without a resident helper", {
   const lines = stdout.trim().split("\n");
   assert.equal(Number(lines[0]), child.pid,
     "syscall.Exec must replace the native Host with Node in the same PID");
-  assert.equal(lines[1], path.join(program, "service-runner.mjs"));
-  assert.equal(lines[2], "--profile");
-  assert.equal(lines[3], "development");
-  assert.equal(lines[4], home);
-  assert.equal(lines[5], "empty");
+  assert.equal(lines[1], "--experimental-vm-modules");
+  assert.equal(lines[2], path.join(program, "service-runner.mjs"));
+  assert.equal(lines[3], "--profile");
+  assert.equal(lines[4], "development");
+  assert.equal(lines[5], home);
+  assert.equal(lines[6], "empty");
 });

@@ -124,7 +124,7 @@ func launchOnce(config launchConfig, output *os.File) (uint32, error) {
 	}
 	// DETACHED_PROCESS (not CREATE_NO_WINDOW) is essential: the latter
 	// creates a hidden but still attached console.
-	command := syscall.EscapeArg(config.node) + " " +
+	command := syscall.EscapeArg(config.node) + " --experimental-vm-modules " +
 		syscall.EscapeArg(config.runner) + " --profile " + config.profile
 	commandPointer, err := syscall.UTF16PtrFromString(command)
 	if err != nil {

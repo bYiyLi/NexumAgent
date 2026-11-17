@@ -98,3 +98,60 @@ test("a malformed update request exits instead of launching an unverified Agent"
   );
   assert.equal(result.status, 1);
 });
+
+test("native VM launcher imports the Agent into its own Node process rather than spawning a second Node", {
+  timeout: 120000,
+}, async (t) => {
+  const scratch = realpathSync.native(
+    await mkdtemp(path.join(tmpdir(), "nexum-launcher-single-node-")),
+  );
+  t.after(() => rm(scratch, { recursive: true, force: true, maxRetries: 3 }));
+  const home = path.join(scratch, "home");
+  await mkdir(home, { recursive: true });
+  const source = path.join(scratch, "source");
+  const program = path.join(home, ".nexum-dev", "program");
+  const marker = path.join(home, "runtime.json");
+  for (const sub of ["dist/application", "contracts", "scripts", "node_modules"])
+    await mkdir(path.join(source, sub), { recursive: true });
+  await writeFile(
+    path.join(source, "package.json"),
+    '{"name":"@nexum-hub/agent","version":"0.0.1","type":"module"}',
+  );
+  await writeFile(
+    path.join(source, "dist/cli.js"),
+    "if(process.argv.includes('--version')){console.log('0.0.1')}else{process.exit(91)}",
+  );
+  await writeFile(path.join(source, "contracts", "fixture.json"), "{}");
+  await writeFile(
+    path.join(source, "dist/application/main.js"),
+    "import {writeFileSync} from 'node:fs';export async function runAgent(profile,{version}){writeFileSync(" +
+      JSON.stringify(marker) +
+      ",JSON.stringify({pid:process.pid,argv:process.argv.slice(2),flags:process.execArgv,profile,version}));return 0}",
+  );
+  for (const name of ["service.mjs", "npm-install.mjs", "service-runner.mjs"])
+    await cp(new URL("../scripts/" + name, import.meta.url),
+      path.join(source, "scripts", name));
+  await installNpmAgent({
+    profile: "development", version: "0.0.1", home,
+    register: false, source,
+    config: { server_url: "http://127.0.0.1:8123/", token: "private-test-token" },
+  });
+  for (const name of ["service.mjs", "npm-install.mjs", "service-runner.mjs"])
+    await cp(new URL("../scripts/" + name, import.meta.url),
+      path.join(program, name));
+  const invocation = spawnSync(
+    process.execPath,
+    ["--experimental-vm-modules", path.join(program, "service-runner.mjs"),
+      "--profile", "development"],
+    { encoding: "utf8", timeout: 12000,
+      env: { ...process.env, HOME: home, USERPROFILE: home } },
+  );
+  assert.equal(invocation.status, 0, invocation.stderr);
+  const fact = JSON.parse(await readFile(marker, "utf8"));
+  assert.equal(fact.pid, invocation.pid,
+    "the business Agent must reuse the original Node launcher process");
+  assert.deepEqual(fact.argv, ["--profile", "development"]);
+  assert.ok(fact.flags.includes("--experimental-vm-modules"));
+  assert.equal(fact.profile, "development");
+  assert.equal(fact.version, "0.0.1");
+});

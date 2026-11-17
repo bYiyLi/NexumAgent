@@ -195,6 +195,34 @@ try {
   await command(null);
   const code = `import fs from 'node:fs';if(process.argv.includes('--version')){console.log('0.0.1');process.exit(0)};const ledger=${JSON.stringify(ledger)},control=${JSON.stringify(control)};let previous={boots:[]};try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'));}catch{};const state={boots:[...previous.boots,{pid:process.pid,parentPid:process.ppid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};process.stderr.write('native-service-fixture-started\\n');fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);setInterval(()=>{try{const command=JSON.parse(fs.readFileSync(control,'utf8'));if(Number.isInteger(command.exitCode)){fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));fs.renameSync(control+'.consumed',control);process.exit(command.exitCode);}}catch{}},50);`;
   await writeFile(path.join(appPackage, "dist/cli.js"), code);
+  await mkdir(path.join(appPackage, "dist/application"), { recursive: true });
+  const embedded = `import fs from 'node:fs';
+  const ledger=${JSON.stringify(ledger)}, control=${JSON.stringify(control)};
+  export async function runAgent(profile,{signal}){
+    let previous={boots:[]};
+    try{previous=JSON.parse(fs.readFileSync(ledger,'utf8'))}catch{}
+    const state={boots:[...previous.boots,{pid:process.pid,parentPid:process.ppid,args:process.argv.slice(2),flags:process.execArgv}],pid:process.pid};
+    fs.writeFileSync(ledger+'.new',JSON.stringify(state));fs.renameSync(ledger+'.new',ledger);
+    return await new Promise(resolve=>{
+      const timer=setInterval(()=>{
+        try{
+          const cmd=JSON.parse(fs.readFileSync(control,'utf8'));
+          if(Number.isInteger(cmd.exitCode)){
+            fs.writeFileSync(control+'.consumed',JSON.stringify({exitCode:null}));
+            fs.renameSync(control+'.consumed',control);
+            if (cmd.exitCode === 75) {
+              // Mirror the actual Cloud-driven Agent upgrade contract.
+              fs.writeFileSync(${JSON.stringify(path.join(program, "update.json"))},
+                JSON.stringify({version:"0.0.1"}));
+            }
+            clearInterval(timer);resolve(cmd.exitCode);
+          }
+        }catch{}
+      },50);
+      signal.addEventListener('abort',()=>{clearInterval(timer);resolve(0)},{once:true});
+    });
+  }`;
+  await writeFile(path.join(appPackage, "dist/application/main.js"), embedded);
   plan = servicePlan({
     profile: "development",
     home,
@@ -227,7 +255,6 @@ try {
     "Startup must not create duplicate native leaders.",
   );
   assert.deepEqual(record.boots.at(-1).args, [
-    "run",
     "--profile",
     "development",
   ]);

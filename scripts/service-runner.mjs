@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
+import vm from "node:vm";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
 import {
   clearOldInstallation, installedAgentVersion, readState, updateNpmAgent,
@@ -49,7 +51,28 @@ async function targetVersion() {
   throw new Error("The Agent installation has no requested version.");
 }
 
-async function runAgent() {
+async function runAgent(version) {
+  // A native Host launches Node with VM modules already enabled. Run the
+  // Agent in this *same* process: Windows never starts another console
+  // subsystem Node, and Unix needs no second process to supervise.
+  if (typeof vm.SourceTextModule === "function") {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    process.on("SIGINT", abort);
+    process.on("SIGTERM", abort);
+    try {
+      const entry = path.join(program, "app", "node_modules",
+        "@nexum-hub", "agent", "dist", "application", "main.js");
+      const { runAgent: start } = await import(pathToFileURL(entry).href);
+      return await start(profile, { version, signal: controller.signal });
+    } finally {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    }
+  }
+  // Compatibility for old registered user tasks which still launch this
+  // script without the required VM flag. A manual reinstall migrates them
+  // to the native entrypoint and eliminates the extra process.
   const cli = path.join(
     program, "app", "node_modules", "@nexum-hub", "agent", "dist", "cli.js",
   );
@@ -95,7 +118,7 @@ async function startOnce() {
     // Clean historical install debris even when the installed app is valid.
     await clearOldInstallation(program);
     if (stopped) return 0;
-    const exitCode = await runAgent();
+    const exitCode = await runAgent(target);
     if (stopped || exitCode === 0) return 0;
     if (exitCode === 75) {
       const requested = await readState(path.join(program, "update.json"));

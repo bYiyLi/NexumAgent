@@ -43,6 +43,6 @@ func run(config launchConfig) error {
 		environment = append(environment, entry)
 	}
 	environment = append(environment, "HOME="+config.home)
-	argv := []string{config.node, config.runner, "--profile", config.profile}
+	argv := []string{config.node, "--experimental-vm-modules", config.runner, "--profile", config.profile}
 	return syscall.Exec(config.node, argv, environment)
 }
