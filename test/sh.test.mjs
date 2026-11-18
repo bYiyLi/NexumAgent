@@ -374,7 +374,16 @@ test("MCP observation timeout keeps the same exec alive; cancellation waits for 
   assert.equal(observing.run.endedAt, null);
   assert.equal(observing.resources.items[0].resourceId, row.resourceId);
   await f.engine.cancel(caller, accepted.run.runId);
-  const closed = await f.finish(accepted.run.runId);
+  // Windows may keep the Run in "cancelling" while the native Job process
+  // tree is still closing. Do not treat cancellation acceptance or a single
+  // observation window as proof of terminal cleanup.
+  const closed = await until(
+    () => f.finish(accepted.run.runId),
+    (view) =>
+      view.run.status === "cancelled" &&
+      f.store.getResource(row.resourceId).closedAt !== null,
+    20000,
+  );
   assert.equal(closed.run.status, "cancelled");
   assert.notEqual(f.store.getResource(row.resourceId).closedAt, null);
 });
