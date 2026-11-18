@@ -49,7 +49,7 @@ func parseConfig(args []string) (launchConfig, error) {
 	config.node = nativeNode(config.program)
 	config.runner = filepath.Join(config.program, "service-runner.mjs")
 	if config.layout == "work" {
-		config.runner = filepath.Join(config.program, "work", "node_modules",
+		config.runner = filepath.Join(config.program, "core", "node_modules",
 			"@nexum-hub", "agent", "dist", "cli.js")
 	}
 	return config, nil

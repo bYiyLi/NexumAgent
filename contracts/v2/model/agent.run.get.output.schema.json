@@ -50,6 +50,9 @@
         "code": {
           "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TextPage"
         },
+        "part": {
+          "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/RunView/properties/part"
+        },
         "input": {},
         "logs": {
           "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/TextPage"

@@ -3,15 +3,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -190,88 +184,6 @@ func launchOnce(config launchConfig, output *os.File) (uint32, error) {
 	return exit, nil
 }
 
-// A Task Scheduler multi-action task cannot reliably prevent the second action
-// when PowerShell initialization fails. The GUI-subsystem native entrypoint
-// runs the Cloud script without a console, waits, then starts the Core.
-func prepareCloud(config launchConfig, output *os.File) error {
-	contents, err := os.ReadFile(filepath.Join(config.program, "config.json"))
-	if err != nil {
-		return err
-	}
-	var configFile struct {
-		ServerURL string `json:"server_url"`
-	}
-	if err := json.Unmarshal(contents, &configFile); err != nil {
-		return err
-	}
-	base, err := url.Parse(configFile.ServerURL)
-	if err != nil || base.Host == "" || (base.Scheme != "https" &&
-		!(config.profile == "development" && base.Scheme == "http")) ||
-		base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return fmt.Errorf("invalid Cloud bootstrap URL")
-	}
-	endpoint, err := url.JoinPath(base.String(), "agent/install.ps1")
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Cache-Control", "no-cache")
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
-			if req.URL.Scheme != base.Scheme || req.URL.Host != base.Host {
-				return http.ErrUseLastResponse
-			}
-			return nil
-		},
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return fmt.Errorf("Cloud bootstrap download failed")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Cloud bootstrap HTTP status %d", response.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
-	if err != nil || len(data) == 0 || len(data) > 1024*1024 {
-		return fmt.Errorf("Cloud bootstrap size or read failure")
-	}
-	file, err := os.CreateTemp(config.program, ".bootstrap-*.ps1")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	currentNative, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	ps := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	command := exec.Command(ps, "-NoLogo", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-File", file.Name())
-	command.Env = append(os.Environ(),
-		"NEXUM_SERVER="+strings.TrimRight(base.String(), "/"),
-		"NEXUM_PROFILE="+config.profile,
-		"NEXUM_BOOTSTRAP_SERVICE=1",
-		"NEXUM_RUNNING_NATIVE="+currentNative)
-	command.Stdout, command.Stderr = output, output
-	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: detachedProcess, HideWindow: true}
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("Cloud bootstrap execution failed")
-	}
-	return nil
-}
-
 func run(config launchConfig) error {
 	if err := os.Setenv("USERPROFILE", config.home); err != nil {
 		return err
@@ -297,13 +209,6 @@ func run(config launchConfig) error {
 	}
 	defer log.Close()
 	for {
-		if config.layout == "work" {
-			if err := prepareCloud(config, log); err != nil {
-				fmt.Fprintln(log, time.Now().UTC().Format(time.RFC3339), "cloud_bootstrap_failed")
-				return err
-			}
-			os.Setenv("NEXUM_CLOUD_BOOTSTRAP", "1")
-		}
 		exit, cause := launchOnce(config, log)
 		if cause != nil {
 			fmt.Fprintln(log, time.Now().UTC().Format(time.RFC3339), "native_start_failed")

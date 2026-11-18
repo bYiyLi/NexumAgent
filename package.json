@@ -32,7 +32,6 @@
     "contracts",
     "skills",
     "scripts/service.mjs",
-	"scripts/cloud-service.mjs",
     "scripts/npm-install.mjs",
     "scripts/service-runner.mjs",
     "scripts/startup-report.mjs",

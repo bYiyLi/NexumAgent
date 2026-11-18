@@ -586,8 +586,12 @@ async function prepare() {
       void (async () => {
         try {
           const result = await audit.run(execute);
-          send({ type: "root-returned" });
           const fixed = await settle(result);
+          // Returned output.result() values can contain unawaited output
+          // helpers. Resolve their authorized Core calls before closing new
+          // work admission; otherwise root-returned races those callbacks
+          // and incorrectly fails the Run with run_stopping.
+          send({ type: "root-returned" });
           // Non-awaited synchronous output helpers must still finish their
           // Core-authorized invocations before the Run succeeds.
           const pending = [...inFlight];

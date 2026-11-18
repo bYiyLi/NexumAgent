@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCloudManagedWorkLayoutUsesSinglePackageDirectory(t *testing.T) {
+func TestCloudManagedWorkLayoutUsesIsolatedCoreDirectory(t *testing.T) {
 	home, err := os.MkdirTemp("", "nexum-native-work-")
 	if err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestCloudManagedWorkLayoutUsesSinglePackageDirectory(t *testing.T) {
 	}
 	root := filepath.Join(home, ".nexum-dev")
 	if cfg.program != root || cfg.node != nativeNode(root) ||
-		cfg.runner != filepath.Join(root, "work", "node_modules", "@nexum-hub", "agent", "dist", "cli.js") {
+		cfg.runner != filepath.Join(root, "core", "node_modules", "@nexum-hub", "agent", "dist", "cli.js") {
 		t.Fatalf("Cloud-managed native layout is inconsistent: %+v", cfg)
 	}
 	if _, err := parseConfig([]string{"--profile", "development", "--home", home, "--layout", "unknown"}); err == nil {

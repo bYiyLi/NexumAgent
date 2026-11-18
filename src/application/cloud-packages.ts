@@ -4,7 +4,7 @@ import path from "node:path";
 const name = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const version = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
 
-/** Cloud Bootstrap owns the single package.json/pnpm installation.
+/** Cloud init updates optional work packages separately from the required Core.
  * Only installed, directly declared dependencies can enter the public module
  * catalog. Core itself must never become an importable user extension. */
 export function cloudManagedPackages(root: string): ReadonlyMap<string, string> {

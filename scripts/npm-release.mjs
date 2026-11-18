@@ -181,7 +181,6 @@ function inspectRelease() {
         "dist/cli.js",
         "contracts/v2/common.schema.json",
         "scripts/service.mjs",
-		"scripts/cloud-service.mjs",
         "scripts/npm-install.mjs",
         "scripts/service-runner.mjs",
         "native/windows-x64/nexum-agent.exe",
