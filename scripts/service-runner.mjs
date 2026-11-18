@@ -10,7 +10,8 @@ import {
   restoreInterruptedCoreUpdate, updateNpmAgent,
 } from "./npm-install.mjs";
 import {
-  reconcileStartupPackages, startupEvent, startupIssue, verifyStartupNpm,
+  coreFailureForAttempt, reconcileStartupPackages, updateStartupPackages, startupEvent,
+  startupIssue, verifyStartupNpm,
   writeStartupReport,
 } from "./startup-report.mjs";
 
@@ -70,7 +71,7 @@ async function targetVersion() {
   throw new Error("The Agent installation has no requested version.");
 }
 
-async function runAgent(version) {
+async function runAgent(version, attemptId) {
   // A native Host launches Node with VM modules already enabled. Run the
   // Agent in this *same* process: Windows never starts another console
   // subsystem Node, and Unix needs no second process to supervise.
@@ -83,7 +84,9 @@ async function runAgent(version) {
       const entry = path.join(program, "app", "node_modules",
         "@nexum-hub", "agent", "dist", "application", "main.js");
       const { runAgent: start } = await import(pathToFileURL(entry).href);
-      return await start(profile, { version, signal: controller.signal });
+      return await start(profile, {
+        version, signal: controller.signal, attemptId,
+      });
     } finally {
       process.off("SIGINT", abort);
       process.off("SIGTERM", abort);
@@ -188,10 +191,12 @@ async function startOnce() {
     });
     npmPhase = "work_dependencies";
     const started = Date.now();
+    let packagesReady = false;
     try {
       const packages = await reconcileStartupPackages({
         root, program, profile,
       });
+      packagesReady = true;
       await recordEvent(root, profile, "work_npm", packages.status, {
         attemptId, durationMs: packages.durationMs,
         packageCount: packages.packageCount,
@@ -203,9 +208,25 @@ async function startOnce() {
       await recordEvent(root, profile, "work_npm", "failed", {
         attemptId, durationMs: Date.now() - started, failureCode,
       });
-      // npm is a mandatory startup prerequisite, not an optional extension.
-      // A valid old node_modules snapshot is not permission to bypass failure.
-      throw cause;
+      // Work packages are optional; their absence must not block Core.
+    }
+    if (packagesReady) {
+      npmPhase = "work_update";
+      const updatingAt = Date.now();
+      try {
+        const update = await updateStartupPackages({ root, program, profile });
+        await recordEvent(root, profile, "work_update", update.status, {
+          attemptId, durationMs: update.durationMs,
+          packageCount: update.packageCount,
+        });
+      } catch (cause) {
+        const failureCode = cause?.code ?? "npm_update_failed";
+        issues.push(startupIssue("npm", "work_update", failureCode));
+        await recordEvent(root, profile, "work_update", "failed", {
+          attemptId, durationMs: Date.now() - updatingAt, failureCode,
+        });
+        // A failed optional update leaves its previous version untouched.
+      }
     }
     npmPassed = true;
     // Installation debris is not an Agent identity or execution dependency.
@@ -232,7 +253,8 @@ async function startOnce() {
       await diagnostic("startup_report_unavailable");
     }
     if (stopped) return 0;
-    const exitCode = await runAgent(active);
+    npmPhase = "core_runtime";
+    const exitCode = await runAgent(active, attemptId);
     if (stopped || exitCode === 0) return 0;
     if (exitCode === 75) {
       const requested = await readState(path.join(program, "update.json"));
@@ -245,8 +267,31 @@ async function startOnce() {
       await diagnostic("agent_restart_requested");
       return 76; // Supervised, nonzero exit triggers the platform restart policy.
     }
+    const coreFailure = await coreFailureForAttempt(root, profile, attemptId);
+    const issue = startupIssue(
+      "core", coreFailure?.stage ?? "core_runtime",
+      coreFailure?.code ?? "agent_exited",
+      coreFailure ?? {},
+    );
+    await recordEvent(root, profile, "core_runtime", "failed", {
+      attemptId, failureCode: issue.code,
+      ...(coreFailure?.sourceCode ? { sourceCode: coreFailure.sourceCode } : {}),
+    });
+    try {
+      await writeStartupReport(root, {
+        version: 1, profile, attemptId, startedAt,
+        completedAt: new Date().toISOString(),
+        targetVersion: target, activeVersion: active,
+        status: "blocked", issues: [...issues, issue],
+      });
+    } catch {
+      await diagnostic("startup_report_unavailable");
+    }
     await diagnostic("agent_exited", "code=" + String(exitCode));
-    return 1;
+    // A permanent local/rejected configuration is stopped, not retried.
+    // The blocked report remains authoritative despite the supervisor's
+    // successful stop of its retry loop.
+    return exitCode === 78 ? 0 : 1;
   } catch (error) {
     if (stopped) return 0;
     if (!npmPassed) {
@@ -288,10 +333,28 @@ async function startOnce() {
       await diagnostic("npm_startup_blocked", "code=" + failure);
       return 1; // systemd / launchd / Windows Supervisor can retry.
     }
-    // Preserve a safe stage/code, not npm stderr, URLs, environment or tokens.
+    // Preserve a safe phase/code for import/launcher failures as well.
+    const failureCode = typeof error?.code === "string" &&
+      /^[a-zA-Z][a-zA-Z0-9_-]{0,100}$/.test(error.code)
+      ? error.code : "agent_launcher_failed";
+    await recordEvent(root, profile, "core_runtime", "failed", {
+      attemptId, failureCode,
+    });
+    try {
+      await writeStartupReport(root, {
+        version: 1, profile, attemptId, startedAt,
+        completedAt: new Date().toISOString(),
+        targetVersion: target ?? "unresolved",
+        activeVersion: active ?? "unavailable",
+        status: "blocked",
+        issues: [...issues, startupIssue("core", npmPhase, failureCode)],
+      });
+    } catch {
+      await diagnostic("startup_report_unavailable");
+    }
     await diagnostic(
       "agent_launcher_failed",
-      "code=" + String(error?.code ?? "UNEXPECTED").replace(/[^A-Z_0-9]/gi, ""),
+      "code=" + failureCode,
     );
     return 1;
   }

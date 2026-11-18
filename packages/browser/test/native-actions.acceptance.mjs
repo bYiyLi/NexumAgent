@@ -271,6 +271,7 @@ test(
     const f = await nativeFixture(t, {
       html: `<!doctype html><title>Native click readiness</title><style>body{margin:0}#spacer{height:1800px}#cover{position:fixed;inset:0;z-index:999;background:white}#target{width:200px;height:50px}</style><div id="cover"></div><div id="spacer"></div><button id="target">Observed target</button><script>
       const target=document.querySelector('#target');target.onclick=event=>{target.dataset.clicks=String(Number(target.dataset.clicks||0)+1);target.dataset.trusted=String(event.isTrusted);};
+      document.addEventListener('click',event=>{window.lastNativeClick={id:event.target.id,trusted:event.isTrusted};},true);
       addEventListener('scroll',()=>setTimeout(()=>{document.querySelector('#cover').remove();target.dataset.released='true';},350),{once:true});
       window.prepareBlockedClick=()=>{const cover=document.createElement('div');cover.id='cover';document.body.append(cover);window.scrollTo({top:0,behavior:'instant'});};
       window.observeBlockedClick=()=>addEventListener('scroll',()=>fetch('/blocked-preflight'),{once:true});
@@ -285,13 +286,17 @@ test(
     });
     const successful = await f.run(
       select +
-        `await tab.playwright.locator('#target').click({timeoutMs:5000});return await tab.evaluate("({...document.querySelector('#target').dataset})");`,
+        `await tab.playwright.locator('#target').click({timeoutMs:5000});return await tab.evaluate("(()=>({data:{...document.querySelector('#target').dataset},lastClick:window.lastNativeClick??null}))()");`,
       { base: f.base },
     );
-    assert.deepEqual(successful.result.data, {
+    assert.deepEqual(successful.result.data.data, {
       clicks: "1",
       trusted: "true",
       released: "true",
+    });
+    assert.deepEqual(successful.result.data.lastClick, {
+      id: "target",
+      trusted: true,
     });
     const timeout = await f.run(
       select +

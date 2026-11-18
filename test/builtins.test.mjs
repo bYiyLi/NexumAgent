@@ -170,6 +170,9 @@ test("runtime.sleep is cancelled promptly without falsely completing a long wait
   assert.equal(observed.run.status, "cancelled");
   assert.equal(observed.result, null);
   assert.equal(observed.run.error.code, "run_cancelled");
+  const sleepOperation = f.store.operationsForRun(initial.run.runId)
+    .find((item) => item.method === "sleep");
+  assert.equal(sleepOperation?.error?.code, "operation_aborted");
   assert.ok(Date.now() - at < 2000);
 });
 

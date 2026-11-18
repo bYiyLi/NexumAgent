@@ -57,6 +57,7 @@ import {
   migration5,
   migration6,
   migration7,
+  migration8,
   schemaVersion,
 } from "./schema.js";
 
@@ -290,20 +291,13 @@ export class SqliteStore {
         if (version < 5) this.#db.exec(migration5);
         if (version < 6) this.#db.exec(migration6);
         if (version < 7) this.#db.exec(migration7);
+        if (version < 8) this.#db.exec(migration8);
         this.#db.exec(`PRAGMA user_version=${schemaVersion}`);
         const metadata = this.#db
           .prepare("SELECT * FROM runtime_meta WHERE singleton=1")
           .get();
-        if (metadata) {
-          requireCondition(
-            metadata.agent_id === binding.agentId &&
-              metadata.profile === binding.profile &&
-              metadata.cloud_environment === binding.cloudEnvironment,
-            "storage_binding_mismatch",
-            "The database belongs to a different Agent, profile, or Cloud environment.",
-          );
-        } else {
-          // Only a newly created, empty schema may acquire its initial binding.
+        if (!metadata) {
+          // Only a newly created, empty schema may initialize its runtime metadata.
           const count = this.#db
             .prepare("SELECT count(*) n FROM runs")
             .get()?.n;
@@ -313,13 +307,8 @@ export class SqliteStore {
             "The existing database binding is missing.",
           );
           this.#db
-            .prepare("INSERT INTO runtime_meta VALUES(1,?,?,?,?)")
-            .run(
-              binding.agentId,
-              binding.profile,
-              binding.cloudEnvironment,
-              this.bootId,
-            );
+            .prepare("INSERT INTO runtime_meta(singleton,boot_id) VALUES(1,?)")
+            .run(this.bootId);
         }
         this.#db
           .prepare("UPDATE runtime_meta SET boot_id=? WHERE singleton=1")

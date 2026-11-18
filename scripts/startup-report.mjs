@@ -136,7 +136,55 @@ export function startupIssue(component, stage, code, details = {}) {
         /^[a-zA-Z0-9@._/-]+$/.test(value))
       issue[key] = value;
   }
+  if (typeof details.sourceModule === "string" &&
+      /^(?:application|storage|runtime|work|extensions|results|services|maintenance|contracts|transfer)\/[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*){0,2}$/.test(details.sourceModule))
+    issue.sourceModule = details.sourceModule;
+  if (typeof details.exceptionType === "string" &&
+      ["AgentError", "Error", "TypeError", "RangeError", "ReferenceError",
+        "SyntaxError", "AggregateError", "SystemError"].includes(details.exceptionType))
+    issue.exceptionType = details.exceptionType;
+  if (typeof details.sourceCode === "string" &&
+      /^(?:E[A-Z_]{2,32}|ERR_[A-Z_]{2,72}|SQLITE_[A-Z_]{2,32})$/.test(details.sourceCode))
+    issue.sourceCode = details.sourceCode;
+  if (typeof details.recoveryCode === "string" &&
+      ["check_configuration", "inspect_storage", "check_permissions",
+        "verify_core", "check_network", "inspect_startup",
+        "inspect_shutdown"].includes(details.recoveryCode))
+    issue.recoveryCode = details.recoveryCode;
   return issue;
+}
+
+/** Read only the last complete, correlated Core failure. The caller must
+ * never use arbitrary stderr or an old boot's evidence as the new cause. */
+export async function coreFailureForAttempt(root, profile, attemptId) {
+  try {
+    const directory = await privateDir(path.join(root, "logs"));
+    const text = await checkedText(path.join(directory, "agent.log"), MAX_LOG);
+    const lines = text.split("\n");
+    for (let index = lines.length - 1; index >= 0; index--) {
+      let row;
+      try { row = JSON.parse(lines[index]); } catch { continue; }
+      if (row?.code !== "agent_startup_failed" ||
+          row.profile !== profile || row.attemptId !== attemptId)
+        continue;
+      const details = startupIssue("core", row.phase, row.failureCode, {
+        sourceModule: row.sourceModule,
+        sourceCode: row.sourceCode,
+        exceptionType: row.exceptionType,
+        recoveryCode: row.recoveryCode,
+      });
+      return {
+        stage: details.stage, code: details.code,
+        ...(details.sourceCode ? { sourceCode: details.sourceCode } : {}),
+        ...(details.sourceModule ? { sourceModule: details.sourceModule } : {}),
+        ...(details.exceptionType ? { exceptionType: details.exceptionType } : {}),
+        ...(details.recoveryCode ? { recoveryCode: details.recoveryCode } : {}),
+      };
+    }
+  } catch {
+    // No valid, correlated evidence: never guess a cause from older logs.
+  }
+  return null;
 }
 
 async function installedMatches(work, approved) {
@@ -169,8 +217,9 @@ export async function reconcileStartupPackages({
   if (!existsSync(approvalFile))
     return { status: "not_configured", packageCount: 0, durationMs: Date.now() - started };
   const evidence = JSON.parse(await checkedText(approvalFile, 16 * 1024 * 1024));
-  if (!checkedObject(evidence) || evidence.version !== 1 ||
+  if (!checkedObject(evidence) || ![1, 2].includes(evidence.version) ||
       evidence.root !== root || evidence.profile !== profile ||
+      (evidence.version === 2 && Object.hasOwn(evidence, "agentId")) ||
       !checkedObject(evidence.approved) ||
       typeof evidence.manifest !== "string" || typeof evidence.lock !== "string" ||
       await checkedText(path.join(work, "package.json")) !== evidence.manifest ||
@@ -255,6 +304,126 @@ export async function reconcileStartupPackages({
       throw cause;
     }
     if (movedOld) await rm(backup, { recursive: true, force: true }).catch(() => {});
+    return { status: "updated", packageCount: names.length, durationMs: Date.now() - started };
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Upgrade the already-approved direct packages; a failed update must leave
+ * the last usable graph in place. New package names still require approval. */
+export async function updateStartupPackages({
+  root, program, profile, timeoutMs = 45000,
+  install = npmExec, registries = npmRegistries(),
+}) {
+  const started = Date.now(), work = path.join(root, "work");
+  const approvalFile = path.join(root, "state", "maintenance", "packages.json");
+  if (!existsSync(approvalFile)) return { status: "not_configured", packageCount: 0, durationMs: 0 };
+  const saved = JSON.parse(await checkedText(approvalFile, 16 * 1024 * 1024));
+  if (!checkedObject(saved) || ![1, 2].includes(saved.version) ||
+      saved.root !== root || saved.profile !== profile ||
+      !checkedObject(saved.approved) ||
+      typeof saved.manifest !== "string" || typeof saved.lock !== "string" ||
+      await checkedText(path.join(work, "package.json")) !== saved.manifest ||
+      await checkedText(path.join(work, "package-lock.json")) !== saved.lock)
+    throw Object.assign(new Error("The approved package graph changed."), {
+      code: "npm_approval_changed",
+    });
+  const names = Object.keys(saved.approved);
+  if (!names.length) return { status: "ready", packageCount: 0, durationMs: Date.now() - started };
+  const oldManifest = JSON.parse(saved.manifest), oldLock = JSON.parse(saved.lock);
+  const declared = { ...oldManifest.dependencies, ...oldManifest.devDependencies,
+    ...oldManifest.optionalDependencies };
+  if (names.length > 150 || Object.keys(declared).length !== names.length ||
+      names.some((name) => !packageName.test(name) ||
+        !packageVersion.test(saved.approved[name]) ||
+        declared[name] !== saved.approved[name] ||
+        oldLock.packages?.["node_modules/" + name]?.version !== saved.approved[name]))
+    throw Object.assign(new Error("The approved npm graph is invalid."), {
+      code: "npm_approval_invalid",
+    });
+  if (!(await installedMatches(work, saved.approved)))
+    throw Object.assign(new Error("The old package graph is not usable."), {
+      code: "npm_packages_unavailable",
+    });
+  const staging = path.join(work, ".startup-update-" + randomUUID());
+  const backup = path.join(work, ".startup-previous-" + randomUUID());
+  await privateDir(staging);
+  try {
+    await writeFile(path.join(staging, "package.json"), saved.manifest, { flag: "wx", mode: 0o600 });
+    await writeFile(path.join(staging, "package-lock.json"), saved.lock, { flag: "wx", mode: 0o600 });
+    const npmCli = path.join(program, "runtime", ...(process.platform === "win32"
+      ? ["node_modules", "npm", "bin", "npm-cli.js"]
+      : ["lib", "node_modules", "npm", "bin", "npm-cli.js"]));
+    const packages = names.map((name) =>
+      name + "@" + (profile === "development" && name.startsWith("@nexum-hub/")
+        ? "next" : "latest"));
+    let failure;
+    for (const registry of registries) {
+      try {
+        const remaining = timeoutMs - (Date.now() - started);
+        if (remaining <= 0)
+          throw Object.assign(new Error("npm update deadline exceeded."), { code: "npm_update_timeout" });
+        await install(process.execPath, [npmCli, "install", ...packages, "--save-exact",
+          "--prefix=" + staging, "--workspaces=false", "--no-audit", "--no-fund",
+          "--registry=" + registry], staging, remaining);
+        failure = undefined;
+        break;
+      } catch (cause) {
+        failure = cause;
+      }
+    }
+    if (failure) throw failure;
+    const manifest = await checkedText(path.join(staging, "package.json"));
+    const lock = await checkedText(path.join(staging, "package-lock.json"));
+    const next = JSON.parse(manifest), nextLock = JSON.parse(lock);
+    const versions = { ...next.dependencies, ...next.devDependencies,
+      ...next.optionalDependencies };
+    if (Object.keys(versions).length !== names.length ||
+        names.some((name) => !Object.hasOwn(versions, name) ||
+          !packageVersion.test(versions[name]) ||
+          nextLock.packages?.["node_modules/" + name]?.version !== versions[name]) ||
+        !(await installedMatches(staging, versions)))
+      throw Object.assign(new Error("The npm update graph did not verify."), {
+        code: "npm_update_graph_invalid",
+      });
+    if (names.every((name) => versions[name] === saved.approved[name]))
+      return { status: "ready", packageCount: names.length, durationMs: Date.now() - started };
+    await privateDir(backup);
+    await writeFile(path.join(staging, "packages.json"), JSON.stringify({
+      version: 2, root, profile, approved: versions, manifest, lock,
+    }), { flag: "wx", mode: 0o600 });
+    const entries = [
+      ["node_modules", path.join(work, "node_modules")],
+      ["package.json", path.join(work, "package.json")],
+      ["package-lock.json", path.join(work, "package-lock.json")],
+      ["packages.json", approvalFile],
+    ];
+    const moved = [];
+    try {
+      for (const [name, destination] of entries) {
+        const prior = await lstat(destination);
+        if (prior.isSymbolicLink() ||
+            (name === "node_modules" ? !prior.isDirectory() : !prior.isFile()))
+          throw Object.assign(new Error("Unsafe package destination."), { code: "npm_install_path_invalid" });
+        const entry = { name, destination, swapped: false };
+        await rename(destination, path.join(backup, name));
+        moved.push(entry);
+        await rename(path.join(staging, name), destination);
+        entry.swapped = true;
+      }
+      if (!(await installedMatches(work, versions)))
+        throw Object.assign(new Error("Updated packages failed activation."), {
+          code: "npm_activation_mismatch",
+        });
+    } catch (cause) {
+      for (const entry of moved.reverse()) {
+        if (entry.swapped) await rename(entry.destination, path.join(staging, entry.name));
+        await rename(path.join(backup, entry.name), entry.destination);
+      }
+      throw cause;
+    }
+    await rm(backup, { recursive: true, force: true }).catch(() => {});
     return { status: "updated", packageCount: names.length, durationMs: Date.now() - started };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => {});

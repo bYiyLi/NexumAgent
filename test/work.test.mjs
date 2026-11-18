@@ -315,6 +315,8 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   assert.equal((first.agent.docs.content.match(/```/g) ?? []).length, 2);
   assert.match(first.agent.docs.content, /## 资料索引/);
   const manual = readFileSync(first.agent.docs.entry, "utf8");
+  assert.match(manual, /桌面控制先确认本机确有可用的 CLI/);
+  assert.match(manual, /不尝试绕过系统权限/);
   assert.match(manual, /## 资料索引/);
   assert.match(manual, /goal\.manage/);
   assert.match(manual, /maintenance/);

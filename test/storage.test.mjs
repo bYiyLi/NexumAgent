@@ -89,18 +89,25 @@ test("unrepresentable runtime deadlines are rejected before acceptance", (t) => 
   assert.equal(store.listRuns({}, "scope").runs.length, 0);
 });
 
-test("initialization creates a bound WAL database; future and mismatched stores are never reset", (t) => {
+test("local WAL history survives Cloud identity changes but not future schemas", (t) => {
   const { store, root, work } = setup(t);
   const run = start(store, work);
   store.close();
-  assert.throws(
-    () => new SqliteStore(root, { ...binding, profile: "production" }),
-    { code: "storage_binding_mismatch" },
-  );
+  const reopened = new SqliteStore(root, {
+    agentId: "new_cloud_agent",
+    profile: "development",
+    cloudEnvironment: "other_cloud",
+  });
+  assert.equal(reopened.getRun(run.runId).status, "interrupted");
+  reopened.close();
   const db = new DatabaseSync(path.join(root, "state/runtime.sqlite"));
   assert.equal(
     db.prepare("SELECT status FROM runs WHERE run_id=?").get(run.runId).status,
-    "running",
+    "interrupted",
+  );
+  assert.deepEqual(
+    db.prepare("PRAGMA table_info(runtime_meta)").all().map((column) => column.name),
+    ["singleton", "boot_id"],
   );
   assert.equal(
     db.prepare("PRAGMA user_version").get().user_version,
@@ -654,7 +661,7 @@ test("shared deletion retains a revision tombstone and migration preserves old v
     .prepare("INSERT INTO agent_state VALUES(?,?,?,?)")
     .run("retained", '{"count":1}', 11, 100);
   old.close();
-  const store = new SqliteStore(root, binding);
+  const store = new SqliteStore(root, { ...binding, agentId: "new_cloud_agent" });
   try {
     assert.deepEqual(store.getState("retained"), {
       value: { count: 1 },

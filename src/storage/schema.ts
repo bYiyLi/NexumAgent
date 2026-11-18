@@ -1,5 +1,5 @@
 // Runtime migrations own the executable DDL.
-export const schemaVersion = 7;
+export const schemaVersion = 8;
 export const migration1 = `
 CREATE TABLE runtime_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -243,4 +243,12 @@ CREATE TABLE project_closures (
   expires_at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX project_closures_expiry ON project_closures(expires_at);
+`;
+
+// Local runtime history belongs to this computer's profile, not a Cloud Agent ID.
+// Older databases keep their runs, state and resources when Cloud credentials change.
+export const migration8 = `
+ALTER TABLE runtime_meta DROP COLUMN agent_id;
+ALTER TABLE runtime_meta DROP COLUMN cloud_environment;
+ALTER TABLE runtime_meta DROP COLUMN profile;
 `;

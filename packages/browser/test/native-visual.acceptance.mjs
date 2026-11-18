@@ -137,7 +137,7 @@ test("native visual feedback preserves user groups and keeps AI markers after ru
   });
   const setup = await f.run(
     select +
-      `const other=await selected.tabs.new(context.input.base+'?visual-other',{active:false});await other.playwright.waitForURL(context.input.base+'?visual-other');const group=await selected.management.tabs.group({tabIds:[tab.id]});await selected.management.tabGroups.update(group.groupId,{title:'Existing user group',color:'green'});return {otherId:other.id,originalId:tab.id,userGroupId:group.groupId};`,
+      `await selected.nameSession('Native visual task');const other=await selected.tabs.new(context.input.base+'?visual-other',{active:false});await other.playwright.waitForURL(context.input.base+'?visual-other');const group=await selected.management.tabs.group({tabIds:[tab.id]});await selected.management.tabGroups.update(group.groupId,{title:'Existing user group',color:'green'});const observed=await selected.management.tabs.get(other.id);const otherGroup=observed.groupId>=0?await selected.management.tabGroups.get(observed.groupId):null;return {otherId:other.id,originalId:tab.id,userGroupId:group.groupId,priorOtherGroup:otherGroup};`,
     { base: f.base },
   );
   const ids = setup.result.data;
@@ -145,7 +145,7 @@ test("native visual feedback preserves user groups and keeps AI markers after ru
     select +
       `
       const other=await selected.tabs.get(context.input.otherId);
-      await selected.nameSession('Native visual task');
+      await selected.nameSession('Another run must not rename a prior task');
       await selected.visibility.set(false);
       await selected.tabs.select(tab.id);
       const moveStarted=Date.now();await other.cua.move({x:42,y:64});const moveCompleted=Date.now();
@@ -193,7 +193,11 @@ test("native visual feedback preserves user groups and keeps AI markers after ru
     },
   );
   assert.match(data.pointer.icon, /^data:image\/png;base64,/);
-  assert.equal(data.ownGroup.title, "Native visual task");
+  // This group was already created by the previous Run. The new Run must
+  // never rename another Run's preserved group, even after nameSession().
+  assert.equal(ids.priorOtherGroup.title, "Native visual task");
+  assert.equal(data.ownGroup.id, ids.priorOtherGroup.id);
+  assert.equal(data.ownGroup.title, ids.priorOtherGroup.title);
   assert.equal(data.ownGroup.color, "blue");
   assert.equal(data.preserved.title, "Existing user group");
   assert.equal(data.preserved.color, "green");

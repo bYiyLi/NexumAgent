@@ -1,5 +1,22 @@
 # Nexum browser 原生验收记录
 
+## 2026-11-18：Chromium 原生点击结果与 Run 分组复验（本地候选，未发布）
+
+- 使用本机已有 Chrome for Testing（Chromium 1254 Playwright 缓存）和隔离临时 Profile、真实 MV3 插件、真实 Worker、Core/Registry，在不碰用户现有浏览器和 Dev Agent 端口的条件下，`native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource` 正向用例通过：实际 DOM、填表、点击、业务状态、MCP JPEG 和文件资源字节均有证据；不等同于截图已到达 ChatGPT 对话。
+- 扩展原生矩阵首次 6 项中 2 项失败：一个滚动后点击在点击发送时由于 Chromium 可视区域/滚动迟到变化，实际可信事件落在 `spacer`，原代码却按同一坐标上的任意可信点击算成功；另一个测试错误地要求新 Run 重命名前一 Run 已保留的 AI 蓝色分组，与现行 `docs/browser/interaction.md` 每 Run 分组隔离规则冲突。
+- 点击修复在首次原生鼠标移动后，重新使用**原目标 ref** 获取真实坐标并按需再次移动；只在坐标稳定且目标真实存在时注册回执并发送**一次**按下/释放。点击回执先确认目标命中，并要求可信事件 `composedPath()` 含原目标；不把坐标相同但点击其他节点当成成功，不重放已发送的输入。预定位只滚动一次，后续观察不重复触发滚动，原生测试已通过遮挡解除、持续遮挡 `TIMEOUT`、取消后禁止迟到点击，且确认实际点击元素身份及 `event.isTrusted`。
+- 分组原生测试改为在创建者 Run 中命名其蓝色组，后续 Run 不更改旧组；既有用户绿组也不受影响。**同源真实 Chromium 专项 7/7 通过，0 失败/跳过**，包含跨站嵌套 Frame、滚动/遮挡/取消点击、AX 状态与截图、真实网络取消/截止时间和任务分组保留。旧用例错误预期不作为产品缺陷；权限与跨 Run 隔离不放宽。
+- 已补真实目标事件的负向组件回归：同一点可信点击必须属于原目标，否则确认数仍为零；VM Frame 夹具提供标准 DOM `composedPath()`，恢复真实目标门禁。新版本 Browser 全量 `check` 通过，**225/225 通过，0 失败/跳过**；尚待新 Agent/Browser 包安装至 Dev 后在真实 ChatGPT Host 上重验，不能从本机结果推断已部署。
+- **2026-11-18 续测证据**：复查上轮中断的文件写入与当前 Git diff 后，在本机隔离 Chrome for Testing 中独立复跑「用户组及旧 Run 蓝组保留」1/1 通过，并复跑「点位被遮挡拒绝」「遮挡等待、取消后不迟到点击」「AX/CUA/DOM 真实控件输入」3/3 通过，全部 0 失败/跳过；未重命名另一 Run 的组，也没有绕过可信点击目标校验。随后当前源码 Browser 完整 `check` **226/226 通过**，Agent 完整 `check` **1400/1427 通过、27 跳过、0 失败**，根仓库 `check:quick` 退出 0。此处为本地最新验证，另有并行开发中的安装/Profile 改动仍在工作区；未提交/发布此修复，未在 Dev Cloud 的真实 Host 上验收图像交付。
+
+## 2026-11-18：Extension Worker 资源上报身份修复候选（未发布）
+
+- 已部署 Nexum Dev 的 Browser 在 `browsers.list/get`、`tabs.list` 成功后，`tabs.get`、`management.windows.list` 和 `capabilities.browserList` 返回 `extension_worker_request_invalid / Unknown resource report owner`。相同错误在两个真实标签的 `tabs.get` 中复现；尚无原生页面 DOM、截图或点击验收结论。
+- 源码根因位于 Core Worker Bridge：`call.resources.register` 创建的 `browser.run` 被记录为 `call` owner，但 `worker-entry.localRef.report` 固定以 `host` owner 上报。修复后保留 Worker-local 的精确 token 以及注册时的 `host/call` 身份，经生命周期通道上报，Core 仍核对 token 与原 owner；不放开跨 owner 的 `resources.get`。
+- 新增真实 Worker 回归，覆盖 host/call 两种资源报告、原创建方法结束后继续报告，以及 `call` 不能借用 host 资源。定向 Agent 构建和 Worker/Run 测试 14/14 通过；随后 `corepack pnpm --dir agent check` 与 `corepack pnpm --dir agent/packages/browser check` 均退出 0。新源码尚未发布到 Dev，实际 Chrome/Edge/Host 的 `tabs.get`、DOM、截图、操作及收尾仍须另验，不从本地门禁推断线上已修复。
+- **本轮补测**：新增 `packages/browser/test/runtime.test.mjs` 的真正独立 Extension Worker + Core/Registry/SQLite + Browser 公共 SDK + 实际 MV3 Router/连接代码的隔离链路。使用测试进程临时端口和模拟 `chrome.*` API，不占用 Dev Agent 监听端口；`tabs.get`、`capabilities.browserList`、`management.windows.list`、截图 JPEG 字节读取与 `browser.run` 真实资源收尾均通过。此前模拟 `tabs.query` 忽略 `active/currentWindow` 条件会导致伪造的 `INVALID_TARGET`，已修正夹具并复验。测试属于组件端到端，**不等于真实 Chrome/Edge 或 Host 截图交付**。
+- 补充 Core 发起 Run 资源 `dispose()` 后 Worker 仍正确报告物理关闭的回归，且不能跨 owner 借用控制器。本轮重新执行 Browser `check` 退出码 0；Agent `check` 共 1431 项，1404 通过、27 跳过、0 失败。新增测试与修复均尚未发布至 Dev Agent；当前已连接 Test Mac 仍为 Browser `0.0.3-next.17`，`tabs.get` 仍复现旧错误。
+
 ## 2026-11-17：IANA 未分配冷门端口段候选（尚未发布）
 
 - 继本日 `43830–43849` 在 Windows + WSL Mirrored 网络模式中与 `43255–47350` 保留区间冲突后，进一步核对 IANA 官方 [Service Name and Transport Protocol Port Number Registry](https://www.iana.org/assignments/service-names-port-numbers)：`29001–29117` 在当前登记表标记为 `Unassigned`（未分配）。选择 Dev `29030–29039`、Production `29040–29049`，保留每个环境十个端口、按顺序尝试、限定本环境 MV3 CSP、现有握手身份校验和失败后的退避。未分配不表示平台独占或永远空闲。

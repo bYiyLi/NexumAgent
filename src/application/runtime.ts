@@ -448,7 +448,7 @@ export class AgentRuntime {
     await this.#retention.start();
     this.#approvedPackages = await ApprovedPackageCatalog.open(
       this.#store.root,
-      this.#store.binding,
+      { profile: this.#config.profile },
       { reserve: (bytes) => this.#retention.reserve(bytes) },
     );
     const policy = this.#options.modulePolicy ?? {

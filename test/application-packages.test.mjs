@@ -234,17 +234,19 @@ test("accept rejects mismatched actual files, invalid targets and contradictory 
   assert.deepEqual([...catalog.approvedPackages()], [["alpha", "1.0.0"]]);
 });
 
-test("private records are bound to this root, Agent and profile and malformed or hard-linked state never falls back to work dependencies", async (t) => {
+test("private approvals belong to this work root, not a Cloud ID, and reject malformed data", async (t) => {
   const f = fixture(t),
     catalog = await ApprovedPackageCatalog.open(f.root, binding);
   await catalog.accept(f.snapshot("alpha"));
-  for (const other of [
-    { ...binding, agentId: "other" },
-    { ...binding, profile: "production" },
-  ])
-    await assert.rejects(ApprovedPackageCatalog.open(f.root, other), {
-      code: "package_approval_invalid",
-    });
+  const changedIdentity = await ApprovedPackageCatalog.open(f.root, {
+    ...binding, agentId: "another_cloud_identity",
+  });
+  assert.deepEqual([...changedIdentity.approvedPackages()], [["alpha", "1.0.0"]]);
+  await assert.rejects(
+    ApprovedPackageCatalog.open(f.root, { ...binding, profile: "production" }),
+    { code: "package_approval_invalid" },
+  );
+  assert.equal(JSON.parse(readFileSync(f.file, "utf8")).agentId, undefined);
   const second = fixture(t);
   mkdirSync(path.dirname(second.file), { recursive: true });
   copyFileSync(f.file, second.file);
@@ -264,6 +266,27 @@ test("private records are bound to this root, Agent and profile and malformed or
   await assert.rejects(ApprovedPackageCatalog.open(f.root, binding), {
     code: "credential_file_invalid",
   });
+});
+
+test("existing package approvals with a legacy Cloud ID are accepted and rewritten without it", async (t) => {
+  const f = fixture(t);
+  const catalog = await ApprovedPackageCatalog.open(f.root, binding);
+  await catalog.accept(f.snapshot("alpha"));
+  const saved = JSON.parse(readFileSync(f.file, "utf8"));
+  await privateMaintenanceWrite(f.root, ["packages.json"], {
+    ...saved,
+    version: 1,
+    agentId: "previous_cloud_agent",
+  });
+  const restored = await ApprovedPackageCatalog.open(f.root, {
+    profile: "development",
+    agentId: "current_cloud_agent",
+  });
+  assert.deepEqual([...restored.approvedPackages()], [["alpha", "1.0.0"]]);
+  await restored.accept(f.snapshot("alpha"));
+  const rewritten = JSON.parse(readFileSync(f.file, "utf8"));
+  assert.equal(rewritten.version, 2);
+  assert.equal("agentId" in rewritten, false);
 });
 
 test("redirected work or control files grant no access and cannot be accepted as verified evidence", async (t) => {

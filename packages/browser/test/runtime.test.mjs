@@ -14,6 +14,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Server as HttpServer } from "node:http";
+import { Server as NetServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -39,6 +40,7 @@ const [
   { ArtifactStore },
   { ResultEncoder },
   { createOutput },
+  { isolatedExtensionFactory },
 ] = await Promise.all([
   core("storage/sqlite.js"),
   core("extensions/resources.js"),
@@ -52,6 +54,7 @@ const [
   core("results/artifacts.js"),
   core("results/encoder.js"),
   core("sdk/output.js"),
+  core("extensions/worker-bridge.js"),
 ]);
 const source = realpathSync.native(
   fileURLToPath(new URL("../", import.meta.url)),
@@ -149,6 +152,7 @@ async function fixture(
     declaredDownloadSize = 150000,
     authorize,
     visualFailure = false,
+    isolatedWorker = false,
   } = {},
 ) {
   const root = realpathSync.native(
@@ -210,6 +214,7 @@ async function fixture(
     builtins: () => [],
     approvedPackages: () => new Map([["@nexum-hub/browser", version]]),
   };
+  let workerEntry;
   const modules = await ModuleLoader.create(work, store.bootId, policy),
     packages = new ExtensionPackageLoader(registry, modules, {
       policy,
@@ -222,6 +227,8 @@ async function fixture(
       // intercept never touches the installed Agent's actual Worker path.
       // Worker admission/crash/isolation has separate real-Worker tests.
       async createInstance(descriptor, host) {
+        if (isolatedWorker)
+          return isolatedExtensionFactory(pathToFileURL(workerEntry).href)(host);
         const namespace = await modules.importExtension({
           packageName: descriptor.packageName,
           entry: descriptor.entry.url,
@@ -331,19 +338,40 @@ async function fixture(
   // port, so the Core conformance tests cannot collide with a running Dev
   // Agent or with another test process.
   let testPort;
+  if (isolatedWorker) {
+    const temporaryListener = new NetServer();
+    await new Promise((resolve, reject) => {
+      temporaryListener.once("error", reject);
+      temporaryListener.listen(0, "127.0.0.1", resolve);
+    });
+    testPort = temporaryListener.address().port;
+    await new Promise((resolve) => temporaryListener.close(resolve));
+    // Only the isolated test Worker imports this wrapper. It redirects the
+    // development-profile listener without touching installed Agent ports,
+    // allowing the genuine Browser extension to run across the Worker bridge.
+    workerEntry = path.join(root, "isolated-browser-worker.mjs");
+    writeFileSync(workerEntry, [
+      'import { Server as HttpServer } from "node:http";',
+      'const listen = HttpServer.prototype.listen;',
+      `HttpServer.prototype.listen = function (port, ...args) { return listen.call(this, port === 29030 ? ${testPort} : port, ...args); };`,
+      `const extension = await import(${JSON.stringify(pathToFileURL(path.join(packageRoot, "dist/extension/index.js")).href)});`,
+      'export default extension.default;',
+    ].join("\n"));
+  }
   const originalListen = HttpServer.prototype.listen,
     previousDescriptor = Object.getOwnPropertyDescriptor(
       HttpServer.prototype,
       "listen",
     );
-  HttpServer.prototype.listen = function (port, ...args) {
-    if (port !== 29030) return originalListen.call(this, port, ...args);
-    this.once("listening", () => {
-      const address = this.address();
-      testPort = address?.port;
-    });
-    return originalListen.call(this, 0, ...args);
-  };
+  if (!isolatedWorker)
+    HttpServer.prototype.listen = function (port, ...args) {
+      if (port !== 29030) return originalListen.call(this, port, ...args);
+      this.once("listening", () => {
+        const address = this.address();
+        testPort = address?.port;
+      });
+      return originalListen.call(this, 0, ...args);
+    };
   let enabled;
   try {
     enabled = await services.enable("@nexum-hub/browser");
@@ -365,13 +393,24 @@ async function fixture(
     runtime: { id: extensionId },
     storage: { local: storage(), session: storage() },
     action: { setBadgeText: async () => {}, setTitle: async () => {} },
+    windows: {
+      getAll: async () => [{
+        id: 1, focused: true, state: "normal",
+        left: 0, top: 0, width: 800, height: 600,
+      }],
+    },
     alarms: {
       create: async () => {},
       clear: async () => true,
       onAlarm: event(),
     },
     tabs: {
-      query: async () => tabs.map((value) => ({ ...value })),
+      query: async (query = {}) => tabs
+        .filter((tab) =>
+          (query.active === undefined || tab.active === query.active) &&
+          (query.windowId === undefined || tab.windowId === query.windowId) &&
+          (query.currentWindow !== true || tab.windowId === 1))
+        .map((value) => ({ ...value })),
       get: async (id) => {
         const tab = tabs.find((value) => value.id === id);
         if (!tab) throw new Error("No tab");
@@ -639,6 +678,32 @@ async function fixture(
   };
 }
 const select = `const {createBrowserClient}=await import("@nexum-hub/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
+
+test("actual isolated Browser Worker can get a tab and clean its RunScope", async (t) => {
+  const f = await fixture(t, { isolatedWorker: true });
+  const result = await f.start(
+    select + "let caps,shot;" +
+      "try{const list=await selected.capabilities.list();caps={count:list.length}}" +
+      "catch(e){caps={error:e.code||e.name,message:e.message}}" +
+      "const windows=await selected.windows.list();" +
+      "try{const image=await tab.screenshot();shot={bytes:image.byteLength}}" +
+      "catch(e){shot={error:e.code||e.name,message:e.message}}" +
+      "return {title:await tab.title(),tabs:tabs.length,caps,shot,windows:windows.length};",
+  );
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
+  assert.equal(result.result.data.title, "Actual native fixture");
+  assert.equal(result.result.data.tabs, 2);
+  assert.equal(result.result.data.windows, 1);
+  assert.ok(result.result.data.caps.count > 0, JSON.stringify(result.result.data));
+  assert.ok(result.result.data.shot.bytes > 0, JSON.stringify(result.result.data));
+  assert.ok(result.operations.items.some((item) =>
+    item.method === "tabs.get" && item.status === "succeeded"));
+  const scopes = f.store.resourcesForRun(result.run.runId).filter((item) =>
+    item.kind === "browser.run");
+  assert.equal(scopes.length, 1);
+  assert.ok(scopes.every((item) => item.closedAt !== null),
+    "the real Worker must close its run control after native operations");
+});
 
 test("visual degradation reaches extension logs with its actual run and action while the browser action continues", async (t) => {
   const f = await fixture(t, { visualFailure: true });

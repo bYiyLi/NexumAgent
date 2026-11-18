@@ -61,7 +61,7 @@ Agent 的 `nexum-agent` CLI 命令名称保留；npm 分发不意味着已注册
 
 Windows 由用户级 Task Scheduler `InteractiveToken` 直接启动 `program/nexum-agent.exe`。它没有窗口、任务栏、托盘或本地 Web 管理界面；通过 Win32 `DETACHED_PROCESS` 生成受管 Node，并使用 Job Object 管理后代。旧版已注册的 PowerShell 任务动作不会因自动升级而自己变更：包含该原生入口的新版 npm 包发布后，用户需要在同一 Windows 账户下**重新执行一次「复制安装/更新命令」**，以替换原有任务定义；不得提前关闭旧的受管控制台。安装完成且 Agent 真实上线后，安装命令所在终端可正常关闭。
 
-同一 Windows 用户、同一 `development` / `production` profile 再次执行安装命令时，安装器会先停止原用户服务；**新的 Cloud Agent ID 经 WSS 认证确认后**才接管原安装。不同 ID 的旧 `state`、`work`、`logs` 保留在 `previous-agents/<archive-id>/`，新身份创建独立本地记录，避免沿用旧 SQLite 的 `storage_binding_mismatch` 循环。只更换同一 Agent 的 Token 不会清空数据；自动 npm 版本升级不会触发身份替换。不会因为相同 hostname 自动撤销其他 Windows 账户或机器上的 Cloud Agent 记录。该机制需要包含此代码的新版 npm Agent 及重新执行安装命令才能在已安装机器上生效，旧版 Agent 不会自动获得这个新行为。
+同一电脑、同一系统用户/profile 再次执行安装命令时，安装器先停止原用户服务，再更新 Agent 程序及 Token，**保留原来的 `state`、`work`、`logs` 与 SQLite 运行历史**。Cloud Agent ID 不再写入本地数据库的身份绑定列，也不决定本地运行环境能否启动；重置 Token 或使用另一条 Cloud Agent 的安装命令均不触发数据归档。旧版安装器的 `identity-replacement.json` 标记在成功显式重装后清理；历史 `previous-agents` 目录保留原状，不自动合并或删除。Cloud 继续使用 Token 认证、Agent ID 路由和当前 AI Host 授权，新身份不会自动获得旧身份的 Cloud Grant。该改动需要发布新版 npm Agent 才会在已安装设备上生效。
 
 后台服务不会在每次启动时执行 npx；原生入口调用受管 Node 的 `program/service-runner.mjs`，Launcher 验证 `installed.json` 和唯一 `program/app` 内确定版本的真实 CLI。Cloud 返回精确目标版本 `426 upgrade_required` 时，Agent 写入 `update.json` 并以退出码 75 退出。Launcher 的下次启动由系统托管入口触发；只有目标版本未安装或完整性验证失败才重新下载，且更新不创建持久安装锁、多版本目录或专用安装暂存。安装/更新不得删除 Token、工作文件和持久业务状态。窗口和服务行为必须以对应发行版本的 npm 内容和三平台真实验收为准，不能将源码已完成视为用户机器已升级。
 
@@ -117,6 +117,8 @@ owner 可直接在所选 profile 的 `config.json` 中添加可选 `storage` 和
 ## 本地安装候选与原生用户服务
 
 安装组件使用固定 Node `24.22.1`、`--experimental-vm-modules` 和明确的 `run --profile development|production`。macOS 使用用户 LaunchAgent，Linux 使用 `systemd --user`，Windows 使用当前用户 `InteractiveToken` 任务。它们不提权、不保存用户密码；登录会话与无人登录启动不同，安装器不会自动启用 Linux linger。Windows 任务负责登录启动与启停，启动器以原生 Job 约束自身及继承的进程树，任务退出时由系统关闭 Job，避免只停启动器而留下 Node。现有启动器对 Agent 非零退出每次等待 10 秒、至多重试 255 次；退出 0 立即停止，不能仅靠 Task Scheduler 的启动失败重试承诺程序退出后重启。正式 Agent 诊断统一写入 profile 内有界的 `logs/agent.log`；macOS LaunchAgent 将 stdout/stderr 指向 `/dev/null`，避免重复生成无界服务日志。Linux stdout/stderr 由 journald 管理，Windows 任务不另写服务日志。
+
+**Core 启动失败诊断**：本地 `logs/agent.log` 按每次启动的 `attemptId` 记录 `agent_boot_stage`、`agent_startup_failed`，并在已能核实的范围内保留 `phase`、`failureCode`、`sourceCode`、`exceptionType`、`sourceModule`、编译行号及固定 `recoveryHint`。不保存原始异常消息、堆栈、绝对路径、环境变量或 Token。Launcher 按同一 `attemptId` 获取最近的 Core 失败事实；异常退出会将 `state/startup-report.json` 标为 `blocked` 并写明阶段与来源，而不再只留下 `agent_exited: code=1`。不可恢复的配置或授权失败使用 Core 退出码 `78`，Launcher 写入 `blocked` 后结束 Supervisor 重试；此时服务动作退出不等于 Core 上线。Core 未完成上线时不伪造已向 AI 发送诊断；先通过本机 `startup.log`、`agent.log` 和 `startup-report.json` 检查。由于致命崩溃或进程被系统直接终止时 Core 可能无法写日志，Launcher 必须退化为「只有退出码、原因未确认」，不得猜测根因。
 
 公开扩展类型由单一源码生成，不需要把 Agent 的运行服务安装到扩展项目中：
 

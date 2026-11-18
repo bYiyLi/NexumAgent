@@ -292,9 +292,14 @@ export function isolatedExtensionFactory(
         return register(owner, input.token, input.kind, target.resources);
       }
       if (name === "resources.report") {
-        const [token, details] = args;
+        const [token, details, registeredOwner] = args;
         const ref = resources.get(String(token));
-        requireCondition(ref && ref.owner === owner && isPlainRecord(details),
+        // Reporting is lifecycle-bound, not invocation-bound: a call-owned
+        // resource can still close and report after its method returns.
+        // The exact Worker-local token and its registered owner must match.
+        requireCondition(owner === "host" && ref &&
+          (registeredOwner === "host" || registeredOwner === "call") &&
+          ref.owner === registeredOwner && isPlainRecord(details),
           "extension_worker_request_invalid", "Unknown resource report owner.");
         ref.ref.report(details as JsonObject);
         return null;

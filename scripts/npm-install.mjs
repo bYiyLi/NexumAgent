@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
@@ -506,28 +506,6 @@ export async function installNpmAgent({
   if (previousService?.registered) await serviceAction(plan, "stop");
   try {
 
-    // Identity replacement is an explicit user action, never an auto upgrade.
-    if (config && !fromUpdate) {
-      const marker = path.join(program, "identity-replacement.json");
-      const tokenDigest = createHash("sha256").update(nextConfig.token).digest("hex");
-      const previous = await readState(marker);
-      if (previous) {
-        fail(
-          previous.profile === profile &&
-            previous.serverUrl === nextConfig.server_url &&
-            previous.tokenDigest === tokenDigest &&
-            typeof previous.archiveId === "string" &&
-            /^[0-9a-f-]{36}$/.test(previous.archiveId),
-          "A previous Agent identity replacement must finish before installing another identity.",
-        );
-      } else {
-        await writeState(marker, {
-          profile, serverUrl: nextConfig.server_url,
-          tokenDigest, archiveId: randomUUID(),
-        });
-      }
-    }
-
     const managedNode = await runtime(program);
     if (fromUpdate)
       await restoreInterruptedCoreUpdate(program, managedNode);
@@ -600,8 +578,12 @@ export async function installNpmAgent({
       !previousConfig || JSON.stringify(previousConfig) !== JSON.stringify(nextConfig)
     ) await writeState(configPath, nextConfig);
     await clearOldInstallation(program);
-    // A completed explicit install wins over any stale request from the old Agent.
-    if (!fromUpdate) await rm(path.join(program, "update.json"), { force: true });
+    // Install/update never archives local work on a Cloud identity change.
+    // Retire an obsolete legacy marker only after the explicit install succeeded.
+    if (!fromUpdate) {
+      await rm(path.join(program, "identity-replacement.json"), { force: true });
+      await rm(path.join(program, "update.json"), { force: true });
+    }
 
     if (register) {
       await serviceAction(plan, "install");

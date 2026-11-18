@@ -73,6 +73,14 @@ export type ConnectionDiagnosticDetails = {
   readonly runId?: string;
   readonly workerId?: string;
   readonly threadId?: number;
+  /** Stable correlation key from the managed Launcher; never a credential. */
+  readonly attemptId?: string;
+  /** Startup failure evidence: no exception message, absolute path or stack. */
+  readonly exceptionType?: string;
+  readonly sourceModule?: string;
+  readonly sourceLine?: number;
+  readonly sourceCode?: string;
+  readonly recoveryCode?: string;
 };
 
 export interface ControlConnectionOptions {

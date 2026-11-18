@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  reconcileStartupPackages, startupEvent, startupIssue, verifyStartupNpm,
+  reconcileStartupPackages, updateStartupPackages, startupEvent, startupIssue, verifyStartupNpm,
   writeStartupReport,
 } from "../scripts/startup-report.mjs";
 
@@ -123,6 +123,94 @@ test("failed npm download keeps the last runnable work graph intact", async (t) 
   assert.equal(pkg.version, "1.0.0");
 });
 
+test("automatic update changes only approved direct packages and retains exact evidence", async (t) => {
+  const f = await fixture(t, "1.0.0", "1.0.0");
+  const result = await updateStartupPackages({
+    ...f, profile: "development", registries: ["https://registry.invalid/"],
+    install: async (_node, argv, cwd) => {
+      assert.ok(argv.includes("install"));
+      assert.ok(argv.includes("example-browser@latest"));
+      assert.ok(argv.includes("--save-exact"));
+      await writeFile(path.join(cwd, "package.json"), JSON.stringify({
+        private: true, type: "module", dependencies: { "example-browser": "1.2.0" },
+      }));
+      await writeFile(path.join(cwd, "package-lock.json"), JSON.stringify({
+        lockfileVersion: 3, packages: {
+          "node_modules/example-browser": { version: "1.2.0" },
+        },
+      }));
+      await mkdir(path.join(cwd, "node_modules", "example-browser"), { recursive: true });
+      await writeFile(path.join(cwd, "node_modules", "example-browser", "package.json"),
+        JSON.stringify({ name: "example-browser", version: "1.2.0" }));
+    },
+  });
+  assert.equal(result.status, "updated");
+  const record = JSON.parse(await readFile(path.join(f.root,
+    "state", "maintenance", "packages.json"), "utf8"));
+  assert.deepEqual(record.approved, { "example-browser": "1.2.0" });
+  assert.equal(record.manifest, await readFile(path.join(f.work, "package.json"), "utf8"));
+  assert.equal(record.lock, await readFile(path.join(f.work, "package-lock.json"), "utf8"));
+  const installed = JSON.parse(await readFile(path.join(f.work,
+    "node_modules", "example-browser", "package.json"), "utf8"));
+  assert.equal(installed.version, "1.2.0");
+});
+
+test("failed automatic update keeps old npm files and runnable package intact", async (t) => {
+  const f = await fixture(t, "1.0.0", "1.0.0");
+  const recordFile = path.join(f.root, "state", "maintenance", "packages.json");
+  const before = await Promise.all([
+    readFile(recordFile, "utf8"),
+    readFile(path.join(f.work, "package.json"), "utf8"),
+    readFile(path.join(f.work, "package-lock.json"), "utf8"),
+  ]);
+  await assert.rejects(updateStartupPackages({
+    ...f, profile: "development", registries: ["https://registry.invalid/"],
+    install: async () => {
+      throw Object.assign(new Error("Private npm details"), { code: "ETIMEDOUT" });
+    },
+  }), { code: "ETIMEDOUT" });
+  assert.deepEqual(await Promise.all([
+    readFile(recordFile, "utf8"),
+    readFile(path.join(f.work, "package.json"), "utf8"),
+    readFile(path.join(f.work, "package-lock.json"), "utf8"),
+  ]), before);
+  const installed = JSON.parse(await readFile(path.join(f.work,
+    "node_modules", "example-browser", "package.json"), "utf8"));
+  assert.equal(installed.version, "1.0.0");
+});
+
+test("Dev Nexum packages use next, and a newly added direct dependency is rejected", async (t) => {
+  const f = await fixture(t, "1.0.0", "1.0.0");
+  const name = "@nexum-hub/browser";
+  const manifest = JSON.stringify({ dependencies: { [name]: "1.0.0" } });
+  const lock = JSON.stringify({ packages: {
+    ["node_modules/" + name]: { version: "1.0.0" },
+  } });
+  await writeFile(path.join(f.work, "package.json"), manifest);
+  await writeFile(path.join(f.work, "package-lock.json"), lock);
+  const approvalFile = path.join(f.root, "state", "maintenance", "packages.json");
+  await writeFile(approvalFile, JSON.stringify({
+    version: 2, root: f.root, profile: "development",
+    approved: { [name]: "1.0.0" }, manifest, lock,
+  }));
+  await mkdir(path.join(f.work, "node_modules", "@nexum-hub", "browser"),
+    { recursive: true });
+  await writeFile(path.join(f.work, "node_modules", "@nexum-hub", "browser", "package.json"),
+    JSON.stringify({ name, version: "1.0.0" }));
+  await assert.rejects(updateStartupPackages({
+    ...f, profile: "development", registries: ["https://registry.invalid/"],
+    install: async (_node, argv, cwd) => {
+      assert.ok(argv.includes("@nexum-hub/browser@next"));
+      await writeFile(path.join(cwd, "package.json"), JSON.stringify({
+        dependencies: { [name]: "1.1.0", unapproved: "1.0.0" },
+      }));
+      await writeFile(path.join(cwd, "package-lock.json"), lock);
+    },
+  }), { code: "npm_update_graph_invalid" });
+  const saved = JSON.parse(await readFile(approvalFile, "utf8"));
+  assert.deepEqual(saved.approved, { [name]: "1.0.0" });
+});
+
 test("unapproved drift cannot trigger an unapproved install", async (t) => {
   const f = await fixture(t);
   await writeFile(path.join(f.work, "package.json"),
@@ -130,6 +218,34 @@ test("unapproved drift cannot trigger an unapproved install", async (t) => {
   await assert.rejects(reconcileStartupPackages({
     ...f, profile: "development",
     install: async () => assert.fail("the unapproved graph must not install"),
+  }), { code: "npm_approval_changed" });
+});
+
+test("Launcher accepts local v2 npm approvals after a Cloud identity change", async (t) => {
+  const f = await fixture(t, "1.0.0", "1.0.0");
+  const filename = path.join(f.root, "state", "maintenance", "packages.json");
+  const old = JSON.parse(await readFile(filename, "utf8"));
+  await writeFile(filename, JSON.stringify({
+    version: 2,
+    root: old.root,
+    profile: old.profile,
+    approved: old.approved,
+    manifest: old.manifest,
+    lock: old.lock,
+  }));
+  const result = await reconcileStartupPackages({
+    ...f, profile: "development",
+    install: async () => assert.fail("Already installed v2 packages must not be downloaded"),
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.packageCount, 1);
+
+  await writeFile(filename, JSON.stringify({
+    ...JSON.parse(await readFile(filename, "utf8")),
+    agentId: "unexpected-cloud-id",
+  }));
+  await assert.rejects(reconcileStartupPackages({
+    ...f, profile: "development",
   }), { code: "npm_approval_changed" });
 });
 

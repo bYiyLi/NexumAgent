@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import {
   mkdtemp,
@@ -127,19 +126,7 @@ test(
       JSON.parse(await readFile(path.join(root, "config.json"), "utf8")).token,
       "private-test-token",
     );
-    const identityIntent = JSON.parse(
-      await readFile(
-        path.join(root, "program/identity-replacement.json"),
-        "utf8",
-      ),
-    );
-    assert.equal(identityIntent.profile, "development");
-    assert.equal(identityIntent.serverUrl, "http://127.0.0.1:8123/");
-    assert.equal(
-      identityIntent.tokenDigest,
-      createHash("sha256").update("private-test-token").digest("hex"),
-    );
-    assert.match(identityIntent.archiveId, /^[0-9a-f-]{36}$/);
+    assert.equal(existsSync(path.join(root, "program/identity-replacement.json")), false);
     // Windows fs.stat().mode emulates Unix bits and does not report NTFS ACLs.
     if (process.platform !== "win32")
       assert.equal(
@@ -153,19 +140,27 @@ test(
     );
     assert.ok((await stat(runtime)).isFile());
     assert.equal((await installNpmAgent(inputs)).version, "0.0.1");
+    assert.equal(existsSync(path.join(root, "program/identity-replacement.json")), false);
+    await mkdir(path.join(root, "work"), { recursive: true });
+    await writeFile(path.join(root, "work/retained.txt"), "computer-owned work");
+    await writeFile(path.join(root, "program/identity-replacement.json"), "obsolete marker");
+    assert.equal((await installNpmAgent({
+      ...inputs,
+      config: {
+        server_url: "http://127.0.0.1:8123/",
+        token: "another-cloud-token",
+      },
+    })).version, "0.0.1");
     assert.equal(
-      JSON.parse(
-        await readFile(
-          path.join(root, "program/identity-replacement.json"),
-          "utf8",
-        ),
-      ).archiveId,
-      identityIntent.archiveId,
-      "retrying the same install keeps its archive identity",
+      JSON.parse(await readFile(path.join(root, "config.json"), "utf8")).token,
+      "another-cloud-token",
     );
+    assert.equal(await readFile(path.join(root, "work/retained.txt"), "utf8"), "computer-owned work");
+    assert.equal(existsSync(path.join(root, "program/identity-replacement.json")), false);
+    assert.equal(existsSync(path.join(root, "previous-agents")), false);
     assert.equal(
       (await readFile(path.join(root, "config.json"), "utf8")).includes(
-        "private-test-token",
+        "another-cloud-token",
       ),
       true,
     );
@@ -190,7 +185,7 @@ test(
     );
     assert.equal(
       JSON.parse(await readFile(path.join(root, "config.json"), "utf8")).token,
-      "private-test-token",
+      "another-cloud-token",
     );
     assert.ok(
       (await stat(path.join(root, "program/app/node_modules/@nexum-hub/agent/package.json"))).isFile(),

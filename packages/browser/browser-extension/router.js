@@ -1174,42 +1174,85 @@ export function humanPointerPath(from, to) {
 }
 async function click(ctx, args, double = false) {
   if (!args.resolvedTarget) await readyForInput(ctx);
-  const p = await point(ctx, args),
-    button = buttons[args.button ?? "left"];
+  let p = await point(ctx, args);
+  const button = buttons[args.button ?? "left"];
   requireValue(button);
   const count = double ? 2 : (args.clickCount ?? 1);
   requireValue(Number.isInteger(count) && count >= 1 && count <= 3);
   const framePath = args.framePath ?? [];
   const originalVersion = ctx.router.version(ctx.target.tabId);
-  const receiptInput = {
-    command: "inputReceipt",
-    token: ctx.actionId,
-    x: args.framePoint?.x ?? p.x,
-    y: args.framePoint?.y ?? p.y,
-    button: { left: 0, middle: 1, right: 2 }[args.button ?? "left"],
-    expiresAt: Date.now() + Math.min(3000, ctx.budgetMs),
-    framePath,
-    ...(args.frameId ? { expectedFrameId: args.frameId } : {}),
-  };
-  const armed = await ctx.router.page(ctx, {
-    ...receiptInput,
-    action: "arm",
-  });
-  requireValue(
-    armed?.armed === true && typeof armed.documentToken === "string",
-    "INVALID_TARGET",
-    "The browser could not arm a receipt for the exact input document.",
-  );
-  const receipt = {
-    ...receiptInput,
-    expectedDocumentToken: armed.documentToken,
-  };
+  let receipt;
   try {
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
       ...p,
       button: "none",
     });
+    let framePoint = args.framePoint;
+    if (args.expectedRef) {
+      // The first native pointer movement can cause Chromium's visible
+      // viewport to change. Re-observe the same element after that movement,
+      // before the first mouse press; no click is ever replayed.
+      let stable = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const current = await ctx.router.page(ctx, {
+          command: "resolve",
+          ref: args.expectedRef,
+          framePath,
+          noScroll: true,
+          ...(args.position ? { position: args.position } : {}),
+        });
+        requireValue(
+          current && (!args.frameId || current.frameId === args.frameId),
+          "INVALID_TARGET",
+          "The original click element is no longer at a controllable point.",
+        );
+        if (
+          Math.abs(current.point.x - p.x) <= 1 &&
+          Math.abs(current.point.y - p.y) <= 1
+        ) {
+          framePoint = current.framePoint ?? framePoint;
+          stable = true;
+          break;
+        }
+        p = current.point;
+        framePoint = current.framePoint ?? framePoint;
+        await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          ...p,
+          button: "none",
+        });
+      }
+      requireValue(
+        stable,
+        "INVALID_TARGET",
+        "The click target continued moving after native pointer preparation.",
+      );
+    }
+    const receiptInput = {
+      command: "inputReceipt",
+      token: ctx.actionId,
+      x: framePoint?.x ?? p.x,
+      y: framePoint?.y ?? p.y,
+      button: { left: 0, middle: 1, right: 2 }[args.button ?? "left"],
+      expiresAt: Date.now() + Math.min(3000, ctx.budgetMs),
+      framePath,
+      ...(args.frameId ? { expectedFrameId: args.frameId } : {}),
+      ...(args.expectedRef ? { expectedRef: args.expectedRef } : {}),
+    };
+    const armed = await ctx.router.page(ctx, {
+      ...receiptInput,
+      action: "arm",
+    });
+    requireValue(
+      armed?.armed === true && typeof armed.documentToken === "string",
+      "INVALID_TARGET",
+      "The browser could not arm a receipt for the exact input document.",
+    );
+    receipt = {
+      ...receiptInput,
+      expectedDocumentToken: armed.documentToken,
+    };
     for (let i = 1; i <= count; i++) {
       await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
         type: "mousePressed",
@@ -1275,9 +1318,10 @@ async function click(ctx, args, double = false) {
     const remaining = ctx.budgetMs - (performance.now() - ctx.started);
     if (remaining > 120) await ctx.router.delay(ctx, 120);
   } finally {
-    await ctx.router
-      .page(ctx, { ...receipt, action: "drop" })
-      .catch(() => {});
+    if (receipt)
+      await ctx.router
+        .page(ctx, { ...receipt, action: "drop" })
+        .catch(() => {});
   }
   return null;
 }
@@ -1436,7 +1480,24 @@ route(
 );
 async function resolveActionTarget(ctx, args) {
   let found, previous;
+  let scrollRequested = false;
+  // Chromium can change the page viewport when its native debugger attaches
+  // (notably by adding a debugging infobar). Attach before measuring or
+  // scrolling the target; attaching only on the first mouse event can shift
+  // the page after preflight and send a trusted click to the wrong element.
+  await ctx.router.attach(ctx);
   await readyForInput(ctx, args.locator?.framePath ?? args.framePath ?? []);
+  const sameLayout = (left, right) =>
+    left && right &&
+    ["x", "y"].every((key) =>
+      Math.abs(left.point[key] - right.point[key]) <= 1,
+    ) &&
+    ["x", "y", "width", "height"].every((key) =>
+      Math.abs(left.rect[key] - right.rect[key]) <= 1,
+    ) &&
+    left.ref === right.ref &&
+    left.documentToken === right.documentToken &&
+    left.frameId === right.frameId;
   // Two matching native observations give the layout a chance to settle
   // after scrolling. Only pre-input observations may repeat, never the click.
   await ctx.router.poll(ctx, async () => {
@@ -1444,24 +1505,23 @@ async function resolveActionTarget(ctx, args) {
       ...args,
       ...options(args),
       command: "resolve",
+      ...(scrollRequested ? { noScroll: true } : {}),
     });
     if (!next) {
       previous = undefined;
       return false;
     }
-    const stable =
-      previous &&
-      ["x", "y"].every((key) =>
-        Math.abs(previous.point[key] - next.point[key]) <= 1,
-      ) &&
-      ["x", "y", "width", "height"].every((key) =>
-        Math.abs(previous.rect[key] - next.rect[key]) <= 1,
-      ) &&
-      previous.documentToken === next.documentToken &&
-      previous.frameId === next.frameId;
+    // A missing target did not establish a usable scroll position. If it
+    // appears later below the viewport, its first observation must still be
+    // allowed to scroll it into view.
+    scrollRequested = true;
+    const stable = sameLayout(previous, next);
     previous = next;
-    if (stable) found = next;
-    return !!stable;
+    if (!stable) return false;
+    // Native mouse movement later re-resolves this exact ref before pressing,
+    // so another pre-move snapshot cannot prove that the final point is safe.
+    found = next;
+    return true;
   });
   return found;
 }
@@ -1496,6 +1556,7 @@ async function locatorClick(ctx, args, double = false) {
         framePath,
         framePoint: found.framePoint,
         frameId: found.frameId,
+        expectedRef: found.ref,
       },
       double,
     );

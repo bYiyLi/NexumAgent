@@ -194,7 +194,9 @@ function rpc(
   return decode((response as { value: unknown }).value);
 }
 
-function localRef(token: string, data: unknown): ResourceRef {
+function localRef(
+  token: string, data: unknown, registeredOwner: "host" | "call",
+): ResourceRef {
   requireCondition(isPlainRecord(data) &&
     typeof data.id === "string" && typeof data.kind === "string",
     "extension_worker_result_invalid", "Resource registration has no Core identity.");
@@ -208,7 +210,10 @@ function localRef(token: string, data: unknown): ResourceRef {
     id: record.id, kind: record.kind, value: record.value,
     signal: record.controller.signal,
     report: (details: JsonObject) => {
-      rpc("host", "resources.report", [token, details]);
+      // Resource facts may arrive after the creating invocation has returned.
+      // Use the Worker lifecycle lane, but preserve the resource's original
+      // registration owner for Core's exact-token ownership check.
+      rpc("host", "resources.report", [token, details, registeredOwner]);
     },
   });
 }
@@ -229,7 +234,7 @@ function nativeResources(owner: "host" | "call", callId?: string): ResourceServi
       try {
         const result = await rpc(owner, "resources.register",
           [{ kind: input.kind, token }], callId ?? null);
-        const ref = localRef(token, result);
+        const ref = localRef(token, result, owner);
         void input.value.closed.then(
           () => send({ type: "resource-closed", token }),
           () => send({ type: "resource-closed", token }),
@@ -246,7 +251,7 @@ function nativeResources(owner: "host" | "call", callId?: string): ResourceServi
       if (!response.token)
         throw new AgentError("extension_worker_resource_unavailable",
           "The resource is not owned by this Worker.");
-      return localRef(response.token, response);
+      return localRef(response.token, response, owner);
     },
     handoff: (id: string) => rpc(owner, "resources.handoff", [id], callId ?? null),
     describe: (id: string) => rpc(owner, "resources.describe", [id], callId ?? null),

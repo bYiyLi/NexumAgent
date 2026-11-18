@@ -15,11 +15,12 @@ import {
 import { AgentRuntime, type AgentRuntimeOptions } from "./runtime.js";
 import { maintenanceRuntimeOptions } from "./maintenance.js";
 import { WorkGitSchedule } from "./work-git.js";
-import { appendDiagnostic } from "./diagnostics.js";
-import { acceptInstalledAgentIdentity } from "./profile-replacement.js";
+import { appendDiagnostic, startupFailureDetails } from "./diagnostics.js";
 
 export interface AgentProgramOptions {
   readonly version: string;
+  /** Managed Launcher correlation ID; optional for embedded/runtime tests. */
+  readonly attemptId?: string;
   readonly signal?: AbortSignal;
   /** Trusted embedding/test home; the installed CLI uses the actual OS home. */
   readonly home?: string;
@@ -47,11 +48,20 @@ export async function runAgent(
   let failure: unknown;
   let restartRequested = false;
   let diagnosticRoot: string | undefined;
+  const attemptId = options.attemptId ?? randomUUID();
+  let startupPhase = "profile_load";
+  let rejectedCode = "connection_rejected";
   const diagnose = (
     code: string,
     retry: boolean,
     details?: ConnectionDiagnosticDetails,
   ) => {
+    if (!retry && [
+      "invalid_configuration", "invalid_agent_credential", "agent_already_connected",
+      "unsupported_protocol", "invalid_agent_metadata",
+      "unsupported_agent_environment",
+    ].includes(code))
+      rejectedCode = code;
     // Never serialize native/plugin errors, request data, configuration or credentials.
     if (diagnosticRoot) {
       try {
@@ -61,7 +71,13 @@ export async function runAgent(
       }
     }
     options.diagnose?.(code, retry, details);
-    process.stderr.write(`${code}${retry ? ": retrying" : ""}\n`);
+    const failureSummary = code === "agent_startup_failed" ? [
+      details?.phase ? `phase=${details.phase}` : "",
+      details?.failureCode ? `failure=${details.failureCode}` : "",
+      details?.sourceCode ? `source=${details.sourceCode}` : "",
+      details?.sourceModule ? `module=${details.sourceModule}` : "",
+    ].filter(Boolean).join(" ") : "";
+    process.stderr.write(`${code}${retry ? ": retrying" : ""}${failureSummary ? " " + failureSummary : ""}\n`);
   };
   const shutdown = (): Promise<void> => {
     if (shutdownTask) return shutdownTask;
@@ -108,12 +124,26 @@ export async function runAgent(
     } catch {
       /* A missing home/profile cannot provide a private diagnostic location. */
     }
+    diagnose("agent_boot_stage", false, {
+      component: "core", phase: startupPhase, attemptId,
+    });
     if (typeof vm.SourceTextModule !== "function") {
-      diagnose("vm_modules_required", false);
-      return 0; // Permanent local launch configuration; a supervisor must not spin.
+      diagnose("vm_modules_required", false, {
+        component: "core", phase: "runtime_preflight",
+        attemptId, recoveryCode: "verify_core",
+      });
+      diagnose("agent_startup_failed", false, {
+        component: "core", phase: "runtime_preflight", attemptId,
+        failureCode: "vm_modules_required", recoveryCode: "verify_core",
+      });
+      return 78; // Permanent local fault: Launcher reports blocked without retry.
     }
     const config = loadProfileConfig(profile, options.home);
     diagnosticRoot = config.root;
+    startupPhase = "control_connect";
+    diagnose("agent_boot_stage", false, {
+      component: "core", phase: startupPhase, attemptId,
+    });
     const bootId = newId("boot");
     const defaults = maintenanceRuntimeOptions(config);
     const configure =
@@ -152,15 +182,15 @@ export async function runAgent(
           try {
             if (stopping)
               throw new AgentError("runtime_closed", "The Agent is stopping.");
-            if (runtime) runtime.attachConnection(connection);
+            if (runtime) {
+              startupPhase = "connection_attach";
+              runtime.attachConnection(connection);
+            }
             else {
-              if (
-                await acceptInstalledAgentIdentity(
-                  config,
-                  connection.binding.agentId,
-                )
-              )
-                diagnose("agent_identity_replaced", false);
+              startupPhase = "core_initialize";
+              diagnose("agent_boot_stage", false, {
+                component: "core", phase: startupPhase, attemptId,
+              });
               initializing = AgentRuntime.create(config, connection, bootId, {
                 version: options.version,
                 home: options.home,
@@ -196,7 +226,10 @@ export async function runAgent(
               }
             }
             if (stopping) return;
-            diagnose("agent_connected", false);
+            startupPhase = "online";
+            diagnose("agent_connected", false, {
+              component: "core", phase: startupPhase, attemptId,
+            });
             // Return the ready handshake first. Optional packages may fail,
             // block or require user authority without losing Core presence.
             setImmediate(() => {
@@ -228,17 +261,28 @@ export async function runAgent(
       diagnose,
     );
     if (failure) throw failure;
+    if (reconnectResult === "permanent") {
+      diagnose("agent_startup_failed", false, {
+        component: "core", phase: "control_connect", attemptId,
+        failureCode: rejectedCode, recoveryCode: "check_configuration",
+      });
+      return 78;
+    }
     return restartRequested ? 76 : reconnectResult === "upgrade" ? 75 : 0;
   } catch (cause) {
     const code = isAgentError(cause) ? cause.code : "agent_failed";
-    diagnose(/^[a-z0-9_]{1,128}$/.test(code) ? code : "agent_failed", false);
-    return code === "invalid_configuration" ? 0 : 1;
+    diagnose("agent_startup_failed", false, startupFailureDetails(
+      cause, startupPhase, attemptId,
+    ));
+    return code === "invalid_configuration" ? 78 : 1;
   } finally {
     options.signal?.removeEventListener("abort", stop);
     try {
       await shutdown();
-    } catch {
-      diagnose("agent_shutdown_unconfirmed", false);
+    } catch (cause) {
+      diagnose("agent_shutdown_unconfirmed", false, startupFailureDetails(
+        cause, "shutdown", attemptId,
+      ));
       // This overrides a normal return; do not report successful cleanup.
       throw new AgentError(
         "agent_shutdown_unconfirmed",

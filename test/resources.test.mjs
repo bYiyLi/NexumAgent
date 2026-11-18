@@ -515,13 +515,13 @@ test("v2 migration preserves state/resource history and restart readers cannot r
     "DROP TABLE project_closures; DROP TABLE task_artifacts; DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; " +
       "ALTER TABLE runs DROP COLUMN retention_history_ms; ALTER TABLE runs DROP COLUMN retention_logs_ms; ALTER TABLE runs DROP COLUMN retention_inputs_ms; " +
       "ALTER TABLE operations DROP COLUMN retention_history_ms; ALTER TABLE managed_resources DROP COLUMN retention_history_ms; " +
-      "ALTER TABLE managed_resources DROP COLUMN retention_logs_ms; ALTER TABLE transfers DROP COLUMN retention_history_ms; PRAGMA user_version=2",
+      "ALTER TABLE managed_resources DROP COLUMN retention_logs_ms; ALTER TABLE transfers DROP COLUMN retention_history_ms; " +
+      "ALTER TABLE runtime_meta ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'legacy'; " +
+      "ALTER TABLE runtime_meta ADD COLUMN profile TEXT NOT NULL DEFAULT 'development'; " +
+      "ALTER TABLE runtime_meta ADD COLUMN cloud_environment TEXT NOT NULL DEFAULT 'development'; " +
+      "PRAGMA user_version=2",
   );
   db.close();
-  assert.throws(
-    () => new SqliteStore(root, { ...binding, profile: "production" }),
-    { code: "storage_binding_mismatch" },
-  );
   db = new DatabaseSync(filename);
   assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
   assert.equal(
@@ -553,7 +553,7 @@ test("v2 migration preserves state/resource history and restart readers cannot r
     2,
   );
   db.close();
-  store = new SqliteStore(root, binding);
+  store = new SqliteStore(root, { ...binding, agentId: "new_cloud_agent" });
   assert.deepEqual(store.getState("kept").value, { value: 1 });
   assert.equal(store.getState("deleted"), null);
   assert.equal(store.setState("deleted", 2, null).version, 3);

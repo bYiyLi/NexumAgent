@@ -24,8 +24,7 @@ const recordPath = ["packages.json"] as const;
 const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const exactVersion = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
 interface PackageRecord {
-  version: 1;
-  agentId: string;
+  version: 2;
   profile: Profile;
   root: string;
   approved: Record<string, string>;
@@ -132,24 +131,20 @@ export class ApprovedPackageCatalog {
   #accepting = false;
   private constructor(
     readonly root: string,
-    readonly binding: Readonly<{ agentId: string; profile: Profile }>,
+    readonly binding: Readonly<{ profile: Profile }>,
     readonly reserve?: (bytes: number) => Promise<{ release(): void }>,
   ) {}
   static async open(
     root: string,
-    binding: { agentId: string; profile: Profile },
+    binding: { profile: Profile },
     options: { reserve?: (bytes: number) => Promise<{ release(): void }> } = {},
   ): Promise<ApprovedPackageCatalog> {
     const actual = realpathSync.native(root);
     requireCondition(
       actual === root &&
-        typeof binding.agentId === "string" &&
-        binding.agentId.length > 0 &&
-        Buffer.byteLength(binding.agentId) <= 256 &&
-        !/[\0\r\n]/.test(binding.agentId) &&
         ["development", "production"].includes(binding.profile),
       "package_approval_invalid",
-      "The package catalog must use its actual Agent/profile root and binding.",
+      "The package catalog must use its actual local profile root.",
     );
     const catalog = new ApprovedPackageCatalog(
       actual,
@@ -159,19 +154,22 @@ export class ApprovedPackageCatalog {
     const saved = await privateMaintenanceRead(actual, recordPath, recordLimit);
     if (saved !== null) {
       requireCondition(
-        saved.version === 1 &&
+        (saved.version === 1 || saved.version === 2) &&
           saved.root === actual &&
-          saved.agentId === binding.agentId &&
           saved.profile === binding.profile &&
+          (saved.version === 2 ||
+            (typeof saved.agentId === "string" &&
+              saved.agentId.length > 0 &&
+              Buffer.byteLength(saved.agentId) <= 256)) &&
           Object.keys(saved).every((key) =>
             [
               "version",
               "root",
-              "agentId",
               "profile",
               "approved",
               "manifest",
               "lock",
+              ...(saved.version === 1 ? ["agentId"] : []),
             ].includes(key),
           ) &&
           isPlainRecord(saved.approved) &&
@@ -179,11 +177,20 @@ export class ApprovedPackageCatalog {
             ([key, value]) => name(key) && version(value),
           ),
         "package_approval_invalid",
-        "Saved package approvals do not belong to this actual Agent/profile or contain invalid identities.",
+        "Saved package approvals do not belong to this local profile or contain invalid evidence.",
       );
       document(saved.manifest);
       document(saved.lock);
-      catalog.#record = saved as unknown as PackageRecord;
+      // Legacy records may contain a former Cloud Agent ID. It is not a local
+      // npm approval boundary and must not prevent this computer from starting.
+      catalog.#record = {
+        version: 2,
+        root: actual,
+        profile: binding.profile,
+        approved: saved.approved as Record<string, string>,
+        manifest: saved.manifest as string,
+        lock: saved.lock as string,
+      };
     }
     return catalog;
   }
@@ -284,8 +291,7 @@ export class ApprovedPackageCatalog {
       if (fixed.target.action === "remove") approved.delete(fixed.target.name);
       else approved.set(fixed.target.name, fixed.target.version!);
       const record: PackageRecord = {
-        version: 1,
-        agentId: this.binding.agentId,
+        version: 2,
         profile: this.binding.profile,
         root: this.root,
         approved: Object.fromEntries(approved),

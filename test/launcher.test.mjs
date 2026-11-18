@@ -182,25 +182,26 @@ test("invalid npm preflight blocks the verified Core", {
       env: { ...process.env, HOME: home, USERPROFILE: home },
       encoding: "utf8", timeout: 12000,
     });
-  assert.equal(dependencyFailure.status, 1, dependencyFailure.stderr);
-  assert.equal(existsSync(marker), false,
-    "failed approved npm dependencies cannot start Core");
+  assert.equal(dependencyFailure.status, 0, dependencyFailure.stderr);
+  assert.equal(existsSync(marker), true,
+    "failed optional npm dependencies must not block a valid Core");
   const dependencyReport = JSON.parse(await readFile(path.join(root,
     "state", "startup-report.json"), "utf8"));
-  assert.equal(dependencyReport.status, "blocked");
+  assert.equal(dependencyReport.status, "degraded");
   assert.equal(dependencyReport.issues[0].component, "npm");
   assert.equal(dependencyReport.issues[0].stage, "work_dependencies");
   assert.equal(dependencyReport.issues[0].code, "npm_approval_changed");
   const rows = (await readFile(path.join(root, "logs", "startup.log"), "utf8"))
     .trim().split("\n").map((line) => JSON.parse(line));
-  assert.ok(rows.some((entry) => entry.stage === "npm_gate" &&
-    entry.code === "blocked" &&
+  assert.ok(rows.some((entry) => entry.stage === "work_npm" &&
+    entry.code === "failed" &&
     entry.failureCode === "npm_approval_changed"));
   const npmCli = path.join(program, "runtime",
     ...(process.platform === "win32"
       ? ["node_modules", "npm", "bin", "npm-cli.js"]
       : ["lib", "node_modules", "npm", "bin", "npm-cli.js"]));
   await rm(npmCli, { force: true });
+  await rm(marker, { force: true });
   const cliFailure = spawnSync(process.execPath,
     ["--experimental-vm-modules", path.join(program, "service-runner.mjs"),
       "--profile", "development"], {

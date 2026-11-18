@@ -125,6 +125,91 @@ test("extension normalizers cannot weaken the original Core Schema gate", {
   }
 });
 
+test("Worker resources report with their registered owner across invocation lifetimes", {
+  timeout: 15000,
+}, async (t) => {
+  const f = await fixture(t, [
+    "let service, run;",
+    "export default async function (host) {",
+    "  const stopped = Promise.withResolvers();",
+    "  service = await host.resources.register({kind:'browser-service', value:{",
+    "    closed: stopped.promise, dispose(){stopped.resolve()}",
+    "  }});",
+    "  service.report({state:'listening'});",
+    "  return {methods:{",
+    "    begin:{description:'Begin',permissions:[],schemaDialect:'draft7',",
+    "      inputSchema:{type:'object'},async handle(input,call){",
+    "        const done=Promise.withResolvers();",
+    "        run=await call.resources.register({kind:'browser.run',value:{",
+    "          closed:done.promise,dispose(){",
+    "            run.report({state:'physically_closed'});done.resolve()",
+    "          }",
+    "        }});",
+    "        run.report({state:'controlling'});",
+    "        return {id:run.id};",
+    "      }",
+    "    },",
+    "    finish:{description:'Finish',permissions:[],schemaDialect:'draft7',",
+    "      inputSchema:{type:'object'},handle(){",
+    "        run.report({state:'closed'});",
+    "        service.report({state:'healthy'});",
+    "        return {ok:true};",
+    "      }",
+    "    },",
+    "    borrow:{description:'Borrow',permissions:[],schemaDialect:'draft7',",
+    "      inputSchema:{type:'object'},async handle(input,call){",
+    "        try { await call.resources.get(service.id); return {allowed:true}; }",
+    "        catch(error){return {code:error.code}}",
+    "      }",
+    "    }",
+    "  }};",
+    "}",
+  ].join("\n"));
+  const reports = [], registered = [];
+  const register = (owner) => async ({ kind, value }) => {
+    registered.push({ owner, kind, value });
+    return {
+      id: `res_${owner}`, kind, value,
+      signal: new AbortController().signal,
+      report(details) { reports.push({ owner, kind, ...details }); },
+    };
+  };
+  f.host.resources = { register: register("host") };
+  const first = invocation();
+  first.resources = { register: register("call") };
+  const instance = await f.factory(f.host);
+  try {
+    const started = await instance.methods.begin.handle({
+      __nexumWorkerArgs: [{}],
+    }, first);
+    assert.equal(started.id, "res_call");
+    const ended = await instance.methods.finish.handle({
+      __nexumWorkerArgs: [{}],
+    }, invocation());
+    assert.equal(ended.ok, true);
+    const borrow = await instance.methods.borrow.handle({
+      __nexumWorkerArgs: [{}],
+    }, invocation());
+    assert.equal(borrow.code, "extension_worker_resource_unavailable",
+      "the fix must not permit a call to borrow a host-owned controller");
+    assert.deepEqual(reports, [
+      { owner: "host", kind: "browser-service", state: "listening" },
+      { owner: "call", kind: "browser.run", state: "controlling" },
+      { owner: "call", kind: "browser.run", state: "closed" },
+      { owner: "host", kind: "browser-service", state: "healthy" },
+    ]);
+    const coreRun = registered.find((r) => r.kind === "browser.run");
+    assert.ok(coreRun, "the original Core must hold the run-owned resource");
+    await coreRun.value.dispose();
+    await coreRun.value.closed;
+    assert.deepEqual(reports.at(-1), {
+      owner: "call", kind: "browser.run", state: "physically_closed",
+    }, "the Worker must report physical cleanup after its creating call ends");
+  } finally {
+    await instance.dispose();
+  }
+});
+
 test("cancelled extension initialization terminates a hanging Worker promptly", {
   timeout: 15000,
 }, async (t) => {

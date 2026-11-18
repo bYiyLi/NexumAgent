@@ -119,8 +119,14 @@ function fixture(t) {
       listeners.get(type)?.delete(fn);
     };
     document.dispatchNativeClick = (x, y, button = 0) => {
+      const target = document.elementFromPoint(x, y);
+      const composed = [];
+      for (let node = target; node; node = node.parentElement)
+        composed.push(node);
+      composed.push(document);
       for (const fn of listeners.get("click") ?? [])
-        fn({ isTrusted: true, clientX: x, clientY: y, button });
+        fn({ isTrusted: true, clientX: x, clientY: y, button,
+          target, composedPath: () => composed });
     };
     return vm.createContext({
       document,

@@ -347,11 +347,15 @@ export async function pageCommand(input) {
         "INVALID_TARGET",
         "The current element is not visible and enabled.",
       );
-      node.scrollIntoView({
-        block: "center",
-        inline: "center",
-        behavior: "instant",
-      });
+      // The first preflight scrolls the target into view. Later checks must
+      // observe the compositor's settled position without requesting another
+      // scroll that can move the target after coordinates were captured.
+      if (!input.noScroll)
+        node.scrollIntoView({
+          block: "center",
+          inline: "center",
+          behavior: "instant",
+        });
       const r = rect(node),
         position = input.command === "resolve" ? input.position : undefined;
       const x = position?.x ?? r.width / 2,
@@ -448,6 +452,16 @@ export async function pageCommand(input) {
               : input.button === 1
                 ? "auxclick"
                 : "click";
+          const expected = input.expectedRef
+            ? getRef(input.expectedRef)
+            : null;
+          if (expected) {
+            const hit = document.elementFromPoint(input.x, input.y);
+            if (hit !== expected && !expected.contains(hit)) {
+              value = { armed: false, documentToken: state.token };
+              break;
+            }
+          }
           const receipt = {
             type,
             count: 0,
@@ -455,11 +469,14 @@ export async function pageCommand(input) {
             x: input.x,
             y: input.y,
             button: input.button,
+            expected,
           };
           receipt.listener = (event) => {
             if (
               event.isTrusted &&
               event.button === input.button &&
+              (!receipt.expected ||
+                event.composedPath().includes(receipt.expected)) &&
               Math.abs(event.clientX - input.x) <= 6 &&
               Math.abs(event.clientY - input.y) <= 6
             )

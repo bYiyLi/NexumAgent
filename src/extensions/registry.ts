@@ -1705,7 +1705,13 @@ export class ExtensionRegistry {
             }
             return value;
           },
-          failure: (cause) => this.#failure(entry, cause),
+          // The Run owns cancellation/deadline semantics. A cancelled SDK
+          // method must not attempt to serialize a native AbortError (which
+          // may carry private symbols or a native cause) as guest result data.
+          failure: (cause) => services.signal.aborted
+            ? new AgentError("operation_aborted",
+              "The SDK operation stopped after the Run signal was aborted.")
+            : this.#failure(entry, cause),
           settled: close,
         },
       );

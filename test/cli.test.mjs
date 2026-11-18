@@ -75,7 +75,7 @@ test("a missing VM launch flag stops permanently before configuration or network
   const result = invoke("run", "--profile", "development");
   assert.equal(
     result.status,
-    0,
+    78,
     JSON.stringify({
       error: result.error?.code,
       signal: result.signal,

@@ -256,6 +256,8 @@ function fixture(t, config = {}) {
           const value =
             payload?.command === "resolve"
               ? (() => {
+                  if (config.targetAppearsLater && resolveReads++ === 0)
+                    return null;
                   const x = config.movingTarget
                     ? [65, 95, 95][Math.min(resolveReads++, 2)]
                     : 65;
@@ -2924,6 +2926,27 @@ test("the locator waits for two stable layout observations before sending input"
   assert.equal(native[3].x, 95);
 });
 
+test("a locator that appears later can still scroll on its first match", async (t) => {
+  const f = fixture(t, { expectationMatched: true, targetAppearsLater: true });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("locator.click", {
+    locator: {target: f.target(), framePath: [],
+      query: {kind: "selector", selector: "#late-target"}},
+  }, {budgetMs: 3000});
+  const samples = f.calls.filter((call) =>
+    call[0] === "scripting.executeScript" &&
+    call[1].args[0].command === "resolve");
+  assert.ok(samples.length >= 3);
+  assert.equal(samples[0][1].args[0].noScroll, undefined);
+  assert.equal(samples[1][1].args[0].noScroll, undefined,
+    "a missing target cannot suppress the first real scroll");
+  assert.equal(samples.at(-1)[1].args[0].noScroll, true);
+  assert.ok(f.calls.some((call) => call[0] === "debugger.sendCommand" &&
+    call[2] === "Input.dispatchMouseEvent" && call[3].type === "mousePressed"));
+});
+
 test("navigation expectation is armed before input and captures a fast document change", async (t) => {
   const url = "https://example.com/next";
   const f = fixture(t, { expectedNavigationUrl: url });
@@ -3021,6 +3044,41 @@ test("the isolated page receipt accepts only the current trusted pointer event a
   click({ isTrusted: true, button: 0, clientX: 140, clientY: 90 });
   assert.equal((await execute({ ...base, action: "peek" })).value.observed, 1);
   assert.equal((await execute({ ...base, action: "drop" })).value.observed, 1);
+  assert.equal(listeners.size, 0);
+});
+
+test("a locator receipt rejects trusted clicks on another element at the same point", async () => {
+  const listeners = new Map();
+  const expected = { isConnected: true, contains(node) { return node === this; } };
+  const other = { isConnected: true };
+  const document = {
+    elementFromPoint: () => expected,
+    addEventListener(type, callback) { listeners.set(type, callback); },
+    removeEventListener(type, callback) {
+      if (listeners.get(type) === callback) listeners.delete(type);
+    },
+  };
+  const scope = vm.createContext({document, crypto: globalThis.crypto,
+    setTimeout, clearTimeout});
+  const execute = vm.runInContext(`(${pageCommand.toString()})`, scope);
+  const base = {command: "inputReceipt", pageVersion: 1,
+    leaseId: "fixture", token: "same-point", x: 120, y: 70, button: 0,
+    expiresAt: Date.now() + 2000};
+  await execute({...base, action: "peek"});
+  const state = scope[Symbol.for("nexum.browser.document.v1")];
+  const expectedRef = `r_fixture_1_${state.token}_1`;
+  state.refs.set(expectedRef, expected);
+  assert.equal((await execute({...base, expectedRef, action: "arm"})).value.armed, true);
+  const click = listeners.get("click");
+  const event = (target) => ({isTrusted: true, button: 0,
+    clientX: 120, clientY: 70, composedPath: () => [target, document]});
+  click(event(other));
+  assert.equal((await execute({...base, action: "peek"})).value.observed, 0);
+  click(event(expected));
+  assert.equal((await execute({...base, action: "peek"})).value.observed, 1);
+  await execute({...base, action: "drop"});
+  document.elementFromPoint = () => other;
+  assert.equal((await execute({...base, expectedRef, action: "arm"})).value.armed, false);
   assert.equal(listeners.size, 0);
 });
 

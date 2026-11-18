@@ -263,6 +263,7 @@ export class DocumentCatalog {
         "2. 优先从 `agent.scripts.items` 用 `scriptWhenUse` 和输入 Schema 匹配可复用脚本，按 `scriptName` 执行；若 `complete=false`，从 `agent.scripts.index` 补读完整目录。",
         "3. 需要创建/修改可复用脚本时选择 `script-authoring` Skill；其它专门方法按 `agent.skills` / `project.skills` 的 `description` 选择，只读取选中项及其相关资源。",
         "4. 文件与数据用 Node/npm，进程用 `sh`，用户输入或延迟用 `runtime`，共享状态用 `state`，结果用 `output`，传输用 `transfer`，安装配置用 `maintenance`；外部 MCP/API/浏览器只按真实已启用方法表选择。",
+        "5. 桌面控制先确认本机确有可用的 CLI/扩展及操作系统授权。只有安装了对应 CLI 时才通过 `sh` 查询其实际权限状态；如 macOS Accessibility 或 Screen Recording 被拒绝，应向用户说明授权对象与恢复步骤，不尝试绕过系统权限。CLI 安装、命令成功和 GUI 实际可控是不同的验收事实。",
         "",
         "## 分段读取选中的文件",
         "",
