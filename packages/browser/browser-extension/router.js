@@ -4417,12 +4417,16 @@ export function createBrowserRouter(
         ctx.pendingInfo.nativeNetworkTabId = tabId;
       let result;
       try {
-        // A native Runtime.evaluate can stay suspended behind a modal dialog
-        // after its action is cancelled. Other native commands (notably IO.read
-        // and IO.close) must retain their actual settlement: dropping their
-        // replies early can abandon a native stream or misreport cleanup.
+        // A native Runtime.evaluate can stay suspended behind a modal dialog.
+        // A raw cdp.send Network.loadNetworkResource can also remain pending
+        // after debugger detach (notably on Windows). The lease still confirms
+        // native input release and debugger detach before reporting closure.
+        // Internal document exports must await the native response so any
+        // returned stream can be closed; IO.read and IO.close likewise retain
+        // their actual settlement.
         result =
-          method === "Runtime.evaluate"
+          method === "Runtime.evaluate" ||
+          (method === "Network.loadNetworkResource" && ctx.method === "cdp.send")
             ? await nativeWithStop(ctx.signal, () =>
                 chrome.debugger.sendCommand(source, method, params),
               )

@@ -1264,7 +1264,10 @@ test("ending or handing off a held native network call releases input before det
         method: "Network.loadNetworkResource",
         params: {},
       });
-      const rejected = assert.rejects(pending, /Native debugger detached/);
+      const rejected = assert.rejects(
+        pending,
+        (cause) => cause.code === "UNKNOWN_RESULT",
+      );
       let closing;
       try {
         await entered.promise;
@@ -1327,6 +1330,65 @@ test("ending or handing off a held native network call releases input before det
         await closing?.catch(() => {});
       }
     });
+});
+
+test("lease expiry closes native network control even when Chrome never settles its detached command", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  await f.call("tab.keyboardDown", { key: "Shift" });
+  const entered = Promise.withResolvers();
+  const native = Promise.withResolvers();
+  const send = f.chrome.debugger.sendCommand;
+  f.chrome.debugger.sendCommand = async (source, method, params) => {
+    if (method === "Network.loadNetworkResource") {
+      entered.resolve();
+      return native.promise;
+    }
+    return send(source, method, params);
+  };
+  const stop = new AbortController();
+  const pending = f.call(
+    "cdp.send",
+    { method: "Network.loadNetworkResource", params: {} },
+    { signal: stop.signal },
+  );
+  const rejected = assert.rejects(
+    pending,
+    (cause) => cause.message === "Run deadline exceeded",
+  );
+  let closing;
+  try {
+    await entered.promise;
+    stop.abort(Error("Run deadline exceeded"));
+    closing = f.router.endLease("lease");
+    await Promise.race([
+      closing,
+      delay(700).then(() => {
+        throw Error("The lease remained blocked by Chrome's already-cancelled native request.");
+      }),
+    ]);
+    await rejected;
+    assert.equal(f.attached.size, 0);
+    assert.ok(
+      f.calls.some(
+        (value) =>
+          value[0] === "debugger.sendCommand" &&
+          value[2] === "Input.dispatchKeyEvent" &&
+          value[3].type === "keyUp" &&
+          value[3].key === "Shift",
+      ),
+    );
+    assert.equal(
+      f.emitted.some((value) => value.event === "user_takeover"),
+      false,
+    );
+  } finally {
+    native.reject(Error("Late Chrome native response"));
+    await rejected.catch(() => {});
+    await closing?.catch(() => {});
+  }
 });
 
 test("both ordinary close entries confirm native input/stream/viewport cleanup, close only their target and keep another attached tab usable", async (t) => {
