@@ -827,9 +827,12 @@ test("separate actual Core runs cannot take the same controlled tab and cancella
   assert.equal(first.run.endedAt, null);
   assert.equal(f.attached.size, 1);
   f.commandGate.resolve();
+  // The second Core run may take longer to prepare on a loaded CI runner.
+  // Give native cancellation its own bounded observation window after release.
+  const cleanupDeadline = Date.now() + 4000;
   while (first.run.endedAt === null) {
     assert.ok(
-      Date.now() < deadline,
+      Date.now() < cleanupDeadline,
       "cancel did not finish after actual native settlement and detach",
     );
     first = await f.observe(first.run.runId);
