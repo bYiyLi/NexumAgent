@@ -607,7 +607,7 @@ test(
 
 test(
   "native visibility follows the selected target and viewport aliases change and reset actual page dimensions",
-  { timeout: 120000 },
+  { timeout: 180000 },
   async (t) => {
     const f = await nativeFixture(t, { html });
     const result = await f.run(
@@ -640,6 +640,7 @@ test(
       return {tabId:tab.id,otherId:other.id,baseline,explicit,first,alias,second,aliasReset,third,fourth,reset,restored,hiddenFollow,visibleFollow,stationary,followed,changedText};
       `,
       { base: f.base },
+      { timeoutMs: 120000 },
     );
     const data = result.result.data;
     assert.deepEqual(data.first, { width: 611, height: 433 });

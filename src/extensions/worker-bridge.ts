@@ -555,7 +555,7 @@ export function isolatedExtensionFactory(
             // settle; killing its Worker at that same instant loses evidence.
             const remaining = Math.ceil(call.deadline - Date.now());
             const rpcTimeout = Math.max(30000,
-              Math.min(120000, remaining + 10000));
+              Math.min(2147483647, remaining + 10000));
             return await request("invoke", {
               method: method.name, input: normalized, callId: id,
               context: call.context, operationId: call.operationId,

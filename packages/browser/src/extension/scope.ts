@@ -577,9 +577,10 @@ export class BrowserRuntime {
             ? Number((args.condition as { timeoutMs: number }).timeoutMs)
             : /download|export|bundle|setFiles/i.test(method)
               ? 120000
-              // A hidden Chromium renderer can take much longer to confirm
-              // each genuine mouse move. Never pretend delivery is complete.
-              : method === "cua.move" ? 90000 : 30000;
+              // Background input on Chromium can take longer to confirm each
+              // real native event; keep all native click receipts mandatory.
+              : ["cua.move", "locator.click", "locator.dblclick"].includes(method)
+                ? 90000 : 30000;
     const budget = Math.min(requested, call.deadline - Date.now(), 2147483647);
     check(
       Number.isFinite(budget) && budget > 0,
