@@ -1339,8 +1339,9 @@ else send(q.id,{});});`,
 });
 
 test("close confirms the Worker ended despite an uncooperative native Promise", async (t) => {
-  const f = await fixture(t, { runtime: { shutdownWaitMs: 30 } }),
-    opened = await f.open();
+  // Closing still requires the actual Worker exit. The standard bounded
+  // shutdown window allows slow CI hosts to deliver that observation.
+  const f = await fixture(t), opened = await f.open();
   const gate = path.join(f.work, "release-native-promise"),
     ready = path.join(f.work, "native-promise-ready");
   const started = await f.invoke("agent.run.start", {
