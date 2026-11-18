@@ -175,10 +175,12 @@ test("synchronous calls and native binary values keep their actual identity with
       return bytes;
     }),
   }));
-  const done = await f.start({
+  const started = await f.start({
     script:
       'const b=Buffer.from("payload");const n=new Uint8Array([1,2]);return sdk.inspect(b,n)===b;',
+    waitMs: 0,
   });
+  const done = await observeTerminal(f.engine, started.run.runId);
   assert.equal(done.run.status, "succeeded");
   assert.equal(done.result.data, true);
   assert.equal(f.store.operationsForRun(done.run.runId).length, 1);
