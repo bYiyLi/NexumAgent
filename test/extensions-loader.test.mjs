@@ -233,6 +233,14 @@ export default async function createExtension(host){
     },
     start: (script) =>
       engine.start(caller, { contextId: context.contextId, script }),
+    settled: async (initial) => {
+      // A short start observation may return a running Run on a loaded CI.
+      // Join that same Run instead of submitting its script again.
+      let observed = initial;
+      for (let attempt = 0; attempt < 8 && observed.run.endedAt === null; attempt++)
+        observed = await engine.observe(caller, initial.run.runId, 3000);
+      return observed;
+    },
   };
 }
 function count(f, value) {
@@ -280,7 +288,7 @@ test("concurrent preparation constructs host before native import, initializes o
   assert.equal(f.control.hosts[0].config.endpoint, "approved");
   assert.equal(f.control.hosts[0].context.runId, undefined);
   assert.equal(
-    (await f.start("return typeof fixtureSDK;")).result.data,
+    (await f.settled(await f.start("return typeof fixtureSDK;"))).result.data,
     "undefined",
   );
   f.control.factory.resolve();
@@ -290,11 +298,11 @@ test("concurrent preparation constructs host before native import, initializes o
   assert.equal(Object.isFrozen(prepared), true);
   await f.loader.verify(prepared);
   assert.equal(
-    (await f.start("return typeof fixtureSDK;")).result.data,
+    (await f.settled(await f.start("return typeof fixtureSDK;"))).result.data,
     "undefined",
   );
   f.registry.publish(prepared.handle);
-  const result = await f.start("return fixtureSDK.echo({answer:42});");
+  const result = await f.settled(await f.start("return fixtureSDK.echo({answer:42});"));
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data, {
     input: { answer: 42 },
