@@ -203,10 +203,15 @@ test("get confirms only the caller-scoped accepted request and never accepts, re
   const byRequest = await f.engine.get(caller, { agentId: "a", requestId });
   assert.equal(byRequest.run.runId, done.run.runId);
   assert.deepEqual(byRequest.result.data, { value: 7 });
-  assert.equal(
-    byRequest.snapshots.code.value.code,
-    'console.log("historical");return context.input;',
-  );
+  assert.equal(byRequest.snapshots.code.status, "available");
+  assert.equal(Object.hasOwn(byRequest.snapshots.code, "value"), false);
+  const source = await f.engine.get(caller, {
+    agentId: "a",
+    runId: done.run.runId,
+    read: { kind: "code", offset: 0, maxBytes: 8192 },
+  });
+  assert.equal(source.part.text, 'console.log("historical");return context.input;');
+  assert.equal(Object.hasOwn(source.snapshots.code, "value"), false);
   assert.deepEqual(byRequest.snapshots.input.value.input, { value: 7 });
   assert.match(byRequest.snapshots.logs.value, /historical/);
   assert.equal(f.store.listRuns({}, "inspection").runs.length, before);

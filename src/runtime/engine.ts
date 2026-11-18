@@ -423,7 +423,9 @@ export class RunEngine extends EventEmitter {
     return {
       ...view,
       snapshots: {
-        code: this.#snapshot(view.run, "code", true),
+        // Keep source availability, not the submitted script body. Callers can
+        // explicitly read retained code through read.kind=code.
+        code: this.#snapshot(view.run, "code"),
         input: this.#snapshot(view.run, "input", true),
         logs: this.#snapshot(view.run, "logs", true),
       },

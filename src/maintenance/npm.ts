@@ -1437,9 +1437,11 @@ export class MaintenanceBackends implements MaintenanceBackend {
   constructor(
     readonly npm: MaintenanceBackend,
     readonly configuration?: MaintenanceBackend,
+    readonly packages?: MaintenanceBackend,
   ) {}
   #for(intent: MaintenanceIntent): MaintenanceBackend {
-    if (intent.target === "package" || intent.target === "extension")
+    if (intent.target === "package") return this.packages ?? this.npm;
+    if (intent.target === "extension")
       return this.npm;
     requireCondition(
       this.configuration,

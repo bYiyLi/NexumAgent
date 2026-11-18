@@ -157,6 +157,13 @@ export async function runAgent(
         version: options.version,
         signal,
         async upgrade(version) {
+	          // The Cloud-managed OS entry downloads the current target and
+	          // prepares all packages on the next start. No second local update
+	          // receipt or JS launcher is used in this installation layout.
+	          if (process.env.NEXUM_CLOUD_BOOTSTRAP === "1") {
+	            diagnose("agent_upgrade_required", false);
+	            return;
+	          }
           const program = path.join(config.root, "program");
           if ((await realpath(program)) !== program)
             throw new AgentError(

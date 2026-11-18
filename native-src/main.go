@@ -13,6 +13,7 @@ import (
 type launchConfig struct {
 	profile string
 	home    string
+	layout  string
 	program string
 	node    string
 	runner  string
@@ -24,6 +25,7 @@ func parseConfig(args []string) (launchConfig, error) {
 	set.SetOutput(os.Stderr)
 	set.StringVar(&config.profile, "profile", "", "development or production")
 	set.StringVar(&config.home, "home", "", "absolute user home")
+	set.StringVar(&config.layout, "layout", "legacy", "legacy or work")
 	if err := set.Parse(args); err != nil {
 		return config, err
 	}
@@ -33,13 +35,23 @@ func parseConfig(args []string) (launchConfig, error) {
 	if config.home == "" || !filepath.IsAbs(config.home) || filepath.Clean(config.home) != config.home {
 		return config, errors.New("a canonical absolute --home is required")
 	}
+	if config.layout != "legacy" && config.layout != "work" {
+		return config, errors.New("invalid Agent installation layout")
+	}
 	profileName := ".nexum"
 	if config.profile == "development" {
 		profileName = ".nexum-dev"
 	}
 	config.program = filepath.Join(config.home, profileName, "program")
+	if config.layout == "work" {
+		config.program = filepath.Join(config.home, profileName)
+	}
 	config.node = nativeNode(config.program)
 	config.runner = filepath.Join(config.program, "service-runner.mjs")
+	if config.layout == "work" {
+		config.runner = filepath.Join(config.program, "work", "node_modules",
+			"@nexum-hub", "agent", "dist", "cli.js")
+	}
 	return config, nil
 }
 

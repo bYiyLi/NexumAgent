@@ -58,6 +58,7 @@ import { ProfileRetention } from "../runtime/retention.js";
 import { MaterialRetention } from "../runtime/material-retention.js";
 import { taskHandlers } from "./tasks.js";
 import { ApprovedPackageCatalog } from "./packages.js";
+import { cloudManagedPackages } from "./cloud-packages.js";
 import type { VerifiedPackageSnapshot } from "../maintenance/npm.js";
 import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
 import {
@@ -438,7 +439,12 @@ export class AgentRuntime {
         this.#shipJson(value, purpose, signal, context, origin, runId),
       configurationBackend: () => this.#configurationBackend(),
       refreshPackages: async (snapshot) => {
-        if (snapshot) await this.#approvedPackages.accept(snapshot);
+        if (snapshot) {
+          requireCondition(process.env.NEXUM_CLOUD_BOOTSTRAP !== "1",
+            "managed_pnpm_required",
+            "Cloud-managed dependencies must use the approved pnpm workflow.");
+          await this.#approvedPackages.accept(snapshot);
+        }
         await this.#documents.refresh(this.#published().docs);
       },
     };
@@ -446,14 +452,18 @@ export class AgentRuntime {
   async #initialize(): Promise<void> {
     const work = path.join(this.#store.root, "work");
     await this.#retention.start();
-    this.#approvedPackages = await ApprovedPackageCatalog.open(
-      this.#store.root,
-      { profile: this.#config.profile },
-      { reserve: (bytes) => this.#retention.reserve(bytes) },
-    );
+    const cloudManaged = process.env.NEXUM_CLOUD_BOOTSTRAP === "1";
+    if (!cloudManaged)
+      this.#approvedPackages = await ApprovedPackageCatalog.open(
+        this.#store.root,
+        { profile: this.#config.profile },
+        { reserve: (bytes) => this.#retention.reserve(bytes) },
+      );
     const policy = this.#options.modulePolicy ?? {
       builtins: () => defaultBuiltins,
-      approvedPackages: () => this.#approvedPackages.approvedPackages(),
+      approvedPackages: () => cloudManaged
+        ? cloudManagedPackages(this.#store.root)
+        : this.#approvedPackages.approvedPackages(),
     };
     const importer = await this.#retention.reserve(65536, { control: true });
     try {

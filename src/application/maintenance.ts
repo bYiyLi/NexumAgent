@@ -24,6 +24,7 @@ import {
   MaintenanceBackends,
   NpmMaintenanceBackend,
 } from "../maintenance/npm.js";
+import { PnpmMaintenanceBackend } from "../maintenance/pnpm.js";
 import type { ProfileConfiguration } from "./config.js";
 import type { ApplicationComponents, AgentRuntimeOptions } from "./runtime.js";
 
@@ -406,6 +407,12 @@ export function maintenanceRuntimeOptions(
         refreshPackages: components.refreshPackages,
         reserve: components.reserve,
       });
+      const pnpm = process.env.NEXUM_CLOUD_BOOTSTRAP === "1"
+        ? new PnpmMaintenanceBackend({
+            root: config.root,
+            profile: config.profile,
+          })
+        : undefined;
       application = new MaintenanceApplication(
         components,
         new MaintenanceBackends(
@@ -413,6 +420,7 @@ export function maintenanceRuntimeOptions(
           configuration
             ? await configuration(components)
             : await components.configurationBackend(),
+          pnpm,
         ),
         config.serverUrl,
       );

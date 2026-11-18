@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseTag, releasePlan } from "../scripts/npm-release.mjs";
+import {
+  assertNoSourceMaps,
+  parseTag,
+  releasePlan,
+} from "../scripts/npm-release.mjs";
+
+test("npm release rejects source maps in any package archive", () => {
+  assert.doesNotThrow(() =>
+    assertNoSourceMaps("@nexum-hub/agent", ["dist/cli.js", "dist/cli.d.ts"]),
+  );
+  for (const map of ["dist/cli.js.map", "dist/main.css.map", "dist/cli.js.MAP"])
+    assert.throws(
+      () => assertNoSourceMaps("@nexum-hub/agent", ["dist/cli.js", map]),
+      /source maps must not be published/,
+    );
+});
 
 test("stable release versions come from the pushed vX.Y.Z tag", () => {
   assert.deepEqual(

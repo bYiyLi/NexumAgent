@@ -25,7 +25,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "!**/*.map"
   ],
   "sideEffects": false
 }

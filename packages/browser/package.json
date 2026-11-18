@@ -26,7 +26,8 @@
     "scripts",
     "skills",
     "README.md",
-    "implementation.json"
+    "implementation.json",
+    "!**/*.map"
   ],
   "exports": {
     ".": {

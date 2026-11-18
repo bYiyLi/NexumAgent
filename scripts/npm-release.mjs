@@ -58,6 +58,15 @@ export function releasePlan({ eventName, ref, runNumber, tags = [] }) {
   };
 }
 
+export function assertNoSourceMaps(packageName, paths) {
+  for (const filename of paths)
+    assert.doesNotMatch(
+      filename,
+      /\.map$/i,
+      `${packageName}: source maps must not be published: ${filename}`,
+    );
+}
+
 function json(relative) {
   return JSON.parse(readFileSync(path.join(root, relative), "utf8"));
 }
@@ -165,12 +174,14 @@ function inspectRelease() {
     assert.equal(pack.version, version);
     assert.match(pack.shasum, /^[a-f0-9]{40}$/);
     const names = new Set(pack.files.map(({ path: filename }) => filename));
+    assertNoSourceMaps(item.name, names);
     for (const required of {
       sdk: ["dist/index.js", "dist/index.d.ts"],
       agent: [
         "dist/cli.js",
         "contracts/v2/common.schema.json",
         "scripts/service.mjs",
+		"scripts/cloud-service.mjs",
         "scripts/npm-install.mjs",
         "scripts/service-runner.mjs",
         "native/windows-x64/nexum-agent.exe",

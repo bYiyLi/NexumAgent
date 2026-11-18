@@ -118,6 +118,9 @@ export function servicePlan({
   profile,
   programDir,
   npmManaged = false,
+  cloudManaged = false,
+  serverUrl,
+  nativeExecutable,
   home = homedir(),
   platform = process.platform,
   userId = process.getuid?.(),
@@ -130,8 +133,56 @@ export function servicePlan({
   )
     throw new Error("Select an explicit supported Agent profile and platform.");
   const p = platform === "win32" ? path.win32 : path.posix;
-  if (!p.isAbsolute(clean(home)) || !p.isAbsolute(clean(programDir)))
+  if (!p.isAbsolute(clean(home)) ||
+      (!cloudManaged && !p.isAbsolute(clean(programDir))))
     throw new Error("Service paths must be absolute.");
+  if (cloudManaged) {
+    const base = new URL(serverUrl);
+    if (!(["https:", "http:"].includes(base.protocol) &&
+      (profile === "development" || base.protocol === "https:") &&
+      !base.username && !base.password && !base.search && !base.hash))
+      throw new Error("Invalid Cloud bootstrap URL.");
+    const root = p.join(home, profile === "development" ? ".nexum-dev" : ".nexum");
+    const native = nativeExecutable ?? p.join(root,
+      platform === "win32" ? "nexum-agent.exe" : "nexum-agent");
+    if (!p.isAbsolute(native) || !p.relative(root, native) ||
+      p.relative(root, native).startsWith("..") ||
+      p.isAbsolute(p.relative(root, native)))
+      throw new Error("The native entrypoint must stay within this Agent profile.");
+    const labelHash = createHash("sha256").update(root).digest("hex").slice(0, 12);
+    const logs = p.join(root, "logs"), state = p.join(root, "state");
+    const common = { profile, platform, home, root, logs, state,
+      programDir: root, native, serverUrl, cloudManaged: true };
+    if (platform === "win32") {
+      if (typeof windowsSid !== "string" || !/^S-1-[0-9-]+$/.test(windowsSid))
+        throw new Error("Use the current Windows user's SID.");
+      const label = `Nexum.Agent.${profile}.${createHash("sha256")
+        .update(windowsSid + "\n" + root).digest("hex").slice(0, 12)}`;
+      const args = ["--profile", profile, "--home", home, "--layout", "work"]
+        .map(windowsArgument).join(" ");
+      const content = `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>Nexum Agent (${profile})</Description></RegistrationInfo><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(windowsSid)}</UserId></LogonTrigger></Triggers><Principals><Principal id="TargetUser"><UserId>${xml(windowsSid)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>255</Count></RestartOnFailure></Settings><Actions Context="TargetUser"><Exec><Command>${xml(native)}</Command><Arguments>${xml(args)}</Arguments><WorkingDirectory>${xml(root)}</WorkingDirectory></Exec></Actions></Task>\n`;
+      return { ...common, label, windowsSid, content,
+        manifestPath: p.join(state, "service-task.xml") };
+    }
+    // The OS service starts only the stable native entrypoint. The native
+    // entrypoint downloads the current Cloud bootstrap on every start, so the
+    // service definition never needs to change when Cloud or Node changes.
+    if (platform === "darwin") {
+      const label = `com.nexum.agent.${profile}.${labelHash}`;
+      const args = ["--profile", profile, "--home", home, "--layout", "work"];
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${[native, ...args].map((x) => `<string>${xml(x)}</string>`).join("")}</array><key>WorkingDirectory</key><string>${xml(root)}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>10</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>${xml(p.join(logs, "native-launcher.log"))}</string></dict></plist>\n`;
+      return { ...common, label, target: `gui/${userId}/${label}`,
+        domain: `gui/${userId}`, content,
+        manifestPath: preview ? p.join(state, "service-preview.plist") :
+          p.join(home, "Library", "LaunchAgents", label + ".plist") };
+    }
+    const label = `nexum-agent-${profile}-${labelHash}.service`;
+    const args = ["--profile", profile, "--home", home, "--layout", "work"];
+    const content = `[Unit]\nDescription=Nexum Agent (${profile})\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=${[native, ...args].map(unit).join(" ")}\nWorkingDirectory=${clean(root).replaceAll("%", "%%")}\nEnvironment=${unit("HOME=" + home)}\nUnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE\nRestart=on-failure\nRestartSec=10s\nTimeoutStopSec=60s\nKillMode=mixed\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
+    return { ...common, label, content,
+      manifestPath: preview ? p.join(state, "service-preview.service") :
+        p.join(home, ".config", "systemd", "user", label) };
+  }
   const root = p.join(
       home,
       profile === "development" ? ".nexum-dev" : ".nexum",
