@@ -828,8 +828,16 @@ test("run completion waits for actual managed closure, persists unconfirmed fact
   });
   const [id] = await registered;
   f.controls.get(id).ref.report({ pid: 123, outputComplete: false });
-  const closing = await f.engine.observe(caller, started.run.runId, 150);
-  assert.equal(closing.run.status, "running");
+  // Resource registration is earlier than the root's return. A loaded CI
+  // runner may still be executing the script after the first observation;
+  // wait for the actual cleanup phase instead of assuming 150ms is enough.
+  const until = Date.now() + 5000;
+  let closing;
+  do {
+    closing = await f.engine.observe(caller, started.run.runId, 150);
+    assert.equal(closing.run.status, "running");
+    assert.ok(Date.now() < until, "The run never entered managed cleanup.");
+  } while (closing.run.cleanup?.phase !== "cleanup");
   assert.equal(closing.run.cleanup.phase, "cleanup");
   assert.equal(closing.run.cleanup.unconfirmed[0].id, id);
   assert.equal(closing.result, null);

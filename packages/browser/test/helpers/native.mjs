@@ -447,13 +447,13 @@ export async function nativeFixture(t, options = {}) {
     runs.add(view.run.runId);
     return view;
   };
-  const run = async (script, input = {}) => {
+  const run = async (script, input = {}, options = {}) => {
     let result = await start(
       `try { ${script} } catch(error) { return {nativeFailure:{code:error.code??"native_error",message:String(error.message)}}; }`,
       input,
-      { waitMs: 1000 },
+      { waitMs: 1000, ...options },
     );
-    const until = Date.now() + 65000;
+    const until = Date.now() + (options.timeoutMs ?? 60000) + 5000;
     while (result.run.endedAt === null) {
       if (Date.now() >= until)
         assert.fail(

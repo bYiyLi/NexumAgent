@@ -1,6 +1,11 @@
 name: Optional browser package
 on:
   workflow_dispatch:
+    inputs:
+      live_public_sites:
+        description: Run public Google/YouTube smoke tests (external site availability is not controlled by CI)
+        type: boolean
+        default: false
   push:
     paths:
       - packages/browser/**
@@ -30,7 +35,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -81,18 +86,27 @@ jobs:
           NEXUM_BROWSER_WEBMCP_TESTING: "1"
         run: node --experimental-vm-modules --test --test-name-pattern="native WebMCP" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise anonymous public Google Docs export through the actual browser
+        # Keep real, assertion-based site checks; run them on explicit demand.
+        # Public providers may redirect GitHub runners to anti-bot challenges.
+        if: github.event_name == 'workflow_dispatch' && inputs.live_public_sites
         env:
           # Public Chromium design: https://issues.chromium.org/issues/376084060
           NEXUM_BROWSER_PUBLIC_DOC_URL: https://docs.google.com/document/d/1RVbtvklXUg9QCNvMT0r-1qDwJNeQFGoTCOD1Ur9mDa4/edit
           NEXUM_BROWSER_PUBLIC_DOC_TEXT: Guest View MPArch Migration
         run: node --experimental-vm-modules --test packages/browser/test/native-sites.acceptance.mjs
       - name: Exercise anonymous public YouTube transcript through the actual browser
+        # Keep real, assertion-based site checks; run them on explicit demand.
+        # Public providers may redirect GitHub runners to anti-bot challenges.
+        if: github.event_name == 'workflow_dispatch' && inputs.live_public_sites
         env:
           # Public Google IFrame API example video; no account or copied cookies.
           NEXUM_BROWSER_PUBLIC_YOUTUBE_URL: https://www.youtube.com/watch?v=M7lc1UVf-VE
           NEXUM_BROWSER_PUBLIC_YOUTUBE_TEXT: YouTube
         run: node --experimental-vm-modules --test packages/browser/test/native-youtube.acceptance.mjs
       - name: Exercise anonymous public Google Sheets and Slides export through the actual browser
+        # Keep real, assertion-based site checks; run them on explicit demand.
+        # Public providers may redirect GitHub runners to anti-bot challenges.
+        if: github.event_name == 'workflow_dispatch' && inputs.live_public_sites
         env:
           # Public Google Sheets quickstart fixture and official BlinkOn 6 slides.
           NEXUM_BROWSER_PUBLIC_SHEET_URL: https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit

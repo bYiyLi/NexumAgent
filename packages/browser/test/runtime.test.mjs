@@ -669,6 +669,8 @@ async function fixture(
     tabs,
     start,
     router,
+    simulateUserCancel: (tabId = 1) =>
+      chrome.debugger.onDetach.emit({ tabId }, "canceled_by_user"),
     downloadSource,
     downloadBytes,
     encoder,
@@ -835,6 +837,63 @@ test("separate actual Core runs cannot take the same controlled tab and cancella
   assert.equal(first.run.status, "cancelled");
   assert.equal(f.attached.size, 0);
   assert.equal(f.counts.removed, 0);
+});
+
+test("revoked run cannot recreate browser control after native closure releases its scope", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { BrowserRuntime } = await import("../dist/extension/scope.js");
+  const runtime = new BrowserRuntime(new EventEmitter());
+  const call = {
+    context: { runId: "run_original" },
+    deadline: Date.now() + 30000,
+    resources: {
+      async register({ value }) {
+        return { id: "res_original", kind: "browser.run", value,
+          signal: new AbortController().signal, report() {} };
+      },
+    },
+    signal: new AbortController().signal,
+  };
+  const scope = await runtime.scope(call);
+  scope.revoke();
+  await scope.closed;
+  await assert.rejects(runtime.scope(call), { code: "USER_TAKEOVER" });
+  const fresh = await runtime.scope({
+    ...call, context: { runId: "run_new" },
+  });
+  assert.notEqual(fresh, scope);
+  await fresh.dispose();
+});
+
+test("a user debugger cancel keeps the original run revoked after its native lease has closed", async (t) => {
+  const f = await fixture(t);
+  let run = await f.start(select + `
+    await tab.cdp.send('Runtime.enable');
+    let waitError;
+    try { await tab.playwright.waitForDownload({timeoutMs:110000}); }
+    catch (error) { waitError = error.code; }
+    let nextError;
+    try { await tab.cdp.send('Runtime.enable'); }
+    catch (error) { nextError = error.code; }
+    return {waitError, nextError};`, { waitMs: 0, timeoutMs: 120000 });
+  const until = Date.now() + 15000;
+  while (!run.operations?.items?.some((operation) =>
+    operation.method === "waiters.get" && operation.status === "running")) {
+    assert.ok(Date.now() < until, "The fixture did not enter its native waiter.");
+    run = await f.observe(run.run.runId);
+  }
+  assert.equal(f.attached.size, 1);
+  f.simulateUserCancel();
+  while (run.run.endedAt === null) {
+    assert.ok(Date.now() < until, "The cancelled fixture did not settle.");
+    run = await f.observe(run.run.runId);
+  }
+  assert.equal(run.run.status, "succeeded", JSON.stringify(run.run.error));
+  assert.deepEqual(run.result.data, {
+    waitError: "USER_TAKEOVER", nextError: "USER_TAKEOVER",
+  });
+  const next = await f.start(select + 'return await tab.cdp.send("Runtime.enable");');
+  assert.equal(next.run.status, "succeeded", JSON.stringify(next.run.error));
 });
 
 test("AX state plus actual JPEG bytes cross Registry and the real Core result pipeline without entering saved JSON", async (t) => {

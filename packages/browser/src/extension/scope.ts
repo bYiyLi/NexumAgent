@@ -64,6 +64,7 @@ export class RunScope implements ManagedResource {
   constructor(
     readonly runtime: BrowserRuntime,
     readonly runId: string,
+    readonly deadline: number,
   ) {
     this.closed = this.#done.promise;
     this.signal = this.#stop.signal;
@@ -375,6 +376,7 @@ export class RunScope implements ManagedResource {
     });
   }
   revoke(target?: Target): void {
+    this.runtime.rememberRevocation(this.runId, this.deadline);
     if (target) this.#sealed.add(stableKey(target));
     void this.dispose(
       failure("USER_TAKEOVER", "The browser user stopped this run's control."),
@@ -405,6 +407,9 @@ export class RunScope implements ManagedResource {
 }
 export class BrowserRuntime {
   #scopes = new Map<string, Promise<RunScope>>();
+  // Native lease closure can remove its RunScope before the original script
+  // returns. Keep the user-revoked run fenced until its Core deadline.
+  #revokedUntil = new Map<string, number>();
   #locks = new Map<string, string>();
   #waiters = new Map<
     string,
@@ -427,6 +432,11 @@ export class BrowserRuntime {
               .catch(() => {});
       },
     );
+  }
+  rememberRevocation(runId: string, deadline: number): void {
+    this.#revokedUntil.set(runId, deadline);
+    for (const [id, until] of this.#revokedUntil)
+      if (until <= Date.now()) this.#revokedUntil.delete(id);
   }
   assertFree(targetKey: string, runId: string): void {
     const parts = JSON.parse(targetKey) as (string | number)[],
@@ -470,9 +480,11 @@ export class BrowserRuntime {
       "INVALID_TARGET",
       "Browser control needs the actual Core run identity.",
     );
+    check((this.#revokedUntil.get(runId) ?? 0) <= Date.now(),
+      "USER_TAKEOVER", "The user ended this run's browser control.");
     let promise = this.#scopes.get(runId);
     if (!promise) {
-      const scope = new RunScope(this, runId);
+      const scope = new RunScope(this, runId, call.deadline);
       promise = (async () => {
         const ref = await call.resources.register({
           kind: "browser.run",
@@ -565,7 +577,9 @@ export class BrowserRuntime {
             ? Number((args.condition as { timeoutMs: number }).timeoutMs)
             : /download|export|bundle|setFiles/i.test(method)
               ? 120000
-              : 30000;
+              // A hidden Chromium renderer can take much longer to confirm
+              // each genuine mouse move. Never pretend delivery is complete.
+              : method === "cua.move" ? 90000 : 30000;
     const budget = Math.min(requested, call.deadline - Date.now(), 2147483647);
     check(
       Number.isFinite(budget) && budget > 0,

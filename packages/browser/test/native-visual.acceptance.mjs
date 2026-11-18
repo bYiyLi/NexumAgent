@@ -5,7 +5,7 @@ import { nativeFixture, select } from "./helpers/native.mjs";
 
 test(
   "native background cursor movement settles without a paint callback and leaves no control after run cleanup",
-  { timeout: 90000 },
+  { timeout: 150000 },
   async (t) => {
     const facts = [];
     const f = await nativeFixture(t, {
@@ -39,6 +39,7 @@ const actual=await other.playwright.evaluate('() => {const layer=document.queryS
 const selectedId=(await selected.tabs.selected())?.id;await selected.visibility.set(true);
 return {observed,actual,selectedId,originalId:tab.id};`,
         { base: f.base },
+        { timeoutMs: 120000 },
       );
     } finally {
       t.diagnostic(JSON.stringify({ pageFacts: facts }));
@@ -110,7 +111,7 @@ test(
   },
 );
 
-test("native visual feedback preserves user groups and keeps AI markers after run cleanup and tab activation", async (t) => {
+test("native visual feedback preserves user groups and keeps AI markers after run cleanup and tab activation", { timeout: 180000 }, async (t) => {
   const events = [];
   const f = await nativeFixture(t, {
     html: `<!doctype html><html><head><title>Native visual page</title><link id="original-icon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' fill='green'/%3E%3C/svg%3E"></head><body><h1>Visual native page</h1><button id="click" onclick="this.textContent='Native pointer clicked'">Native pointer target</button><script>
@@ -161,6 +162,7 @@ test("native visual feedback preserves user groups and keeps AI markers after ru
       await other.markDeliverable();
       return {pointer,moveStarted,moveCompleted,stationary:stationary.id,followed:followed.id,ownGroup,preserved,inventory};`,
     { base: f.base, ...ids },
+    { timeoutMs: 120000 },
   );
   const data = result.result.data;
   if (!data.pointer.exists) {
