@@ -858,7 +858,8 @@ test("run completion waits for actual managed closure, persists unconfirmed fact
 
 test("handed-off resources survive the creator terminal state and new runs explicitly control the original instance", async (t) => {
   const f = await resourceFixture(t);
-  const started = await f.start({ script: "return await managed.open(true);" });
+  const started = await observeTerminal(f.engine,
+    await f.start({ script: "return await managed.open(true);" }));
   assert.equal(started.run.status, "succeeded");
   const id = started.result.data,
     control = f.controls.get(id);
@@ -866,10 +867,10 @@ test("handed-off resources survive the creator terminal state and new runs expli
   f.engine.cancel(caller, started.run.runId);
   assert.equal(control.stops, 0);
   control.closeOnDispose = true;
-  const stopped = await f.start({
+  const stopped = await observeTerminal(f.engine, await f.start({
     script: "return await managed.close(context.input);",
     input: id,
-  });
+  }));
   assert.equal(stopped.run.status, "succeeded");
   assert.equal(stopped.result.data.status, "closed");
   assert.equal(f.store.getResource(id).originRunId, started.run.runId);

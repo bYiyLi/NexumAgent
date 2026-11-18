@@ -550,16 +550,18 @@ export function isolatedExtensionFactory(
               method.schemaDialect as MethodDefinition["schemaDialect"],
               method.schemas,
             )(normalized);
-            // The original Run may allow longer native SDK operations than
-            // the 30s Worker RPC default. Bound this wait by the *real* Run
-            // deadline rather than revoking a still-running extension early.
+            // The Run deadline aborts the invocation independently. Leave
+            // time for the original native cancellation and lease cleanup to
+            // settle; killing its Worker at that same instant loses evidence.
+            const remaining = Math.ceil(call.deadline - Date.now());
+            const rpcTimeout = Math.max(30000,
+              Math.min(120000, remaining + 10000));
             return await request("invoke", {
               method: method.name, input: normalized, callId: id,
               context: call.context, operationId: call.operationId,
               deadline: call.deadline,
               hasHostRequests: Boolean(call.hostRequests),
-            }, Math.max(1, Math.min(120000,
-              Math.ceil(call.deadline - Date.now()))));
+            }, rpcTimeout);
           } finally {
             calls.delete(id);
             for (const issuedId of issuedIds) issued.delete(issuedId);
