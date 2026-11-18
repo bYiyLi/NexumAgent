@@ -360,6 +360,21 @@ export function isolatedExtensionFactory(
         "The requested SDK method is not available.");
       return Reflect.apply(desc.value, receiver, args.map((v) => decode(v)));
     };
+    const serviceError = (cause: unknown, name: unknown): JsonObject => {
+      // Current Core authorization may throw an ordinary Error with a fixed
+      // forbidden code. Preserve that one trusted denial across the Worker,
+      // without accepting arbitrary extension-supplied error properties.
+      if (name === "authorize" && cause && typeof cause === "object" &&
+          !types.isProxy(cause)) {
+        const code = Object.getOwnPropertyDescriptor(cause, "code");
+        if (code && "value" in code && code.value === "forbidden")
+          return { code: "forbidden", message: "Current access was revoked or denied." };
+      }
+      return safeErrorData(cause, {
+        code: "extension_worker_call_failed",
+        message: "The original Core service failed.",
+      });
+    };
     const respond = (entry: Record<string, unknown>,
       payload: Record<string, unknown>) => {
       if (ended) return;
@@ -478,18 +493,12 @@ export function isolatedExtensionFactory(
             void Promise.resolve(value).then(
               (v) => respond(asyncEntry, { value: encode(v,
                 typeof entry.callId === "string" ? entry.callId : undefined) }),
-              (e) => respond(asyncEntry, { error: safeErrorData(e, {
-                code: "extension_worker_call_failed",
-                message: "The original Core service failed.",
-              }) }),
+              (e) => respond(asyncEntry, { error: serviceError(e, name) }),
             );
           } else respond(entry, { value: encode(value,
             typeof entry.callId === "string" ? entry.callId : undefined) });
         } catch (e) {
-          respond(entry, { error: safeErrorData(e, {
-            code: "extension_worker_call_failed",
-            message: "The original Core service failed.",
-          }) });
+          respond(entry, { error: serviceError(e, message.name) });
         }
       }
     });

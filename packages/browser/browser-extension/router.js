@@ -1150,12 +1150,12 @@ async function readyForInput(ctx, framePath = []) {
 
 // Build the points for real Chrome Input.dispatchMouseEvent calls, not a
 // decorative animation that runs independently of the actual input.
-export function humanPointerPath(from, to) {
+export function humanPointerPath(from, to, maxSteps = 28) {
   const dx = to.x - from.x,
     dy = to.y - from.y,
     distance = Math.hypot(dx, dy);
   if (distance < 12) return [{ x: to.x, y: to.y, delayMs: 0 }];
-  const steps = Math.min(28, Math.max(3, Math.ceil(distance / 28))),
+  const steps = Math.min(maxSteps, Math.max(3, Math.ceil(distance / 28))),
     durationMs = Math.min(420, Math.max(110, 85 + distance * 0.35)),
     bend = Math.min(18, distance * 0.08) *
       (Math.sin(from.x * 0.013 + to.y * 0.017) < 0 ? -1 : 1);
@@ -4244,8 +4244,14 @@ export function createBrowserRouter(
         Number.isFinite(params.y)
       ) {
         const tabId = nativeId(ctx.target.tabId),
-          previous = pointerPositions.get(tabId) ?? { x: 32, y: 72 },
-          path = humanPointerPath(previous, { x: params.x, y: params.y });
+          previous = pointerPositions.get(tabId) ?? { x: 32, y: 72 };
+        // Chromium can heavily throttle input acknowledgement in an inactive
+        // tab. Keep a real multi-point native trajectory, but bound its steps
+        // so one background move cannot outlive the original SDK request.
+        const tab = await chrome.tabs.get(tabId);
+        const clickMove = /(^|\.)(click|dblclick|doubleClick)$/.test(ctx.method);
+        const maxSteps = tab.active ? 28 : clickMove ? 2 : 3;
+        const path = humanPointerPath(previous, { x: params.x, y: params.y }, maxSteps);
         let result;
         for (const step of path) {
           result = await router.send(

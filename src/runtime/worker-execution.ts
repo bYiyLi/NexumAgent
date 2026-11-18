@@ -538,6 +538,11 @@ export async function compileWorker(
         const nativeTypes = Array.isArray(entry.nativeTypes)
           ? entry.nativeTypes : [];
         const reconstruct = (value: unknown): unknown => {
+          // A valid Core-issued output/transfer/MCP identity was already
+          // checked by decode(). Rebuilding the plain object strips its
+          // private brand, breaking nested output.result() content.
+          if (outputIntent(value) || transferOffer(value) || mcpResult(value))
+            return value;
           if (isPlainRecord(value) &&
               Object.keys(value).length === 1 &&
               typeof value.__nexumBoundData === "string") {

@@ -237,8 +237,12 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
       const invoke = (...args: unknown[]) => {
         let inspected = 0;
         const unsafe = (value: unknown, depth = 0): boolean => {
-          if (++inspected > 4096 || depth > 24) return true;
-          if (!value || typeof value !== "object") return false;
+          if (depth > 24 || !value || typeof value !== "object")
+            return depth > 24;
+          // The node budget protects object graphs, not each byte in a
+          // plain numeric array (for example a screenshot passed to evaluate).
+          if (++inspected > 4096 ||
+              (Array.isArray(value) && value.length > 1024 * 1024)) return true;
           if (types.isProxy(value)) return true;
           if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer ||
               value instanceof Blob || value instanceof Date ||
@@ -393,7 +397,13 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
           Object.hasOwn(outputKinds, prefix[1]!)) {
         return (...args: unknown[]) => {
           const result = Object.freeze({ kind: outputKinds[prefix[1]!] });
-          const task = Promise.resolve(invoke(...args));
+          // Explicit result content may contain earlier output helpers. Their
+          // Core identities must exist before the enclosing result is built;
+          // a cloneable placeholder is not a valid MCP content block.
+          const task = prefix[1] === "result"
+            ? Promise.all(args.map((value) => settle(value)))
+                .then((resolved) => invoke(...resolved))
+            : Promise.resolve(invoke(...args));
           outputIntents.set(result, task);
           inFlight.add(task);
           void task.finally(() => inFlight.delete(task)).catch(() => {});

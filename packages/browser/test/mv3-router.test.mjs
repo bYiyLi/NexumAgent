@@ -2690,6 +2690,22 @@ test("native pointer trajectory uses curved eased intermediate positions and end
     "the native path has an actual curved component",
   );
   assert.deepEqual(humanPointerPath(end, end), [{ ...end, delayMs: 0 }]);
+  // Inactive tabs can take seconds to acknowledge each native event. Retain
+  // a curved multi-point path while bounding the number of CDP round trips.
+  const background = humanPointerPath(start, end, 3);
+  assert.equal(background.length, 3);
+  assert.deepEqual({ x: background.at(-1).x, y: background.at(-1).y }, end);
+  assert.ok(background.slice(0, -1).every((point) => point.delayMs > 0));
+  assert.ok(background.some((point) =>
+    Math.abs((point.x - start.x) * (end.y - start.y) -
+      (point.y - start.y) * (end.x - start.x)) > 100));
+  const backgroundClick = humanPointerPath(start, end, 2);
+  assert.equal(backgroundClick.length, 2);
+  assert.deepEqual({ x: backgroundClick.at(-1).x,
+    y: backgroundClick.at(-1).y }, end);
+  assert.ok(backgroundClick[0].delayMs > 0);
+  assert.ok(Math.abs((backgroundClick[0].x - start.x) * (end.y - start.y) -
+    (backgroundClick[0].y - start.y) * (end.x - start.x)) > 100);
 });
 
 test("high-level mouse input dispatches real intermediate events before click and during held-button drag", async (t) => {
