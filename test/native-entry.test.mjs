@@ -14,8 +14,9 @@ test("the npm Core package contains no native binaries or OS lifecycle installer
     "Cloud owns the native supervisor, bootstrap and updater");
   const result = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
     cwd: root, encoding: "utf8", timeout: 30000,
+    shell: process.platform === "win32",
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr);
   const [pack] = JSON.parse(result.stdout);
   const names = pack.files.map((entry) => entry.path);
   assert.ok(names.includes("dist/cli.js"));
