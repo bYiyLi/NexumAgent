@@ -184,15 +184,23 @@ function fromCore(
     result[key] = fromCore(nested, depth + 1, seen);
   return result;
 }
-/** Resolve output helpers nested in output.result(), where callers may not
- * explicitly await each underlying SDK method. Do not recursively call object
- * getters or alter native typed arrays, blobs, Maps or Dates. */
-async function settle(value: unknown, depth = 0): Promise<unknown> {
+/** Resolve pending output helpers and make ordinary result data cloneable.
+ * Do not invoke user getters or conversion hooks; native bytes and dates pass
+ * through unchanged. SDK arguments stay strict unless resultData is enabled. */
+async function settle(
+  value: unknown,
+  depth = 0,
+  resultData = false,
+): Promise<unknown> {
   if (depth > 24) throw new AgentError("worker_arguments_invalid",
     "Nested SDK arguments exceed the value depth limit.");
-  if (value instanceof Promise) return settle(await value, depth + 1);
+  // Functions and Symbols are valid JavaScript values, but cannot cross the
+  // Worker data channel. Keep them as undefined for the JSON result normalizer.
+  if (resultData && (typeof value === "function" || typeof value === "symbol"))
+    return undefined;
+  if (value instanceof Promise) return settle(await value, depth + 1, resultData);
   if (value && typeof value === "object" && outputIntents.has(value))
-    return settle(await outputIntents.get(value), depth + 1);
+    return settle(await outputIntents.get(value), depth + 1, resultData);
   if (value && typeof value === "object" && issuedIntentViews.has(value))
     return { __nexumIntent: issuedIntentViews.get(value)! };
   if (value && typeof value === "object" && issuedOfferViews.has(value))
@@ -204,7 +212,37 @@ async function settle(value: unknown, depth = 0): Promise<unknown> {
     return { ...entry.snapshot, __nexumMcpHandle: entry.id };
   }
   if (Array.isArray(value))
-    return Promise.all(value.map((item) => settle(item, depth + 1)));
+    return Promise.all(value.map((item) => settle(item, depth + 1, resultData)));
+  if (resultData && types.isMap(value)) {
+    const entries: [unknown, unknown][] = [];
+    Map.prototype.forEach.call(value, (item: unknown, key: unknown) =>
+      entries.push([key, item]));
+    const resolved: [unknown, unknown][] = [];
+    let nonCloneableKeys = false;
+    for (const [key, item] of entries) {
+      if (typeof key === "function" || typeof key === "symbol")
+        nonCloneableKeys = true;
+      resolved.push([
+        await settle(key, depth + 1, resultData),
+        await settle(item, depth + 1, resultData),
+      ]);
+    }
+    // Replacing distinct Symbol/function keys with undefined in a Map would
+    // silently collapse entries. Keep every entry as a JSON-compatible pair.
+    return nonCloneableKeys ? resolved : new Map(resolved);
+  }
+  if (resultData && types.isSet(value)) {
+    const entries: unknown[] = [];
+    Set.prototype.forEach.call(value, (item: unknown) => entries.push(item));
+    const resolved: unknown[] = [];
+    let nonCloneableValues = false;
+    for (const item of entries) {
+      if (typeof item === "function" || typeof item === "symbol")
+        nonCloneableValues = true;
+      resolved.push(await settle(item, depth + 1, resultData));
+    }
+    return nonCloneableValues ? resolved : new Set(resolved);
+  }
   if (isPlainRecord(value)) {
     const result = Object.create(null) as Record<string, unknown>;
     for (const [key, descriptor] of Object.entries(
@@ -214,7 +252,7 @@ async function settle(value: unknown, depth = 0): Promise<unknown> {
       if (!("value" in descriptor))
         throw new AgentError("worker_arguments_invalid",
           "SDK data cannot contain accessors.");
-      result[key] = await settle(descriptor.value, depth + 1);
+      result[key] = await settle(descriptor.value, depth + 1, resultData);
     }
     return result;
   }
@@ -400,8 +438,8 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
           // Explicit result content may contain earlier output helpers. Their
           // Core identities must exist before the enclosing result is built;
           // a cloneable placeholder is not a valid MCP content block.
-          const task = prefix[1] === "result"
-            ? Promise.all(args.map((value) => settle(value)))
+          const task = prefix[1] === "result" || prefix[1] === "json"
+            ? Promise.all(args.map((value) => settle(value, 0, true)))
                 .then((resolved) => invoke(...resolved))
             : Promise.resolve(invoke(...args));
           outputIntents.set(result, task);
@@ -586,7 +624,7 @@ async function prepare() {
       void (async () => {
         try {
           const result = await audit.run(execute);
-          const fixed = await settle(result);
+          const fixed = await settle(result, 0, true);
           // Returned output.result() values can contain unawaited output
           // helpers. Resolve their authorized Core calls before closing new
           // work admission; otherwise root-returned races those callbacks

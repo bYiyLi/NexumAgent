@@ -624,13 +624,30 @@ export class ControlConnection {
             return this.#options.invoke(message, signal);
           })
           .then(
-            (output) =>
-              this.send({
-                type: "result",
-                id: message.id,
-                operation: message.operation,
-                output,
-              } as WireEnvelopeV2),
+            async (output) => {
+              try {
+                await this.send({
+                  type: "result",
+                  id: message.id,
+                  operation: message.operation,
+                  output,
+                } as WireEnvelopeV2);
+              } catch (cause) {
+                // Invalid reply data is local to this RPC. Only a real transport
+                // failure or an exhausted output queue closes the shared socket.
+                if (
+                  !isAgentError(cause) ||
+                  cause.code === "connection_closed" ||
+                  cause.code === "control_busy"
+                )
+                  throw cause;
+                await this.send({
+                  type: "error",
+                  id: message.id,
+                  error: remoteError(cause, message.operation),
+                });
+              }
+            },
             (cause) =>
               this.send({
                 type: "error",

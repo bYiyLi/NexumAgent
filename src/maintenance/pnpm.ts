@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { requireCondition } from "../contracts/errors.js";
 import { authorizeCall } from "../contracts/caller.js";
 import type { Profile } from "../contracts/types.js";
+import { defaultEofAlreadyClosed, type ProcessBackend } from "../process/backend.js";
+import type { ResourceManager } from "../extensions/resources.js";
+import { maintenanceOrigin } from "./requests.js";
 import type {
   MaintenanceBackend, MaintenanceIntent, MaintenanceResult,
   MaintenanceScope, PreparedMaintenance,
@@ -23,24 +26,133 @@ type DirectManifest = {
   [key: string]: unknown;
 };
 
-/** The existing SDK request and Cloud approval page own the user's one-time
- * permission to add/update/remove a package. This backend does not approve or
- * install package versions. It edits the single work/package.json; the Cloud
- * bootstrap reconciles dependencies on the next OS-managed start.
- *
- * Manual edits to package.json are equally valid and need no approval record.
+/** Approved package changes install immediately into the existing managed
+ * work tree. The native supervisor can reuse these bytes at its next start.
  */
 export class PnpmMaintenanceBackend implements MaintenanceBackend {
   readonly root: string;
   readonly work: string;
 
-  constructor(readonly options: { root: string; profile: Profile }) {
+  constructor(readonly options: {
+    root: string;
+    profile: Profile;
+    resources: ResourceManager;
+    withPackageChanges: <T>(action: () => Promise<T>) => Promise<T>;
+  }) {
     this.root = realpathSync.native(options.root);
     this.work = realpathSync.native(path.join(this.root, "work"));
     requireCondition(this.root === options.root &&
       ["production", "development"].includes(options.profile),
       "maintenance_profile_mismatch",
       "The package request must use this Agent's work directory.");
+  }
+
+  #pnpm(): string {
+    return process.platform === "win32"
+      ? path.join(this.root, "runtime", "node_modules", "pnpm", "bin", "pnpm.cjs")
+      : path.join(this.root, "runtime", "lib", "node_modules", "pnpm", "bin", "pnpm.cjs");
+  }
+
+  async #command(args: readonly string[], scope: MaintenanceScope): Promise<void> {
+    scope.signal.throwIfAborted();
+    authorizeCall(() => scope.assertCurrent());
+    const cli = this.#pnpm();
+    requireCondition(
+      existsSync(cli) && lstatSync(cli).isFile(),
+      "pnpm_unavailable",
+      "The managed pnpm CLI is unavailable.",
+    );
+    const backend: ProcessBackend = process.platform === "win32"
+      ? new (await import("../process/windows-pipes.js")).WindowsProcessBackend({
+          onOutput: async () => {},
+        })
+      : new (await import("../process/pipes.js")).PipeProcessBackend({
+          onOutput: async () => {},
+        });
+    const owner = this.options.resources.instance(
+      { ...maintenanceOrigin, operationId: scope.operationId },
+      {
+        signal: scope.signal,
+        assertActive: () => authorizeCall(() => scope.assertCurrent()),
+        authorize: () => authorizeCall(() => scope.assertCurrent()),
+      },
+    );
+    let registered = false;
+    try {
+      await owner.resources.register({ kind: "maintenance.command", value: backend });
+      registered = true;
+      await backend.start({
+        file: process.execPath,
+        args: [cli, "--dir", this.work, ...args],
+        cwd: this.work,
+        env: {
+          ...process.env,
+          CI: "true",
+          NEXUM_CLOUD_BOOTSTRAP: "1",
+          npm_config_registry: "https://registry.npmjs.org/",
+        },
+        tty: false,
+        cols: 80,
+        rows: 24,
+      });
+      try {
+        await backend.write(new Uint8Array(), true, scope.signal);
+      } catch (cause) {
+        scope.signal.throwIfAborted();
+        if (backend.failure !== undefined ||
+          !defaultEofAlreadyClosed(cause, backend.facts())) throw cause;
+      }
+      await backend.closed;
+      const facts = backend.facts();
+      requireCondition(
+        facts.closed && facts.treeStopped && facts.outputComplete,
+        "process_stop_unconfirmed",
+        "The managed pnpm process has not completely exited.",
+      );
+      scope.signal.throwIfAborted();
+      requireCondition(
+        !backend.failure && facts.exitCode === 0,
+        "pnpm_command_failed",
+        "The approved pnpm operation did not complete successfully.",
+        { exitCode: facts.exitCode },
+      );
+      authorizeCall(() => scope.assertCurrent());
+    } finally {
+      if (!registered) await backend.dispose();
+      const cleanup = await owner.stop();
+      requireCondition(
+        cleanup.unconfirmed.length === 0,
+        "process_stop_unconfirmed",
+        "The managed pnpm process has unconfirmed cleanup.",
+      );
+    }
+  }
+
+  async #installed(name: string): Promise<string | null> {
+    const modules = path.join(this.work, "node_modules");
+    const location = path.join(modules, ...name.split("/"));
+    let actual: string;
+    try {
+      actual = realpathSync.native(location);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw cause;
+    }
+    const relative = path.relative(modules, actual);
+    requireCondition(
+      relative !== ".." && !relative.startsWith(".." + path.sep) &&
+        !path.isAbsolute(relative),
+      "pnpm_install_invalid",
+      "The installed package is outside this Agent work directory.",
+    );
+    const parsed = JSON.parse(await readFile(path.join(actual, "package.json"), "utf8"));
+    requireCondition(
+      parsed?.name === name && typeof parsed.version === "string" &&
+        parsed.version.length > 0,
+      "pnpm_install_invalid",
+      "The installed package does not match the approved dependency.",
+    );
+    return parsed.version;
   }
 
   #validate(intent: MaintenanceIntent): void {
@@ -129,8 +241,14 @@ export class PnpmMaintenanceBackend implements MaintenanceBackend {
 
   async apply(intent: MaintenanceIntent, candidate: PreparedMaintenance,
     scope: MaintenanceScope): Promise<MaintenanceResult> {
+    return this.options.withPackageChanges(() => this.#apply(intent, candidate, scope));
+  }
+
+  async #apply(intent: MaintenanceIntent, candidate: PreparedMaintenance,
+    scope: MaintenanceScope): Promise<MaintenanceResult> {
     await this.verify(intent, candidate, scope);
     const current = await this.#read();
+    const previousVersion = await this.#installed(intent.name);
     const filename = path.join(this.work, "package.json");
     const next = candidate.payload.manifest as string;
     const changed = current.body !== next;
@@ -147,15 +265,37 @@ export class PnpmMaintenanceBackend implements MaintenanceBackend {
         await rm(temporary, { force: true });
       }
     }
-    // An update request can also be used to retry a failed bootstrap without
-    // changing a dependency specifier. The OS-owned restart performs the work.
+    await this.#command(
+      intent.action === "update"
+        ? ["update", intent.name]
+        : ["install", "--no-frozen-lockfile"],
+      scope,
+    );
+    const installedVersion = await this.#installed(intent.name);
+    const finalManifest = await this.#read();
+    requireCondition(
+      finalManifest.manifest.dependencies?.[intent.name] ===
+        (intent.action === "remove" ? undefined : candidate.payload.initialVersion),
+      "pnpm_install_invalid",
+      "The installed dependency declaration differs from the approved request.",
+    );
+    requireCondition(
+      existsSync(path.join(this.work, "pnpm-lock.yaml")) &&
+        lstatSync(path.join(this.work, "pnpm-lock.yaml")).isFile() &&
+        (intent.action === "remove" ? installedVersion === null : installedVersion !== null),
+      "pnpm_install_invalid",
+      "pnpm did not leave the expected installed package and lockfile.",
+    );
+    scope.signal.throwIfAborted();
+    authorizeCall(() => scope.assertCurrent());
+    const packageChanged = changed || previousVersion !== installedVersion;
     return {
-      changed,
-      restartRequired: changed || intent.action === "update",
+      changed: packageChanged,
+      restartRequired: packageChanged,
       package: {
         name: intent.name,
         declared: intent.action !== "remove",
-        installedVersion: null,
+        installedVersion,
       },
       extension: null,
     };

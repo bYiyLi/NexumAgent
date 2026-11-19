@@ -11,6 +11,10 @@ return await maintenance.list({ target: "package", limit: 20 });
 ~~~
 
 例如实际安装 npm 包时使用 maintenance.packages.install({ name, version }) 提交申请；返回的 requestId 用 maintenance.get(requestId) 回读审批与执行结果。MCP/API 配置、扩展启停均按下方实际方法表构造参数，不推测配置字段或绕过用户批准。
+
+MCP 配置新增、修改或移除时，申请返回 status 为 pending，只表示等待用户确认。将返回的 approvalUrl 链接交给用户并说明需要在授权页确认；编辑 work/mcp.json、reload 或重启 Agent 都不能代替授权。
+
+用户确认后 Nexum 会自动执行该修订，并切换对应 MCP 连接；不要重复调用 maintenance.mcp.update、手动重启 Agent 或尝试再次执行这份申请。使用 maintenance.get(requestId) 回读：status 为 approved 只说明用户同意；只有 execution.status 为 succeeded 且 execution.result.connection.state 为 ready，才确认 MCP 连接已就绪。连接移除成功时 state 为 removed。等待、失败或无执行结果时，向用户说明 requestId、实际状态和可用的错误代码，不要假报已生效或盲目重试。
 `;
 
 /** Public call-bound facade, identical for built-in and external extensions. */
@@ -58,7 +62,9 @@ export const maintenanceExtension: ExtensionFactory = () => {
       });
     methods[name] = {
       description: group
-        ? `申请 ${name}；用户确认最终修订后才实际执行。`
+        ? group === "mcp"
+          ? `申请 ${name}；返回 approvalUrl 供用户确认，批准后自动更新 MCP 连接。用 maintenance.get(requestId) 核对执行结果，无需重启 Agent。`
+          : `申请 ${name}；用户确认最终修订后才实际执行。`
         : `${name === "get" ? "读取" : name === "list" ? "筛选" : "撤销尚未执行的"}维护申请；不批准或重签。`,
       permissions: [`maintenance.${name}`],
       path: parts,

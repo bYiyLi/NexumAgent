@@ -411,6 +411,10 @@ export function maintenanceRuntimeOptions(
         ? new PnpmMaintenanceBackend({
             root: config.root,
             profile: config.profile,
+            resources: components.extensions.registry.resources,
+            withPackageChanges: (action) =>
+              components.modules.withPackageChanges(() =>
+                components.extensions.withPackageChanges(action)),
           })
         : undefined;
       application = new MaintenanceApplication(

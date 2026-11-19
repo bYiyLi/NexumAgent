@@ -1,19 +1,16 @@
-name: Agent install candidates
+name: Core npm package candidates
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  native-package:
+  core-package:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,59 +21,5 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.6'
-          cache: false
-      - run: node scripts/build-native.mjs
-      - run: node --test test/installer.test.mjs test/service.test.mjs test/npm-install.test.mjs test/extension-package.test.mjs
-      - name: Exercise the actual native user service in an isolated home and unique namespace
-        run: node scripts/native-service-test.mjs
-      - name: Create a disposable candidate signing identity
-        run: |
-          node --input-type=module - <<'JS'
-          import {generateKeyPairSync} from 'node:crypto';
-          import {writeFileSync} from 'node:fs';
-          import path from 'node:path';
-          const key=generateKeyPairSync('ed25519');
-          writeFileSync(path.join(process.env.RUNNER_TEMP,'candidate-private.pem'),key.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});
-          writeFileSync(path.join(process.env.RUNNER_TEMP,'candidate-public.pem'),key.publicKey.export({type:'spki',format:'pem'}));
-          JS
-      - name: Build the platform's actual runtime and production dependencies
-        run: pnpm run build:candidate --out-dir "$RUNNER_TEMP/candidate" --signing-key-file "$RUNNER_TEMP/candidate-private.pem"
-      - name: Bootstrap, verify and install only into a temporary home without service registration
-        run: |
-          node --input-type=module - <<'JS'
-          import {cleanupPrograms} from './scripts/install-agent.mjs';
-          import {childEnvironment} from './scripts/service.mjs';
-          import {readdir,mkdir,readFile,rm} from 'node:fs/promises';
-          import {spawnSync,execFileSync} from 'node:child_process';
-          import path from 'node:path';
-          const temp=process.env.RUNNER_TEMP;
-          const output=path.join(temp,'candidate');
-          const archive=path.join(output,(await readdir(output)).find(x=>x.endsWith('.tar.gz')));
-          const sha256=(await readFile(archive+'.sha256','utf8')).split(' ')[0];
-          const home=path.join(temp,'isolated-agent-home 空格 & $ %');await mkdir(home);
-          const installer=path.join(output,'installer-kit',process.platform==='win32'?'install.ps1':'install.sh');
-          const args=['--archive',archive,'--sha256',sha256,'--signature-file',archive+'.sig','--public-key-file',path.join(temp,'candidate-public.pem'),'--home',home,'--profile','development','--no-register'];
-          const bootstrap=spawnSync(process.platform==='win32'?path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'):'/bin/sh',process.platform==='win32'?['-NoLogo','-NoProfile','-NonInteractive','-File',installer,...args]:[installer,...args],{encoding:'utf8',env:childEnvironment(),input:JSON.stringify({server_url:'http://127.0.0.1:9/',token:'candidate-fixture-token'}),timeout:180000});
-          if(bootstrap.status!==0)throw new Error('The verified bootstrap installer did not complete.');
-          const installed=JSON.parse(bootstrap.stdout.trim());
-          const node=path.join(installed.programDir,'runtime',process.platform==='win32'?'node.exe':'bin/node');
-          const result=spawnSync(node,['--experimental-vm-modules',path.join(installed.programDir,'app/dist/cli.js'),'--help'],{encoding:'utf8'});
-          if(result.status!==0)throw new Error('The actual packaged CLI did not start.');
-          execFileSync(process.execPath,['scripts/native-installed-agent-test.mjs','--home',home,'--program-dir',installed.programDir],{env:childEnvironment(),stdio:'inherit',timeout:300000});
-          await cleanupPrograms({profile:'development',home});
-          await rm(home,{recursive:true,force:true});
-          JS
-      - name: Upload reviewable candidate files, never the private signing key
-        uses: actions/upload-artifact@v4
-        with:
-          name: nexum-agent-${{ matrix.os }}-candidate
-          path: |
-            ${{ runner.temp }}/candidate/*.tar.gz
-            ${{ runner.temp }}/candidate/*.sig
-            ${{ runner.temp }}/candidate/*.sha256
-            ${{ runner.temp }}/candidate/installer-kit/**
-            ${{ runner.temp }}/candidate-public.pem
-          retention-days: 7
+      - run: pnpm check
+      - run: node --test test/native-entry.test.mjs

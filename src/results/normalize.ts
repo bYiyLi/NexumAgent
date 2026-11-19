@@ -270,16 +270,7 @@ export async function normalizeData(
     conversions.push(conversion);
   }
   function enumerableKeys(input: object, position: ResultPath): string[] {
-    if (
-      Object.getOwnPropertySymbols(input).some(
-        (key) => Object.getOwnPropertyDescriptor(input, key)?.enumerable,
-      )
-    )
-      problem(
-        "invalid_result_data",
-        "Enumerable Symbol keys cannot be represented as JSON.",
-        position,
-      );
+    // JSON object serialization ignores Symbol-keyed properties.
     const keys = Object.keys(input);
     if (keys.length > maximum.nodes - nodes)
       problem(
@@ -298,7 +289,7 @@ export async function normalizeData(
     if (!descriptor || !("value" in descriptor))
       problem(
         "invalid_result_data",
-        "Data accessors and array holes require an explicit value.",
+        "A result property is missing or uses an accessor that cannot be read safely.",
         position,
       );
     return descriptor.value;
@@ -394,12 +385,10 @@ export async function normalizeData(
     }
     if (typeof input === "string") return text(input, position);
     if (typeof input === "number") {
-      if (!Number.isFinite(input))
-        problem(
-          "invalid_result_data",
-          "Non-finite numbers require an explicit representation.",
-          position,
-        );
+      if (!Number.isFinite(input)) {
+        charge(4, position);
+        return null;
+      }
       if (Object.is(input, -0)) converted(position, "-0", "0");
       charge(Buffer.byteLength(String(input)), position);
       return Object.is(input, -0) ? 0 : input;
@@ -430,10 +419,20 @@ export async function normalizeData(
         );
       return text(BigInt.prototype.toString.call(input), position);
     }
+    // JSON cannot represent these values. Arrays use null; object properties
+    // are omitted by the object walk below, matching JSON.stringify semantics.
+    if (
+      input === undefined ||
+      typeof input === "function" ||
+      typeof input === "symbol"
+    ) {
+      charge(4, position);
+      return null;
+    }
     if (!input || typeof input !== "object")
       problem(
         "invalid_result_data",
-        "Undefined, functions and Symbols require an explicit JSON value.",
+        "The result contains an unsupported value.",
         position,
       );
     if (types.isProxy(input))
@@ -550,12 +549,10 @@ export async function normalizeData(
       }
       if (types.isDate(input)) {
         const time = Date.prototype.getTime.call(input);
-        if (!Number.isFinite(time))
-          problem(
-            "invalid_result_data",
-            "An invalid Date has no ISO timestamp.",
-            position,
-          );
+        if (!Number.isFinite(time)) {
+          charge(4, position);
+          return null;
+        }
         converted(position, "Date", "iso8601-utc");
         return text(Date.prototype.toISOString.call(input), position);
       }
@@ -634,25 +631,24 @@ export async function normalizeData(
             "Array length exceeds the remaining node budget.",
             position,
           );
-        const keys = enumerableKeys(input, position);
-        if (
-          keys.some(
-            (key) => !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= length,
-          )
-        )
-          problem(
-            "invalid_result_data",
-            "Array properties outside its element range cannot be represented as JSON.",
-            position,
-          );
         const result: JsonValue[] = [];
         charge(2, position);
         for (let index = 0; index < length; index++) {
           if (index) charge(1, position);
           const itemPath = appendPath(position, `[${index}]`);
+          const descriptor = Object.getOwnPropertyDescriptor(
+            input,
+            String(index),
+          );
+          if (descriptor && !("value" in descriptor))
+            problem(
+              "invalid_result_data",
+              "Result accessors cannot be serialized without executing user code.",
+              itemPath,
+            );
           result.push(
             await visit(
-              dataProperty(input, String(index), itemPath),
+              descriptor?.value,
               itemPath,
               depth + 1,
               pure,
@@ -671,18 +667,20 @@ export async function normalizeData(
       charge(2, position);
       let index = 0;
       for (const key of enumerableKeys(input, position)) {
+        const itemPath = field(position, key);
+        const item = dataProperty(input, key, itemPath);
+        if (
+          item === undefined ||
+          typeof item === "function" ||
+          typeof item === "symbol"
+        )
+          continue;
         if (index++) charge(1, position);
         text(key, position);
         charge(1, position);
-        const itemPath = field(position, key);
         Object.defineProperty(result, key, {
           enumerable: true,
-          value: await visit(
-            dataProperty(input, key, itemPath),
-            itemPath,
-            depth + 1,
-            pure,
-          ),
+          value: await visit(item, itemPath, depth + 1, pure),
         });
       }
       return result;

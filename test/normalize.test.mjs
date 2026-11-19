@@ -101,29 +101,26 @@ test("guest realm objects and native slots work without relying on host instance
   });
 });
 
-test("plain data rejects lossy values and points to the original field", async () => {
-  for (const invalid of [
-    undefined,
-    NaN,
-    Infinity,
-    -Infinity,
-    () => {},
-    Symbol("x"),
-    Promise.resolve(1),
-  ])
-    await assert.rejects(
-      normalizeData({ items: [{ value: invalid }] }),
-      failure("$.items[0].value"),
-    );
-  await assert.rejects(normalizeData(undefined), failure("$"));
-  await assert.rejects(normalizeData({ items: [, 1] }), failure("$.items[0]"));
-  await assert.rejects(normalizeData(new Date("invalid")), failure("$"));
+test("ordinary JavaScript values use JSON-compatible serialization instead of failing a whole result", async () => {
+  const data = {
+    ok: { status: "passed", value: undefined, method: () => {}, token: Symbol("s") },
+    samples: [undefined, , NaN, Infinity, -Infinity, () => {}, Symbol("x"), 3],
+    invalidDate: new Date("invalid"),
+    nonFinite: NaN,
+    [Symbol("ignored")]: "metadata",
+  };
+  assert.deepEqual(
+    plain((await normalizeData(data)).data),
+    JSON.parse(JSON.stringify(data)),
+  );
+  assert.deepEqual((await normalizeData(undefined)).data, null);
   const array = [1];
   array.extra = 2;
-  await assert.rejects(normalizeData(array), failure("$"));
+  assert.deepEqual(plain((await normalizeData(array)).data), [1]);
+  assert.deepEqual(plain((await normalizeData({ ["a.b"]: undefined })).data), {});
   await assert.rejects(
-    normalizeData({ ["a.b"]: undefined }),
-    failure('$["a.b"]'),
+    normalizeData({ items: [{ value: Promise.resolve(1) }] }),
+    failure("$.items[0].value"),
   );
 });
 
@@ -137,9 +134,7 @@ test("getters, Proxy traps, custom converters and iterators are never executed t
     Object.defineProperty({}, "secret", { enumerable: true, get: hook }),
     new Proxy({}, { ownKeys: hook, get: hook, getPrototypeOf: hook }),
     Object.create(new Proxy({}, { getPrototypeOf: hook, get: hook })),
-    { toJSON: hook },
     Object.defineProperty([], "0", { enumerable: true, get: hook }),
-    { [Symbol("unrepresentable")]: 1 },
     new (class Unknown {
       value = 1;
     })(),
@@ -150,6 +145,7 @@ test("getters, Proxy traps, custom converters and iterators are never executed t
   const nonenumerable = Object.defineProperty({ ok: true }, "toJSON", {
     value: hook,
   });
+  assert.deepEqual(plain((await normalizeData({ toJSON: hook })).data), {});
   assert.deepEqual(plain((await normalizeData(nonenumerable)).data), {
     ok: true,
   });
@@ -548,7 +544,7 @@ test("very long keys cannot inflate error paths beyond a small persistable envel
     return true;
   };
   await assert.rejects(
-    normalizeData({ [key]: undefined }, { maxBytes: 4 * 1024 * 1024 }),
+    normalizeData({ [key]: new Proxy({}, {}) }, { maxBytes: 4 * 1024 * 1024 }),
     boundedError("invalid_result_data"),
   );
   await assert.rejects(
@@ -567,7 +563,7 @@ test("very long keys cannot inflate error paths beyond a small persistable envel
   );
   await assert.rejects(
     normalizeData(
-      { [key]: { [key]: undefined } },
+      { [key]: { [key]: new Proxy({}, {}) } },
       { maxBytes: 6 * 1024 * 1024 },
     ),
     boundedError("invalid_result_data"),
@@ -649,9 +645,15 @@ test("authorization is checked throughout asynchronous resolution and references
   active = false;
   resolve({ resourceId: "r" });
   await assert.rejects(result, /revoked/);
+  assert.deepEqual(
+    plain((await normalizeData(Buffer.from([1]), {
+      resolveContent: async () => ({ bad: undefined, ok: true }),
+    })).data),
+    { ok: true },
+  );
   await assert.rejects(
     normalizeData(Buffer.from([1]), {
-      resolveContent: async () => ({ bad: undefined }),
+      resolveContent: async () => ({ bad: new Proxy({}, {}) }),
     }),
     failure("$.bad"),
   );

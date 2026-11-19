@@ -180,15 +180,6 @@ function inspectRelease() {
       agent: [
         "dist/cli.js",
         "contracts/v2/common.schema.json",
-        "scripts/service.mjs",
-        "scripts/npm-install.mjs",
-        "scripts/service-runner.mjs",
-        "native/windows-x64/nexum-agent.exe",
-        "native/windows-arm64/nexum-agent.exe",
-        "native/darwin-x64/nexum-agent",
-        "native/darwin-arm64/nexum-agent",
-        "native/linux-x64/nexum-agent",
-        "native/linux-arm64/nexum-agent",
       ],
       browser: [
         "dist/client/index.js",
@@ -199,6 +190,14 @@ function inspectRelease() {
       ],
     }[item.key])
       assert.ok(names.has(required), `${item.name} is missing ${required}`);
+    if (item.key === "agent") {
+      for (const filename of names)
+        assert.doesNotMatch(
+          filename,
+          /^(?:native\/|native-src\/|scripts\/(?:npm-install|service|service-runner|build-native|startup-report))/,
+          "Core npm package must not own native binaries or lifecycle installation",
+        );
+    }
     for (const filename of names)
       assert.doesNotMatch(
         filename,

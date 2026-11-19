@@ -1021,6 +1021,41 @@ test("a projection failure preserves only the actual public Run identity for lat
   c.close();
 });
 
+test("one invalid application reply returns an RPC error while a later call still works on the same socket", async (t) => {
+  const f = await fixture(t);
+  let calls = 0;
+  const c = await f.connect({
+    invoke: async () =>
+      ++calls === 1
+        ? { root: "/fixed", name: undefined }
+        : { root: "/fixed", name: "valid" },
+  });
+  const { peer, binding } = await f.peer();
+  const invoke = (id) =>
+    peer.send(canonicalJson({
+      type: "invoke",
+      id,
+      operation: "agent.project.resolve",
+      context: context(binding),
+      input: { path: "/fixed" },
+    }));
+  invoke("invalid_reply");
+  const bad = await f.waitMessage(
+    (message) => message.id === "invalid_reply" && message.type === "error",
+  );
+  assert.ok(bad.error.code);
+  assert.equal(c.signal.aborted, false);
+
+  invoke("valid_reply");
+  const good = await f.waitMessage(
+    (message) => message.id === "valid_reply" && message.type === "result",
+  );
+  assert.deepEqual(good.output, { root: "/fixed", name: "valid" });
+  assert.equal(calls, 2);
+  assert.equal(c.signal.aborted, false);
+  c.close();
+});
+
 test("only project resolution denials expose canonical directory evidence for approval", async (t) => {
   const canonicalPath = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-approval-evidence-")),

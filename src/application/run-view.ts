@@ -38,8 +38,21 @@ const json = <T>(value: T, maximum = 1024 * 1024): T =>
 function error(value: JsonObject | null | undefined): WireErrorV2 | null {
   if (!value) return null;
   const code = typeof value.code === "string" ? value.code : "agent_error";
+  const path =
+    isPlainRecord(value.details) && typeof value.details.path === "string"
+      ? value.details.path
+      : null;
+  const location = path ? ` at ${path}` : "";
   const hint =
-    code === "script_execution_failed"
+    code === "invalid_result_data"
+      ? `The script ran, but the returned value${location} is not valid result data. Return an explicit supported value or use an output content helper for media. Check recorded operations before starting another Run; do not repeat side effects to fix formatting.`
+      : code === "invalid_result_content"
+        ? `The result content description${location} is invalid. Check the output helper's source and required fields. Inspect recorded operations before any new Run.`
+        : code === "result_data_too_large" || code === "result_content_too_large"
+          ? `The returned data${location} exceeds its size or depth budget. Return a smaller summary or an authorized resource; inspect the original Run before rerunning any operations.`
+          : code === "worker_result_invalid"
+            ? "The value could not cross the isolated Worker boundary. Return supported data or output helpers; check recorded operations before starting another Run."
+            : code === "script_execution_failed"
       ? "Use error.details.location to inspect the failing script line and error.details.exceptionType to identify the exception. Check prior operations before retrying; never replay unknown side effects blindly."
       : code === "script_syntax_error"
         ? "Correct JavaScript syntax at the reported location if present, then submit a new Run."

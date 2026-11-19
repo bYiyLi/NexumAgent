@@ -518,6 +518,81 @@ test("registered extension results run through the real engine encoder while bus
   assert.equal(failed.result, null);
 });
 
+test("nested undefined and other ordinary JSON conversions preserve the successful Run and its complete result", async (t) => {
+  const f = await fixture(t, { runtime: true });
+  const completed = await f.start(
+    'return { checks: [{ name: "first", status: "passed" }, { name: "second", value: undefined }, { name: "third", values: [undefined, , NaN, Infinity] }] };',
+  );
+  assert.equal(completed.run.status, "succeeded");
+  assert.equal(completed.run.error, null);
+  assert.ok(completed.run.resultRef);
+  assert.deepEqual(savedJSON(completed.result.data), {
+    checks: [
+      { name: "first", status: "passed" },
+      { name: "second" },
+      { name: "third", values: [null, null, null, null] },
+    ],
+  });
+  const saved = JSON.parse(
+    readFileSync(path.join(f.root, completed.run.resultRef), "utf8"),
+  );
+  assert.deepEqual(saved.data, savedJSON(completed.result.data));
+
+  const { projectRunView } = await import(
+    new URL("application/run-view.js", dist)
+  );
+  const view = await projectRunView(completed, {
+    encoder: f.encoder,
+    scope: f.scope(),
+    budgets: { textBytes: 65536, controlBytes: 1024 * 1024 },
+    readOnly: true,
+    shipJson: () => assert.fail("small result must not require a transfer"),
+  });
+  assert.equal(view.run.runId, completed.run.runId);
+  assert.equal(view.run.status, "succeeded");
+  assert.equal(view.run.error, null);
+  assert.deepEqual(savedJSON(view.result.data), savedJSON(completed.result.data));
+
+  const pure = await f.start(
+    'return output.json({ nested: { missing: undefined, count: NaN }, list: [undefined] });',
+  );
+  assert.equal(pure.run.status, "succeeded");
+  assert.deepEqual(savedJSON(pure.result.data), {
+    nested: { count: null },
+    list: [null],
+  });
+  const explicit = await f.start(
+    'return output.result({ content: [], structuredContent: { good: 1, missing: undefined } });',
+  );
+  assert.equal(explicit.run.status, "succeeded");
+  assert.deepEqual(savedJSON(explicit.result.data), { good: 1 });
+  const nonFinite = await f.start("return Infinity");
+  assert.equal(nonFinite.run.status, "succeeded");
+  assert.equal(nonFinite.result.data, null);
+});
+
+test("non-cloneable ordinary values reach the Core result normalizer without failing the Worker", async (t) => {
+  const f = await fixture(t, { runtime: true });
+  const direct = await f.start(
+    'return { ok: true, ignored: () => 1, symbol: Symbol("value"), items: [Symbol("value"), () => 2], map: new Map([[Symbol("first"), 1], [Symbol("second"), 2]]), set: new Set([Symbol("first"), Symbol("second"), 4]) };',
+  );
+  assert.equal(direct.run.status, "succeeded");
+  assert.deepEqual(savedJSON(direct.result.data), {
+    ok: true,
+    items: [null, null],
+    map: [[null, 1], [null, 2]],
+    set: [null, null, 4],
+  });
+  const wrapped = await f.start(
+    'return output.json({ ok: true, ignored: () => 1, list: [Symbol("value")] });',
+  );
+  assert.equal(wrapped.run.status, "succeeded");
+  assert.deepEqual(savedJSON(wrapped.result.data), {
+    ok: true,
+    list: [null],
+  });
+});
+
 test("historical results retain original image snapshots and recheck current resource permissions", async (t) => {
   const f = await fixture(t, { runtime: true }),
     original = png(80),

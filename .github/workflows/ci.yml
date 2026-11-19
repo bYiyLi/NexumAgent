@@ -22,9 +22,4 @@ jobs:
           node-version: 24.22.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.6'
-          cache: false
-      - run: node scripts/build-native.mjs
       - run: pnpm check

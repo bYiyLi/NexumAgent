@@ -7,37 +7,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const args = process.argv.slice(2);
-if (args[0] === "install") {
-  if (
-    args.length !== 3 ||
-    args[1] !== "--profile" ||
-    !["development", "production"].includes(args[2]!)
-  ) {
-    process.stderr.write(
-      "install requires --profile production|development.\n",
-    );
-    process.exitCode = 2;
-  } else {
-    const server_url = process.env.NEXUM_BOOTSTRAP_SERVER;
-    const token = process.env.NEXUM_BOOTSTRAP_TOKEN;
-    delete process.env.NEXUM_BOOTSTRAP_SERVER;
-    delete process.env.NEXUM_BOOTSTRAP_TOKEN;
-    try {
-      const { installNpmAgent } = await import("../scripts/npm-install.mjs");
-      const result = await installNpmAgent({
-        profile: args[2] as "development" | "production",
-        version,
-        config: { server_url, token },
-      });
-      process.stdout.write(JSON.stringify(result) + "\n");
-    } catch {
-      process.stderr.write(
-        "agent_install_failed: inspect current service and installed version before retrying.\n",
-      );
-      process.exitCode = 1;
-    }
-  }
-} else if (args[0] === "run") {
+if (args[0] === "run") {
   if (
     args.length !== 3 ||
     args[1] !== "--profile" ||
