@@ -60,7 +60,7 @@ export class ExtensionServices {
         origin: entry.prepared.handle.origin,
         status,
         methodCount: entry.prepared.handle.methods.length,
-        docs: entry.materials?.entry ?? null,
+        skills: entry.materials?.materials.skills.map((skill) => skill.skillId) ?? [],
       }),
     ) as JsonObject;
   }

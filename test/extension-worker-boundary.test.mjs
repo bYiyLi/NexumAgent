@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { isolatedExtensionFactory } from "../dist/extensions/worker-bridge.js";
+import { isolatedExtensionFactory, isolatedHandlerNormalizes } from "../dist/extensions/worker-bridge.js";
 import { AgentError } from "../dist/contracts/errors.js";
 
 async function fixture(t, source, options = {}) {
@@ -107,6 +107,7 @@ test("extension normalizers cannot weaken the original Core Schema gate", {
   const f = await fixture(t, source);
   const instance = await f.factory(f.host);
   try {
+    assert.equal(isolatedHandlerNormalizes(instance.methods.inspect.handle), true);
     await new Promise((resolve) => setTimeout(resolve, 90));
     await assert.rejects(
       instance.methods.inspect.handle({

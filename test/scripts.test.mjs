@@ -143,7 +143,7 @@ test("enrollment persists the complete source once, rejects changes and regenera
   assert.throws(() => catalog.enroll(code("Report.js")), {
     code: "script_name_conflict",
   });
-  const index = readFileSync(path.join(catalog.docs, "scripts.md"), "utf8");
+  const index = readFileSync(path.join(catalog.local, "index.md"), "utf8");
   assert.match(index, /report\.js/);
   assert.match(index, /additionalProperties/);
   assert.equal(
@@ -156,7 +156,7 @@ test("enrollment persists the complete source once, rejects changes and regenera
   );
   catalog.refreshIndex();
   assert.match(
-    readFileSync(path.join(catalog.docs, "scripts.md"), "utf8"),
+    readFileSync(path.join(catalog.local, "index.md"), "utf8"),
     /新的描述/,
   );
   assert.throws(() => catalog.resolve("scripts/report.js"), {
@@ -169,7 +169,7 @@ test("enrollment persists the complete source once, rejects changes and regenera
 
 test("a manual write failure reports the already-saved file and never silently undoes enrollment", (t) => {
   const { catalog } = fixture(t);
-  mkdirSync(path.join(catalog.docs, "scripts.md"));
+  mkdirSync(path.join(catalog.local, "index.md"));
   assert.throws(
     () => catalog.enroll(code("kept.js")),
     (error) =>

@@ -18,7 +18,6 @@ import { SqliteStore } from "../dist/storage/sqlite.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { RunEngine, callerKey } from "../dist/runtime/engine.js";
-import { DocumentCatalog } from "../dist/work/catalog.js";
 import { WorkService } from "../dist/work/service.js";
 import { selectorKey } from "../dist/work/discovery.js";
 import { canonicalJson } from "../dist/contracts/json.js";
@@ -72,15 +71,16 @@ function fixture(t) {
     builtins: () => ["fs", "path", "timers"],
     approvedPackages: () => new Map([["tiny", "1.0.0"]]),
   };
-  const catalog = new DocumentCatalog(work, scripts, policy);
   let disabled = [],
-    published = { instructions: [], skills: [], docs: [] },
+    published = { instructions: [], skills: [] },
     allowed = true,
     beforeCommit = () => {},
     authorizationHook = () => {},
-    resolveHook = async () => {};
+    resolveHook = async () => {},
+    reserveHook = async () => {};
   let projectName = "Original";
-  const service = new WorkService(store, scripts, catalog, {
+  const service = new WorkService(store, scripts, policy, {
+    reserve: async () => { await reserveHook(); return { release() {} }; },
     home,
     agent: { name: "test Agent", version: "0.0.1", protocolVersion: "2" },
     authorize(who, target) {
@@ -135,12 +135,12 @@ function fixture(t) {
     store,
     scripts,
     policy,
-    catalog,
     service,
     write,
     open,
     setDisabled: (value) => (disabled = value),
     setPublished: (value) => (published = value),
+    setReserve: (fn) => (reserveHook = fn),
     setBeforeCommit: (fn) => (beforeCommit = fn),
     setAuthorization: (fn) => (authorizationHook = fn),
     setResolver: (fn) => (resolveHook = fn),
@@ -224,19 +224,15 @@ test("published guidance and module policy use fixed values across asynchronous 
       },
     ],
     skills: [],
-    docs: [],
   };
   f.setPublished(published);
   const approved = new Map([["tiny", "1.0.0"]]);
   f.policy.approvedPackages = () => approved;
-  const refresh = f.catalog.refresh.bind(f.catalog);
-  f.catalog.refresh = (...args) => {
-    const pending = refresh(...args);
+  f.setReserve(() => {
     published.instructions[0].content = "replacement instruction";
     approved.set("tiny", "2.0.0");
     f.policy.builtins = () => ["net"];
-    return pending;
-  };
+  });
   const result = await f.open();
   assert.equal(result.agent.instructions[0].content, "original instruction");
   assert.deepEqual(result.agent.modules.builtinFamilies, [
@@ -244,10 +240,7 @@ test("published guidance and module policy use fixed values across asynchronous 
     "path",
     "timers",
   ]);
-  assert.match(
-    readFileSync(result.agent.modules.packagesIndex, "utf8"),
-    /批准版本：1\.0\.0/,
-  );
+  assert.deepEqual(result.agent.modules.approvedPackages, { tiny: "1.0.0" });
 });
 
 test("a replaced local Skill requires refresh before its body or resources can be read", async (t) => {
@@ -301,49 +294,11 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   assert.equal(first.agent.skills[0].name, "review");
   assert.equal(first.agent.skills[0].content, undefined);
   assert.doesNotMatch(JSON.stringify(first), /BODY FOR review/);
-  assert.match(
-    readFileSync(first.agent.docs.entry, "utf8"),
-    /Nexum Agent 使用手册/,
-  );
-  assert.match(first.agent.docs.content, /按任务选择资料/);
-  assert.match(first.agent.docs.content, /agent\.scripts\.items/);
-  assert.match(first.agent.docs.content, /script-authoring/);
-  assert.match(first.agent.docs.content, /\[可复用脚本\]/);
-  assert.match(first.agent.docs.content, /skillFile/);
-  assert.match(first.agent.docs.content, /input.reference/);
-  assert.match(first.agent.docs.content, /nextLine/);
-  assert.equal((first.agent.docs.content.match(/```/g) ?? []).length, 2);
-  assert.match(first.agent.docs.content, /## 资料索引/);
-  const manual = readFileSync(first.agent.docs.entry, "utf8");
-  assert.match(manual, /桌面控制先确认本机确有可用的 CLI/);
-  assert.match(manual, /不尝试绕过系统权限/);
-  assert.match(manual, /## 资料索引/);
-  assert.match(manual, /goal\.manage/);
-  assert.match(manual, /maintenance/);
-  const example = manual.match(/```javascript\n([\s\S]*?)\n```/);
-  assert.ok(example, "the model-visible manual provides a complete JavaScript example");
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const readPage = new AsyncFunction("context", example[1]);
-  const manualLines = manual.split(/\r?\n/);
-  const firstPage = await readPage({
-    input: { reference: first.agent.docs.entry },
-  });
-  assert.equal(firstPage.content, manualLines.slice(0, 40).join("\n"));
-  assert.equal(firstPage.nextLine, manualLines.length > 40 ? 41 : null);
-  if (firstPage.nextLine !== null) {
-    const secondPage = await readPage({
-      input: {
-        reference: pathToFileURL(first.agent.docs.entry).href,
-        startLine: firstPage.nextLine,
-      },
-    });
-    assert.equal(secondPage.content, manualLines.slice(40, 80).join("\n"));
-    assert.equal(secondPage.nextLine, manualLines.length > 80 ? 81 : null);
-  }
-  const packages = readFileSync(first.agent.modules.packagesIndex, "utf8");
-  assert.match(packages, /tiny installed library/);
-  assert.match(packages, /available/);
-  assert.doesNotMatch(packages, /should-not-persist/);
+  assert.equal(Object.hasOwn(first.agent, "docs"), false);
+  assert.equal(Object.hasOwn(first.agent.paths, "docs"), false);
+  assert.equal(first.agent.paths.skills, path.join(work, "skills"));
+  assert.deepEqual(first.agent.modules.approvedPackages, { tiny: "1.0.0" });
+  assert.match(readFileSync(first.agent.scripts.index, "utf8"), /可用脚本/);
   assert.equal(service.get(caller, first.contextId).revision, 1);
 });
 
@@ -534,14 +489,9 @@ test("platform/SDK guidance and namespaced Skills keep Agent scope, versioned pa
   const { open, work, write, setPublished, service } = fixture(t);
   const directory = path.join(
     work,
-    "docs/extensions/browser/1.0.0/rev/skills/audit",
+    "skills/.generated/extensions/browser/1.0.0/rev/skills/audit",
   );
   const file = write(directory, "SKILL.md", skill("audit"));
-  const manual = write(
-    work,
-    "docs/extensions/browser/1.0.0/rev/manual/README.md",
-    "browser manual",
-  );
   const owner = {
     type: "extension",
     owner: "@example/browser",
@@ -572,22 +522,13 @@ test("platform/SDK guidance and namespaced Skills keep Agent scope, versioned pa
         origin: owner,
       },
     ],
-    docs: [
-      {
-        name: "browser",
-        description: "浏览器使用手册",
-        path: manual,
-        owner: owner.owner,
-        version: owner.version,
-      },
-    ],
   });
   const opened = await open({ projectId: "project" });
   assert.equal(opened.agent.instructions[0].content, "SDK ENTRY RULE");
   assert.equal(opened.project.instructions.length, 0);
   assert.equal(opened.agent.skills[0].skillId, "browser/audit");
   assert.equal(opened.agent.skills[0].origin.version, "1.0.0");
-  assert.match(readFileSync(opened.agent.docs.entry, "utf8"), /浏览器使用手册/);
+  assert.equal(Object.hasOwn(opened.agent, "docs"), false);
   assert.match(
     (
       await service.readMaterial(caller, opened.contextId, "browser/audit")
@@ -685,22 +626,14 @@ test("the real work provider feeds captured Project identity and pwd to accepted
   assert.match(done.run.logsRef, /^logs\/runs\//);
 });
 
-test("generated manuals keep old reading coordinates and an invalid package cannot be advertised as available", async (t) => {
-  const { open, work, write, catalog } = fixture(t);
-  const first = await open(),
-    body = readFileSync(first.agent.docs.entry, "utf8");
-  write(
-    work,
-    "node_modules/tiny/package.json",
-    JSON.stringify({
-      name: "tiny",
-      version: "2.0.0",
-      description: "changed version",
-    }),
-  );
+test("script indexes retain captured discovery across refresh without a Docs catalog", async (t) => {
+  const { open, scripts } = fixture(t);
+  scripts.enroll('/** {"scriptName":"one.js","scriptDesc":"One","scriptWhenUse":"One task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 1;');
+  const first = await open(), body = readFileSync(first.agent.scripts.index, "utf8");
+  scripts.enroll('/** {"scriptName":"two.js","scriptDesc":"Two","scriptWhenUse":"Two task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 2;');
   const second = await open();
-  assert.notEqual(second.agent.docs.entry, first.agent.docs.entry);
-  assert.equal(readFileSync(first.agent.docs.entry, "utf8"), body);
-  const data = await catalog.refresh();
-  assert.equal(data.packages[0].status, "changed");
+  assert.notEqual(second.agent.scripts.index, first.agent.scripts.index);
+  assert.equal(readFileSync(first.agent.scripts.index, "utf8"), body);
+  assert.doesNotMatch(body, /two\.js/);
+  assert.match(readFileSync(second.agent.scripts.index, "utf8"), /two\.js/);
 });

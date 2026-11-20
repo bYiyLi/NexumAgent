@@ -458,7 +458,7 @@ test(
 );
 
 test(
-  "native capability revisions, browser identity, tab metadata and packaged documentation describe the actual peer",
+  "native capability revisions, browser identity, tab metadata describe the actual peer",
   { timeout: 120000 },
   async (t) => {
     const f = await nativeFixture(t, { html });
@@ -478,12 +478,11 @@ test(
       const reject=async(action)=>{try{await action();return null;}catch(error){return {code:error.code,message:error.message};}};
       const unknownBrowser=await reject(()=>selected.capabilities.get('nexum_missing_capability'));
       const unknownTab=await reject(()=>tab.capabilities.get('nexum_missing_capability'));
-      const docs=await selected.documentation(),usage=await client.documentation.get('usage');
       const visited=context.input.base+'?native-history=one';
       await tab.navigate(visited);await tab.playwright.waitForURL(visited);
       const changed=await tab.capabilities.list();
       const history=await selected.history({from:new Date(Date.now()-60000),to:new Date(Date.now()+1000),queries:['127.0.0.1'],limit:20});
-      return {peers,identity:{browserId:selected.browserId,name:selected.name,type:selected.type,profileName:selected.profileName??null},byId:byId.browserId,byUrl:byUrl.browserId,tabId:tab.id,selectedId:selectedTab?.id,actual,userTabs,userTab,claimedState,userContext,selectedUserContext,browserCaps,tabCaps,stable,changed,unknownBrowser,unknownTab,docs,usage,history,visited,title:await tab.title(),url:await tab.url()};
+      return {peers,identity:{browserId:selected.browserId,name:selected.name,type:selected.type,profileName:selected.profileName??null},byId:byId.browserId,byUrl:byUrl.browserId,tabId:tab.id,selectedId:selectedTab?.id,actual,userTabs,userTab,claimedState,userContext,selectedUserContext,browserCaps,tabCaps,stable,changed,unknownBrowser,unknownTab,history,visited,title:await tab.title(),url:await tab.url()};
       `,
       { base: f.base },
     );
@@ -572,8 +571,6 @@ test(
     assert.equal(data.unknownTab.code, "CAPABILITY_NOT_ALLOWED");
     assert.ok(data.unknownBrowser.message.length > 0);
     assert.ok(data.unknownTab.message.length > 0);
-    assert.match(data.docs, /Nexum|browser/i);
-    assert.match(data.usage, /createBrowserClient/);
     assert.ok(data.history.some((item) => item.url === data.visited));
     assert.ok(
       data.history.every((item) =>

@@ -105,7 +105,7 @@ import { outputExtension, outputSdkUsage } from "../sdk/output-extension.js";
 import { shExtension, shSdkUsage } from "../sdk/sh.js";
 import { transferExtension, transferSdkUsage } from "../sdk/transfer.js";
 import { maintenanceExtension, maintenanceSdkUsage } from "../sdk/maintenance.js";
-import { DocumentCatalog } from "../work/catalog.js";
+import { methodSkill, writeMethodSkill } from "../work/method-skills.js";
 import { WorkService, type PublishedMaterials } from "../work/service.js";
 import { parseSkillFrontmatter } from "../work/discovery.js";
 import { AgentAuthority } from "./authority.js";
@@ -229,7 +229,6 @@ export class AgentRuntime {
   #store: SqliteStore;
   #modules!: ModuleLoader;
   #scripts!: ScriptCatalog;
-  #documents!: DocumentCatalog;
   #work!: WorkService;
   #engine!: RunEngine;
   #tasks!: RuntimeTasks;
@@ -258,7 +257,6 @@ export class AgentRuntime {
   #platformMaterials: PublishedMaterials = {
     instructions: [],
     skills: [],
-    docs: [],
   };
   #slots = new TransferStreamSlots();
   #lifetime = new AbortController();
@@ -354,7 +352,6 @@ export class AgentRuntime {
       publishedDirectories: () =>
         new Set([
           ...(this.#materials?.activeDirectories() ?? []),
-          ...(this.#documents?.activeDirectories() ?? []),
         ]),
     });
     this.#materials = new ExtensionMaterials(work, {
@@ -445,7 +442,6 @@ export class AgentRuntime {
             "Cloud-managed dependencies must use the approved pnpm workflow.");
           await this.#approvedPackages.accept(snapshot);
         }
-        await this.#documents.refresh(this.#published().docs);
       },
     };
   }
@@ -486,10 +482,6 @@ export class AgentRuntime {
       ...controls,
       ...this.#materials.scriptSources(),
     ]);
-    this.#documents = new DocumentCatalog(work, this.#scripts, policy, {
-      reserve: (bytes) => this.#retention.reserve(bytes),
-      materialRetention: this.#materialRetention,
-    });
     const permissions = new Set([
       "connection",
       "path",
@@ -604,8 +596,7 @@ export class AgentRuntime {
               .then(async (result) => {
                 this.#logStartup("extension_worker_cleanup", packageName,
                   "cleanup", String(result.status));
-                await this.#documents.refresh(this.#published().docs);
-              })
+                      })
               .catch((cause) => {
                 this.#logStartup("extension_worker_cleanup_failed",
                   packageName, "cleanup", failureCode(cause));
@@ -643,7 +634,7 @@ export class AgentRuntime {
         this.#registry.resolveMcpResource(source, scope),
     });
     this.#encoder = new ResultEncoder(this.#artifacts, {}, this.#offers, mcp);
-    this.#work = new WorkService(this.#store, this.#scripts, this.#documents, {
+    this.#work = new WorkService(this.#store, this.#scripts, policy, {
       reserve: (bytes) => this.#retention.reserve(bytes),
       materialRetention: this.#materialRetention,
       home: this.#options.home === undefined ? homedir() : this.#options.home,
@@ -765,49 +756,32 @@ export class AgentRuntime {
       );
       this.#registry.publish(handle);
       this.#platform.push(handle);
-      const directory = privateDirectory(work, "docs", "platform");
-      const filename = path.join(directory, namespace + ".md");
-      const text =
-        `# ${namespace} SDK\n\n` +
-        `> 以下 inputSchema 表示方法内部归一化后的校验结构，不代表 JavaScript 的实际参数顺序。\n\n` +
-        (namespace === "state" ? stateSdkUsage + "\n\n" : "") +
-        (namespace === "runtime" ? runtimeSdkUsage + "\n\n" : "") +
-        (namespace === "output" ? outputSdkUsage + "\n\n" : "") +
-        (namespace === "sh" ? shSdkUsage + "\n\n" : "") +
-        (namespace === "transfer" ? transferSdkUsage + "\n\n" : "") +
-        (namespace === "maintenance" ? maintenanceSdkUsage + "\n\n" : "") +
-        "## 已注册方法\n\n" +
-        handle.methods
-          .map((method) => `- \`${namespace}.${String(method.name)}\`：${String(method.description ?? "")}`)
-          .join("\n") +
-        "\n\n## 具体参数与返回\n\n" +
-        handle.methods
-          .map(
-            (method) => "```json\n" + canonicalJson(Object.fromEntries(Object.entries(method).filter(([field]) => field !== "permissions" && field !== "description")), 65536) + "\n```\n",
-          )
-          .join("\n");
-      const ticket = await this.#retention.reserve(
-        Buffer.byteLength(text) + 1024,
-        { control: true },
-      );
+      const selections: Record<string, [string, string, string]> = {
+        runtime: ["runtime-control", "需要可取消等待、向用户收集本次 Run 的业务输入，或请求已获授权的 Agent 安全重启时使用。", runtimeSdkUsage],
+        state: ["shared-state", "需要读取、按实际版本条件写入或删除当前 Agent/profile 或 Cloud 用户的跨 Run 共享值时使用。", stateSdkUsage],
+        output: ["output-delivery", "需要把实际图片、音频、文件或资源交付给 Host，或组合内容块与结构化业务结果时使用。普通文字和 JSON 可直接 return。", outputSdkUsage],
+        sh: ["managed-processes", "需要启动或执行受管命令、PTY，按真实 processId 观察、读写或停止进程，或查询可执行文件与进程环境时使用；普通文件处理使用 Node/npm。", shSdkUsage],
+        transfer: ["file-transfer", "需要创建 Agent 与外部之间的一次性上传或下载通道，查询实际传输状态或请求取消传输时使用。", transferSdkUsage],
+        maintenance: ["environment-maintenance", "需要申请安装、更新或移除 npm 包，启停 SDK 扩展，配置 MCP/API 接入，或查询和撤销维护申请时使用；申请回执不代表已经批准或执行。", maintenanceSdkUsage],
+      };
+      const [name, description, usage] = selections[namespace]!;
+      const generated = methodSkill({ name, description, usage,
+        origin: handle.origin, bindingPath: [namespace], methods: handle.methods });
+      const directory = path.join(work, "skills", ".generated", "platform", namespace, generated.revision);
+      const hold = await this.#materialRetention.hold("skill", directory);
       try {
-        atomicText(filename, text);
-      } finally {
-        ticket.release();
-      }
-      this.#platformMaterials.docs = [
-        ...this.#platformMaterials.docs,
-        {
-          name: namespace,
-          description: `${namespace} SDK 参数和返回约定`,
-          path: filename,
-          owner: CONTROL_OWNER,
-          version: CONTROL_VERSION,
-        },
-      ];
+        await writeMethodSkill(work, directory, generated.files,
+          (bytes) => this.#retention.reserve(bytes, { control: true }));
+        this.#materialRetention.setPublished(`platform:${namespace}`, directory);
+        this.#platformMaterials.skills = [...this.#platformMaterials.skills, {
+          ...generated.metadata, skillId: `nexum/${name}`,
+          path: directory, skillFile: path.join(directory, "SKILL.md"),
+          scope: { type: "agent", root: work }, origin: handle.origin,
+        }];
+      } finally { hold.release(); }
     }
     const instruction =
-      "Run 脚本从 context.input/context.attachments 读取输入，以 context.pwd/context.paths 定位工作文件；普通文件及数据操作使用当前获准的 Node/npm。需要受管进程、用户输入或可取消延迟、跨 Run 共享状态、图片/文件交付、跨端传输、配置维护时，分别从本次 agent.docs 读取 sh/runtime/state/output/transfer/maintenance 的实际 JavaScript 用法。扩展和外部 MCP/API 仅使用当前已经启用的方法。文字/JSON 可直接 return；图片、音频与文件必须由 output 显式交付。等待业务结果应检查真实状态，必要延迟用 runtime.sleep；观察超时或取消请求不能证明外部工作已停止，未确认副作用时不要重做。";
+      "Run 脚本在 agent.open 选定的授权执行环境内运行，不要把执行环境当作 AI Host 所在设备；从 context.input/context.attachments 读取输入，以 context.pwd/context.paths 定位该环境中的工作文件；普通文件及数据操作使用当前获准的 Node/npm。需要受管进程、用户输入或可取消延迟、跨 Run 共享状态、图片/文件交付、跨端传输、配置维护时，按 agent.skills/project.skills 的 description 选择匹配 Skill，用获准的 Node 文件能力读取其 skillFile，按正文路由读取 references 中的实际 JavaScript 用法和完整方法合同。Skill 引用缺失时报告缺口，不猜测方法或 Schema。agent.scripts 是独立注册、可按 scriptName 执行的脚本；Skill 的 scripts/ 是私有辅助资源，不自动注册，不能按 scriptName 调用。agent.scripts.complete=false 时读取本次 scripts.index。扩展和外部 MCP/API 仅使用当前已经启用的方法。文字/JSON 可直接 return；图片、音频与文件必须由 output 显式交付。等待业务结果应检查真实状态，必要延迟用 runtime.sleep；观察超时或取消请求不能证明外部工作已停止，未确认副作用时不要重做。";
     this.#platformMaterials.instructions = [
       {
         instructionId: "platform-runtime",
@@ -829,9 +803,9 @@ export class AgentRuntime {
     );
     const scriptSkillRoot = privateDirectory(
       work,
-      "docs",
-      "platform",
       "skills",
+      ".generated",
+      "authored",
       "script-authoring",
     );
     const scriptSkillReferences = privateDirectory(scriptSkillRoot, "references");
@@ -855,6 +829,7 @@ export class AgentRuntime {
       "script-authoring",
     );
     this.#platformMaterials.skills = [
+      ...this.#platformMaterials.skills,
       {
         ...scriptSkill,
         skillId: "nexum/script-authoring",
@@ -864,7 +839,6 @@ export class AgentRuntime {
         origin: { ...platformOrigin("nexum"), revision: digest(scriptSkillText) },
       },
     ];
-    await this.#documents.refresh(this.#published().docs);
   }
   /** After Core is admitted, optional extensions start independently.
    * A bad package must never cause a second Agent boot or tear down Cloud. */
@@ -917,15 +891,7 @@ export class AgentRuntime {
         }
       })());
     }
-    this.#optionalStartup = Promise.allSettled(tasks).then(async () => {
-      if (this.#closing) return;
-      try {
-        await this.#documents.refresh(this.#published().docs);
-      } catch (cause) {
-        this.#logStartup("extension_docs_failed", "catalog",
-          "documentation", failureCode(cause));
-      }
-    });
+    this.#optionalStartup = Promise.allSettled(tasks).then(() => {});
     void this.#optionalStartup.catch((cause) => {
       this.#logStartup("extension_recovery_failed", "catalog",
         "initialization", failureCode(cause));
@@ -993,8 +959,7 @@ export class AgentRuntime {
     const extra = this.#materials.published();
     const adapters = this.#configurationSources?.published() ?? {
       instructions: [],
-      docs: [],
-      skills: [],
+        skills: [],
     };
     const owner = caller
       ? [...(this.#ownerIssues.get(this.#configurationCallerKey(caller))
@@ -1023,8 +988,7 @@ export class AgentRuntime {
         ...extra.instructions,
         ...adapters.instructions,
       ],
-      skills: [...this.#platformMaterials.skills, ...extra.skills],
-      docs: [...this.#platformMaterials.docs, ...extra.docs, ...adapters.docs],
+      skills: [...this.#platformMaterials.skills, ...extra.skills, ...adapters.skills],
     };
   }
   #configurationBackend(): Promise<ConfigurationMaintenanceBackend> {
@@ -1107,7 +1071,6 @@ export class AgentRuntime {
       if (!issues.size)
         this.#restoredOwners.add(key);
       else this.#restoreRetryAt.set(key, Date.now() + 60_000);
-      await this.#documents.refresh(this.#published().docs);
     })();
     this.#restoringOwners.set(key, task);
     try {
@@ -1837,7 +1800,7 @@ export class AgentRuntime {
         contextId: this.#store.getRun(runId).contextId,
         projectId: this.#store.getRun(runId).projectId,
         direction: binding.direction,
-        claimDeadlineAt: iso(binding.claimDeadlineAt),
+        ...(binding.resourceExpiresAt ? { resourceExpiresAt: binding.resourceExpiresAt } : {}),
         maxBytes: binding.maxBytes,
         target: binding.target,
       },

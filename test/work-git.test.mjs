@@ -172,6 +172,8 @@ test("initialization creates an independent local snapshot of only the fixed all
     "package.json",
     "package-lock.json",
     "scripts/report.js",
+    "skills/review/SKILL.md",
+    "skills/review/references/contract.md",
     "modules/helper.js",
     "docs/README.md",
   ])
@@ -187,6 +189,7 @@ test("initialization creates an independent local snapshot of only the fixed all
     "scripts/.env.local",
     "docs/.npmrc",
     "modules/node_modules/lib/index.js",
+    "skills/.generated/platform/state/revision/SKILL.md",
     "resources/content",
     "tmp/result",
     "node_modules/example/index.js",
@@ -202,6 +205,8 @@ test("initialization creates an independent local snapshot of only the fixed all
     "package-lock.json",
     "package.json",
     "scripts/report.js",
+    "skills/review/SKILL.md",
+    "skills/review/references/contract.md",
   ]);
   assert.equal(
     realpathSync.native(f.git(["rev-parse", "--show-toplevel"]).trim()),

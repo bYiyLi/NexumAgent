@@ -24,7 +24,7 @@ Nexum browser 是 Nexum 官方维护的可选浏览器控制扩展，源码与�
 | [lifecycle.md](lifecycle.md)                                                       | 初始化、共享资源、单次调用、锁、取消、停用/升级、Agent 退出/重启      |
 | [interaction.md](interaction.md)                                                   | 页面观察、引用、虚拟鼠标/标签组/favicon、前台跟随、用户停止与原生限制 |
 | [results.md](results.md)                                                           | 截图、文本、附件/文件、导出、下载、标准内容与 Resources、历史         |
-| [packaging.md](packaging.md)                                                       | 官方可选 npm 包、浏览器插件、五类贡献、独立版本和发布验收             |
+| [packaging.md](packaging.md)                                                       | 官方可选 npm 包、浏览器插件、四类贡献、独立版本和发布验收             |
 | [acceptance.md](acceptance.md)                                                     | 功能、失败/竞态、完整能力、真实环境、制品与不侵入核心验收             |
 | [platform-contract.md](platform-contract.md)                                       | 本包使用的公共协议、无私有回调接入、一般能力与接线前提                |
 | [sources.md](sources.md)                                                           | 设计来源、参考材料的分发边界及当前合同的裁定                          |

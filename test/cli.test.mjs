@@ -335,7 +335,7 @@ AgentRuntime.prototype.dispatch=async function(...args){
     "error",
   );
   assert.equal(denied.code, "context_closed");
-  assert.equal(denied.message, "The Agent operation failed.");
+  assert.equal(denied.message, "The original work Context is unavailable. Check its current status and reopen authorized work if it has closed.");
   await until(() => {
     const offset = stderr.indexOf("native_cli_invoke_failed ");
     return offset >= 0 && stderr.slice(offset).includes("\n");

@@ -20,4 +20,4 @@ return await tab.playwright.domSnapshot();
 
 平台注册入口为 `@nexum-hub/browser/nexum` 的默认 `createExtension(host)`。它只使用 `@nexum-hub/sdk` 当前公开类型和标准 Node/WS。模块顶层不初始化服务，工厂先登记冷资源，启用成功才监听本 profile 固定 loopback 端口。
 
-[使用手册](docs/README.md) · [连接](docs/connection.md) · [生命周期](docs/lifecycle.md)
+[浏览器 Skill](skills/browser-control/SKILL.md) · [连接](skills/browser-control/references/connection.md) · [生命周期](skills/browser-control/references/lifecycle.md)

@@ -23,6 +23,7 @@ import type {
   MaterialRetention,
 } from "../runtime/material-retention.js";
 import { boundedFile } from "../work/discovery.js";
+import { methodSkill } from "../work/method-skills.js";
 import type { PublishedMaterials } from "../work/service.js";
 import type { ExtensionHandle } from "./registry.js";
 import type {
@@ -39,7 +40,6 @@ export interface PreparedExtensionMaterials {
   readonly handleId: string;
   readonly origin: ContributionOrigin;
   readonly directory: string;
-  readonly entry: string;
   readonly materials: PublishedMaterials;
   readonly scripts?: ScriptSource;
   readonly diagnostics: readonly MaterialDiagnostic[];
@@ -120,7 +120,6 @@ export class ExtensionMaterials {
   #published: PublishedMaterials = freeze({
     instructions: [],
     skills: [],
-    docs: [],
   });
   #sources: readonly ScriptSource[] = Object.freeze([]);
   #reserve?: ManagedReserve;
@@ -204,13 +203,56 @@ export class ExtensionMaterials {
         "Extension material sources must remain in their installed package.",
       );
     }
+    const readSource = async (file: ExtensionPackageFile, boundary: string) => {
+      signal?.throwIfAborted();
+      const lexical = path.resolve(descriptor.root, file.relativePath);
+      requireCondition(
+        contains(descriptor.root, lexical) &&
+          (await realpath(lexical)) === file.path &&
+          (await realpath(boundary)) === boundary &&
+          contains(boundary, file.path),
+        "extension_package_changed",
+        "A declared reading source redirected after static inspection.",
+      );
+      const read = await boundedFile(
+        file.path,
+        Math.min(file.size, this.#maxBytes),
+        signal,
+      );
+      requireCondition(
+        read.bytes.length === file.size &&
+          read.revision === file.revision &&
+          (await realpath(lexical)) === file.path,
+        "extension_package_changed",
+        "A declared reading source changed after static inspection.",
+      );
+      return read.bytes;
+    };
+    const baseName = origin.namespace!.toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/^-|-$/g, "") || "extension";
+    const name = `${baseName}-sdk-${digest(origin.namespace!).slice(0, 8)}`;
+    requireCondition(
+      !descriptor.materials.skills?.entries.some((skill) => skill.metadata.name === name),
+      "extension_material_conflict",
+      "A generated Skill cannot replace an authored Skill's identity.",
+    );
+    const generated = methodSkill({
+      name,
+      description: `编写或核对 ${origin.namespace} SDK 的调用代码、参数及返回合同，或诊断该扩展的方法错误时使用。当前操作包括：${handle.methods.slice(0, 4).map((method) => String(method.description).replace(/[\r\n]+/g, " ").slice(0, 100)).join("；")}。具体任务优先选择同来源匹配的人工 Skill。`.slice(0, 1024),
+      origin, bindingPath: [origin.namespace!], methods: handle.methods,
+      references: {
+        "types.md": "# 来源类型声明\n\n```typescript\n" +
+          text(await readSource(descriptor.types, descriptor.root)) + "\n```\n",
+      },
+    });
     const methods = canonicalJson(handle.methods, 4 * 1024 * 1024);
     const snapshotRevision = digest(
-      canonicalJson({ origin, methods }, 8 * 1024 * 1024),
+      canonicalJson({ origin, methods, skill: generated.revision }, 8 * 1024 * 1024),
     );
     const parent = privateDirectory(
       this.work,
-      "docs",
+      "skills",
+      ".generated",
       "extensions",
       segment(origin.namespace!),
       segment(descriptor.version),
@@ -270,15 +312,6 @@ export class ExtensionMaterials {
       if (!mappings.has(lexical)) mappings.set(lexical, target);
       if (!mappings.has(source.path)) mappings.set(source.path, target);
     };
-    const docs = descriptor.materials.docs;
-    mappings.set(path.resolve(descriptor.root, docs.relativePath), "manual");
-    mappings.set(docs.path, "manual");
-    for (const file of docs.files)
-      add(
-        file,
-        "manual/" + sourceSuffix(docs.relativePath || ".", file.relativePath),
-        docs.path,
-      );
     if (descriptor.materials.instructions) {
       const file = descriptor.materials.instructions;
       add(
@@ -304,12 +337,6 @@ export class ExtensionMaterials {
         );
     }
     const scripts = descriptor.materials.scripts;
-    for (const item of scripts?.entries ?? [])
-      add(
-        item.file,
-        "reference/scripts/" + item.metadata.scriptName,
-        scripts!.directory,
-      );
     for (const item of plan) {
       // Directory links inside the author's tree remain usable too.
       let source = path.dirname(
@@ -493,37 +520,12 @@ export class ExtensionMaterials {
         })
         .join("\n");
     };
-    const readSource = async (file: ExtensionPackageFile, boundary: string) => {
-      signal?.throwIfAborted();
-      const lexical = path.resolve(descriptor.root, file.relativePath);
-      requireCondition(
-        contains(descriptor.root, lexical) &&
-          (await realpath(lexical)) === file.path &&
-          (await realpath(boundary)) === boundary &&
-          contains(boundary, file.path),
-        "extension_package_changed",
-        "A declared reading source redirected after static inspection.",
-      );
-      const read = await boundedFile(
-        file.path,
-        Math.min(file.size, this.#maxBytes),
-        signal,
-      );
-      requireCondition(
-        read.bytes.length === file.size &&
-          read.revision === file.revision &&
-          (await realpath(lexical)) === file.path,
-        "extension_package_changed",
-        "A declared reading source changed after static inspection.",
-      );
-      return read.bytes;
-    };
     requireCondition(
       (await realpath(parent)) === parent,
       "extension_path_escape",
       "A reading parent must not redirect before staging.",
     );
-    const hold = await this.#retention?.hold("extension", directory);
+    const hold = await this.#retention?.hold("skill", directory);
     let transferred = false;
     let temporary: string;
     try {
@@ -631,97 +633,14 @@ export class ExtensionMaterials {
           instructionContent = text(bytes);
         await save(item.target, bytes, item.source);
       }
-      const generated = (prefix: string, parts: Iterable<string>) => {
-        let size = Buffer.byteLength(prefix);
-        const chunks = [prefix];
-        for (const part of parts) {
-          size += Buffer.byteLength(part);
-          requireCondition(
-            totalBytes + size <= this.#maxBytes,
-            "extension_material_too_large",
-            "Generated method references exceed their snapshot budget.",
-          );
-          chunks.push(part);
-        }
-        return chunks.join("");
-      };
-      const methodText = generated(
-        "# " +
-          label(origin.namespace!) +
-          " 方法参考\n\n来源：" +
-          label(origin.owner) +
-          " " +
-          label(descriptor.version) +
-          "；" +
-          origin.revision +
-          "。仅包含已准备的公开方法与 Schema，不含配置或凭据。\n\n",
-        (function* () {
-          for (const method of handle.methods)
-            yield "## " +
-              label(
-                [origin.namespace, ...(method.path as string[])].join("."),
-              ) +
-              "\n\n" +
-              String(method.description) +
-              "\n\n```json\n" +
-              canonicalJson(method, 4 * 1024 * 1024) +
-              "\n```\n";
-        })(),
-      );
-      await save("reference/README.md", Buffer.from(methodText));
-      const scriptText = generated(
-        "# 组合脚本\n\n阅读副本不作为执行源；按 scriptName 执行仍核对当前启用包的原始声明目录。\n\n",
-        (function* () {
-          for (const item of scripts?.entries ?? [])
-            yield "## " +
-              label(`${origin.namespace}/${item.metadata.scriptName}`) +
-              "\n\n" +
-              label(item.metadata.scriptDesc) +
-              "\n\n使用时机：" +
-              label(item.metadata.scriptWhenUse) +
-              "。\n\n[原始脚本与 JSON 头部阅读副本](<scripts/" +
-              encodeURIComponent(item.metadata.scriptName) +
-              ">)\n\n```json\n" +
-              canonicalJson(item.metadata) +
-              "\n```\n";
-        })(),
-      );
-      await save("reference/scripts.md", Buffer.from(scriptText));
-      const entryText = generated(
-        "# " +
-          label(origin.namespace!) +
-          " 扩展手册\n\n" +
-          label(origin.owner) +
-          " " +
-          label(descriptor.version) +
-          "；内容修订 " +
-          origin.revision +
-          "。\n\n以下内容是独立阅读副本；实际 SDK 与脚本仅在该来源已启用且当前授权通过时可用。\n\n## 作者手册\n\n",
-        (function* () {
-          for (const item of plan)
-            if (item.target.startsWith("manual/") && /\.md$/i.test(item.target))
-              yield "- [" +
-                label(item.target.slice(7)) +
-                "](<" +
-                item.target.split("/").map(encodeURIComponent).join("/") +
-                ">)\n";
-          yield "\n## 方法与脚本\n\n- [完整方法与 Schema](reference/README.md)\n- [全部组合脚本、用法与输入 Schema](reference/scripts.md)\n\n## 指令与 Skills\n\n";
-          for (const item of plan)
-            if (
-              item.source === descriptor.materials.instructions ||
-              (item.target.startsWith("skills/") &&
-                path.posix.basename(item.target) === "SKILL.md")
-            )
-              yield "- [" +
-                label(item.target) +
-                "](<" +
-                item.target.split("/").map(encodeURIComponent).join("/") +
-                ">)\n";
-        })(),
-      );
-      await save("README.md", Buffer.from(entryText));
+      requireCondition(diagnostics.length === 0, "extension_material_link_unavailable",
+        "A declared Skill or instruction references an unavailable local resource.",
+        { diagnostics: diagnostics as unknown as import("../contracts/types.js").JsonValue });
+      for (const [file, body] of generated.files)
+        await save(`generated/${name}/${file}`, Buffer.from(body));
       // Verify the entire declared reading set again before exposing a fixed coordinate.
       for (const item of plan) await readSource(item.source, item.boundary);
+      await readSource(descriptor.types, descriptor.root);
       signal?.throwIfAborted();
       const manifest = Buffer.from(
         canonicalJson(
@@ -851,7 +770,6 @@ export class ExtensionMaterials {
         handleId: handle.id,
         origin: readingOrigin,
         directory,
-        entry: path.join(directory, "README.md"),
         materials: {
           instructions: descriptor.materials.instructions
             ? [
@@ -866,13 +784,13 @@ export class ExtensionMaterials {
                     ),
                   ),
                   content: instructionContent!,
-                  scope: { type: "agent", root: this.work },
+                  scope: { type: "agent" as const, root: this.work },
                   origin: readingOrigin,
                   truncated: false,
                 },
               ]
             : [],
-          skills: (descriptor.materials.skills?.entries ?? []).map((skill) => ({
+          skills: [...(descriptor.materials.skills?.entries ?? []).map((skill) => ({
             skillId: `${origin.namespace}/${skill.metadata.name}`,
             ...skill.metadata,
             path: path.join(directory, "skills", skill.metadata.name),
@@ -882,19 +800,14 @@ export class ExtensionMaterials {
               skill.metadata.name,
               "SKILL.md",
             ),
-            scope: { type: "agent", root: this.work },
+            scope: { type: "agent" as const, root: this.work },
             origin: readingOrigin,
-          })),
-          docs: [
-            {
-              name: origin.namespace!,
-              description:
-                "SDK 用法、作者手册、完整方法参考、组合脚本、指令与 Skills",
-              path: path.join(directory, "README.md"),
-              owner: origin.owner,
-              version: descriptor.version,
-            },
-          ],
+          })), {
+            ...generated.metadata, skillId: `${origin.namespace}/${generated.metadata.name}`,
+            path: path.join(directory, "generated", generated.metadata.name),
+            skillFile: path.join(directory, "generated", generated.metadata.name, "SKILL.md"),
+            scope: { type: "agent" as const, root: this.work }, origin: readingOrigin,
+          }],
         },
         ...(scripts
           ? {
@@ -946,7 +859,6 @@ export class ExtensionMaterials {
     const published: PublishedMaterials = freeze({
       instructions: items.flatMap((item) => item.materials.instructions),
       skills: items.flatMap((item) => item.materials.skills),
-      docs: items.flatMap((item) => item.materials.docs),
     });
     canonicalJson(published, 4 * 1024 * 1024);
     return {

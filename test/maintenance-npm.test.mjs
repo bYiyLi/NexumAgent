@@ -125,7 +125,7 @@ async function fixture(t) {
         apiVersion: 1,
         namespace: "fixtureSDK",
         permissions: ["read"],
-        docs: "./docs",
+
       },
       scripts: { install: "node install.js" },
     });

@@ -460,7 +460,7 @@ export class ConfigurationMaintenanceBackend implements MaintenanceBackend {
           fixed.kind === "mcp" ? "connection" : "api",
           "configuration",
           "authentication",
-          "docs",
+          "skill",
           "capability",
         ],
         permissions: [fixed.kind === "mcp" ? "mcp.use" : "api.use"],

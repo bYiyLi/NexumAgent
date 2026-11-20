@@ -2513,6 +2513,7 @@ export function createMcpAdapter(
         inputSchema: unknown,
         handler: MethodDefinition["handle"],
         schemaDialect: SchemaDialect = "2020-12",
+        outputSchema?: unknown,
       ) => {
         methods[key] = {
           path,
@@ -2520,6 +2521,9 @@ export function createMcpAdapter(
           permissions: allPermissions,
           inputSchema,
           schemaDialect,
+          ...(outputSchema === undefined ? {} : {
+            outputSchema, outputSchemaDialect: dialect(outputSchema),
+          }),
           normalize: (args) => {
             requireCondition(
               args.length <= 1,
@@ -2543,6 +2547,7 @@ export function createMcpAdapter(
           tool.inputSchema,
           (input, call) => current.invoke("tools/call", input, call, tool),
           dialect(tool.inputSchema),
+          tool.outputSchema,
         );
       if ((catalog.capabilities as { resources?: unknown }).resources) {
         define(

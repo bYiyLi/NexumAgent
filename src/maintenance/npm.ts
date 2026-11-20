@@ -126,10 +126,6 @@ function declaration(value: ExtensionPackageDescriptor): JsonObject {
     permissions: [...value.source.permissions],
     entry: value.entry.relativePath,
     types: value.types.relativePath,
-    docs: {
-      directory: value.materials.docs.relativePath,
-      fileCount: value.materials.docs.files.length,
-    },
     instructions: value.materials.instructions?.relativePath ?? null,
     scripts: {
       names: scripts.slice(0, 200).map((item) => item.scriptName),
@@ -260,7 +256,7 @@ export interface NpmMaintenanceOptions {
   readonly npmCli?: string;
   readonly env?: Readonly<NodeJS.ProcessEnv>;
   readonly reserve?: MaintenanceSpaceReserve;
-  /** Persist only the verified explicit target, then rebuild approved npm discovery/docs. */
+  /** Persist only the verified explicit target, then rebuild approved npm discovery/Skills. */
   readonly refreshPackages: (
     snapshot: VerifiedPackageSnapshot,
   ) => void | Promise<void>;
@@ -752,7 +748,6 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
             "capability",
             "script",
             "instruction",
-            "docs",
             "skill",
           ],
           permissions: descriptor.source.permissions,
@@ -981,8 +976,7 @@ export class NpmMaintenanceBackend implements MaintenanceBackend {
                   "capability",
                   "script",
                   "instruction",
-                  "docs",
-                  "skill",
+                        "skill",
                 ]
               : []),
             ...(intent.action === "remove" ? ["remove"] : []),

@@ -7,7 +7,7 @@ import type { ContributionOrigin } from "../contracts/types.js";
 import { createMcpAdapter } from "../adapters/mcp.js";
 import type { ConfigurationActivation } from "../maintenance/configuration.js";
 import type { MaintenanceScope } from "../maintenance/requests.js";
-import { atomicText, privateDirectory } from "../runtime/paths.js";
+import { methodSkill, writeMethodSkill } from "../work/method-skills.js";
 import type { MaterialRetention } from "../runtime/material-retention.js";
 import {
   ExtensionRegistry,
@@ -67,11 +67,10 @@ export class ConfigurationSources implements ConfigurationActivation {
       (value) => value.available,
     );
     return {
-      docs: values.flatMap((value) => [...value.materials.docs]),
       instructions: values.flatMap((value) => [
         ...value.materials.instructions,
       ]),
-      skills: [],
+      skills: values.flatMap((value) => [...value.materials.skills]),
     };
   }
   async prepare(
@@ -162,53 +161,30 @@ export class ConfigurationSources implements ConfigurationActivation {
       this.#candidates.add(handle);
       scope.signal.throwIfAborted();
       scope.assertCurrent();
-      // Physical names depend on fixed identity/revision, preserving case and path isolation.
-      const parts = [
-        "docs",
-        "adapters",
-        input.kind,
-        digest(input.name),
-        digest(input.revision),
-      ];
-      const directory = path.join(this.work, ...parts);
-      const filename = path.join(directory, "README.md");
-      const hold = await this.materialRetention?.hold("extension", directory);
-      if (hold) this.#holds.set(handle, hold);
       const catalog = adapter.catalog();
       const api = input.api;
-      const markdown = api
-        ? api.documentation.markdown
-        : `# MCP ${input.name}\n\n已在此 Agent/profile 生效的 MCP 连接。实际可调用工具、Resources 与 Prompts 以本次 catalog 和 methods 为准；先按输入 Schema 选择需要的原生工具，不要根据名称猜测参数。\n\n工具调用入口：\`mcp[${JSON.stringify(input.name)}].tools[实际已注册工具名](arguments)\`；Resources/Prompts 只能使用实际列出的分组及原名称。请求超时或取消不代表远端副作用已撤销。\n\n\`\`\`json\n${canonicalJson({ catalog, methods: handle.methods.map((method) => Object.fromEntries(Object.entries(method).filter(([field]) => field !== "permissions"))) }, 16 * 1024 * 1024)}\n\`\`\`\n`;
-      const space = await this.reserve?.(
-        Buffer.byteLength(markdown) +
-          Buffer.byteLength(api?.documentation.types ?? "") +
-          2048,
-      );
-      try {
-        privateDirectory(this.work, ...parts);
-        atomicText(filename, markdown);
-        if (api)
-          atomicText(
-            path.join(directory, "index.d.ts"),
-            api.documentation.types,
-          );
-      } finally {
-        space?.release();
-      }
+      const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32).replace(/^-|-$/g, "") || "source";
+      const name = `${input.kind}-${slug}-${digest(input.objectId).slice(0, 8)}`;
+      const generated = methodSkill({
+        name, origin, bindingPath: adapter.bindingPath, methods: handle.methods,
+        description: `通过当前已批准的 ${input.kind} 来源 ${input.name} 调用其已注册方法时使用。${handle.methods.slice(0, 4).map((method) => String(method.description).replace(/[\r\n]+/g, " ").slice(0, 120)).join("；")}`.slice(0, 1024),
+        usage: input.kind === "mcp"
+          ? `# MCP 调用\n\n使用 mcp[${JSON.stringify(input.name)}] 下本次已注册的 tools/resources/prompts 方法，每次至多传一个参数对象；实际名称及 Schema 见选中方法参考。工具返回保留 MCP content、structuredContent、isError 语义。资源引用需要实际读取；超时、取消或断连不代表远端副作用已撤销。\n`
+          : `# API 调用\n\n使用 api[${JSON.stringify(input.name)}][实际方法名](input)。实际参数与响应、HTTP/业务错误以 [导入的 API 合同](api.md) 和 [类型声明](index.d.ts) 为准，不能从 HTTP 路径猜参数。\n`,
+        references: api
+          ? { "api.md": api.documentation.markdown, "index.d.ts": api.documentation.types }
+          : { "catalog.json": canonicalJson(catalog, 16 * 1024 * 1024) },
+      });
+      const directory = path.join(this.work, "skills", ".generated", "adapters", input.kind,
+        digest(input.name), generated.revision);
+      const hold = await this.materialRetention?.hold("skill", directory);
+      if (hold) this.#holds.set(handle, hold);
+      await writeMethodSkill(this.work, directory, generated.files, this.reserve);
       const instruction =
         input.kind === "mcp" && catalog && "instructions" in catalog
           ? catalog.instructions
           : null;
       const materials: PublishedMaterials = {
-        docs: [
-          {
-            name: `${input.kind}.${input.name}`,
-            description: `已批准的 ${input.kind} SDK 用法与调用定义`,
-            path: filename,
-            owner: origin.owner,
-            version: "1",
-          },
-        ],
         instructions:
           typeof instruction === "string" && instruction.length
             ? [
@@ -223,7 +199,9 @@ export class ConfigurationSources implements ConfigurationActivation {
                 },
               ]
             : [],
-        skills: [],
+        skills: [{ ...generated.metadata, skillId: `${input.kind}/${input.objectId}/${name}`,
+          path: directory, skillFile: path.join(directory, "SKILL.md"),
+          scope: { type: "agent", root: this.work }, origin }],
       };
       const active: ActiveSource = {
         kind: input.kind,

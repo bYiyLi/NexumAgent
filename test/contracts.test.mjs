@@ -172,3 +172,61 @@ test("SDK JSON accepts a plain object from the guest realm without invoking prox
     { code: "invalid_json" },
   );
 });
+
+test("MCP selector presence rules remain exclusive", () => {
+  const valid = [
+    ["agent.open", {agentId:"agt_test",projectId:"project_one"}],
+    ["agent.open", {agentId:"agt_test",path:"/tmp/project"}],
+    ["agent.list", {agentId:"agt_test",projectsCursor:"page_two"}],
+    ["agent.list", {cursor:"page_two"}],
+    ["agent.run.get", {agentId:"agt_test",runId:"run_one"}],
+    ["agent.run.start", {contextId:"ctx_test",script:"return 1;"}],
+    ["agent.run.start", {contextId:"ctx_test",scriptName:"my-script"}],
+  ];
+  const invalid = [
+    ["agent.open", {agentId:"agt_test",projectId:"project_one",path:"/tmp/project"}],
+    ["agent.list", {cursor:"page_two",agentId:"agt_test"}],
+    ["agent.list", {cursor:"page_two",projectsCursor:"page_three"}],
+    ["agent.run.get", {agentId:"agt_test",runId:"run_one",requestId:"req_1234567890123_00000000000000000000000000000000"}],
+    ["agent.run.get", {agentId:"agt_test",requestId:"req_1234567890123_00000000000000000000000000000000"}],
+    ["agent.run.start", {contextId:"ctx_test",script:"return 1;",requestId:"req_1234567890123_00000000000000000000000000000000"}],
+    ["agent.run.start", {contextId:"ctx_test",script:"return 1;",scriptName:"my-script"}],
+  ];
+  for (const [name,input] of valid) assert.doesNotThrow(()=>validateContract(name,input), name+" valid");
+  for (const [name,input] of invalid) assert.throws(()=>validateContract(name,input), name+" invalid");
+});
+
+
+test("schema failures identify field and constraint without echoing rejected input", () => {
+  const check = compileInputSchema({
+    type: "object",
+    properties: {
+      timeoutMs: { type: "integer", minimum: 1, maximum: 30000 },
+      mode: { enum: ["safe", "fast"] },
+    },
+    required: ["timeoutMs"],
+    additionalProperties: false,
+  });
+  assert.throws(() => check({}), (error) => {
+    assert.equal(error.code, "invalid_arguments");
+    assert.deepEqual(error.details.errors[0], {
+      path: "$.timeoutMs", keyword: "required", expected: "provide this field",
+    });
+    return true;
+  });
+  assert.throws(() => check({ timeoutMs: "private-string-value" }), (error) => {
+    assert.equal(error.details.errors[0].path, "$.timeoutMs");
+    assert.equal(error.details.errors[0].expected, "integer");
+    assert(!JSON.stringify(error.toJSON()).includes("private-string-value"));
+    return true;
+  });
+  assert.throws(() => check({ timeoutMs: 0 }), (error) => {
+    assert.equal(error.details.errors[0].expected, "minimum 1");
+    return true;
+  });
+  assert.throws(() => check({ timeoutMs: 1, "secret-token-DO-NOT-ECHO": true }), (error) => {
+    assert(!JSON.stringify(error.toJSON()).includes("secret-token-DO-NOT-ECHO"));
+    return true;
+  });
+  assert.doesNotThrow(() => check({ timeoutMs: 500, mode: "safe" }));
+});

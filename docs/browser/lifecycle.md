@@ -2,7 +2,7 @@
 
 ## 实例启动与就绪
 
-通用扩展加载器静态检查 npm 身份/版本、exports、协议、namespace、权限及五类贡献，再调用 `createExtension(host)`。一份 Agent/profile 仅一个 browser 实例；并发初始化共享结果，跨 profile 不共用变量或连接。
+通用扩展加载器静态检查 npm 身份/版本、exports、协议、namespace、权限及四类贡献，再调用 `createExtension(host)`。一份 Agent/profile 仅一个 browser 实例；并发初始化共享结果，跨 profile 不共用变量或连接。
 
 工厂先创建冷的 BrowserService 控制对象，尚不 listen、不创建 WS、定时器或系统副作用；用 `host.resources.register({kind:"browser-service",value:service})` 登记后，检查资源/host signal，再启动 loopback 服务。服务确认实际 listening、协议路由和清理入口就绪后才返回方法表。后续公共准备/Schema/资料失败时，核心可凭登记关系清理；工厂的未登记临时内容自行 finally 收尾。没有浏览器连接不是初始化失败；端口冲突、错误环境/配置或协议准备失败只保留该实例诊断，不假装服务已上线。
 

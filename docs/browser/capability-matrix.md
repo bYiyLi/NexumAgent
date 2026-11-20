@@ -1,11 +1,11 @@
 # Nexum browser 逐成员开发与验收清单
 
-22 个来源接口、148 个成员及 102 条额外验收项全部保留。本文与 [JSON 清单](capability-matrix.json) 只定义稳定 ID、目标和契约映射，不维护一份重复的实现状态。公开入口和路由范围见 [implementation.json](../../packages/browser/implementation.json)，实际环境、源码和通过/失败证据见 [原生验收记录](../development/browser-native-acceptance.md)。完整签名和类型见 [SDK 契约](sdk.md) 与 [类型](sdk-types.md)。局部原生通过不代表完整 250 项矩阵完成。
+22 个来源接口、148 个成员及 102 条额外验收项稳定 ID 保留；B002/B011/B145 的独立文档方法已撤销，改用 browser-control Skill 引用。本文与 [JSON 清单](capability-matrix.json) 只定义稳定 ID、目标和契约映射，不维护一份重复的实现状态。公开入口和路由范围见 [implementation.json](../../packages/browser/implementation.json)，实际环境、源码和通过/失败证据见 [原生验收记录](../development/browser-native-acceptance.md)。完整签名和类型见 [SDK 契约](sdk.md) 与 [类型](sdk-types.md)。局部原生通过不代表当前 247 项公开成员矩阵完成。
 
 | ID   | 来源接口/成员                           | Nexum browser 对应                    |
 | ---- | --------------------------------------- | ------------------------------------- |
 | B001 | Agent.browsers                          | `client.browsers`                     |
-| B002 | Agent.documentation                     | `client.documentation`                |
+| B002 | Agent.documentation                     | 已撤销；读取 Skill 引用                |
 | B003 | Browsers.get                            | `client.browsers.get`                 |
 | B004 | Browsers.getDefault                     | `client.browsers.getDefault`          |
 | B005 | Browsers.getForUrl                      | `client.browsers.getForUrl`           |
@@ -14,7 +14,7 @@
 | B008 | Browser.capabilities                    | `selectedBrowser.capabilities`        |
 | B009 | Browser.tabs                            | `selectedBrowser.tabs`                |
 | B010 | Browser.user                            | `selectedBrowser.user`                |
-| B011 | Browser.documentation                   | `selectedBrowser.documentation`       |
+| B011 | Browser.documentation                   | 已撤销；读取 Skill 引用       |
 | B012 | Browser.history                         | `selectedBrowser.history`             |
 | B013 | Browser.nameSession                     | `selectedBrowser.nameSession`         |
 | B014 | BrowserUser.claimTab                    | `selectedBrowser.user.claimTab`       |
@@ -148,7 +148,7 @@
 | B142 | ConfirmDialog.type                      | `dialog.type`                         |
 | B143 | ConfirmDialog.accept                    | `dialog.accept`                       |
 | B144 | ConfirmDialog.dismiss                   | `dialog.dismiss`                      |
-| B145 | Documentation.get                       | `client.documentation.get`            |
+| B145 | Documentation.get                       | 已撤销；读取 Skill 引用            |
 | B146 | PromptDialog.type                       | `dialog.type`                         |
 | B147 | PromptDialog.accept                     | `dialog.accept`                       |
 | B148 | PromptDialog.dismiss                    | `dialog.dismiss`                      |

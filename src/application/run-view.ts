@@ -76,7 +76,7 @@ function error(value: JsonObject | null | undefined): WireErrorV2 | null {
     message:
       typeof value.message === "string"
         ? value.message
-        : "The Agent operation failed.",
+        : "The Run recorded an error without a public message; inspect the error code, safe details and retained logs before retrying.",
     hint,
     ...((value.details &&
       typeof value.details === "object" &&

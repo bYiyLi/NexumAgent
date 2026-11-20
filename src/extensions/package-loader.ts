@@ -133,7 +133,7 @@ export class ExtensionPackageLoader {
       ? prepared
       : null;
   }
-  /** The coordinator must call this immediately before publishing all five contributions. */
+  /** The coordinator must call this immediately before publishing all four contributions. */
   async verify(prepared: PreparedExtensionPackage): Promise<void> {
     requireCondition(
       this.#prepared.has(prepared),

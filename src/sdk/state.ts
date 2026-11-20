@@ -28,6 +28,8 @@ await state.agent.delete("example", { expectedVersion: saved.version });
 ~~~
 
 首次创建时 expectedVersion 为 null；更新或删除必须使用读取到的实际版本，不要猜测版本号。脚本异常时先核对是否已发生写入，不要盲目重试。
+
+get 返回 {value: JSON, version: number, updatedAt: number} 或 null；set 返回同形的新版本；delete 返回 {deleted: true, version: number, updatedAt: number}。updatedAt 为存储返回的时间戳。key、version 的完整范围见对应方法 Schema。invalid_state_key、invalid_state_options、invalid_state_version 表示输入不合法；state_service_unavailable 或 user_state_unavailable 表示当前服务不可用，不能用本地值冒充 Cloud 用户权威值。条件写入冲突时重新读取实际值与版本，按用户意图重新判断，不猜版本重放。
 `;
 export const stateExtension: ExtensionFactory = () => {
   const methods: Record<string, MethodDefinition> = {};

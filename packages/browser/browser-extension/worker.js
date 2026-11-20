@@ -21,4 +21,8 @@ connection = createExtensionConnection({
   profile,
   extensionVersion,
 });
+chrome.action.onClicked.addListener(() => {
+  void chrome.tabs.create({ url: "https://nexum.y2l.top/" });
+});
+
 void connection.start().catch(() => {});

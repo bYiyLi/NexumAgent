@@ -75,7 +75,7 @@ async function fixture(t, { pnpm = false } = {}) {
       namespace: "fixtureSDK",
       permissions: ["network"],
       instructions: "./instructions/README.md",
-      docs: "./docs",
+
       scripts: "./scripts",
       skills: "./skills",
     },
@@ -115,19 +115,19 @@ async function fixture(t, { pnpm = false } = {}) {
     "# SDK usage rules\nUse the documented workflow.\n",
   );
   write(
-    path.join(packageRoot, "docs", "README.md"),
+    path.join(packageRoot, "skills", "endpoint-audit", "references", "README.md"),
     "# SDK manual\nUse the endpoint inspection capability.\n",
   );
   write(
-    path.join(packageRoot, "docs", "reference", "example.md"),
+    path.join(packageRoot, "skills", "endpoint-audit", "references", "reference", "example.md"),
     "# Example\nA longer example.\n",
   );
   write(
-    path.join(packageRoot, "docs", ".secret"),
+    path.join(packageRoot, "skills", "endpoint-audit", "references", ".secret"),
     "must not be automatically published",
   );
   write(
-    path.join(packageRoot, "docs", "picture.bin"),
+    path.join(packageRoot, "skills", "endpoint-audit", "references", "picture.bin"),
     Buffer.from([0, 1, 2, 3]),
   );
   write(path.join(packageRoot, "scripts", "inspect.js"), script());
@@ -223,7 +223,7 @@ test("explicit package preflight uses native import conditions and returns fixed
     ),
   );
   assert.equal(
-    descriptor.materials.docs.files.some((file) =>
+    descriptor.materials.skills.entries[0].directory.files.some((file) =>
       file.relativePath.includes(".secret"),
     ),
     false,
@@ -338,11 +338,11 @@ test("protocol, reserved namespace, permission and types declarations fail befor
       "ENOENT",
     ],
     [
-      (manifest) => (manifest.exports["./nexum"].types = "./docs/README.md"),
+      (manifest) => (manifest.exports["./nexum"].types = "./skills/endpoint-audit/references/README.md"),
       "invalid_extension_types",
     ],
-    [(manifest) => (manifest.nexum.docs = "./missing-docs"), "ENOENT"],
-    [(manifest) => (manifest.nexum.docs = "."), "invalid_extension_source"],
+    [(manifest) => (manifest.nexum.docs = "./missing-docs"), "invalid_extension_manifest"],
+    [(manifest) => (manifest.nexum.skills = "."), "invalid_extension_source"],
     [
       (manifest) => (manifest.nexum.instructions = "../outside.md"),
       "invalid_extension_source",
@@ -393,7 +393,7 @@ test("declared materials and Skill resources cannot borrow files from another so
   const f = await fixture(t);
   const skill = path.join(f.packageRoot, "skills", "endpoint-audit");
   symlinkSync(
-    path.join(f.packageRoot, "docs"),
+    path.join(f.packageRoot, "instructions"),
     path.join(skill, "borrowed-docs"),
     "junction",
   );
@@ -401,7 +401,7 @@ test("declared materials and Skill resources cannot borrow files from another so
     code: "extension_path_escape",
   });
   rmSync(path.join(skill, "borrowed-docs"), { recursive: true });
-  const docs = path.join(f.packageRoot, "docs"),
+  const docs = path.join(f.packageRoot, "skills", "endpoint-audit", "references"),
     external = path.join(f.root, "external-docs");
   mkdirSync(external);
   write(path.join(external, "README.md"), "outside material");
@@ -424,7 +424,7 @@ test("canonical aliases cannot turn nested dependency files into owned docs or t
     path.join(foreign, "types", "index.d.ts"),
     "export interface Foreign {}\n",
   );
-  const docs = path.join(f.packageRoot, "docs");
+  const docs = path.join(f.packageRoot, "skills", "endpoint-audit", "references");
   renameSync(docs, docs + "-original");
   symlinkSync(path.join(foreign, "docs"), docs, "junction");
   await assert.rejects(inspectExtensionPackage(f.options), {
@@ -463,7 +463,7 @@ test("a native resolved runtime entry must not be an alias for a nested dependen
 
 test("public material collisions and invalid UTF-8 are explicit rather than silently pruned", async (t) => {
   const f = await fixture(t);
-  const docs = path.join(f.packageRoot, "docs");
+  const docs = path.join(f.packageRoot, "skills", "endpoint-audit", "references");
   write(path.join(docs, "README.md"), Buffer.from([0xff, 0xfe]));
   await assert.rejects(inspectExtensionPackage(f.options), {
     code: "extension_material_encoding",
@@ -505,7 +505,7 @@ test("same-version helper and declared resource changes produce new stable revis
     code: "extension_package_changed",
   });
   write(
-    path.join(f.packageRoot, "docs", "picture.bin"),
+    path.join(f.packageRoot, "skills", "endpoint-audit", "references", "picture.bin"),
     Buffer.from([9, 8, 7, 6]),
   );
   const third = await inspectExtensionPackage(f.options);
@@ -528,12 +528,12 @@ test("same-version helper and declared resource changes produce new stable revis
 test("verification rejects removed or replaced source and current approval changes without evaluation", async (t) => {
   const f = await fixture(t);
   const descriptor = await inspectExtensionPackage(f.options);
-  rmSync(path.join(f.packageRoot, "docs", "README.md"));
+  rmSync(path.join(f.packageRoot, "skills", "endpoint-audit", "references", "README.md"));
   await assert.rejects(verifyExtensionPackage(descriptor, f.options), {
     code: "extension_package_changed",
   });
   write(
-    path.join(f.packageRoot, "docs", "README.md"),
+    path.join(f.packageRoot, "skills", "endpoint-audit", "references", "README.md"),
     "# Replacement source\n",
   );
   const replacement = await inspectExtensionPackage(f.options);
@@ -568,7 +568,7 @@ test("file, byte and directory budgets stop bounded preparation before evaluatin
   const inspected = await inspectExtensionPackage(f.options);
   assert.ok(inspected.totalBytes >= 32 * 1024 * 1024);
   assert.equal(
-    inspected.materials.docs.files.some((file) => file.path === target),
+    inspected.materials.skills.entries[0].directory.files.some((file) => file.path === target),
     false,
   );
   const controller = new AbortController();

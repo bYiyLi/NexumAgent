@@ -1013,7 +1013,7 @@ test("a projection failure preserves only the actual public Run identity for lat
   );
   assert.deepEqual(reply.error, {
     code: "run_context_too_large",
-    message: "The Agent operation failed.",
+    message: "Run context exceeded its allowed size. Inspect the original runId and status instead of starting duplicate work.",
     details: { runId, status: "running" },
   });
   assert(!JSON.stringify(reply).includes("synthetic-secret"));
@@ -1130,11 +1130,72 @@ test("only project resolution denials expose canonical directory evidence for ap
     );
     assert.deepEqual(reply.error, {
       code: entry.error.code,
-      message: "The Agent operation failed.",
+      message: entry.error.code === "project_not_allowed"
+        ? "The requested project directory is outside the current Agent authorization. Use a Cloud-provided approval flow only when offered."
+        : "The requested path is denied by the Agent's current path policy. Do not bypass it with a different path.",
       ...(entry.expected ? { details: entry.expected } : {}),
     });
     assert(!JSON.stringify(reply).includes("do-not-publish"));
     assert(!JSON.stringify(reply).includes("forged"));
   }
+  c.close();
+});
+
+
+test("schema field diagnostics survive the Agent transport without private rejected values", async (t) => {
+  const f = await fixture(t);
+  const c = await f.connect({
+    invoke: async () => {
+      throw new AgentError("invalid_arguments", "private native error secret-value", {
+        errors: [
+          { path: "$.timeoutMs", keyword: "type", expected: "integer" },
+          { path: "$.secretToken", keyword: "type", expected: "string" },
+          { path: "$.safe", keyword: "type", expected: "private raw token" },
+        ],
+        privateValue: "secret-value",
+      });
+    },
+  });
+  const { peer, binding } = await f.peer();
+  peer.send(canonicalJson({
+    type: "invoke", id: "safe_schema_failure", operation: "agent.run.get",
+    context: context(binding),
+    input: { agentId: "agent", runId: "run_" + "a".repeat(32) },
+  }));
+  const response = await f.waitMessage(
+    (message) => message.type === "error" && message.id === "safe_schema_failure",
+  );
+  assert.equal(response.error.code, "invalid_arguments");
+  assert.deepEqual(response.error.details, {
+    errors: [{ path: "$.timeoutMs", keyword: "type", expected: "integer" }],
+  });
+  assert.match(response.error.message, /timeoutMs.*integer/);
+  assert(!JSON.stringify(response.error).includes("secret-value"));
+  assert(!JSON.stringify(response.error).includes("secretToken"));
+  c.close();
+});
+
+
+test("untrusted Agent exception is redacted while the failed operation remains identifiable", async (t) => {
+  const f = await fixture(t);
+  const c = await f.connect({
+    invoke: async () => {
+      throw new Error("private password do-not-publish");
+    },
+  });
+  const { peer, binding } = await f.peer();
+  peer.send(canonicalJson({
+    type: "invoke", id: "raw_agent_failure", operation: "agent.run.get",
+    context: context(binding),
+    input: { agentId: "agent", runId: "run_" + "b".repeat(32) },
+  }));
+  const response = await f.waitMessage(
+    (message) => message.type === "error" && message.id === "raw_agent_failure",
+  );
+  assert.equal(response.error.code, "agent_error");
+  assert.match(response.error.message, /agent\.run\.get/);
+  assert.match(response.error.message, /inspect/i);
+  assert(!JSON.stringify(response.error).includes("do-not-publish"));
+  assert.equal(response.error.details, undefined);
   c.close();
 });

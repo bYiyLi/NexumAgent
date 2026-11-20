@@ -22,7 +22,6 @@
     "dist",
     "browser-extension",
     "instructions",
-    "docs",
     "scripts",
     "skills",
     "README.md",
@@ -49,12 +48,11 @@
       "url"
     ],
     "instructions": "./instructions/README.md",
-    "docs": "./docs",
     "scripts": "./scripts",
     "skills": "./skills"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node browser-extension/build.mjs",
+    "build": "node tools/generate-skill-api-reference.mjs && tsc -p tsconfig.json && node browser-extension/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --experimental-vm-modules --test --test-concurrency=1 test/*.test.mjs",
     "check": "pnpm typecheck && pnpm build && pnpm test"

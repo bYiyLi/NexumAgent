@@ -10,7 +10,7 @@
     "members": 148,
     "extraMembers": 102
   },
-  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前250项仍未逐项完成该矩阵，局部原生通过不将其标为通过。nativeCases 只关联仓库中按 coverage 标明范围的用例定义，不代表该成员的权限、失效、取消或支持平台矩阵已全部验收；实际执行版本与结果由开发记录维护。",
+  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前247项仍未逐项完成该矩阵，局部原生通过不将其标为通过。nativeCases 只关联仓库中按 coverage 标明范围的用例定义，不代表该成员的权限、失效、取消或支持平台矩阵已全部验收；实际执行版本与结果由开发记录维护。",
   "registeredNativeRoutes": [
     "tabs.list",
     "tabs.get",
@@ -152,13 +152,6 @@
       "nativeCases": ["native-independent-profiles"]
     },
     {
-      "id": "B002",
-      "target": "client.documentation",
-      "clientSurface": "declared",
-      "nativeAcceptance": "not_run",
-      "nativeCases": ["native-peer-metadata"]
-    },
-    {
       "id": "B003",
       "target": "client.browsers.get",
       "clientSurface": "declared",
@@ -210,13 +203,6 @@
     {
       "id": "B010",
       "target": "selectedBrowser.user",
-      "clientSurface": "declared",
-      "nativeAcceptance": "not_run",
-      "nativeCases": ["native-peer-metadata"]
-    },
-    {
-      "id": "B011",
-      "target": "selectedBrowser.documentation",
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
       "nativeCases": ["native-peer-metadata"]
@@ -1171,13 +1157,6 @@
       "clientSurface": "declared",
       "nativeAcceptance": "not_run",
       "nativeCases": ["native-dialog-values"]
-    },
-    {
-      "id": "B145",
-      "target": "client.documentation.get",
-      "clientSurface": "declared",
-      "nativeAcceptance": "not_run",
-      "nativeCases": ["native-peer-metadata"]
     },
     {
       "id": "B146",

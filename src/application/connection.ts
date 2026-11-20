@@ -136,13 +136,43 @@ function header(response: IncomingMessage, name: string): string {
   );
   return value;
 }
+function remoteFailureMessage(code: string, operation: WireOperationV2): string {
+  // A stable code and authenticated operation name are safe to report.
+  // Native exceptions, plugin messages and user input are not.
+  switch (code) {
+    case "agent_error":
+      return "Agent " + operation + " failed without a verified result. Inspect the original Context or Run and Agent diagnostics before replaying any side effects.";
+    case "invalid_arguments":
+      return "Agent " + operation + " rejected its arguments. Check the registered input schema and the safe field errors when present.";
+    case "run_context_too_large":
+      return "Run context exceeded its allowed size. Inspect the original runId and status instead of starting duplicate work.";
+    case "project_not_allowed":
+      return "The requested project directory is outside the current Agent authorization. Use a Cloud-provided approval flow only when offered.";
+    case "path_not_allowed":
+      return "The requested path is denied by the Agent's current path policy. Do not bypass it with a different path.";
+    case "permission_denied":
+      return "The current Agent authorization does not permit this operation. Check the original Grant and scope.";
+    case "context_not_found":
+    case "context_unavailable":
+    case "context_closed":
+      return "The original work Context is unavailable. Check its current status and reopen authorized work if it has closed.";
+    case "operation_not_supported":
+      return "Agent " + operation + " is not available in the current method registry. Read the available methods and their schemas.";
+    default:
+      return "Agent " + operation + " returned " + code + " without public diagnostic details. Check the original work state and logs before retrying.";
+  }
+}
+
 function remoteError(
   error: unknown,
   operation: WireOperationV2,
 ): {
   code: string;
   message: string;
-  details?: { runId: string; status: string } | { canonicalPath: string };
+  details?:
+    | { runId: string; status: string }
+    | { canonicalPath: string }
+    | { errors: { path: string; keyword: string; expected: string }[] };
 } {
   const safe = safeErrorData(error, {
     code: "agent_error",
@@ -152,7 +182,10 @@ function remoteError(
   const result: {
     code: string;
     message: string;
-    details?: { runId: string; status: string } | { canonicalPath: string };
+    details?:
+    | { runId: string; status: string }
+    | { canonicalPath: string }
+    | { errors: { path: string; keyword: string; expected: string }[] };
   } = {
     code:
       typeof safe.code === "string" && /^[a-z0-9_]{1,128}$/.test(safe.code)
@@ -160,6 +193,7 @@ function remoteError(
         : "agent_error",
     message: "The Agent operation failed.",
   };
+  result.message = remoteFailureMessage(result.code, operation);
   // Only operation-specific, bounded recovery evidence crosses the socket.
   // The Cloud must never generate a directory approval from raw Host input.
   const details = safe.details;
@@ -175,6 +209,31 @@ function remoteError(
     path.normalize(details.canonicalPath) === details.canonicalPath
   ) {
     result.details = { canonicalPath: details.canonicalPath };
+  } else if (
+    result.code === "invalid_arguments" &&
+    isPlainRecord(details) &&
+    Array.isArray(details.errors)
+  ) {
+    const errors: { path: string; keyword: string; expected: string }[] = [];
+    for (const issue of details.errors.slice(0, 8)) {
+      if (!isPlainRecord(issue)) continue;
+      const { path: field, keyword, expected } = issue;
+      if (
+        typeof field !== "string" || field.length > 256 ||
+        !/^\$(?:\.[A-Za-z][A-Za-z0-9_]{0,47}|\[[0-9]{1,6}\])*$/.test(field) ||
+        /(token|secret|password|credential|bearer)/i.test(field) ||
+        typeof keyword !== "string" || !/^[A-Za-z]{1,32}$/.test(keyword) ||
+        typeof expected !== "string" || expected.length > 120 ||
+        !( /^(integer|string|number|boolean|object|array|null|provide this field|remove this undeclared field|match the declared schema|match the declared field type|satisfy the declared bound|provide exactly one allowed combination|provide an allowed combination|omit the forbidden combination|use a value declared in inputSchema)$/.test(expected) || /^(minimum|maximum|exclusiveMinimum|exclusiveMaximum|minLength|maxLength|minItems|maxItems) -?[0-9]{1,15}$/.test(expected) )
+      ) continue;
+      errors.push({ path: field, keyword, expected });
+    }
+    const first = errors[0];
+    if (first) {
+      result.details = { errors };
+      result.message = "Invalid arguments: " + first.path +
+        " violates " + first.keyword + "; expected " + first.expected + ".";
+    }
   } else if (
     result.code === "run_context_too_large" &&
     isPlainRecord(details) &&

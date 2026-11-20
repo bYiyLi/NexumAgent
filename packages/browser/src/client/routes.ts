@@ -316,8 +316,6 @@ route("browsers.list");
 route("browsers.get", { id }, ["id"]);
 route("browsers.getDefault");
 route("browsers.getForUrl", { url: string }, ["url"]);
-route("documentation.get", { name: string }, ["name"]);
-browser("browsers.documentation");
 browser("browsers.nameSession", { name: string }, ["name"]);
 browser("browsers.history", {
   options: optionalObject({

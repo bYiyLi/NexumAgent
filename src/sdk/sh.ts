@@ -41,6 +41,19 @@ return result;
 ~~~
 
 运行前在 agent.run.start.input 提供已确认的 command 和可选 args；CLI 路径不明确时先查 sh.which。需要跨 Run 保留进程时明确使用 sh.start({ command, args, background: true })，之后按实际 processId 调用 sh.get({ processId }) / sh.stop({ processId })。观察超时不是进程退出；停止请求返回后仍以真实关闭状态为准。
+
+## 调用参数与结果
+
+- exec(options)、start(options) 各接受一个对象或 shellCommand 字符串。对象选择 command: string + args?: string[]，或 shellCommand: string + shell?: string，不能混用；可选 cwd、env: Record<string,string|null>、tty、cols、rows、input: string | Uint8Array、timeoutMs。cols/rows 只用于 tty，timeoutMs 是 1–2147483647 毫秒；input 上限 1 MiB。
+- start 可用 background: true 交接后台；exec 可用 check: true 在非零退出/信号退出时报 process_exit_failed。background 不用于 exec，check 不用于 start。
+- get({processId, cursor?, maxBytes?, encoding?, waitMs?}) 返回同一进程快照和输出页 {output,nextCursor,hasMoreOutput,truncated,outputComplete}；encoding 为 null 时保留字节。
+- list({status?,state?,runId?,contextId?,limit?,cursor?}?) 返回 {items: 进程快照[], nextCursor}。
+- write({processId,data?: string | Uint8Array,eof?: boolean}) 返回 {processId,accepted,bytes,eof}，至少提供 data 或 eof:true。
+- resize({processId,cols,rows}) 返回 {processId,accepted,cols,rows}；只支持 PTY。
+- signal({processId,signal}) 返回投递回执；stop({processId,graceMs?,forceMs?}) 返回 accepted、confirmed 和真实 facts，不能把 accepted 当退出。
+- which(command: string | {command: string,cwd?: string}) 返回实际可执行文件解析结果，不启动命令。
+
+进程快照含 processId/status/state/lifetime、originRunId/contextId/origin、createdAt/closedAt/handedOffAt、controlAvailable、pid/exitCode/signal/outputComplete/details。exec 等待实际退出和输出收尾，start 返回启动快照。精确读取/控制参数范围见各方法 Schema；exec/start 的注册 Schema 只声明对象，额外参数由真实启动归一化器校验，不能从该宽 Schema 猜字段。invalid_process_arguments、invalid_process_input、invalid_output_encoding 表示输入不合法；process_exit_failed、process_timeout 或 I/O 失败时保留 processId，回读原进程及输出，不盲目重启同一业务。
 `;
 
 const kind = "sh.process";

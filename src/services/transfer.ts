@@ -84,7 +84,8 @@ export interface TransferChannelBinding {
   readonly resourceId: string;
   readonly caller: Caller;
   readonly direction: "upload" | "download";
-  readonly claimDeadlineAt: number;
+  /** Optional immutable artifact expiry; Cloud caps its own Offer deadline. */
+  readonly resourceExpiresAt?: string;
   readonly maxBytes: number;
   readonly target: TransferTarget;
 }
@@ -110,7 +111,6 @@ export interface TransferReservation {
 export interface TransferServicesOptions {
   readonly origin: ContributionOrigin;
   readonly maxBytes?: number;
-  readonly claimTimeoutMs?: number;
   readonly activeTimeoutMs?: number;
   readonly reservationTimeoutMs?: number;
   readonly streams?: TransferStreamSlots;
@@ -244,7 +244,6 @@ export class TransferServices extends EventEmitter {
   #entries = new Map<string, Entry>();
   #reservations = new WeakMap<TransferReservation, Reservation>();
   #maxBytes: number;
-  #claimMs: number;
   #activeMs: number;
   #reservationMs: number;
   #now: () => number;
@@ -283,12 +282,10 @@ export class TransferServices extends EventEmitter {
       "Transfers, artifacts and offers must share the actual Agent/profile.",
     );
     this.#maxBytes = options.maxBytes ?? 256 * 1024 ** 2;
-    this.#claimMs = options.claimTimeoutMs ?? 10 * 60_000;
     this.#activeMs = options.activeTimeoutMs ?? 30 * 60_000;
     this.#reservationMs = options.reservationTimeoutMs ?? 5000;
     for (const [value, maximum] of [
       [this.#maxBytes, 20 * 1024 ** 3],
-      [this.#claimMs, 600_000],
       [this.#activeMs, 1_800_000],
       [this.#reservationMs, 30_000],
     ])
@@ -783,15 +780,12 @@ export class TransferServices extends EventEmitter {
       };
     }
     check();
-    const claimDeadlineAt = Math.min(
-      this.#now() + this.#claimMs,
-      entry.artifact ? Date.parse(entry.artifact.expiresAt) : Infinity,
-    );
-    requireCondition(
-      claimDeadlineAt > this.#now(),
-      "resource_expired",
-      "The fixed artifact expired before channel preparation.",
-    );
+    if (entry.artifact)
+      requireCondition(
+        Date.parse(entry.artifact.expiresAt) > this.#now(),
+        "resource_expired",
+        "The fixed artifact expired before channel preparation.",
+      );
     const channel: TransferChannelBinding = Object.freeze({
       binding: Object.freeze({
         ...this.store.binding,
@@ -801,7 +795,7 @@ export class TransferServices extends EventEmitter {
       resourceId: entry.ref.id,
       caller: entry.authority.caller,
       direction: entry.record.direction,
-      claimDeadlineAt,
+      ...(entry.artifact ? { resourceExpiresAt: entry.artifact.expiresAt } : {}),
       maxBytes: this.#maxBytes,
       target: Object.freeze(target),
     });
@@ -810,10 +804,13 @@ export class TransferServices extends EventEmitter {
     entry.channel = channel;
     entry.request = await this.channels.prepare(channel, signal);
     check();
+    const claimDeadlineAt = Date.parse(entry.request.expiresAt);
     requireCondition(
       entry.request.method ===
         (entry.record.direction === "upload" ? "PUT" : "GET") &&
-        Date.parse(entry.request.expiresAt) === claimDeadlineAt,
+        Number.isSafeInteger(claimDeadlineAt) &&
+        claimDeadlineAt > this.#now() &&
+        (!entry.artifact || claimDeadlineAt <= Date.parse(entry.artifact.expiresAt)),
       "invalid_transfer_channel",
       "The actual channel must use the fixed direction and claim deadline.",
     );
@@ -1174,8 +1171,7 @@ export class TransferServices extends EventEmitter {
         entry.record.status === "pending" &&
         !entry.stop &&
         !entry.fault &&
-        entry.channel &&
-        entry.channel.claimDeadlineAt > this.#now(),
+        entry.channel,
       "transfer_delivery_unavailable",
       "The current owner/Grant has no live unconsumed transfer channel.",
     );

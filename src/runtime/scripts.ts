@@ -149,7 +149,7 @@ export function scriptHeader(code: string): ScriptMetadata | null {
 export class ScriptCatalog {
   readonly work: string;
   readonly local: string;
-  readonly docs: string;
+  readonly skills: string;
   readonly owner: string;
   // Supplied by the trusted contribution registry, never by script input/header.
   #sources: () => readonly ScriptSource[];
@@ -162,7 +162,7 @@ export class ScriptCatalog {
     this.work = realpathSync.native(work);
     this.owner = `local:${agentId}`;
     this.local = privateDirectory(this.work, "scripts");
-    this.docs = privateDirectory(this.work, "docs");
+    this.skills = privateDirectory(this.work, "skills");
     this.#sources = sources;
   }
 
@@ -356,7 +356,7 @@ export class ScriptCatalog {
       } catch (error) {
         throw new AgentError(
           "script_index_failed",
-          "The script exists but the manual could not be refreshed.",
+          "The script exists but its index could not be refreshed.",
           { scriptName: metadata.scriptName, saved },
           { cause: error },
         );
@@ -496,8 +496,8 @@ export class ScriptCatalog {
 
   refreshIndex(discovery?: ScriptDiscovery): void {
     // Re-check the generated directory; it is writable by the same OS user.
-    privateDirectory(this.work, "docs");
-    atomicText(path.join(this.docs, "scripts.md"), this.indexText(discovery));
+    privateDirectory(this.work, "scripts");
+    atomicText(path.join(this.local, "index.md"), this.indexText(discovery));
   }
 
   select(

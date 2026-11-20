@@ -28,8 +28,8 @@
       "path"
     ],
     "properties": {
-      "projectId": {},
-      "path": {}
+      "projectId": {"type": "string"},
+      "path": {"type": "string"}
     }
   }
 }

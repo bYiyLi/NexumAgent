@@ -73,7 +73,7 @@ async function fixture(t) {
       apiVersion: 1,
       namespace: "fixtureSDK",
       permissions: ["read"],
-      docs: "./docs",
+
     },
   };
   write(path.join(work, "package.json"), {

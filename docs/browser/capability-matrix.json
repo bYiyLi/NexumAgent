@@ -20,9 +20,9 @@
       "id": "B002",
       "sourceInterface": "Agent",
       "sourceMember": "documentation",
-      "target": "client.documentation",
-      "declarations": ["documentation: Documentation;"],
-      "contract": "sdk.md",
+      "target": "已撤销独立文档方法；读取 browser-control Skill 引用",
+      "declarations": [],
+      "contract": "../../packages/browser/skills/browser-control/SKILL.md",
       "acceptance": "acceptance.md"
     },
     {
@@ -101,9 +101,9 @@
       "id": "B011",
       "sourceInterface": "Browser",
       "sourceMember": "documentation",
-      "target": "selectedBrowser.documentation",
-      "declarations": ["documentation(): Promise<string>;"],
-      "contract": "sdk.md",
+      "target": "已撤销独立文档方法；读取 browser-control Skill 引用",
+      "declarations": [],
+      "contract": "../../packages/browser/skills/browser-control/SKILL.md",
       "acceptance": "acceptance.md"
     },
     {
@@ -1450,9 +1450,9 @@
       "id": "B145",
       "sourceInterface": "Documentation",
       "sourceMember": "get",
-      "target": "client.documentation.get",
-      "declarations": ["get(name: string): Promise<string>;"],
-      "contract": "sdk.md",
+      "target": "已撤销独立文档方法；读取 browser-control Skill 引用",
+      "declarations": [],
+      "contract": "../../packages/browser/skills/browser-control/SKILL.md",
       "acceptance": "acceptance.md"
     },
     {

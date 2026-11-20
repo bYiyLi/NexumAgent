@@ -565,3 +565,30 @@ test("protocol rejection diagnostics retain close identity without recording the
     /fixture-private-credential/,
   );
 });
+
+
+test("Browser failed action without a public message explains how to inspect the unknown effect", async (t) => {
+  const f = await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f);
+  const ready = await peer.ready();
+  snapshot(peer, ready);
+  await until(() => f.service.get(ready.browserId).tabsReady);
+  const pending = action(f.service, ready, { budgetMs: 5000 });
+  const request = await peer.next("action");
+  ready.send({
+    type: "action_result",
+    actionId: request.actionId,
+    operationId: request.operationId,
+    ok: false,
+    code: "UNKNOWN_RESULT",
+    dispatched: true,
+    effect: "unknown",
+  });
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, "UNKNOWN_RESULT");
+    assert.match(error.message, /operationId.*dispatched.*effect/);
+    assert(!error.message.includes("The browser operation failed."));
+    return true;
+  });
+});

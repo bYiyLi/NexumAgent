@@ -190,21 +190,19 @@ test("run title is optional, bounded and retained across start, get and list", a
   await assert.rejects(f.start({ title: "x".repeat(121), script: "return 1;" }));
 });
 
-test("get confirms only the caller-scoped accepted request and never accepts, replays or revives a closed work", async (t) => {
-  const f = await fixture(t),
-    requestId = newRequestId();
+test("get confirms only the caller-scoped accepted run and never accepts, replays or revives a closed work", async (t) => {
+  const f = await fixture(t);
   const done = await f.execute({
     script: 'console.log("historical");return context.input;',
     input: { value: 7 },
-    requestId,
   });
   f.store.closeWork(f.initial.contextId, callerKey(caller));
   const before = f.store.listRuns({}, "inspection").runs.length;
-  const byRequest = await f.engine.get(caller, { agentId: "a", requestId });
-  assert.equal(byRequest.run.runId, done.run.runId);
-  assert.deepEqual(byRequest.result.data, { value: 7 });
-  assert.equal(byRequest.snapshots.code.status, "available");
-  assert.equal(Object.hasOwn(byRequest.snapshots.code, "value"), false);
+  const byRun = await f.engine.get(caller, { agentId: "a", runId: done.run.runId });
+  assert.equal(byRun.run.runId, done.run.runId);
+  assert.deepEqual(byRun.result.data, { value: 7 });
+  assert.equal(byRun.snapshots.code.status, "available");
+  assert.equal(Object.hasOwn(byRun.snapshots.code, "value"), false);
   const source = await f.engine.get(caller, {
     agentId: "a",
     runId: done.run.runId,
@@ -212,23 +210,9 @@ test("get confirms only the caller-scoped accepted request and never accepts, re
   });
   assert.equal(source.part.text, 'console.log("historical");return context.input;');
   assert.equal(Object.hasOwn(source.snapshots.code, "value"), false);
-  assert.deepEqual(byRequest.snapshots.input.value.input, { value: 7 });
-  assert.match(byRequest.snapshots.logs.value, /historical/);
+  assert.deepEqual(byRun.snapshots.input.value.input, { value: 7 });
+  assert.match(byRun.snapshots.logs.value, /historical/);
   assert.equal(f.store.listRuns({}, "inspection").runs.length, before);
-  await assert.rejects(f.engine.get(otherHost, { agentId: "a", requestId }), {
-    code: "submission_unknown",
-  });
-  await assert.rejects(
-    f.engine.get(caller, { agentId: "a", requestId: newRequestId() }),
-    { code: "submission_unknown" },
-  );
-  await assert.rejects(
-    f.engine.get(caller, {
-      agentId: "a",
-      requestId: newRequestId(Date.now() - 86400001),
-    }),
-    { code: "submission_expired" },
-  );
   const second = await f.execute(
     { script: "return 2;" },
     otherHost,
@@ -635,38 +619,6 @@ test("get observations preserve waits and deadlines, and list rechecks status af
     clock.mock.restore();
   }
   await f.finish(short.run.runId);
-});
-
-test("retained run lookup missing behind a request identity remains submission_unknown rather than proof of nonexecution", async (t) => {
-  const f = await fixture(t),
-    requestId = newRequestId();
-  const result = await f.execute({ script: "return 1;", requestId });
-  // The storage contract deliberately preserves a submission identity after its
-  // run can no longer be returned. Use a real database fault fixture, not a fake Store.
-  f.runIds.clear();
-  f.store.close();
-  const db = new DatabaseSync(path.join(f.root, "state", "runtime.sqlite"));
-  db.exec("PRAGMA foreign_keys=OFF");
-  db.prepare("DELETE FROM runs WHERE run_id=?").run(result.run.runId);
-  db.close();
-  const reopened = new SqliteStore(f.root, {
-    agentId: "a",
-    profile: "development",
-    cloudEnvironment: "test",
-  });
-  try {
-    const reader = new RunEngine(reopened, f.engine.loader, f.scripts, {
-      authorize: () => {},
-      loadWork: () => ({}),
-      bindings: () => ({}),
-      encodeResult: async () => ({}),
-    });
-    await assert.rejects(reader.get(caller, { agentId: "a", requestId }), {
-      code: "submission_unknown",
-    });
-  } finally {
-    reopened.close();
-  }
 });
 
 test("all nine retained statuses remain visible and default or maximum page limits are enforced", async (t) => {

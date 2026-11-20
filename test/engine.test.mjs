@@ -406,36 +406,6 @@ test("enrollment precedes input validation; syntax/preparation failures never co
   assert.ok(bad.run.inputRef);
 });
 
-test("dedup does not reload changed code or execute twice, including after work closes", async (t) => {
-  let calls = 0;
-  const { start, store, work, engine } = await fixture(t, {
-    bindings: () => ({ mark: () => calls++ }),
-  });
-  const requestId = newRequestId();
-  const first = await observeTerminal(engine,
-    await start({ script: "mark();return 1;", requestId }));
-  assert.equal(first.run.status, "succeeded");
-  assert.equal(calls, 1);
-  store.closeWork(work.contextId, callerKey(caller));
-  const repeated = await engine.start(caller, {
-    contextId: work.contextId,
-    script: "mark();return 1;",
-    requestId,
-    waitMs: 0,
-  });
-  assert.equal(repeated.run.runId, first.run.runId);
-  assert.equal(calls, 1);
-  await assert.rejects(
-    () =>
-      engine.start(caller, {
-        contextId: work.contextId,
-        script: "mark();return 2;",
-        requestId,
-      }),
-    { code: "submission_conflict" },
-  );
-});
-
 test("input resumes the same stack once; invalid input remains correctable and duplicates keep the consumed receipt", async (t) => {
   let before = 0,
     after = 0;

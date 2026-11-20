@@ -12,6 +12,16 @@ return await transfer.createDownload({ path: file, name: "report.pdf" });
 ~~~
 
 接收外部上传用 transfer.createUpload({ path: targetPath })，已知大小时另传 expectedSize；用 transfer.get(transferId, { waitMs: 10000 }) 或 transfer.list() 查实际传输状态，传输未完成不等于文件已送达。transferId 必须来自真实结果；Offer 的 URL 不是本机文件路径。
+
+## 调用签名与结果
+
+- createUpload(options: {path: string, expectedSize?: number, expectedSha256?: string, mimeType?: string})；也可传 path 字符串。返回 pending 的上传 Offer。
+- createDownload(options: {path: string, name?: string, mimeType?: string} | {uri: string, name?: string, mimeType?: string})；path/uri 二选一，也可传 path 字符串。返回 pending 的下载 Offer。
+- get(transferId: string, options?: {waitMs?: number}) 返回 TransferSnapshot。
+- list(options?: {direction?, status?, runId?, limit?, cursor?}) 返回 {transfers: TransferSnapshot[], nextCursor: string | null}。
+- cancel(transferId: string) 返回 {accepted: boolean, transfer: TransferSnapshot}；accepted 不代表已经关闭。
+
+TransferSnapshot 包含 transferId、direction、status、runId/contextId/projectId、progress {bytesTransferred,totalBytes}、createdAt/expiresAt/startedAt/deadlineAt/finishedAt、error，以及实际存在的 path/resource/file。Offer 另有一次性传输信息；查询不重签 URL。参数枚举、hash、大小及等待上限以选中方法 Schema 为准。transfer_unavailable 表示该服务未配置；其他权限、期限、完整性或 I/O 错误保留原 code/message 与 transferId，先查询原通道再判断恢复。
 `;
 
 const boundedText = { type: "string", minLength: 1, maxLength: 4096 };

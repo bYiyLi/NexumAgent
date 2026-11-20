@@ -1,8 +1,10 @@
 # 公开接口与数据类型
 
-此页由本包公开 TypeScript 声明生成，用于查询调用合同；调用是否已注册及实际验证范围见包内 `implementation.json`。未注册的方法明确失败，类型存在不代表当前插件已经支持。
+此引用由本包的 `src/client/types.ts` 自动生成；仅当需要精确签名时按 [类型索引](api-index.md) 和 [成员索引](api-members.md) 找到对应行号，再读取本文件所需范围。
 
-入口为 `import { createBrowserClient } from "@nexum-hub/browser"`。`createBrowserClient(browser)` 接收当前运行注入的方法容器，返回 `BrowserClient`。所有 I/O 都经过当前受管调用，客户端对象不传入 MCP 结果。
+类型存在不代表当前 Agent 已注册对应方法。实际可调用方法和输入 Schema 仍以本次 `agent.open` / SDK 注册能力为准。
+
+入口：`import { createBrowserClient } from "@nexum-hub/browser"`；`createBrowserClient(browser)` 使用当前 Run 注入的 `browser` 方法容器。不要把控制对象当成 MCP 结果输出。
 
 ```typescript
 /** Public browser SDK data and facade contracts. Runtime control objects never cross managed calls. */
@@ -276,6 +278,8 @@ export type LocatorClickOptions = {
   position?: { x: number; y: number };
   modifiers?: Array<KeyboardModifier>;
   timeoutMs?: number;
+  /** Optional observable completion condition. Never replay input on timeout. */
+  expect?: WaitCondition;
 };
 
 export type LocatorDownloadMediaOptions = {
@@ -472,6 +476,14 @@ export type WaitCondition = (
 export interface WaitResult {
   matched: true;
   snapshot: PageSnapshot;
+}
+/** One bounded AI-oriented observation; AX text keeps its existing full/diff semantics. */
+export interface PageObservation {
+  tabId: string;
+  title?: string;
+  url?: string;
+  accessibility: string;
+  mode: "full" | "diff";
 }
 export interface NavigationOptions {
   waitUntil?: WaitUntil;
@@ -1014,7 +1026,6 @@ export interface VisibleDomTree {
 
 export interface BrowserClient {
   browsers: Browsers;
-  documentation: Documentation;
 }
 
 export interface Browsers {
@@ -1032,7 +1043,6 @@ export interface Browser {
   };
   tabs: Tabs;
   user: BrowserUser;
-  documentation(): Promise<string>;
   history(options?: BrowserHistoryOptions): Promise<Array<BrowserHistoryEntry>>;
   nameSession(name: string): Promise<void>;
 }
@@ -1077,6 +1087,7 @@ export interface Tab {
     reason?: "authentication" | "captcha" | "user_requested" | "other",
   ): Promise<void>;
   screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;
+  observe(options?: { timeoutMs?: number; full?: boolean }): Promise<PageObservation>;
   title(): Promise<undefined | string>;
   url(): Promise<undefined | string>;
 }
@@ -1219,8 +1230,10 @@ export interface PlaywrightLocator {
   allTextContents(options?: { timeoutMs?: number }): Promise<Array<string>>;
   and(locator: PlaywrightLocator): PlaywrightLocator;
   check(options?: LocatorCheckOptions): Promise<void>;
+  click(options: LocatorClickOptions & { expect: WaitCondition }): Promise<WaitResult>;
   click(options?: LocatorClickOptions): Promise<void>;
   count(): Promise<number>;
+  dblclick(options: LocatorClickOptions & { expect: WaitCondition }): Promise<WaitResult>;
   dblclick(options?: LocatorClickOptions): Promise<void>;
   downloadMedia(
     options?: LocatorDownloadMediaOptions,
@@ -1330,9 +1343,6 @@ export interface ConfirmDialog {
   dismiss(): Promise<void>;
 }
 
-export interface Documentation {
-  get(name: string): Promise<string>;
-}
 
 export interface PromptDialog {
   type: "prompt";

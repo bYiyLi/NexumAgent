@@ -741,11 +741,11 @@ test("symbolic artifact directories are not traversed or removed, and current do
     id = "res_" + "c".repeat(32);
   const outside = f.file("project/keep.txt", "keep");
   symlinkSync(path.dirname(outside), path.join(f.artifacts.directory, id));
-  const docs = f.file("work/docs/extensions/current/manual.md", "current docs");
+  const docs = f.file("work/skills/.generated/extensions/current/SKILL.md", "current Skill");
   const result = await f.retention.sweep();
   assert.equal(result.errors[0].code, "storage_path_escape");
   assert.equal(readFileSync(outside, "utf8"), "keep");
-  assert.equal(readFileSync(docs, "utf8"), "current docs");
+  assert.equal(readFileSync(docs, "utf8"), "current Skill");
 });
 
 test("missing artifact metadata can be removed only without a pin; malformed metadata is reported without guessing an expiry", async (t) => {

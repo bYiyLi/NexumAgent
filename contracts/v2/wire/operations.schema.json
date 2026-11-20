@@ -83,7 +83,105 @@
           "maxLength": 8192
         },
         "agent": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "software": {
+              "type": "object"
+            },
+            "system": {
+              "type": "object"
+            },
+            "runtime": {
+              "type": "object"
+            },
+            "instructions": {
+              "type": "array"
+            },
+            "skills": {
+              "type": "array"
+            },
+            "skillsComplete": {
+              "type": "boolean"
+            },
+            "materialsIndex": {
+              "type": "string"
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "paths": {
+              "type": "object",
+              "properties": {
+                "work": {
+                  "type": "string"
+                },
+                "skills": {
+                  "type": "string"
+                },
+                "scripts": {
+                  "type": "string"
+                },
+                "resources": {
+                  "type": "string"
+                }
+              },
+              "required": ["work", "skills", "scripts", "resources"],
+              "additionalProperties": false
+            },
+            "modules": {
+              "type": "object",
+              "properties": {
+                "builtinFamilies": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "approvedPackages": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["builtinFamilies", "approvedPackages"],
+              "additionalProperties": false
+            },
+            "scripts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "complete": {
+                  "type": "boolean"
+                },
+                "index": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["total", "items", "complete", "index"],
+              "additionalProperties": false
+            },
+            "management": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
         },
         "project": {
           "anyOf": [
@@ -271,13 +369,19 @@
         "read": {
           "type": "object",
           "properties": {
-            "kind": { "enum": ["code", "input", "logs"] },
+            "kind": {
+              "enum": ["code", "input", "logs"]
+            },
             "offset": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
             },
-            "maxBytes": { "type": "integer", "minimum": 4, "maximum": 16384 }
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 16384
+            }
           },
           "required": ["kind", "offset", "maxBytes"],
           "additionalProperties": false
@@ -428,8 +532,14 @@
         "stats": {
           "type": "object",
           "properties": {
-            "total": { "type": "integer", "minimum": 0 },
-            "active": { "type": "integer", "minimum": 0 }
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "active": {
+              "type": "integer",
+              "minimum": 0
+            }
           },
           "required": ["total", "active"],
           "additionalProperties": false
@@ -779,7 +889,7 @@
         "direction": {
           "enum": ["upload", "download"]
         },
-        "claimDeadlineAt": {
+        "resourceExpiresAt": {
           "type": "string",
           "format": "date-time",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?Z$"
@@ -800,7 +910,6 @@
         "contextId",
         "projectId",
         "direction",
-        "claimDeadlineAt",
         "maxBytes",
         "target"
       ],

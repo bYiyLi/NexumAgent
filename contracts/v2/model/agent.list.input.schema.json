@@ -36,8 +36,8 @@
           "agentId"
         ],
         "properties": {
-          "cursor": {},
-          "agentId": {}
+          "cursor": {"type": "string"},
+          "agentId": {"type": "string"}
         }
       }
     },
@@ -48,8 +48,8 @@
           "projectsCursor"
         ],
         "properties": {
-          "cursor": {},
-          "projectsCursor": {}
+          "cursor": {"type": "string"},
+          "projectsCursor": {"type": "string"}
         }
       }
     }

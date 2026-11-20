@@ -33,10 +33,13 @@ const callMethods = new Set([
 const sdkRoots = new Set([
   "output", "state", "transfer", "maintenance", "hostRequests",
 ]);
-const isolatedHandlers = new WeakSet<Function>();
+const isolatedHandlers = new WeakMap<Function, boolean>();
 /** Only Core-created remote methods can select the worker normalization path. */
 export const isIsolatedHandler = (value: Function): boolean =>
   isolatedHandlers.has(value);
+/** Calling convention reported by the actual Worker method descriptor. */
+export const isolatedHandlerNormalizes = (value: Function): boolean | undefined =>
+  isolatedHandlers.get(value);
 
 interface RemoteMethod {
   readonly name: string;
@@ -568,7 +571,7 @@ export function isolatedExtensionFactory(
             call.signal.removeEventListener("abort", onAbort);
           }
         };
-        isolatedHandlers.add(handle);
+        isolatedHandlers.set(handle, method.normalizes === true);
         table[method.name] = {
           description: method.description,
           permissions: method.permissions,

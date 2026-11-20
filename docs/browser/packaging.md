@@ -17,7 +17,6 @@
     "dist",
     "browser-extension",
     "instructions",
-    "docs",
     "scripts",
     "skills",
     "README.md",
@@ -38,7 +37,6 @@
     "namespace": "browser",
     "permissions": ["connection", "path", "resource", "url"],
     "instructions": "./instructions/README.md",
-    "docs": "./docs",
     "scripts": "./scripts",
     "skills": "./skills"
   }
@@ -47,15 +45,14 @@
 
 permissions 表达需要连接、路径和资源能力；具体平台注册键及方法子集须以公共协议包正式导出固化，不以自创字符串授予权限。无 postinstall 自动启用/监听/浏览器安装/系统服务注册。内部使用公开 @nexum-hub/sdk 类型；运行依赖仅为本包真实需要的 Node 库，不拉入 Avru/QuickJS/FRPC/Host 私有运行时。
 
-## 五类贡献
+## 四类贡献
 
 - SDK：完整方法表及类型；普通入口只构造公开客户端，扩展入口负责受管实现。
 - instructions：使用时机、先观察后操作再验证、目标/引用、默认全自动与用户停止、未知副作用不重放、结果实际交付、浏览器原生限制。
-- docs：完整 SDK/类型、连接/安装、生命周期、文件/媒体、故障、权限、兼容矩阵和复杂示例；本包手册由 Nexum 生成阅读副本。
 - scripts：真实 .js 元数据/Schema 的可复用流程，如浏览器发现、页面观察、截图与文件交付、页面操作验证；不自动执行。
 - Skills：按任务选择浏览器控制、页面验收、资料提取和下载/附件流程；先元数据，再正文及相对资源。
 
-五类内容的 owner/namespace/版本/修订统一；启停换版整体准备/发布，不混合新手册与旧方法。资料源留包内，生成导航/副本沿通用机制，不覆盖 Agent 根 README、其他扩展或全局资料目录。用户指令及模型权限不由网页内容覆盖。
+四类内容的 owner/namespace/版本/修订统一；启停换版整体准备/发布，不混合新 Skill 与旧方法。资料源留包内，Skill 阅读副本沿通用机制，不覆盖 Agent 根 README、其他扩展或全局资料目录。用户指令及模型权限不由网页内容覆盖。
 
 ## 浏览器插件交付
 

@@ -53,7 +53,6 @@ return view;
 ```typescript
 interface BrowserClient {
   browsers: Browsers;
-  documentation: Documentation;
 }
 declare function createBrowserClient(
   methods: Readonly<Record<string, unknown>>,
@@ -88,7 +87,6 @@ interface Browser {
   };
   tabs: Tabs;
   user: BrowserUser;
-  documentation(): Promise<string>;
   history(options?: BrowserHistoryOptions): Promise<Array<BrowserHistoryEntry>>;
   nameSession(name: string): Promise<void>;
 }
@@ -491,15 +489,9 @@ interface ConfirmDialog {
 }
 ```
 
-## Documentation
+## 技能资料
 
-本包本地手册读取；不调用额外 MCP 工具，不包含原始归档或其他来源秘密。
-
-```typescript
-interface Documentation {
-  get(name: string): Promise<string>;
-}
-```
+浏览器操作按 browser-control Skill 及其 references 读取；不再提供独立文档读取方法。运行时方法与 Schema 由注册结果生成的 Skill 提供。
 
 ## PromptDialog
 

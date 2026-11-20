@@ -20,7 +20,6 @@ import { ResourceManager } from "../dist/extensions/resources.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { RunEngine } from "../dist/runtime/engine.js";
-import { DocumentCatalog } from "../dist/work/catalog.js";
 import { WorkService } from "../dist/work/service.js";
 import { SqliteStore } from "../dist/storage/sqlite.js";
 import { AgentError } from "../dist/contracts/errors.js";
@@ -85,7 +84,7 @@ async function fixture(t, options = {}) {
         apiVersion: 1,
         namespace,
         permissions: ["read"],
-        docs: "./manual",
+
         instructions: "./rules.md",
         scripts: "./flows",
         skills: "./skills",
@@ -217,18 +216,13 @@ export default async function createExtension(host){
   const scripts = new ScriptCatalog(work, "agent", () =>
     materials.scriptSources(),
   );
-  const catalog = new DocumentCatalog(work, scripts, policy);
-  const refresh = catalog.refresh.bind(catalog);
-  let catalogPause;
-  const catalogPauses = [];
-  catalog.refresh = async (...args) => {
-    const pause = catalogPause;
-    catalogPause = undefined;
-    if (pause) {
-      pause.entered.resolve();
-      await pause.release.promise;
-    }
-    return refresh(...args);
+  let snapshotPause;
+  const snapshotPauses = [];
+  const reserve = async () => {
+    const pause = snapshotPause;
+    snapshotPause = undefined;
+    if (pause) { pause.entered.resolve(); await pause.release.promise; }
+    return { release() {} };
   };
   const authorizeCaller = (who) => {
     if (
@@ -237,7 +231,8 @@ export default async function createExtension(host){
     )
       throw new AgentError("forbidden", "Wrong caller.");
   };
-  const workService = new WorkService(store, scripts, catalog, {
+  const workService = new WorkService(store, scripts, policy, {
+    reserve,
     home: null,
     agent: {
       name: "Fixture Agent",
@@ -289,7 +284,7 @@ export default async function createExtension(host){
   };
   t.after(async () => {
     allowed = true;
-    for (const pause of catalogPauses) pause.release.resolve();
+    for (const pause of snapshotPauses) pause.release.resolve();
     for (const control of Object.values(controls)) {
       control.cleanup = true;
       control.factoryGate?.resolve();
@@ -326,7 +321,6 @@ export default async function createExtension(host){
     materials,
     services,
     scripts,
-    catalog,
     workService,
     engine,
     open,
@@ -334,13 +328,13 @@ export default async function createExtension(host){
     execute,
     enable: (...args) => track(services.enable(...args)),
     disable: (...args) => track(services.disable(...args)),
-    pauseCatalog() {
+    pauseSnapshot() {
       const value = {
         entered: Promise.withResolvers(),
         release: Promise.withResolvers(),
       };
-      catalogPause = value;
-      catalogPauses.push(value);
+      snapshotPause = value;
+      snapshotPauses.push(value);
       return value;
     },
     revoke() {
@@ -370,7 +364,7 @@ function snapshot(view, pkg, present) {
     present,
   );
   assert.equal(
-    view.agent.docs.content.includes(`[${pkg.namespace}](<`),
+    view.agent.skills.some((item) => item.name.startsWith(pkg.namespace.toLowerCase() + "-sdk-")),
     present,
   );
 }
@@ -381,11 +375,11 @@ async function visible(f, pkg, present) {
   assert.equal(result.result.data, present ? "object" : "undefined");
 }
 
-test("all five contributions publish together, equivalent concurrent enables share one action, and an in-flight open keeps its old generation", async (t) => {
+test("all registered contributions publish together, equivalent concurrent enables share one action, and an in-flight open keeps its old generation", async (t) => {
   const f = await fixture(t),
     pkg = f.packages.alpha,
     control = pkg.control;
-  const pause = f.pauseCatalog(),
+  const pause = f.pauseSnapshot(),
     oldOpen = f.open();
   await entered(pause.entered, oldOpen);
   control.factoryGate = Promise.withResolvers();
@@ -410,7 +404,8 @@ test("all five contributions publish together, equivalent concurrent enables sha
   const report = await f.execute(`return ${pkg.namespace}.echo({value:7});`);
   assert.equal(report.run.status, "succeeded");
   assert.equal(report.result.data.value, 7);
-  assert.match(readFileSync(enabled.docs, "utf8"), /方法与脚本/);
+  assert.ok(enabled.skills.some((id) => id.startsWith(pkg.namespace + "/")));
+  assert.equal(Object.hasOwn(enabled, "docs"), false);
   assert.equal(control.factories, 1);
 });
 
@@ -457,7 +452,7 @@ test("real material preparation failure publishes no fragments and explicit clea
     good = f.packages.beta,
     bad = f.packages.alpha;
   await f.enable(good.name);
-  write(path.join(bad.directory, "manual/guide.md"), "x".repeat(70000));
+  write(path.join(bad.directory, "skills/audit/references/guide.md"), "x".repeat(70000));
   bad.control.disposeFailure = true;
   await assert.rejects(f.enable(bad.name), (error) => {
     assert.equal(error.code, "extension_publication_failed");
@@ -518,7 +513,7 @@ test("a real named-script lease and a handed-off business resource independently
   assert.equal((await f.disable(pkg.name)).status, "disabled");
 });
 
-test("accepted disable withdraws all five before disposal while old open and reading snapshots remain whole", async (t) => {
+test("accepted disable withdraws all registered before disposal while old open and reading snapshots remain whole", async (t) => {
   const f = await fixture(t),
     pkg = f.packages.alpha,
     control = pkg.control;
@@ -527,8 +522,8 @@ test("accepted disable withdraws all five before disposal while old open and rea
     skill = old.agent.skills.find(
       (item) => item.skillId === `${pkg.namespace}/audit`,
     );
-  const oldDoc = readFileSync(enabled.docs, "utf8");
-  const pause = f.pauseCatalog(),
+  const oldSkill = readFileSync(skill.skillFile, "utf8");
+  const pause = f.pauseSnapshot(),
     opening = f.open();
   await entered(pause.entered, opening);
   control.disposeGate = Promise.withResolvers();
@@ -547,7 +542,7 @@ test("accepted disable withdraws all five before disposal while old open and rea
   pause.release.resolve();
   snapshot(await opening, pkg, true);
   await visible(f, pkg, false);
-  assert.equal(readFileSync(enabled.docs, "utf8"), oldDoc);
+  assert.equal(readFileSync(skill.skillFile, "utf8"), oldSkill);
   assert.equal(
     (
       await f.workService.readMaterial(
@@ -588,7 +583,7 @@ test("same-revision reenable creates a fresh instance and restores all contribut
   const second = await f.enable(pkg.name, { endpoint: "approved" });
   assert.notEqual(second.extensionId, first.extensionId);
   assert.equal(second.origin.revision, first.origin.revision);
-  assert.equal(second.docs, first.docs);
+  assert.deepEqual(second.skills, first.skills);
   assert.equal(pkg.control.evaluations, 1);
   assert.equal(pkg.control.factories, 2);
   assert.equal(pkg.control.disposals, 1);
@@ -607,7 +602,7 @@ test("source changes and enable or approval revocation after real material prepa
       const pending = f.enable(pkg.name);
       const prepared = await entered(control.materialsEntered, pending);
       assert.equal(
-        readFileSync(prepared.entry, "utf8").includes(pkg.namespace),
+        prepared.materials.skills.some((skill) => skill.skillId.startsWith(pkg.namespace + "/")),
         true,
       );
       if (scenario === "source")

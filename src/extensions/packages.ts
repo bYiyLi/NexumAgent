@@ -64,7 +64,6 @@ export interface ExtensionPackageDescriptor {
   source: ExtensionSource;
   materials: {
     instructions?: ExtensionPackageFile;
-    docs: ExtensionPackageDirectory;
     scripts?: {
       directory: string;
       entries: readonly ExtensionPackageScript[];
@@ -303,10 +302,9 @@ export async function inspectExtensionPackage(
   requireCondition(
     record(metadata) &&
       metadata.apiVersion === 1 &&
-      typeof metadata.namespace === "string" &&
-      typeof metadata.docs === "string",
+      typeof metadata.namespace === "string",
     "invalid_extension_manifest",
-    "An extension needs protocol version 1, a namespace and an authored docs directory.",
+    "An extension needs protocol version 1 and a namespace.",
   );
   requireCondition(
     Object.keys(metadata).every((field) =>
@@ -315,7 +313,6 @@ export async function inspectExtensionPackage(
         "namespace",
         "permissions",
         "instructions",
-        "docs",
         "scripts",
         "skills",
       ].includes(field),
@@ -371,7 +368,6 @@ export async function inspectExtensionPackage(
     "extension_path_escape",
     "The Node-resolved extension entry must be a runtime file inside the approved package.",
   );
-  const docs = await packagePath(metadata.docs, "directory");
   const instruction =
     metadata.instructions === undefined
       ? undefined
@@ -572,18 +568,6 @@ export async function inspectExtensionPackage(
         .map(publicFile),
     };
   }
-  const docCollection = collection(docs);
-  requireCondition(
-    docCollection.files.some((item) => /\.md$/i.test(item.relativePath)),
-    "extension_docs_missing",
-    "The declared docs directory needs actual authored Markdown content.",
-  );
-  for (const item of docCollection.files)
-    if (/\.md$/i.test(item.relativePath))
-      await readText(
-        file(path.join(root, item.relativePath)),
-        textLimits.document,
-      );
   const instructionFile = instruction
     ? file(instruction.lexical, instruction.path)
     : undefined;
@@ -635,6 +619,9 @@ export async function inspectExtensionPackage(
         "A Skill must retain its declared directory identity.",
       );
       const source = collection({ lexical, path: actual });
+      for (const resource of source.files)
+        if (/\.md$/i.test(resource.relativePath))
+          await readText(file(path.join(root, resource.relativePath)), textLimits.document);
       const skillFile = file(path.join(lexical, "SKILL.md"));
       requireCondition(
         contains(actual, skillFile.path),
@@ -734,7 +721,6 @@ export async function inspectExtensionPackage(
       permissions,
     },
     materials: {
-      docs: docCollection,
       ...(instructionFile ? { instructions: publicFile(instructionFile) } : {}),
       ...(scriptCollection ? { scripts: scriptCollection } : {}),
       ...(skillCollection ? { skills: skillCollection } : {}),

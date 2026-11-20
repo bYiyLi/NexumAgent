@@ -792,8 +792,6 @@ function makeBrowser(router: Router, value: t.BrowserInfo): t.Browser {
     bookmarks: organization.bookmarks,
     visibility,
     viewport,
-    documentation: () =>
-      router.call<string>("browsers.documentation", { target }),
     history: (options?: t.BrowserHistoryOptions) =>
       router.call<t.BrowserHistoryEntry[]>("browsers.history", {
         target,
@@ -1357,9 +1355,6 @@ export function createBrowserClient(
           router,
           await router.call<t.BrowserInfo>("browsers.getForUrl", { url }),
         ),
-    },
-    documentation: {
-      get: (name: string) => router.call<string>("documentation.get", { name }),
     },
   });
 }

@@ -750,7 +750,7 @@ export class BrowserService extends EventEmitter {
               identifier(message.code) ? message.code : "UNKNOWN_RESULT",
               typeof message.message === "string"
                 ? message.message.slice(0, 1024)
-                : "The browser operation failed.",
+                : "The browser extension reported a failed operation without a public reason. Inspect operationId, dispatched and effect before retrying; unknown effects must be observed first.",
               {
                 dispatched: message.dispatched !== false,
                 effect:

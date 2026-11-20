@@ -99,7 +99,6 @@ export async function nativeFixture(t, options = {}) {
     "dist",
     "browser-extension",
     "instructions",
-    "docs",
     "scripts",
     "skills",
     "package.json",

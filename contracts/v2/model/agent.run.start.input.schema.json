@@ -28,9 +28,6 @@
     "attachments": {
       "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/attachments"
     },
-    "requestId": {
-      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/requestId"
-    },
     "pwd": {
       "type": "string",
       "minLength": 1,
@@ -55,7 +52,9 @@
         "script"
       ],
       "properties": {
-        "script": {}
+        "script": {
+          "type": "string"
+        }
       }
     },
     {
@@ -63,7 +62,9 @@
         "scriptName"
       ],
       "properties": {
-        "scriptName": {}
+        "scriptName": {
+          "type": "string"
+        }
       }
     },
     {
@@ -71,7 +72,9 @@
         "replayRunId"
       ],
       "properties": {
-        "replayRunId": {}
+        "replayRunId": {
+          "type": "string"
+        }
       }
     }
   ]

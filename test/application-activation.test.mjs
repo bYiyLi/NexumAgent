@@ -93,6 +93,20 @@ async function fixture(t) {
   return { sources, resources, registry, scope };
 }
 
+test("valid long configuration names generate a standard Skill identity even when truncation ends at a separator", async (t) => {
+  const f = await fixture(t), name = "A".repeat(31) + "_B";
+  const original = input("long", () => ({ methods: { ping: method() } }));
+  const prepared = await f.sources.prepare({
+    ...original, name,
+    api: { ...original.api, bindingPath: ["api", name], catalog: () => ({ ...original.api.catalog(), name }) },
+  }, f.scope());
+  prepared.publish();
+  const skill = f.sources.published().skills[0];
+  assert.match(skill.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  assert.ok(skill.name.length <= 64);
+  assert.doesNotMatch(skill.name, /--/);
+});
+
 test("an adapter removal retains the actual stopping handle until an explicit retry confirms disposal", async (t) => {
   const f = await fixture(t),
     release = Promise.withResolvers();
@@ -116,7 +130,7 @@ test("an adapter removal retains the actual stopping handle until an explicit re
   await assert.rejects(f.sources.remove(target, f.scope()), {
     code: "configuration_cleanup_unconfirmed",
   });
-  assert.equal(f.sources.published().docs.length, 0);
+  assert.equal(f.sources.published().skills.length, 0);
   await assert.rejects(f.sources.remove(target, f.scope()), {
     code: "configuration_cleanup_unconfirmed",
   });
@@ -176,13 +190,13 @@ test("after a retired predecessor cannot be republished, a later approved retry 
   assert.equal(closed, 1);
   controller.abort();
   await candidate.dispose();
-  assert.equal(f.sources.published().docs.length, 0);
+  assert.equal(f.sources.published().skills.length, 0);
   const retry = await f.sources.prepare(
     input("new", () => ({ methods: { ping: method() } })),
     f.scope(),
   );
   retry.publish();
-  assert.equal(f.sources.published().docs.length, 1);
-  assert.match(f.sources.published().docs[0].name, /api.fixture/);
+  assert.equal(f.sources.published().skills.length, 1);
+  assert.match(f.sources.published().skills[0].name, /api-fixture/);
   assert.equal(closed, 1);
 });

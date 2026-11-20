@@ -15,7 +15,6 @@ import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { SqliteStore } from "../dist/storage/sqlite.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { DocumentCatalog } from "../dist/work/catalog.js";
 import { WorkService } from "../dist/work/service.js";
 import { selectorKey } from "../dist/work/discovery.js";
 
@@ -51,14 +50,14 @@ function fixture(t) {
     cloudEnvironment: "test",
   });
   const scripts = new ScriptCatalog(work, "agent"),
-    catalog = new DocumentCatalog(work, scripts, {
+    policy = {
       builtins: () => [],
       approvedPackages: () => new Map(),
-    });
+    };
   let disabled = [],
     allowed = true,
     hook = () => {};
-  const service = new WorkService(store, scripts, catalog, {
+  const service = new WorkService(store, scripts, policy, {
     home,
     agent: { name: "fixture", version: "1", protocolVersion: "2" },
     authorize(caller, target) {

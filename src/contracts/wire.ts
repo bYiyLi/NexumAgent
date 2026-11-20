@@ -656,7 +656,7 @@ export interface WireTransferPrepareInputV2 {
   readonly contextId: string;
   readonly projectId: string | null;
   readonly direction: "upload" | "download";
-  readonly claimDeadlineAt: string;
+  readonly resourceExpiresAt?: string;
   readonly maxBytes: number;
   readonly target: WireTransferTargetV2;
 }

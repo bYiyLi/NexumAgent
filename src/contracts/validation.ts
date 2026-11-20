@@ -140,18 +140,75 @@ export function compileInputSchema(schema: unknown): (value: unknown) => void {
   };
 }
 
+const safeFieldName = (name: unknown): string | null =>
+  typeof name === "string" &&
+  /^[A-Za-z][A-Za-z0-9_]{0,47}$/.test(name) &&
+  !/(token|secret|password|credential|bearer)/i.test(name)
+    ? name
+    : null;
+
+function safeInstancePath(input: string): string {
+  if (!input) return "$";
+  if (input.length > 256 || !input.startsWith("/")) return "$";
+  const parts = input.slice(1).split("/");
+  if (parts.length > 12) return "$";
+  let path = "$";
+  for (const part of parts) {
+    const decoded = part.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (safeFieldName(decoded)) path += "." + decoded;
+    else if (/^(0|[1-9][0-9]{0,5})$/.test(decoded)) path += "[" + decoded + "]";
+    else return "$";
+  }
+  return path;
+}
+
 function assertValid(validate: ValidateFunction, value: unknown): void {
-  if (!validate(value))
-    throw new AgentError(
-      "invalid_arguments",
-      "The arguments do not match the declared schema.",
-      {
-        errors: (validate.errors ?? []).slice(0, 10).map((error) => ({
-          path: error.instancePath,
-          keyword: error.keyword,
-        })),
-      },
-    );
+  if (validate(value)) return;
+  const errors = (validate.errors ?? []).slice(0, 8).map((error) => {
+    let path = safeInstancePath(error.instancePath);
+    const keyword = error.keyword;
+    const p = error.params;
+    let expected = "match the declared schema";
+    if (keyword === "required" || keyword === "additionalProperties") {
+      const field = safeFieldName(
+        keyword === "required" ? p.missingProperty : p.additionalProperty,
+      );
+      if (field) path += "." + field;
+      expected = keyword === "required"
+        ? "provide this field"
+        : "remove this undeclared field";
+    } else if (keyword === "type") {
+      expected = typeof p.type === "string" &&
+        /^(string|number|integer|boolean|object|array|null)$/.test(p.type)
+        ? p.type
+        : "match the declared field type";
+    } else if (
+      ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+       "minLength", "maxLength", "minItems", "maxItems"].includes(keyword)
+    ) {
+      expected = typeof p.limit === "number" && Number.isFinite(p.limit)
+        ? keyword + " " + p.limit
+        : "satisfy the declared bound";
+    } else if (keyword === "oneOf") {
+      expected = "provide exactly one allowed combination";
+    } else if (keyword === "anyOf") {
+      expected = "provide an allowed combination";
+    } else if (keyword === "not") {
+      expected = "omit the forbidden combination";
+    } else if (keyword === "enum") {
+      expected = "use a value declared in inputSchema";
+    }
+    return { path, keyword, expected };
+  });
+  const first = errors[0];
+  throw new AgentError(
+    "invalid_arguments",
+    first
+      ? "Invalid arguments: " + first.path + " violates " + first.keyword +
+        "; expected " + first.expected + "."
+      : "The arguments do not match the declared schema.",
+    { errors },
+  );
 }
 
 export type SchemaDialect = "draft7" | "2020-12";

@@ -1303,7 +1303,7 @@ export class RunEngine extends EventEmitter {
         compileInputSchema(snapshot.metadata.scriptInputSchema)(businessInput);
       const paths = {
         work: this.scripts.work,
-        docs: this.scripts.docs,
+        skills: this.scripts.skills,
         scripts: this.scripts.local,
         resources: path.join(this.scripts.work, "resources"),
         temp: directory,

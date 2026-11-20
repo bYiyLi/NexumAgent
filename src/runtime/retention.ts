@@ -71,7 +71,6 @@ const managedRoots = [
   "logs",
   "work/tmp",
   "work/resources",
-  "work/docs",
   "work/data",
   "work/scripts",
   "work/skills",

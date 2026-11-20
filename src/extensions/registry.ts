@@ -33,7 +33,7 @@ import {
 } from "../maintenance/requests.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
-import { isIsolatedHandler } from "./worker-bridge.js";
+import { isIsolatedHandler, isolatedHandlerNormalizes } from "./worker-bridge.js";
 import {
   createOutput,
   outputIntent,
@@ -875,7 +875,7 @@ export class ExtensionRegistry {
         profile: this.resources.store.binding.profile,
         paths: {
           work: path.join(root, "work"),
-          docs: path.join(root, "work", "docs"),
+          skills: path.join(root, "work", "skills"),
           resources: path.join(root, "work", "resources"),
           logs: path.join(root, "logs"),
         },
@@ -1017,6 +1017,7 @@ export class ExtensionRegistry {
           name,
           path: [...target],
           description: def.description,
+          normalizes: isolatedHandlerNormalizes(def.handle) ?? typeof def.normalize === "function",
           permissions: [...def.permissions],
           inputSchema: def.inputSchema,
           ...(def.schemas ? { schemas: def.schemas } : {}),

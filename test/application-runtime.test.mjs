@@ -5,6 +5,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   existsSync,
@@ -211,7 +212,7 @@ async function fixture(t, options = {}) {
               method: input.direction === "upload" ? "PUT" : "GET",
               url: serverUrl + "/public/" + input.transferId,
               headers: { "Content-Type": "application/octet-stream" },
-              expiresAt: input.claimDeadlineAt,
+              expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
             },
           };
         else if (operation === "transfer.revoke")
@@ -517,7 +518,7 @@ test("a failing npm extension Worker cannot prevent Core access or conceal its a
         },
         nexum: {
           apiVersion: 1, namespace: "brokenbrowser",
-          permissions: [], docs: "./docs",
+          permissions: [],
         },
       });
       write(path.join(pkg, "extension.d.ts"),
@@ -573,7 +574,7 @@ test("a running extension Worker exit withdraws its methods without taking Core 
         },
         nexum: {
           apiVersion: 1, namespace: "workerexit",
-          permissions: [], docs: "./docs",
+          permissions: [],
         },
       });
       write(path.join(pkg, "extension.d.ts"),
@@ -615,47 +616,53 @@ test("a running extension Worker exit withdraws its methods without taking Core 
   );
 });
 
-test("Agent-generated platform documents show actual positional JavaScript calls", async (t) => {
-  const f = await fixture(t);
-  const stateDocs = readFileSync(path.join(f.work, "docs", "platform", "state.md"), "utf8");
-  const runtimeDocs = readFileSync(path.join(f.work, "docs", "platform", "runtime.md"), "utf8");
-  const outputDocs = readFileSync(path.join(f.work, "docs", "platform", "output.md"), "utf8");
-  const shDocs = readFileSync(path.join(f.work, "docs", "platform", "sh.md"), "utf8");
-  const transferDocs = readFileSync(path.join(f.work, "docs", "platform", "transfer.md"), "utf8");
-  const maintenanceDocs = readFileSync(path.join(f.work, "docs", "platform", "maintenance.md"), "utf8");
+test("registered platform Skills expose real calling conventions, method schemas and readable resources", async (t) => {
+  const f = await fixture(t), opened = await f.open();
+  assert.equal(Object.hasOwn(opened.agent, "docs"), false);
+  assert.equal(Object.hasOwn(opened.agent.paths, "docs"), false);
+  const calling = (name) => {
+    const item = opened.agent.skills.find((entry) => entry.name === name);
+    assert.ok(item, `${name} is published`);
+    const body = readFileSync(item.skillFile, "utf8");
+    assert.match(body, /references\/method-1.md/);
+    return readFileSync(path.join(item.path, "references/calling.md"), "utf8");
+  };
+  const stateDocs = calling("shared-state"), runtimeDocs = calling("runtime-control"),
+    outputDocs = calling("output-delivery"), shDocs = calling("managed-processes"),
+    transferDocs = calling("file-transfer"), maintenanceDocs = calling("environment-maintenance");
   assert.match(stateDocs, /state\.agent\.get\(key: string\)/);
   assert.match(stateDocs, /state\.user\.set\(key: string, value: JSON, options:/);
-  assert.match(stateDocs, /expectedVersion: current\?\.version \?\? null/);
   assert.match(runtimeDocs, /runtime\.sleep\(milliseconds\)/);
-  assert.match(runtimeDocs, /inputSchema.*归一化/);
-  assert.match(outputDocs, /output\.image\(/);
-  assert.match(outputDocs, /output\.file\(/);
-  assert.match(shDocs, /sh\.exec\(/);
   assert.match(shDocs, /context\.input\.command/);
-  assert.match(transferDocs, /transfer\.createDownload\(/);
-  assert.match(transferDocs, /transfer\.get\(/);
-  assert.match(maintenanceDocs, /maintenance\.list\(/);
-  assert.match(maintenanceDocs, /maintenance\.packages\.install\(/);
-  assert.match(shDocs, /## 已注册方法/);
-  assert.match(shDocs, /sh\.exec/);
-  assert.match(stateDocs, /state\.agent\.get/);
-  assert.match(outputDocs, /## 具体参数与返回/);
-  for (const document of [stateDocs, runtimeDocs, outputDocs, shDocs, transferDocs, maintenanceDocs]) {
-    const methods = [...document.split("## 具体参数与返回")[1].matchAll(/```json\n([\s\S]*?)\n```/g)]
-      .map(([, source]) => JSON.parse(source));
-    assert.ok(methods.length > 0);
-    for (const method of methods)
-      assert.equal(Object.hasOwn(method, "permissions"), false, "SDK docs must not publish internal registration permissions");
+  for (const entry of opened.agent.skills.filter((entry) => entry.origin.namespace !== "nexum")) {
+    const body = readFileSync(entry.skillFile, "utf8");
+    for (const [, target] of body.matchAll(/\]\((references\/[^)]+)\)/g))
+      assert.ok(readFileSync(path.join(entry.path, target)).length, target);
+    const methodFiles = readdirSync(path.join(entry.path, "references")).filter((name) => /^method-/.test(name));
+    assert.ok(methodFiles.length > 0);
+    for (const name of methodFiles) {
+      const text = readFileSync(path.join(entry.path, "references", name), "utf8");
+      const method = JSON.parse(text.match(/```json\n([\s\S]*?)\n```/)[1]);
+      assert.ok(Object.hasOwn(method, "inputSchema"));
+      assert.ok(Array.isArray(method.path));
+      if (!Object.hasOwn(method, "outputSchema")) assert.match(text, /来源未声明 outputSchema/);
+    }
   }
-  const opened = await f.open();
   const authoring = opened.agent.skills.find((entry) => entry.skillId === "nexum/script-authoring");
-  assert.ok(authoring, "script-authoring is an actually published Agent Skill");
-  assert.equal(authoring.name, "script-authoring");
-  assert.match(authoring.description, /scriptName/);
-  assert.ok(authoring.skillFile.startsWith(f.work + path.sep));
+  assert.ok(authoring);
   assert.match(readFileSync(authoring.skillFile, "utf8"), /仅保存/);
   assert.match(readFileSync(path.join(authoring.path, "references", "authoring.md"), "utf8"), /scriptInputSchema/);
-  assert.match(opened.agent.docs.content, /agent\.scripts\.items/);
+  const readable = await f.run(`
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    return await Promise.all(context.input.map(async (entry) => {
+      const body = await fs.readFile(entry.skillFile, "utf8");
+      const references = await fs.readdir(path.join(entry.path, "references"));
+      const sizes = await Promise.all(references.map(async (name) => (await fs.readFile(path.join(entry.path, "references", name))).length));
+      return {name:entry.name, bodyBytes:body.length, references:sizes.length, allReadable:sizes.every(size=>size>0)};
+    }));`, opened.agent.skills, opened);
+  assert.equal(readable.run.status, "succeeded", JSON.stringify(readable));
+  assert.ok(readable.result.data.every((entry) => entry.bodyBytes > 0 && entry.references > 0 && entry.allReadable));
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   for (const [name, document] of Object.entries({
     state: stateDocs,
@@ -942,7 +949,7 @@ test("an explicitly approved enabled npm SDK contributes capabilities, materials
           apiVersion: 1,
           namespace: "probe",
           permissions: ["read"],
-          docs: "./docs",
+
           instructions: "./rules.md",
         },
       });
@@ -979,6 +986,11 @@ test("an explicitly approved enabled npm SDK contributes capabilities, materials
     ),
     readFileSync(path.join(f.root, "logs", "agent.log"), "utf8"),
   );
+  const sdkSkill = opened.agent.skills.find((entry) => entry.origin.namespace === "probe");
+  assert.ok(sdkSkill);
+  const methodReference = readFileSync(path.join(sdkSkill.path, "references/method-1.md"), "utf8");
+  const method = JSON.parse(methodReference.match(/```json\n([\s\S]*?)\n```/)[1]);
+  assert.equal(method.normalizes, false, "the Skill keeps the actual Worker's one-input convention");
   const result = await f.run("return await probe.sample({});", null, opened);
   assert.equal(result.run.status, "succeeded", JSON.stringify(result));
   assert.equal(result.result.data.model, "fixture");
@@ -1021,7 +1033,7 @@ test("the normal application recognizes browser extension permissions without gr
           apiVersion: 1,
           namespace: "browserprobe",
           permissions: ["connection", "path", "resource", "url"],
-          docs: "./docs",
+
         },
       });
       write(
@@ -1215,7 +1227,7 @@ test("the default configuration backend publishes approved API definitions throu
     1,
   );
   const opened = await f.open();
-  assert.ok(JSON.stringify(opened.agent.docs).includes("api.crm"));
+  assert.ok(opened.agent.skills.some((entry) => entry.name.startsWith("api-crm-")));
   revision = 2;
   const update = await f.maintenance
     .bind(f.scope())
@@ -1276,14 +1288,11 @@ else send(q.id,{});});`,
   const run = await f.run("return await mcp.fixture.tools.version({});");
   assert.equal(run.run.status, "succeeded", JSON.stringify(run));
   assert.equal(run.result.content[0].text, "1");
-  const latestDocs = readFileSync((await f.open()).agent.docs.entry, "utf8");
-  const docUrl = latestDocs.match(/\[mcp\.fixture\]\(<(file:[^>]+)>\)/)?.[1];
-  assert.ok(docUrl, "the approved MCP source publishes a readable manual");
-  const mcpDocs = readFileSync(new URL(docUrl), "utf8");
-  const methodCatalog = JSON.parse(mcpDocs.match(/```json\n([\s\S]*?)\n```/)?.[1] ?? "null");
-  assert.ok(methodCatalog?.methods?.length > 0);
-  for (const method of methodCatalog.methods)
-    assert.equal(Object.hasOwn(method, "permissions"), false, "MCP manuals should omit registration permissions");
+  const mcpSkill = (await f.open()).agent.skills.find((entry) => entry.name.startsWith("mcp-fixture-"));
+  assert.ok(mcpSkill, "the approved MCP source publishes a readable Skill");
+  const methodCatalog = JSON.parse(readFileSync(path.join(mcpSkill.path, "references/catalog.json"), "utf8"));
+  assert.ok(methodCatalog.tools.length > 0);
+  assert.equal(methodCatalog.tools[0].name, "version");
   assert.ok(
     (await f.open()).agent.instructions.some(
       (value) => value.content === "Approved MCP guide 1",
@@ -1418,10 +1427,7 @@ test("the default package policy imports only its verified approved snapshot and
   );
   assert.equal(approved.run.status, "succeeded", JSON.stringify(approved));
   assert.equal(approved.result.data.value, 48);
-  assert.match(
-    readFileSync(path.join(f.work, "docs/packages/README.md"), "utf8"),
-    /approved-runtime-fixture/,
-  );
+  assert.equal((await f.open()).agent.modules.approvedPackages["approved-runtime-fixture"], "1.0.0");
   write(path.join(f.work, "package.json"), manifest + "\n");
   assert.equal(
     (
@@ -2102,7 +2108,7 @@ test("shutdown drains the final bounded native extension log writes and closes s
           apiVersion: 1,
           namespace: "disposeLog",
           permissions: [],
-          docs: "./docs",
+
         },
       });
       write(

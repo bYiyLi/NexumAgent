@@ -18,6 +18,17 @@ return output.file("report.pdf", { name: "report.pdf" });
 ~~~
 
 文件须真实存在且可在当前权限下读取；资源引用不等于模型已读取内容。需要混合内容与结构化数据时使用 output.result，具体形状查下方方法说明。
+
+## 参数与结果合同
+
+- text(value: string, options?)；json(value: unknown) 只接受一个参数。
+- image(source, options?)、audio(source, options?)、resourceLink(source, options?)、file(source, options?)、embeddedResource(source, options?)、resource(source, options?)；images(sources, options?) 接受 source 数组。
+- source 为路径字符串或 {path?, uri?, data?, mimeType?, name?}；data 为实际 ArrayBufferView、ArrayBuffer、SharedArrayBuffer 或 Blob，不把 base64 字符串当原生 bytes。
+- options 为 {name?, description?, mimeType?, annotations?: {audience?: ("user" | "assistant")[], priority?: number, lastModified?: string}}。
+- result({content: 内容块数组, structuredContent?, isError?})；error(message: string, options?: {content?: 内容块数组, structuredContent?})。
+- 以上返回 OutputIntent，由结果层编码成实际内容/资源；error 是业务错误标记，不直接设置 Run 终态。resourceLink/file 固定文件后返回资源引用，embeddedResource/resource 嵌入受限正文。
+
+注册 Schema 只描述归一化的 {value, options?}；真正的媒体类型、大小及内容块由 output 实现验证。保留实际错误 code/message；文件不存在或无权读取时不能改成虚构资源，未知交付状态先查原 Run。
 `;
 
 type ScriptOutputMethod = Exclude<

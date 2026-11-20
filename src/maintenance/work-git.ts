@@ -31,6 +31,7 @@ const roots = [
   "package.json",
   "package-lock.json",
   "scripts",
+  "skills",
   "modules",
   "docs",
 ];
@@ -39,6 +40,7 @@ const ignoreBlock = [
   "# Nexum Agent work snapshots",
   "/mcp.json",
   "/api/",
+  "/skills/.generated/",
   "/api.json",
   "node_modules/",
   "resources/",
@@ -109,6 +111,7 @@ async function exists(filename: string): Promise<boolean> {
 function forbidden(filename: string): boolean {
   const parts = filename.split("/");
   return (
+    (parts[0]!.toLowerCase() === "skills" && parts[1]?.toLowerCase() === ".generated") ||
     ["mcp.json", "api", "api.json"].includes(parts[0]!.toLowerCase()) ||
     parts.some(
       (part) =>
@@ -122,7 +125,7 @@ function selected(filename: string): boolean {
   return (
     !forbidden(filename) &&
     (roots.includes(filename) ||
-      ["scripts/", "modules/", "docs/"].some((prefix) =>
+      ["scripts/", "skills/", "modules/", "docs/"].some((prefix) =>
         filename.startsWith(prefix),
       ))
   );

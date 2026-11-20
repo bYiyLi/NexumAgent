@@ -112,13 +112,17 @@ async function fixture(t, options = {}) {
   const adapter = {
     async prepare(info, signal) {
       channels.set(info.transferId, { info, signal, used: false });
+      assert.equal(Object.hasOwn(info, "claimDeadlineAt"), false);
+      const cloudTime = (options.now?.() ?? Date.now()) - (options.cloudClockBehindMs ?? 0);
+      const fixedExpiry = info.resourceExpiresAt === undefined ? Infinity : Date.parse(info.resourceExpiresAt);
+      const issuedDeadline = Math.min(cloudTime + (options.claimTimeoutMs ?? 30 * 60_000), fixedExpiry);
       if (options.prepareGate) await options.prepareGate.promise;
       signal.throwIfAborted();
       return {
         method: info.direction === "upload" ? "PUT" : "GET",
         url: `http://127.0.0.1:${server.address().port}/${info.transferId}?token=private-channel-token`,
         headers: {},
-        expiresAt: new Date(info.claimDeadlineAt).toISOString(),
+        expiresAt: new Date(issuedDeadline).toISOString(),
       };
     },
     async revoke(info) {
@@ -416,6 +420,23 @@ test("preparing is immediately observable, then pending and background are commi
   assert.equal(JSON.stringify(done).includes("private-channel-token"), false);
   assert.equal(f.streams.active, 0);
   assert.equal(f.store.getResource(row.resourceId).closedAt !== null, true);
+});
+
+test("Agent uses Cloud-issued 30-minute deadline even when Cloud clock differs", async (t) => {
+  const f = await fixture(t, { cloudClockBehindMs: 5000 });
+  const owner = f.run();
+  const started = Date.now();
+  const upload = await owner.api.createUpload({ path: "skew-upload.bin" });
+  assert.equal(upload.status, "pending");
+  // The fixture Cloud is five seconds behind: its response is authoritative.
+  assert.ok(Date.parse(upload.expiresAt) >= started + 30 * 60_000 - 7000);
+  assert.ok(Date.parse(upload.expiresAt) <= started + 30 * 60_000 - 4000);
+  const source = path.join(f.root, "work", "skew-source.txt");
+  writeFileSync(source, "clock skew test");
+  const download = await owner.api.createDownload({ path: source });
+  assert.equal(download.status, "pending");
+  assert.ok(Date.parse(download.expiresAt) >= started + 30 * 60_000 - 7000);
+  assert.ok(Date.parse(download.expiresAt) <= started + 30 * 60_000 - 4000);
 });
 
 test("download sends the fixed ArtifactStore bytes after the original file changes", async (t) => {

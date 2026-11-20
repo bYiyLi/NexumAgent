@@ -2,11 +2,13 @@
 
 ## 给 AI 使用的运行资料
 
-- Cloud 的 `agent.list/open/run.*` 负责目标选择、执行与历史；实际开启 Goal 时另有 `goal.manage`，两者不是 Agent JavaScript SDK。
-- 每次 `agent.open` 都会交付适用 Instructions、Skills 选择元数据、可复用脚本默认/高频列表及 `agent.docs` 目录预览，扩展能力由本次启用状态决定。
-- `src/runtime/scripts.ts` 依据有效 `.js` 头部生成真实 `work/docs/scripts.md`；官方 [script-authoring](../skills/script-authoring/SKILL.md) 负责创建与维护可复用脚本。
-- `src/application/runtime.ts` 从当前平台方法生成 `work/docs/platform/*.md`，每类 SDK 提供方法索引、参数与适用的 JavaScript 用法。
-- 已启用的扩展或经授权接入的 MCP/OpenAPI 各有自己的来源文档；模型不能仅凭某个 npm 包已安装而假设扩展方法可调用。
+- Cloud 的 `agent.list/open/run.*` 负责目标选择、执行与历史；Cloud 开启 Goal 时使用其当前独立 Goal 工具，两者不是 Agent JavaScript SDK。
+- 每次 `agent.open` 都会交付适用 Instructions、Skills 选择元数据、可复用脚本默认/高频列表，不返回独立 Docs，扩展能力由本次启用状态决定。
+- `src/runtime/scripts.ts` 依据有效 `.js` 头部生成独立脚本索引；每次打开另保存本次工作快照的 `scripts.index`；官方 [script-authoring](../skills/script-authoring/SKILL.md) 负责创建与维护可复用脚本。
+- `src/application/runtime.ts` 从实际 Registry 方法生成 `work/skills/.generated/platform/` 下的 Skill，按需引用真实签名、完整 Schema 及输出/错误合同。
+- 已启用的扩展或经授权接入的 MCP/OpenAPI 各自生成有来源/修订的 Skill，人工 Skill 及包内 references/scripts/assets 保留；模型不能仅凭某个 npm 包已安装而假设扩展方法可调用。
+
+Skill 私有 scripts/ 不注册成 agent.scripts，不能按 scriptName 直接执行；可复用脚本发现、输入 Schema 与运行仍由 ScriptCatalog 独立负责。
 
 下游 AI 使用 `agent.open` 返回的实际材料，而不是自动读取本仓库的开发文档。模型可见内容只保留决策条件、实际调用、结果/错误处理及按需阅读入口。
 

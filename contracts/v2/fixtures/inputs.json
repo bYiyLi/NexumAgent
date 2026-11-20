@@ -66,8 +66,7 @@
       "contextId": "ctx",
       "script": "return 1",
       "input": null,
-      "waitMs": 0,
-      "requestId": "req_1794591000000_0123456789abcdef0123456789abcdef"
+      "waitMs": 0
     }
   },
   {
@@ -106,7 +105,7 @@
   },
   {
     "contract": "agent.run.get",
-    "valid": true,
+    "valid": false,
     "value": {
       "agentId": "a",
       "requestId": "req_1794591000000_0123456789abcdef0123456789abcdef"

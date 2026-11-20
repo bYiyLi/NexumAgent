@@ -83,6 +83,9 @@ test("construction is inert and public discovery fixes immutable connection targ
   assert.equal(Object.isFrozen(f.client), true);
   assert.equal(Object.hasOwn(f.client, "invoke"), false);
   const browser = await f.client.browsers.get(info.id);
+  assert.equal(Object.hasOwn(f.client, "documentation"), false);
+  assert.equal(Object.hasOwn(browser, "documentation"), false);
+  assert.equal(browserRoutes.some((route) => route.path === "documentation.get" || route.path === "browsers.documentation"), false);
   const tab = await browser.tabs.new("https://example.test/", {
     active: false,
   });
@@ -577,7 +580,7 @@ test("ordinary Node import and construction never load extension services, call 
   const script = `import assert from "node:assert/strict";import {registerHooks} from "node:module";
 const prefix=${JSON.stringify(new URL("../dist/client/", import.meta.url).href)};
 const hooks=registerHooks({resolve(specifier,context,next){const found=next(specifier,context);assert.ok(found.url==="node:util"||found.url.startsWith(prefix),"Ordinary client import must not load extension/Core services or other runtime dependencies.");return found;}});
-try{const {createBrowserClient}=await import(${JSON.stringify(entry)});const client=createBrowserClient({});assert.equal(Object.isFrozen(client),true);assert.deepEqual(Object.keys(client),["browsers","documentation"]);}finally{hooks.deregister();}`;
+try{const {createBrowserClient}=await import(${JSON.stringify(entry)});const client=createBrowserClient({});assert.equal(Object.isFrozen(client),true);assert.deepEqual(Object.keys(client),["browsers"]);}finally{hooks.deregister();}`;
   const result = spawnSync(
     process.execPath,
     ["--input-type=module", "--eval", script],

@@ -52,6 +52,10 @@ export async function buildExtensions(
     "page-data.js",
     "assets.js",
     "site-source.js",
+    "icon-16.png",
+    "icon-32.png",
+    "icon-48.png",
+    "icon-128.png",
   ];
   for (const [profile, info] of Object.entries(release.profiles)) {
     if (extensionId(info.key) !== info.extensionId || info.profile !== profile)
@@ -80,7 +84,11 @@ export async function buildExtensions(
           key: info.key,
           minimum_chrome_version: "125",
           background: { service_worker: "worker.js", type: "module" },
-          action: { default_title: "Nexum browser" },
+          icons: { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+          action: {
+            default_title: "打开 Nexum 欢迎页",
+            default_icon: { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+          },
           permissions: [
             "debugger",
             "tabs",

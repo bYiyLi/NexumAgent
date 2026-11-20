@@ -9,41 +9,41 @@
     "runId": {
       "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/id"
     },
-    "requestId": {
-      "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/requestId"
-    },
     "waitMs": {
       "$ref": "https://schemas.nexum.local/agent/v2/common.schema.json#/$defs/waitMs"
     },
     "read": {
       "type": "object",
       "properties": {
-        "kind": { "enum": ["code", "input", "logs"] },
+        "kind": {
+          "enum": [
+            "code",
+            "input",
+            "logs"
+          ]
+        },
         "offset": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "maxBytes": { "type": "integer", "minimum": 4, "maximum": 16384 }
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 16384
+        }
       },
-      "required": ["kind", "offset", "maxBytes"],
+      "required": [
+        "kind",
+        "offset",
+        "maxBytes"
+      ],
       "additionalProperties": false
     }
   },
-  "required": ["agentId"],
-  "additionalProperties": false,
-  "oneOf": [
-    {
-      "required": ["runId"],
-      "properties": {
-        "runId": {}
-      }
-    },
-    {
-      "required": ["requestId"],
-      "properties": {
-        "requestId": {}
-      }
-    }
-  ]
+  "required": [
+    "agentId",
+    "runId"
+  ],
+  "additionalProperties": false
 }

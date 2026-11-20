@@ -427,7 +427,6 @@ const changeKinds = new Set([
   "capability",
   "script",
   "instruction",
-  "docs",
   "skill",
   "connection",
   "authentication",

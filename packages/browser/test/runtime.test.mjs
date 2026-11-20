@@ -165,7 +165,6 @@ async function fixture(
     "dist",
     "browser-extension",
     "instructions",
-    "docs",
     "scripts",
     "skills",
     "package.json",
@@ -733,7 +732,7 @@ test("visual degradation reaches extension logs with its actual run and action w
   assert.doesNotMatch(JSON.stringify(entry), /fixture visual failure|https?:/);
 });
 
-test("the installed optional package loads through the public factory, publishes five contributions and cleans a real Core run", async (t) => {
+test("the installed Browser package publishes its own Skill, instructions and scripts and cleans a Core run", async (t) => {
   const f = await fixture(t);
   const result = await f.start(
     select + "return {title:await tab.title(),tabs:tabs.length};",
@@ -754,12 +753,19 @@ test("the installed optional package loads through the public factory, publishes
   );
   assert.ok(runResources.every((value) => value.closedAt !== null));
   assert.equal(f.materials.published().instructions.length, 1);
-  assert.equal(f.materials.published().skills.length, 1);
+  assert.equal(
+    f.materials.published().skills.filter((entry) => entry.skillId === "browser/browser-control").length,
+    1,
+  );
   assert.equal(f.materials.scriptSources().length, 1);
-  assert.ok(f.materials.published().docs.length > 0);
+  assert.equal("docs" in f.materials.published(), false);
   const disabled = await f.services.disable("@nexum-hub/browser");
   assert.equal(disabled.status, "disabled");
   assert.deepEqual(f.materials.scriptSources(), []);
+  assert.equal(
+    f.materials.published().skills.some((entry) => entry.skillId === "browser/browser-control"),
+    false,
+  );
   assert.equal(f.materials.published().instructions.length, 0);
   assert.equal(f.counts.removed, 0);
   assert.equal(f.tabs.length, 2);
@@ -782,7 +788,10 @@ test("normal return waits for actual remote detach and busy disable preserves al
     code: "extension_busy",
   });
   assert.equal(f.services.get("@nexum-hub/browser").status, "enabled");
-  assert.equal(f.materials.published().skills.length, 1);
+  assert.equal(
+    f.materials.published().skills.filter((entry) => entry.skillId === "browser/browser-control").length,
+    1,
+  );
   f.detachGate.resolve();
   while (result.run.endedAt === null) {
     assert.ok(

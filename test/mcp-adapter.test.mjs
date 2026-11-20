@@ -1122,6 +1122,15 @@ test("real stdio SDK tools retain hyphenated names, schema dialects and standard
     peer = stdioFixture(t, f);
   const { adapter, handle } = await f.prepare(peer.config);
   f.registry.publish(handle);
+  for (const source of adapter.catalog().tools) {
+    const method = handle.methods.find((entry) => entry.path[0] === "tools" && entry.path[1] === source.name);
+    assert.ok(method);
+    assert.deepEqual(method.inputSchema, JSON.parse(JSON.stringify(source.inputSchema)));
+    if (source.outputSchema !== undefined) {
+      assert.deepEqual(method.outputSchema, JSON.parse(JSON.stringify(source.outputSchema)));
+      assert.equal(method.outputSchemaDialect, source.outputSchema.$schema?.includes("draft-07") ? "draft7" : "2020-12");
+    } else assert.equal(Object.hasOwn(method, "outputSchema"), false);
+  }
   assert.deepEqual(
     adapter.catalog().tools.map((tool) => tool.name),
     tools.map((tool) => tool.name),

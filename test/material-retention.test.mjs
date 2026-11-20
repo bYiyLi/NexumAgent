@@ -72,10 +72,10 @@ function fixture(t, options = {}) {
     writeFileSync(path.join(directory, "README.md"), content);
     return directory;
   };
-  const catalog = (name = "catalog") =>
-    make(path.join("work", "docs", ".catalog", hash(name)));
-  const extension = (name = "extension") =>
-    make(path.join("work", "docs", "extensions", name, "v1", hash(name)));
+  const skill = (name = "skill") =>
+    make(path.join("work", "skills", ".generated", "platform", "runtime", hash(name)));
+  const extension = (name = "skill") =>
+    make(path.join("work", "skills", ".generated", "extensions", name, "v1", hash(name)));
   const snapshot = (
     name = "snapshot",
     bundle = { view: {}, published: {} },
@@ -100,7 +100,7 @@ function fixture(t, options = {}) {
     root,
     manager,
     live,
-    catalog,
+    skill,
     extension,
     snapshot,
     marker,
@@ -188,10 +188,10 @@ test("material retention stays cold until real lifecycle work is requested", asy
 
 test("owner retention is fixed per material generation across restart; legacy markers keep seven days", async (t) => {
   const f = fixture(t, { retentionMs: 100 }),
-    existing = f.catalog("existing-policy"),
-    legacy = f.catalog("legacy-policy");
+    existing = f.skill("existing-policy"),
+    legacy = f.skill("legacy-policy");
   for (const directory of [existing, legacy]) {
-    const hold = await f.manager.hold("catalog", directory);
+    const hold = await f.manager.hold("skill", directory);
     hold.release();
   }
   const old = f.marker(legacy);
@@ -208,8 +208,8 @@ test("owner retention is fixed per material generation across restart; legacy ma
     retentionMs: 20,
   });
   t.after(() => restarted.stop());
-  const fresh = f.catalog("new-policy"),
-    hold = await restarted.hold("catalog", fresh);
+  const fresh = f.skill("new-policy"),
+    hold = await restarted.hold("skill", fresh);
   hold.release();
   await restarted.sweep();
   assert.equal(f.marker(existing).retentionMs, 100);
@@ -244,28 +244,28 @@ test("each new private marker reserves exactly 4096 bytes before allocation and 
       };
     },
   });
-  directory = f.catalog();
+  directory = f.skill();
   const [first, second] = await Promise.all([
-    f.manager.hold("catalog", directory),
-    f.manager.hold("catalog", directory),
+    f.manager.hold("skill", directory),
+    f.manager.hold("skill", directory),
   ]);
   assert.deepEqual(admissions, [{ bytes: 4096, released: true }]);
   const before = statSync(f.markerFile(directory));
   const initial = f.marker(directory);
-  assert.equal(initial.kind, "catalog");
+  assert.equal(initial.kind, "skill");
   assert.equal(initial.unreferencedSince, null);
   assert.equal(
     initial.ref,
     path.relative(f.root, directory).split(path.sep).join("/"),
   );
-  assert.equal(f.manager.setPublished("catalog", directory), undefined);
+  assert.equal(f.manager.setPublished("skill", directory), undefined);
   first.release();
   second.release();
   f.advance(1);
-  assert.equal(f.manager.setPublished("catalog", null), undefined);
+  assert.equal(f.manager.setPublished("skill", null), undefined);
   await f.manager.sweep();
   assert.equal(f.marker(directory).unreferencedSince, f.now());
-  assert.equal(f.manager.setPublished("catalog", directory), undefined);
+  assert.equal(f.manager.setPublished("skill", directory), undefined);
   const after = statSync(f.markerFile(directory));
   assert.equal(after.ino, before.ino);
   assert.equal(after.size, 4096);
@@ -283,9 +283,9 @@ test("denied marker admission creates no marker and clears its pending protectio
       throw denied;
     },
   });
-  const directory = f.catalog();
+  const directory = f.skill();
   await assert.rejects(
-    f.manager.hold("catalog", directory),
+    f.manager.hold("skill", directory),
     (error) => error === denied,
   );
   assert.equal(existsSync(f.markerFile(directory)), false);
@@ -294,17 +294,16 @@ test("denied marker admission creates no marker and clears its pending protectio
 
 test("retired generations receive seven full days after the last active reference disappears", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  const hold = await f.manager.hold("catalog", directory);
-  f.manager.setPublished("catalog", directory);
+    directory = f.skill();
+  const hold = await f.manager.hold("skill", directory);
+  f.manager.setPublished("skill", directory);
   hold.release();
   const snapshot = f.snapshot("active", {
-    view: { agent: { docs: { entry: path.join(directory, "README.md") } } },
-    published: {},
+    published: { skills: [{ skillFile: path.join(directory, "README.md") }] },
   });
   f.live.add(snapshot.ref);
   f.advance(1);
-  f.manager.setPublished("catalog", null);
+  f.manager.setPublished("skill", null);
   assert.equal(f.marker(directory).unreferencedSince, null);
   f.advance(10 * 86400000);
   f.live.clear();
@@ -319,28 +318,26 @@ test("retired generations receive seven full days after the last active referenc
   assert.equal(existsSync(f.markerFile(directory)), false);
 });
 
-test("real live bundles protect their own snapshot, catalog and all published material reference forms", async (t) => {
+test("real live bundles protect their own snapshot, skill and all published material reference forms", async (t) => {
   const f = fixture(t),
-    catalog = f.catalog();
+    skill = f.skill();
   const docs = f.extension("docs"),
     instructions = f.extension("instructions"),
     skills = f.extension("skills");
   const snapshot = f.snapshot("references", {
-    view: { agent: { docs: { entry: path.join(catalog, "README.md") } } },
     published: {
-      docs: [{ path: path.join(docs, "README.md") }],
+      skills: [{path: path.join(skill, "README.md")}, { path: path.join(docs, "README.md") }, { skillFile: path.join(skills, "SKILL.md") }],
       instructions: [{ path: path.join(instructions, "README.md") }],
-      skills: [{ skillFile: path.join(skills, "SKILL.md") }],
     },
   });
-  const generations = [catalog, docs, instructions, skills, snapshot.directory];
+  const generations = [skill, docs, instructions, skills, snapshot.directory];
   for (const directory of generations) {
     const kind =
-      directory === catalog
-        ? "catalog"
+      directory === skill
+        ? "skill"
         : directory === snapshot.directory
           ? "work"
-          : "extension";
+          : "skill";
     (await f.manager.hold(kind, directory)).release();
   }
   f.live.add(snapshot.ref);
@@ -362,8 +359,8 @@ test("real live bundles protect their own snapshot, catalog and all published ma
 
 test("a hold acquired during the final asynchronous live-reference inspection prevents deletion", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
+    directory = f.skill();
+  await retired(f, "skill", directory);
   const snapshot = f.snapshot("unrelated");
   f.live.add(snapshot.ref);
   const gate = gateSecondBundleRead(t, snapshot.filename);
@@ -371,7 +368,7 @@ test("a hold acquired during the final asynchronous live-reference inspection pr
   let held;
   try {
     await enteredWithin(gate.entered);
-    held = await f.manager.hold("catalog", directory);
+    held = await f.manager.hold("skill", directory);
     gate.resume();
     assert.equal((await sweeping).removed, 0);
     assert.equal(existsSync(directory), true);
@@ -390,14 +387,14 @@ test("a hold acquired during the final asynchronous live-reference inspection pr
 
 test("new holds and publication reject a generation while its deletion is in flight", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
+    directory = f.skill();
+  await retired(f, "skill", directory);
   const gate = gateDirectoryRead(t, directory);
   const sweeping = f.manager.sweep();
   try {
     await enteredWithin(gate.entered);
-    await assert.rejects(f.manager.hold("catalog", directory));
-    assert.throws(() => f.manager.setPublished("catalog", directory));
+    await assert.rejects(f.manager.hold("skill", directory));
+    assert.throws(() => f.manager.setPublished("skill", directory));
     assert.equal(f.marker(directory).unreferencedSince < f.now(), true);
     gate.resume();
     assert.equal((await sweeping).removed, 1);
@@ -415,10 +412,10 @@ test("new holds and publication reject a generation while its deletion is in fli
 
 test("publication and live-reference inspection never reconstruct missing generation directories", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  (await f.manager.hold("catalog", directory)).release();
+    directory = f.skill();
+  (await f.manager.hold("skill", directory)).release();
   rmSync(directory, { recursive: true });
-  assert.throws(() => f.manager.setPublished("catalog", directory));
+  assert.throws(() => f.manager.setPublished("skill", directory));
   assert.equal(existsSync(directory), false);
   assert.deepEqual([...f.manager.activeDirectories()], []);
 
@@ -432,12 +429,12 @@ test("publication and live-reference inspection never reconstruct missing genera
 
 test("an ancestor redirect during final live inspection cannot delete an unmanaged reading tree", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
+    directory = f.skill();
+  await retired(f, "skill", directory);
   const snapshot = f.snapshot("redirect-barrier");
   f.live.add(snapshot.ref);
-  const catalogRoot = path.dirname(directory),
-    savedRoot = catalogRoot + "-saved";
+  const skillRoot = path.dirname(directory),
+    savedRoot = skillRoot + "-saved";
   const outside = path.join(f.root, "unmanaged"),
     outsideGeneration = path.join(outside, path.basename(directory));
   mkdirSync(outsideGeneration, { recursive: true });
@@ -446,8 +443,8 @@ test("an ancestor redirect during final live inspection cannot delete an unmanag
   const sweeping = f.manager.sweep();
   try {
     await enteredWithin(gate.entered);
-    renameSync(catalogRoot, savedRoot);
-    symlinkSync(outside, catalogRoot, "junction");
+    renameSync(skillRoot, savedRoot);
+    symlinkSync(outside, skillRoot, "junction");
     gate.resume();
     const result = await sweeping;
     assert.equal(result.removed, 0);
@@ -474,9 +471,9 @@ test("cleanup honors a maximum batch of 100 across a persistent directory cursor
   const f = fixture(t);
   const generations = [];
   for (let index = 0; index < 105; index++) {
-    const directory = f.catalog(`batch-${index}`);
+    const directory = f.skill(`batch-${index}`);
     generations.push(directory);
-    (await f.manager.hold("catalog", directory)).release();
+    (await f.manager.hold("skill", directory)).release();
   }
   assert.throws(() => f.manager.sweep(101));
   const firstObservation = await f.manager.sweep(100),
@@ -499,10 +496,10 @@ test("cleanup honors a maximum batch of 100 across a persistent directory cursor
 
 test("an ancestor redirect after a native leaf read cannot mutate the unmanaged destination", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
-  const catalogRoot = path.dirname(directory),
-    savedRoot = catalogRoot + "-saved";
+    directory = f.skill();
+  await retired(f, "skill", directory);
+  const skillRoot = path.dirname(directory),
+    savedRoot = skillRoot + "-saved";
   const outside = path.join(f.root, "unmanaged"),
     outsideGeneration = path.join(outside, path.basename(directory));
   mkdirSync(outsideGeneration, { recursive: true });
@@ -516,7 +513,7 @@ test("an ancestor redirect after a native leaf read cannot mutate the unmanaged 
     await enteredWithin(gate.entered);
     let nativeProtection = false;
     try {
-      renameSync(catalogRoot, savedRoot);
+      renameSync(skillRoot, savedRoot);
     } catch (cause) {
       if (
         process.platform !== "win32" ||
@@ -526,14 +523,14 @@ test("an ancestor redirect after a native leaf read cannot mutate the unmanaged 
       // Windows holds the ancestor in place while this actual Dir is open.
       // Verify that native protection and real cleanup instead of skipping.
       nativeProtection = true;
-      assert.equal(realpathSync.native(catalogRoot), catalogRoot);
+      assert.equal(realpathSync.native(skillRoot), skillRoot);
       assert.equal(existsSync(savedRoot), false);
       assert.equal(
         readFileSync(path.join(directory, "README.md"), "utf8"),
         "fixed manual",
       );
     }
-    if (!nativeProtection) symlinkSync(outside, catalogRoot, "junction");
+    if (!nativeProtection) symlinkSync(outside, skillRoot, "junction");
     gate.resume();
     const result = await sweeping;
     assert.equal(result.removed, nativeProtection ? 1 : 0);
@@ -571,20 +568,20 @@ test("an ancestor redirect after a native leaf read cannot mutate the unmanaged 
 
 test("a large generation continues across bounded pages and remains closed to new holds until completion", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
+    directory = f.skill();
   for (let index = 0; index < 250; index++)
     writeFileSync(path.join(directory, `file-${index}.txt`), "retired leaf");
-  await retired(f, "catalog", directory);
+  await retired(f, "skill", directory);
   const first = await f.manager.sweep(100);
   assert.equal(first.processed, 100);
   assert.equal(first.removed, 0);
   assert.equal(existsSync(directory), true);
   await assert.rejects(
-    f.manager.hold("catalog", directory),
+    f.manager.hold("skill", directory),
     (error) => error.code === "material_retiring",
   );
   assert.throws(
-    () => f.manager.setPublished("catalog", directory),
+    () => f.manager.setPublished("skill", directory),
     (error) => error.code === "material_retiring",
   );
   let removed = 0;
@@ -601,12 +598,12 @@ test("a large generation continues across bounded pages and remains closed to ne
 
 test("retired leaf symlinks are unlinked without following their external targets", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
+    directory = f.skill();
   const outside = path.join(f.root, "unmanaged");
   mkdirSync(outside);
   writeFileSync(path.join(outside, "keep.txt"), "preserve target");
   symlinkSync(outside, path.join(directory, "linked-directory"), "junction");
-  await retired(f, "catalog", directory);
+  await retired(f, "skill", directory);
   const result = await f.manager.sweep(100);
   assert.equal(result.removed, 1);
   assert.deepEqual(result.errors, []);
@@ -619,8 +616,8 @@ test("retired leaf symlinks are unlinked without following their external target
 
 test("stop closes the lifecycle cursor and every pending generation directory handle", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
+    directory = f.skill();
+  await retired(f, "skill", directory);
   const original = filesystem.opendir,
     handles = [];
   filesystem.opendir = async (...args) => {
@@ -664,8 +661,8 @@ test("stop joins pending marker admission and refuses later lifecycle work witho
       };
     },
   });
-  const directory = f.catalog(),
-    holding = f.manager.hold("catalog", directory);
+  const directory = f.skill(),
+    holding = f.manager.hold("skill", directory);
   const rejected = assert.rejects(holding, {
     code: "material_retention_closed",
   });
@@ -678,7 +675,7 @@ test("stop joins pending marker admission and refuses later lifecycle work witho
     });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(stopped, false);
-    await assert.rejects(f.manager.hold("catalog", directory), {
+    await assert.rejects(f.manager.hold("skill", directory), {
       code: "material_retention_closed",
     });
     assert.throws(() => f.manager.setPublished("new", directory), {
@@ -703,7 +700,7 @@ test("stop joins pending marker admission and refuses later lifecycle work witho
 
 test("stop joins an accepted native marker write, fsync and close before confirming closure", async (t) => {
   const f = fixture(t),
-    directory = f.catalog(),
+    directory = f.skill(),
     entered = deferred(),
     resume = deferred();
   const original = filesystem.open;
@@ -726,7 +723,7 @@ test("stop joins an accepted native marker write, fsync and close before confirm
     return handle;
   };
   syncBuiltinESMExports();
-  const holding = f.manager.hold("catalog", directory);
+  const holding = f.manager.hold("skill", directory);
   const rejected = assert.rejects(holding, {
     code: "material_retention_closed",
   });
@@ -762,8 +759,8 @@ test("stop joins an accepted native marker write, fsync and close before confirm
 
 test("hard-linked private markers cannot mutate another profile's lifecycle facts or admit deletion", async (t) => {
   const f = fixture(t),
-    directory = f.catalog();
-  await retired(f, "catalog", directory);
+    directory = f.skill();
+  await retired(f, "skill", directory);
   const outsideRoot = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-external-marker-")),
   );
@@ -771,10 +768,10 @@ test("hard-linked private markers cannot mutate another profile's lifecycle fact
   const outside = path.join(outsideRoot, "other-profile-marker.json");
   linkSync(f.markerFile(directory), outside);
   const before = readFileSync(outside);
-  assert.throws(() => f.manager.setPublished("catalog", directory), {
+  assert.throws(() => f.manager.setPublished("skill", directory), {
     code: "invalid_material_marker",
   });
-  await assert.rejects(f.manager.hold("catalog", directory), {
+  await assert.rejects(f.manager.hold("skill", directory), {
     code: "invalid_material_marker",
   });
   const result = await f.manager.sweep(100);

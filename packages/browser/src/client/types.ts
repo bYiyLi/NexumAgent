@@ -1017,7 +1017,6 @@ export interface VisibleDomTree {
 
 export interface BrowserClient {
   browsers: Browsers;
-  documentation: Documentation;
 }
 
 export interface Browsers {
@@ -1035,7 +1034,6 @@ export interface Browser {
   };
   tabs: Tabs;
   user: BrowserUser;
-  documentation(): Promise<string>;
   history(options?: BrowserHistoryOptions): Promise<Array<BrowserHistoryEntry>>;
   nameSession(name: string): Promise<void>;
 }
@@ -1336,9 +1334,6 @@ export interface ConfirmDialog {
   dismiss(): Promise<void>;
 }
 
-export interface Documentation {
-  get(name: string): Promise<string>;
-}
 
 export interface PromptDialog {
   type: "prompt";

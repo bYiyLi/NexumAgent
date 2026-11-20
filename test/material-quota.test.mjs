@@ -26,7 +26,6 @@ const { SqliteStore } = await load("storage/sqlite.js");
 const { ScriptCatalog } = await load("runtime/scripts.js");
 const { ModuleLoader } = await load("runtime/modules.js");
 const { RunEngine } = await load("runtime/engine.js");
-const { DocumentCatalog } = await load("work/catalog.js");
 const { WorkService } = await load("work/service.js");
 const { ExtensionMaterials } = await load("extensions/materials.js");
 const { inspectExtensionPackage } = await load("extensions/packages.js");
@@ -130,15 +129,9 @@ function workFixture(t, options = {}) {
   });
   const scripts = new ScriptCatalog(f.work, "agent");
   const policy = { builtins: () => [], approvedPackages: () => new Map() };
-  const catalog = new DocumentCatalog(
-    f.work,
-    scripts,
-    policy,
-    options.catalogOptions,
-  );
   let allowed = true,
     reserve = options.reserve;
-  const service = new WorkService(store, scripts, catalog, {
+  const service = new WorkService(store, scripts, policy, {
     home: null,
     agent: { name: "资料测试 🧪", version: "0.0.1", protocolVersion: "2" },
     authorize() {
@@ -163,7 +156,6 @@ function workFixture(t, options = {}) {
     store,
     scripts,
     policy,
-    catalog,
     service,
     open: (input = {}, signal = lifetime.signal) =>
       service.open(caller, { agentId: "agent", ...input }, signal),
@@ -197,7 +189,7 @@ async function extensionFixture(t, options = {}) {
       apiVersion: 1,
       namespace,
       permissions: [],
-      docs: "./manual",
+
       instructions: "./rules.md",
       scripts: "./flows",
       skills: "./skills",
@@ -212,14 +204,14 @@ async function extensionFixture(t, options = {}) {
     "export default function(): unknown;\n",
   );
   write(
-    path.join(source, "manual/README.md"),
+    path.join(source, "skills/review/references/manual/README.md"),
     "# 中文 🧪\n[guide](guide.md)\n![bytes](bytes.bin)\n",
   );
-  write(path.join(source, "manual/guide.md"), "# 使用方法\n");
-  write(path.join(source, "manual/bytes.bin"), Buffer.from([0, 255, 1, 128]));
+  write(path.join(source, "skills/review/references/manual/guide.md"), "# 使用方法\n");
+  write(path.join(source, "skills/review/references/manual/bytes.bin"), Buffer.from([0, 255, 1, 128]));
   write(
     path.join(source, "rules.md"),
-    "# 必须遵守\n[manual](manual/README.md)\n",
+    "# 必须遵守\n[manual](skills/review/references/manual/README.md)\n",
   );
   write(
     path.join(source, "flows/report.js"),
@@ -227,7 +219,7 @@ async function extensionFixture(t, options = {}) {
   );
   write(
     path.join(source, "skills/review/SKILL.md"),
-    "---\nname: review\ndescription: Review this extension.\n---\n# Review\n",
+    "---\nname: review\ndescription: Review this extension.\n---\n# Review\n[manual](references/manual/README.md)\n",
   );
   const policy = {
     builtins: () => [],
@@ -265,7 +257,7 @@ async function extensionFixture(t, options = {}) {
     descriptor,
     handle,
     materials,
-    reading: path.join(f.work, "docs", "extensions"),
+    reading: path.join(f.work, "skills", ".generated", "extensions"),
   };
 }
 
@@ -276,12 +268,12 @@ for (const project of [false, true])
     f.setReserve(recorder.reserve);
     const opened = await f.open(project ? { projectId: "project" } : {});
     assert.equal(opened.revision, 1);
-    assert.equal(recorder.admissions.length, project ? 3 : 2);
+    assert.equal(recorder.admissions.length, project ? 4 : 3);
     assert.deepEqual(
       recorder.admissions.map((item) => path.basename(item.name)),
       project
-        ? ["agent.json", "project.json", "bundle.json"]
-        : ["agent.json", "bundle.json"],
+        ? ["agent.json", "scripts.md", "project.json", "bundle.json"]
+        : ["agent.json", "scripts.md", "bundle.json"],
     );
     assert.equal(
       [...files(f.snapshots).values()].reduce(
@@ -292,7 +284,7 @@ for (const project of [false, true])
     );
   });
 
-for (const failure of [1, 2, 3])
+for (const failure of [1, 2, 3, 4])
   test(`Work denial at snapshot body ${failure} publishes no work or failed snapshot`, async (t) => {
     const denied = new Error("quota denied"),
       f = workFixture(t);
@@ -394,7 +386,6 @@ test("ExtensionMaterials admits actual copied, generated and manifest bytes, the
   assert.deepEqual(f.materials.published(), {
     instructions: [],
     skills: [],
-    docs: [],
   });
   assert.equal(f.materials.activeDirectories().has(prepared.directory), true);
   assert.equal(
@@ -409,7 +400,7 @@ test("ExtensionMaterials admits actual copied, generated and manifest bytes, the
     recorder.admissions.reduce((sum, item) => sum + item.bytes, 0),
   );
   assert.deepEqual(
-    readFileSync(path.join(prepared.directory, "manual/bytes.bin")),
+    readFileSync(path.join(prepared.directory, "skills/review/references/manual/bytes.bin")),
     Buffer.from([0, 255, 1, 128]),
   );
   const manifest = JSON.parse(
@@ -421,7 +412,7 @@ test("ExtensionMaterials admits actual copied, generated and manifest bytes, the
       item.size,
     );
   f.materials.publish(prepared);
-  assert.equal(f.materials.published().docs.length, 1);
+  assert.equal(f.materials.published().skills.length, 2);
   f.materials.withdraw(f.handle.id);
   assert.deepEqual([...f.materials.activeDirectories()], []);
 });
@@ -458,7 +449,6 @@ test("ExtensionMaterials rejects before every copied/generated/manifest body and
     assert.deepEqual(f.materials.published(), {
       instructions: [],
       skills: [],
-      docs: [],
     });
   }
 });
@@ -560,14 +550,9 @@ test("real accepted Run scope protects an old Work/catalog snapshot across refre
         ...f.store.workSnapshotRefs(now),
         ...(engine?.activeSnapshotRefs() ?? []),
       ]),
-    publishedDirectories: () => f.catalog.activeDirectories(),
   });
   f.cleanup(() => manager.stop());
-  // The real service and catalog share this manager; no fabricated snapshot ref supplies the protection.
-  const catalog = new DocumentCatalog(f.work, f.scripts, f.policy, {
-    materialRetention: manager,
-  });
-  const service = new WorkService(f.store, f.scripts, catalog, {
+  const service = new WorkService(f.store, f.scripts, f.policy, {
     home: null,
     agent: { name: "Agent", version: "1", protocolVersion: "2" },
     authorize() {},
@@ -714,7 +699,7 @@ test("actual extension preparation, publication and captured Work references eac
     materials.publish(prepared);
     now += 10 * 86400000;
     assert.equal((await manager.sweep(100)).removed, 0);
-    assert.equal(existsSync(prepared.entry), true);
+    assert.equal(existsSync(prepared.materials.skills[0].skillFile), true);
     store = new SqliteStore(f.root, {
       agentId: "agent",
       profile: "development",
@@ -723,10 +708,7 @@ test("actual extension preparation, publication and captured Work references eac
     f.cleanup(() => store.close());
     const scripts = new ScriptCatalog(f.work, "agent"),
       policy = { builtins: () => [], approvedPackages: () => new Map() };
-    const catalog = new DocumentCatalog(f.work, scripts, policy, {
-      materialRetention: manager,
-    });
-    const service = new WorkService(store, scripts, catalog, {
+    const service = new WorkService(store, scripts, policy, {
       home: null,
       agent: { name: "Agent", version: "1", protocolVersion: "2" },
       authorize() {},
@@ -749,7 +731,7 @@ test("actual extension preparation, publication and captured Work references eac
     const held = await manager.sweep(100);
     assert.deepEqual(held.errors, []);
     assert.equal(
-      existsSync(prepared.entry),
+      existsSync(prepared.materials.skills[0].skillFile),
       true,
       "captured Work holds SDK material after its instance withdraws",
     );
@@ -757,7 +739,7 @@ test("actual extension preparation, publication and captured Work references eac
     assert.equal((await manager.sweep(100)).removed, 0);
     now += grace - 1;
     assert.equal((await manager.sweep(100)).removed, 0);
-    assert.equal(existsSync(prepared.entry), true);
+    assert.equal(existsSync(prepared.materials.skills[0].skillFile), true);
     now += 1;
     const retired = await manager.sweep(100);
     assert.deepEqual(retired.errors, []);
@@ -776,11 +758,11 @@ test("ProfileRetention shares one 100-entry budget between native material delet
     now: () => now,
     liveSnapshotRefs: () => new Set(),
   });
-  const directory = path.join(f.work, "docs", ".catalog", "a".repeat(64));
+  const directory = path.join(f.work, "skills", ".generated", "platform", "runtime", "a".repeat(64));
   mkdirSync(directory, { recursive: true });
   for (let index = 0; index < 250; index++)
     writeFileSync(path.join(directory, `body-${index}.txt`), "retired");
-  (await manager.hold("catalog", directory)).release();
+  (await manager.hold("skill", directory)).release();
   await manager.sweep(100);
   const artifacts = new ArtifactStore(f.root, "agent", {
     now: () => now,

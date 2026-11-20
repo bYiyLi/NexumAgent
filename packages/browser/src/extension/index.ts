@@ -211,8 +211,6 @@ const localRoutes = new Set([
   "browsers.get",
   "browsers.getDefault",
   "browsers.getForUrl",
-  "documentation.get",
-  "browsers.documentation",
   "tabs.list",
   "user.openTabs",
   "user.claimTab",
@@ -354,20 +352,6 @@ async function local(
     }
     return service.get(chosen).info;
   }
-  if (
-    pathName === "documentation.get" ||
-    pathName === "browsers.documentation"
-  ) {
-    if (input.target) service.target(targetOf(input));
-    const topic =
-      pathName === "browsers.documentation" ? "README" : String(input.name);
-    check(
-      ["README", "usage", "connection", "lifecycle", "api"].includes(topic),
-      "TOPIC_NOT_FOUND",
-      "This package has no manual chapter with that name.",
-    );
-    return readFile(new URL(`../../docs/${topic}.md`, import.meta.url), "utf8");
-  }
   const target = targetOf(input),
     peer = selected(service, target.browserId, call);
   service.target({ ...target, tabId: undefined });
@@ -468,9 +452,7 @@ const createExtension: ExtensionFactory = async (host) => {
         description: `Nexum browser: ${pathName}`,
         path: pathName.split("."),
         permissions:
-          pathName === "documentation.get"
-            ? []
-            : [
+          [
                 "connection",
                 ...(pathName === "downloads.path" ||
                 pathName === "tab.saveDownload" ||

@@ -1,0 +1,36 @@
+# 页面交互与业务确认
+
+需要当前 Tab 时先按 [初始化与发现](bootstrap.md) 取得真实目标。
+
+## 导航与等待
+
+`expectNavigation(action)` 的 action 留在 Node；先建立真实导航等待条件，再触发当前已确认的页面操作，避免漏掉导航结果。
+
+`tab.navigate(url,{waitUntil})` 等待实际顶层导航的指定阶段，允许站点正常重定向；完成后用 `await tab.url()` 观察最终地址。`waitForURL` 或显式带 `url` 的导航等待仍按指定地址精确匹配；它们不会因某个不同地址已经加载而返回成功。
+
+## 观察、定位与业务确认
+
+页面操作先 `tab.observe({full:true})`，再用 `tab.playwright.getByRole/getByLabel/getByText/locator` 定位当前元素。Locator 会在操作时重新查询；固定 ref、dialog、chooser 等过期后需重新观察，不能把旧 ID 改猜成另一个元素。
+
+`locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `TIMEOUT`，不会点击覆盖层。
+
+点击或输入后检查返回的实际状态。若出现 `INPUT_UNCONFIRMED` 或 `effect: unknown`，输入可能已送达：先重新观察，不自动再次点击、提交或选择文件。
+
+点击成功只说明网页接收了输入，不代表异步业务完成。保存、支付或提交后，应等待或回读可观察的完成结果（例如确认文字或目标 URL）；确认不了就报告未知，不重复提交。
+
+首次观察用 `tab.observe({full:true})`，后续可用 `tab.observe()` 获取变化；需要验证点击后的业务结果时，在点击之前提供等待条件：
+
+以下片段的 `tab` 必须先在同一次脚本中按上方方式获取，不能单独提交为完整脚本。
+
+```javascript
+const before = await tab.observe({ full: true });
+const result = await tab.playwright.getByRole("button", { name: "保存" }).click({
+  expect: { kind: "text", value: "保存成功", timeoutMs: 15000 },
+  timeoutMs: 20000,
+});
+return { before: before.url, matched: result.matched, after: await tab.observe() };
+```
+
+`click({expect})` 会等待已指定的页面条件；例如文字、导航或 URL 匹配。返回 `EXPECTATION_UNCONFIRMED` 表示业务完成尚未证实，原输入可能已经发生，不能自动重放。无 `expect` 的点击不证明异步业务结果。
+
+只需要 DOM 结构时，将上方完整入口的最后一行换成 `return await tab.playwright.domSnapshot();`，不必加载全部 API 声明。

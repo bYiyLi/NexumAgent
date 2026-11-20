@@ -20,7 +20,7 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { privateDirectory } from "./paths.js";
 
 export type ManagedReserve = (bytes: number) => Promise<{ release(): void }>;
-export type MaterialKind = "work" | "catalog" | "extension";
+export type MaterialKind = "work" | "skill";
 interface Marker {
   schemaVersion: 1;
   kind: MaterialKind;
@@ -64,24 +64,9 @@ function generation(ref: string): { kind: MaterialKind; ref: string } | null {
   const work =
     /^(work\/tmp\/contexts\/snapshot_[0-9a-f]{32})(?:\/[^\0]*)?$/.exec(ref);
   if (work) return { kind: "work", ref: work[1]! };
-  const catalog = /^(work\/docs\/\.catalog\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(
-    ref,
-  );
-  if (catalog) return { kind: "catalog", ref: catalog[1]! };
-  const extension =
-    /^(work\/docs\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(
-      ref,
-    );
-  if (
-    extension &&
-    !extension[1]!.split("/").some((part) => part === "." || part === "..")
-  )
-    return { kind: "extension", ref: extension[1]! };
-  const adapter =
-    /^(work\/docs\/adapters\/(?:api|mcp)\/[0-9a-f]{64}\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(
-      ref,
-    );
-  if (adapter) return { kind: "extension", ref: adapter[1]! };
+  const skill = /^(work\/skills\/\.generated\/(?:extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|adapters\/(?:api|mcp)\/[0-9a-f]{64}|platform\/[A-Za-z0-9_-]+)\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(ref);
+  if (skill && !skill[1]!.split("/").some((part) => part === "." || part === ".."))
+    return { kind: "skill", ref: skill[1]! };
   return null;
 }
 
@@ -449,7 +434,7 @@ export class MaterialRetention {
     this.#assertOpen();
     const ref = path.relative(this.root, directory).split(path.sep).join("/");
     requireCondition(
-      /^work\/docs\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.prepare-[A-Za-z0-9_-]+$/.test(
+      /^work\/skills\/\.generated\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.prepare-[A-Za-z0-9_-]+$/.test(
         ref,
       ),
       "material_path_escape",
@@ -552,8 +537,7 @@ export class MaterialRetention {
           await this.#bytes(path.join(this.root, ref), 16 * 1024 * 1024),
         ),
       ) as Record<string, any>;
-      add(bundle.view?.agent?.docs?.entry);
-      for (const group of ["docs", "instructions", "skills"])
+      for (const group of ["instructions", "skills"])
         for (const item of bundle.published?.[group] ?? []) {
           add(item.path);
           add(item.skillFile);

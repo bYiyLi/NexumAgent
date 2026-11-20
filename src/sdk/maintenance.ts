@@ -15,6 +15,17 @@ return await maintenance.list({ target: "package", limit: 20 });
 MCP 配置新增、修改或移除时，申请返回 status 为 pending，只表示等待用户确认。将返回的 approvalUrl 链接交给用户并说明需要在授权页确认；编辑 work/mcp.json、reload 或重启 Agent 都不能代替授权。
 
 用户确认后 Nexum 会自动执行该修订，并切换对应 MCP 连接；不要重复调用 maintenance.mcp.update、手动重启 Agent 或尝试再次执行这份申请。使用 maintenance.get(requestId) 回读：status 为 approved 只说明用户同意；只有 execution.status 为 succeeded 且 execution.result.connection.state 为 ready，才确认 MCP 连接已就绪。连接移除成功时 state 为 removed。等待、失败或无执行结果时，向用户说明 requestId、实际状态和可用的错误代码，不要假报已生效或盲目重试。
+
+## JavaScript 参数与返回
+
+- packages.install/update({name, version?})、packages.remove({name})；extensions.enable/disable({name})。
+- mcp.add/update({name, config})、mcp.remove({name})。
+- api.import/update({name, url?, path?, config?})、api.remove({name})；API 导入的实际字段组合由对应方法 Schema 和导入结果校验。
+- 上述变更返回 {requestId, status, expiresAt, approvalUrl?}。
+- get(requestId: string)、cancel(requestId: string) 返回申请视图，包含 requestId、target/action/name、status、revision/candidateRevision、summary、authStatus、createdAt/expiresAt，以及实际存在的 approvalUrl、decision、execution 等状态证据。
+- list(options?: {target?, name?, status?, limit?, cursor?}) 返回 {requests: 申请视图[], nextCursor: string | null}。
+
+get/cancel 是位置参数，不能传 {requestId} 代替字符串；其余方法按上方对象调用，完整字段类型/枚举由选中方法 Schema 提供。maintenance_unavailable 表示服务不可用；配置/认证/权限及候选修订错误以实际 code/message 为准，保留原 requestId，不能通过改文件或重启绕过批准。
 `;
 
 /** Public call-bound facade, identical for built-in and external extensions. */

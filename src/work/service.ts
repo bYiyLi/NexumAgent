@@ -30,7 +30,7 @@ import {
 } from "../contracts/caller.js";
 import { ScriptCatalog, type ScriptUsage } from "../runtime/scripts.js";
 import { atomicText, contains, privateDirectory } from "../runtime/paths.js";
-import { DocumentCatalog, type DocLink } from "./catalog.js";
+import type { ModulePolicy } from "../runtime/modules.js";
 import type {
   ManagedReserve,
   MaterialRetention,
@@ -64,7 +64,6 @@ export type PublishedSkill = Omit<SkillMetadata, "disabled">;
 export interface PublishedMaterials {
   instructions: readonly PublishedInstruction[];
   skills: readonly PublishedSkill[];
-  docs: readonly DocLink[];
 }
 export interface OpenInput {
   agentId: string;
@@ -146,26 +145,25 @@ function modelBytes(value: JsonObject): number {
 export class WorkService {
   #store: SqliteStore;
   #scripts: ScriptCatalog;
-  #catalog: DocumentCatalog;
+  #policy: ModulePolicy;
   #options: WorkOptions;
   #refreshes = new Map<string, Promise<void>>();
   #operations = new Set<Promise<void>>();
   constructor(
     store: SqliteStore,
     scripts: ScriptCatalog,
-    catalog: DocumentCatalog,
+    policy: ModulePolicy,
     options: WorkOptions,
   ) {
     requireCondition(
       scripts.work === path.join(store.root, "work") &&
-        catalog.work === scripts.work &&
         scripts.owner === `local:${store.binding.agentId}`,
       "runtime_profile_mismatch",
       "Work metadata must use this Agent's own profile/work environment.",
     );
     this.#store = store;
     this.#scripts = scripts;
-    this.#catalog = catalog;
+    this.#policy = policy;
     this.#options = options;
   }
   async open(
@@ -428,7 +426,6 @@ export class WorkService {
       this.#options.materials?.(caller) ?? {
         instructions: [],
         skills: [],
-        docs: [],
       },
       4 * 1024 * 1024,
     ) as unknown as PublishedMaterials;
@@ -439,10 +436,10 @@ export class WorkService {
       this.#options.canUseScript?.(caller, origin) ?? true;
     const library = this.#scripts.discover(canUse);
     const scripts = this.#scripts.select(usage, canUse, 128 * 1024, library);
-    // Capture all contribution discovery synchronously. Catalog I/O may yield
-    // while another work enables/disables a source; its versioned manual must
-    // still describe this same captured instruction/Skill/script generation.
-    const docs = await this.#catalog.refresh(published.docs, signal, library);
+    const modules = {
+      builtinFamilies: [...this.#policy.builtins()],
+      approvedPackages: Object.fromEntries(this.#policy.approvedPackages()),
+    };
     signal.throwIfAborted();
     const directory = privateDirectory(
       this.#scripts.work,
@@ -512,6 +509,8 @@ export class WorkService {
         nestedInstructions: effective.nestedInstructions.map(withoutDisabled),
       });
       await write(agentIndex, canonicalJson(allAgent, 16 * 1024 * 1024));
+      const scriptIndex = path.join(directory, "scripts.md");
+      await write(scriptIndex, this.#scripts.indexText(library));
       if (project)
         await write(projectIndex, canonicalJson(allProject, 16 * 1024 * 1024));
       const cpus = os.cpus();
@@ -554,30 +553,20 @@ export class WorkService {
           },
           paths: {
             work: this.#scripts.work,
-            docs: this.#scripts.docs,
+            skills: this.#scripts.skills,
             scripts: this.#scripts.local,
             resources: path.join(this.#scripts.work, "resources"),
           },
-          modules: {
-            builtinFamilies: docs.builtinFamilies,
-            packagesIndex: docs.packagesIndex,
-          },
+          modules,
           instructions: agentInstructions,
           skills: agentSkills,
           skillsComplete: discovered.skillsComplete,
           materialsIndex: agentIndex,
-          docs: {
-            entry: docs.entry,
-            revision: docs.revision,
-            content: docs.content,
-            truncated: docs.truncated,
-            nextLine: docs.nextLine,
-          },
           scripts: {
             total: scripts.total,
             items: scripts.items,
             complete: scripts.complete,
-            index: path.join(this.#scripts.docs, "scripts.md"),
+            index: scriptIndex,
           },
         },
         project: project
@@ -718,7 +707,7 @@ export class WorkService {
       const root = realpathSync.native(skill.path),
         file = realpathSync.native(skill.skillFile);
       requireCondition(
-        contains(this.#scripts.docs, root) &&
+        contains(this.#scripts.skills, root) &&
           contains(root, file) &&
           statSync(file).isFile(),
         "material_path_escape",
@@ -730,8 +719,7 @@ export class WorkService {
   #fit(view: JsonObject): void {
     const agent = view.agent as JsonObject,
       project = view.project as JsonObject | null;
-    const scripts = agent.scripts as JsonObject,
-      docs = agent.docs as JsonObject;
+    const scripts = agent.scripts as JsonObject;
     const scriptItems = scripts.items as JsonValue[];
     const warnings = view.warnings as JsonValue[];
     let omitted = false;
@@ -770,12 +758,6 @@ export class WorkService {
     ) {
       (project.nestedInstructions as JsonValue[]).pop();
       project.nestedInstructionsComplete = false;
-      omitted = true;
-    }
-    if (over() && typeof docs.content === "string") {
-      docs.content = "";
-      docs.truncated = true;
-      docs.nextLine = 1;
       omitted = true;
     }
     requireCondition(
