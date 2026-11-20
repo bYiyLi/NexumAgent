@@ -158,20 +158,44 @@ test("getters, Proxy traps, custom converters and iterators are never executed t
   assert.equal(calls, 0);
 });
 
-test("cycles fail while repeated references are copied without an object graph protocol", async () => {
+test("shared and cyclic values preserve authoritative JSON Pointer references", async () => {
   const common = { item: 1 };
-  const copy = (await normalizeData({ left: common, right: common })).data;
-  assert.deepEqual(plain(copy), { left: { item: 1 }, right: { item: 1 } });
-  assert.notEqual(copy.left, copy.right);
+  const shared = await normalizeData({ left: common, right: common });
+  assert.deepEqual(plain(shared.data), {
+    left: { item: 1 },
+    right: { $nexumRef: "/left" }
+  });
+  assert.deepEqual(plain(shared.references), [
+    { path: "/right", target: "/left" }
+  ]);
+
   const circular = {};
   circular.self = circular;
-  await assert.rejects(normalizeData(circular), failure("$.self"));
+  const root = await normalizeData(circular);
+  assert.deepEqual(plain(root.data), { self: { $nexumRef: "" } });
+  assert.deepEqual(plain(root.references), [{ path: "/self", target: "" }]);
+
   const map = new Map();
   map.set("self", map);
-  await assert.rejects(normalizeData(map), failure("$[0][1]"));
+  const mapped = await normalizeData(map);
+  assert.deepEqual(plain(mapped.data), [["self", { $nexumRef: "" }]]);
+  assert.deepEqual(plain(mapped.references), [{ path: "/0/1", target: "" }]);
+
   const set = new Set();
   set.add(set);
-  await assert.rejects(normalizeData(set), failure("$[0]"));
+  const settled = await normalizeData(set);
+  assert.deepEqual(plain(settled.data), [{ $nexumRef: "" }]);
+  assert.deepEqual(plain(settled.references), [{ path: "/0", target: "" }]);
+
+  const escaped = {};
+  escaped["x/y~z"] = escaped;
+  const escapedResult = await normalizeData(escaped);
+  assert.deepEqual(plain(escapedResult.references), [
+    { path: "/x~1y~0z", target: "" }
+  ]);
+  const business = await normalizeData({ $nexumRef: "/ordinary" });
+  assert.equal(business.data.$nexumRef, "/ordinary");
+  assert.equal(business.references, undefined);
 });
 
 test("nested native bytes route by original identity and receive explicit resource associations", async () => {
@@ -259,14 +283,14 @@ test("content identification validates real descriptions and never interprets or
       },
     },
   );
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].value.path, path.join(pwd, "picture.png"));
-  assert.equal(calls[1].value.kind, "text");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].value.kind, "text");
+  assert.deepEqual(plain(result.data.a), raw);
   assert.deepEqual(plain(result.data.plain), { path: "notes.md" });
   assert.equal(result.data.string, "picture.png");
-  await assert.rejects(
-    normalizeData({ bad: { type: "image", path: 7 } }, { pwd }),
-    failure("$.bad", "invalid_result_content"),
+  assert.deepEqual(
+    plain((await normalizeData({ bad: { type: "image", path: 7 } }, { pwd })).data),
+    { bad: { type: "image", path: 7 } },
   );
 });
 
@@ -559,14 +583,14 @@ test("very long keys cannot inflate error paths beyond a small persistable envel
       { [key]: { type: "image", path: 7 } },
       { maxBytes: 4 * 1024 * 1024 },
     ),
-    boundedError("invalid_result_content"),
+    boundedError("result_reference_path_too_long"),
   );
   await assert.rejects(
     normalizeData(
       { [key]: { [key]: new Proxy({}, {}) } },
       { maxBytes: 6 * 1024 * 1024 },
     ),
-    boundedError("invalid_result_data"),
+    boundedError("result_reference_path_too_long"),
   );
   const result = await normalizeData(
     { [key]: 1n },
@@ -596,8 +620,8 @@ test("resolver errors use the same bounded path and do not copy untrusted messag
       },
     ),
     (error) => {
-      assert.equal(error.code, "resource_read_failed");
-      assert.equal(error.cause, original);
+      assert.equal(error.code, "result_reference_path_too_long");
+      assert.equal(error.cause, undefined);
       assert.equal(error.details.pathTruncated, true);
       assert.ok(Buffer.byteLength(error.details.path) <= 512);
       assert.ok(Buffer.byteLength(canonicalJson(error.toJSON())) < 4096);

@@ -2472,22 +2472,33 @@
           "logs": true
         }
       },
-      "data": {
-        "transferId": "transfer_a"
-      },
-      "delivery": {
-        "transfers": [
-          {
-            "transferId": "transfer_a",
-            "available": true,
-            "request": {
-              "method": "PUT",
-              "url": "https://example.com/upload/opaque",
-              "headers": {},
-              "expiresAt": "2026-11-14T00:00:00.000Z"
+      "result": {
+        "state": "ready",
+        "hasValue": true,
+        "value": {
+          "transferId": "transfer_a"
+        },
+        "items": [],
+        "resources": [],
+        "references": [],
+        "conversions": [],
+        "delivery": {
+          "representationComplete": true,
+          "inlineComplete": true,
+          "requiresResourceRead": false,
+          "transfers": [
+            {
+              "transferId": "transfer_a",
+              "available": true,
+              "request": {
+                "method": "PUT",
+                "url": "https://example.com/upload/opaque",
+                "headers": {},
+                "expiresAt": "2026-11-14T00:00:00.000Z"
+              }
             }
-          }
-        ]
+          ]
+        }
       }
     }
   },
@@ -2562,22 +2573,33 @@
         "scriptDesc": "Generate image report",
         "descriptionTruncated": true
       },
-      "data": {
-        "transferId": "transfer_a"
-      },
-      "delivery": {
-        "transfers": [
-          {
-            "transferId": "transfer_a",
-            "available": true,
-            "request": {
-              "method": "PUT",
-              "url": "https://example.com/upload/opaque",
-              "headers": {},
-              "expiresAt": "2026-11-14T00:00:00.000Z"
+      "result": {
+        "state": "ready",
+        "hasValue": true,
+        "value": {
+          "transferId": "transfer_a"
+        },
+        "items": [],
+        "resources": [],
+        "references": [],
+        "conversions": [],
+        "delivery": {
+          "representationComplete": true,
+          "inlineComplete": true,
+          "requiresResourceRead": false,
+          "transfers": [
+            {
+              "transferId": "transfer_a",
+              "available": true,
+              "request": {
+                "method": "PUT",
+                "url": "https://example.com/upload/opaque",
+                "headers": {},
+                "expiresAt": "2026-11-14T00:00:00.000Z"
+              }
             }
-          }
-        ]
+          ]
+        }
       }
     }
   },

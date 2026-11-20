@@ -24,10 +24,15 @@
           }
         },
         "theme": {
-          "enum": ["light", "dark"]
+          "enum": [
+            "light",
+            "dark"
+          ]
         }
       },
-      "required": ["src"],
+      "required": [
+        "src"
+      ],
       "additionalProperties": false
     },
     "Content": {
@@ -50,14 +55,20 @@
               "maxLength": 1048576
             }
           },
-          "required": ["type", "text"],
+          "required": [
+            "type",
+            "text"
+          ],
           "additionalProperties": false
         },
         {
           "type": "object",
           "properties": {
             "type": {
-              "enum": ["image", "audio"]
+              "enum": [
+                "image",
+                "audio"
+              ]
             },
             "resource": {
               "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Artifact"
@@ -76,7 +87,11 @@
               "maxLength": 1048576
             }
           },
-          "required": ["type", "resource", "mimeType"],
+          "required": [
+            "type",
+            "resource",
+            "mimeType"
+          ],
           "additionalProperties": false
         },
         {
@@ -126,7 +141,11 @@
               }
             }
           },
-          "required": ["type", "uri", "name"],
+          "required": [
+            "type",
+            "uri",
+            "name"
+          ],
           "additionalProperties": false
         },
         {
@@ -145,7 +164,10 @@
               "pattern": "^nexum://agents/[^/?#]+/(?:resources|mcp)/"
             },
             "encoding": {
-              "enum": ["text", "blob"]
+              "enum": [
+                "text",
+                "blob"
+              ]
             },
             "annotations": {
               "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
@@ -155,7 +177,12 @@
               "maxLength": 1048576
             }
           },
-          "required": ["type", "resource", "uri", "encoding"],
+          "required": [
+            "type",
+            "resource",
+            "uri",
+            "encoding"
+          ],
           "additionalProperties": false
         }
       ]
@@ -204,7 +231,10 @@
           "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
         }
       },
-      "required": ["uri", "name"],
+      "required": [
+        "uri",
+        "name"
+      ],
       "additionalProperties": false
     },
     "Result": {
@@ -240,9 +270,118 @@
             "type": "object"
           },
           "maxItems": 1000
+        },
+        "references": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "target"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+              },
+              "target": {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "uri",
+              "name",
+              "mimeType",
+              "size",
+              "sha256",
+              "delivery",
+              "contentIndex"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+              },
+              "uri": {
+                "type": "string",
+                "pattern": "^nexum://agents/[^/?#]+/resources/",
+                "maxLength": 4096
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 256
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "delivery": {
+                "enum": [
+                  "inline",
+                  "resource_link"
+                ]
+              },
+              "contentIndex": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              }
+            }
+          }
+        },
+        "contentAssociations": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "contentIndex"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+              },
+              "contentIndex": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              }
+            }
+          }
         }
       },
-      "required": ["content"],
+      "required": [
+        "content"
+      ],
       "additionalProperties": false
     },
     "ResourcesList": {
@@ -268,7 +407,10 @@
           ]
         }
       },
-      "required": ["resources", "nextCursor"],
+      "required": [
+        "resources",
+        "nextCursor"
+      ],
       "additionalProperties": false
     },
     "MCPResourceContents": {
@@ -326,17 +468,23 @@
           "$ref": "https://schemas.nexum.local/agent/v2/wire/types.schema.json#/$defs/Annotations"
         }
       },
-      "required": ["uri"],
+      "required": [
+        "uri"
+      ],
       "additionalProperties": false,
       "oneOf": [
         {
-          "required": ["text"],
+          "required": [
+            "text"
+          ],
           "properties": {
             "text": {}
           }
         },
         {
-          "required": ["blob"],
+          "required": [
+            "blob"
+          ],
           "properties": {
             "blob": {}
           }
@@ -373,10 +521,15 @@
           "maximum": 9007199254740991
         },
         "cacheScope": {
-          "enum": ["public", "private"]
+          "enum": [
+            "public",
+            "private"
+          ]
         }
       },
-      "required": ["contents"],
+      "required": [
+        "contents"
+      ],
       "additionalProperties": false
     }
   }

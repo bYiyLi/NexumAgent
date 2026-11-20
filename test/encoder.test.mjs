@@ -251,40 +251,24 @@ function onlyMedia(response, type) {
   return response.content.filter((item) => item.type === type);
 }
 
-test("automatic and explicit images share validated fixed bytes and actual MCP image rendering", async (t) => {
-  const f = await fixture(t),
-    bytes = png();
+
+test("content-shaped business values remain JSON while explicit images use verified native bytes", async (t) => {
+  const f = await fixture(t), bytes = png();
   f.source("chart.png", bytes);
-  for (const value of [
-    { type: "image", path: "chart.png" },
-    f.output.image("chart.png"),
-  ]) {
-    const saved = await f.encoder.encode(value, f.scope());
-    assert.equal(saved.content[0].type, "image");
-    assert.equal(saved.content[0].mimeType, "image/png");
-    assert.equal(
-      saved.content[0].resource.sha256,
-      createHash("sha256").update(bytes).digest("hex"),
-    );
-    assert.equal(Object.hasOwn(saved.content[0], "data"), false);
-    assert.doesNotMatch(
-      JSON.stringify(saved),
-      new RegExp(bytes.toString("base64")),
-    );
-    const rendered = await f.encoder.render(savedJSON(saved), f.scope(), run);
-    assert.deepEqual(
-      Buffer.from(onlyMedia(rendered, "image")[0].data, "base64"),
-      bytes,
-    );
-    assert.equal(rendered.structuredContent.run.status, "succeeded");
-  }
-  assert.ok(
-    f.accesses.some(
-      (item) =>
-        item.action === "register" &&
-        item.path === path.join(f.work, "chart.png"),
-    ),
-  );
+  const raw = { type: "image", path: "chart.png" };
+  const business = await f.encoder.encode(raw, f.scope());
+  assert.equal(business.content.length, 0);
+  assert.deepEqual(savedJSON(business.data), raw);
+  const saved = await f.encoder.encode(f.output.image("chart.png"), f.scope());
+  assert.equal(saved.content[0].type, "image");
+  assert.equal(saved.content[0].mimeType, "image/png");
+  assert.equal(saved.content[0].resource.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(Object.hasOwn(saved.content[0], "data"), false);
+  assert.doesNotMatch(JSON.stringify(saved), new RegExp(bytes.toString("base64")));
+  const rendered = await f.encoder.render(savedJSON(saved), f.scope(), run);
+  assert.deepEqual(Buffer.from(onlyMedia(rendered, "image")[0].data, "base64"), bytes);
+  assert.equal(rendered.structuredContent.run.status, "succeeded");
+  assert.ok(f.accesses.some((item) => item.action === "register" && item.path === path.join(f.work, "chart.png")));
 });
 
 test("all five content types and mixed structured data retain their standard content semantics", async (t) => {
@@ -342,7 +326,7 @@ test("standard encoded image/audio and embedded binary resources are fixed, with
     audio = wav(),
     blob = Buffer.from("embedded binary");
   const saved = await f.encoder.encode(
-    [
+    f.output.result({ content: [
       { type: "image", data: image.toString("base64"), mimeType: "image/png" },
       { type: "audio", data: audio.toString("base64"), mimeType: "audio/wav" },
       {
@@ -353,7 +337,7 @@ test("standard encoded image/audio and embedded binary resources are fixed, with
           blob: blob.toString("base64"),
         },
       },
-    ],
+    ] }),
     f.scope(),
   );
   for (const bytes of [image, audio, blob])
@@ -378,7 +362,7 @@ test("nested binary keeps structure and content associations and snapshots only 
   const saved = await f.encoder.encode(
     {
       title: "binary",
-      items: [{ bytes: view }, { image: { type: "image", data: png() } }],
+      items: [{ bytes: view }, { image: f.output.image({ data: png() }) }],
     },
     f.scope(),
   );
@@ -424,37 +408,34 @@ test("explicit pure data preserves media-looking objects and refuses embedded bi
   );
 });
 
-test("text and JSON beyond 64 KiB become real readable resources with explicit incomplete delivery", async (t) => {
-  const f = await fixture(t),
-    large = "正文".repeat(16000);
+
+test("large JSON, primitive text and explicit text become readable bounded resources", async (t) => {
+  const f = await fixture(t), large = "正文".repeat(16000);
   assert.ok(Buffer.byteLength(large) > 64 * KiB);
   const data = { title: "full", body: large, count: 3n };
   for (const [value, kind] of [
     [f.output.json(data), "dataResource"],
-    [large, "textResource"],
+    [large, "dataResource"],
+    [f.output.text(large), "textResource"]
   ]) {
     const saved = await f.encoder.encode(value, f.scope());
     assert.equal(saved.delivery.complete, false);
     assert.equal(saved.delivery.reason, "context_budget");
     const resource = saved.delivery[kind];
     assert.ok(resource.uri);
-    const full = JSON.parse(
-      (
-        await f.artifacts.read(resource.uri, f.scope(), { maxBytes: 1 * MiB })
-      ).data.toString("utf8"),
-    );
-    if (kind === "dataResource") {
+    const full = JSON.parse((await f.artifacts.read(resource.uri, f.scope(), { maxBytes: 1 * MiB })).data.toString("utf8"));
+    if (kind === "textResource") {
+      assert.equal(full[0].item.text, large);
+    } else if (value === large) {
+      assert.equal(full.data, large);
+    } else {
       assert.equal(Object.hasOwn(saved, "data"), false);
       assert.deepEqual(full.data, { title: "full", body: large, count: "3" });
       assert.ok(full.conversions.some((item) => item.from === "BigInt"));
-    } else assert.equal(full[0].item.text, large);
+    }
     const rendered = await f.encoder.render(savedJSON(saved), f.scope(), run);
     assert.equal(rendered.structuredContent.delivery.complete, false);
-    assert.ok(
-      rendered.content.some(
-        (item) => item.type === "resource_link" && item.uri === resource.uri,
-      ),
-    );
+    assert.ok(rendered.content.some((item) => item.type === "resource_link" && item.uri === resource.uri));
     assert.ok(Buffer.byteLength(JSON.stringify(rendered)) <= 64 * KiB);
     assert.equal(JSON.stringify(rendered).includes(large), false);
   }
@@ -677,51 +658,45 @@ test("expired historical media fails explicitly without recreating it from a sti
   );
 });
 
-test("individual real image/audio boundaries and aggregate raw-byte boundaries are enforced before success", async (t) => {
-  const f = await fixture(t),
-    image = png(),
-    audio = wav();
+
+test("inline media limits automatically promote to verifiable links while retained inline responses respect Host budgets", async (t) => {
+  const f = await fixture(t), image = png(), audio = wav();
   assert.equal(f.encoder.limits.imageBytes, 10 * MiB);
   assert.equal(f.encoder.limits.audioBytes, 32 * MiB);
   assert.equal(f.encoder.limits.inlineBytes, 64 * MiB);
   for (const [type, bytes, limit] of [
     ["image", image, "imageBytes"],
-    ["audio", audio, "audioBytes"],
+    ["audio", audio, "audioBytes"]
   ]) {
     const exact = new ResultEncoder(f.artifacts, { [limit]: bytes.length });
-    const saved = await exact.encode(
-      f.output[type]({ data: bytes }),
-      f.scope(),
-    );
+    const saved = await exact.encode(f.output[type]({ data: bytes }), f.scope());
     assert.equal(saved.content[0].resource.size, bytes.length);
     const small = new ResultEncoder(f.artifacts, { [limit]: bytes.length - 1 });
-    await assert.rejects(
-      () => small.encode(f.output[type]({ data: bytes }), f.scope()),
-      { code: "inline_media_too_large" },
-    );
+    const downgraded = await small.encode(f.output[type]({ data: bytes }), f.scope());
+    assert.equal(downgraded.content[0].type, "resource_link");
+    assert.equal(downgraded.content[0].resource.size, bytes.length);
+    const savedBytes = await f.artifacts.read(downgraded.content[0].resource.uri, f.scope(), { maxBytes: bytes.length });
+    assert.deepEqual(Buffer.from(savedBytes.data), bytes);
     await assert.rejects(() => small.render(saved, f.scope(), run), {
-      code: "resource_read_too_large",
+      code: "resource_read_too_large"
     });
   }
   const values = f.output.result({
-    content: [f.output.image({ data: image }), f.output.audio({ data: audio })],
+    content: [f.output.image({ data: image }), f.output.audio({ data: audio })]
   });
   const exact = new ResultEncoder(f.artifacts, {
-    inlineBytes: image.length + audio.length,
+    inlineBytes: image.length + audio.length
   });
   const saved = await exact.encode(values, f.scope());
-  assert.equal(
-    (await exact.render(saved, f.scope(), run)).content[1].type,
-    "audio",
-  );
+  assert.equal((await exact.render(saved, f.scope(), run)).content[1].type, "audio");
   const small = new ResultEncoder(f.artifacts, {
-    inlineBytes: image.length + audio.length - 1,
+    inlineBytes: image.length + audio.length - 1
   });
-  await assert.rejects(() => small.encode(values, f.scope()), {
-    code: "inline_content_too_large",
-  });
+  const promoted = await small.encode(values, f.scope());
+  assert.equal(promoted.content[0].type, "image");
+  assert.equal(promoted.content[1].type, "resource_link");
   await assert.rejects(() => small.render(saved, f.scope(), run), {
-    code: "inline_content_too_large",
+    code: "inline_content_too_large"
   });
 });
 
@@ -943,170 +918,58 @@ test("Resources directory over the text budget fails clearly and a smaller real 
   assert.deepEqual(await bounded.listResources(f.scope(), { limit: 1 }), one);
 });
 
-test("oversized raw embedded text is rejected before Buffer allocation, registration or inspection", async (t) => {
-  const f = await fixture(t),
-    text = "中".repeat(100);
+
+test("ordinary resource-shaped data stays JSON while explicit oversized embedded text becomes a real link", async (t) => {
+  const f = await fixture(t), text = "中".repeat(1000);
   const value = {
     type: "resource",
-    resource: { uri: "remote://original-text", text, mimeType: "text/plain" },
+    resource: { uri: "remote://original-text", text, mimeType: "text/plain" }
   };
-  const originalFrom = Buffer.from,
-    originalRegister = f.artifacts.register;
-  let allocations = 0,
-    registrations = 0,
-    inspections = 0;
-  t.mock.method(Buffer, "from", function (...args) {
-    if (args[0] === text) allocations++;
-    return Reflect.apply(originalFrom, this, args);
-  });
-  t.mock.method(
-    f.artifacts,
-    "register",
-    function (source, scope, inspect, options) {
-      registrations++;
-      return Reflect.apply(originalRegister, this, [
-        source,
-        scope,
-        inspect &&
-          (async (...args) => {
-            inspections++;
-            return inspect(...args);
-          }),
-        options,
-      ]);
-    },
-  );
-  const normal = await f.encoder.encode(value, f.scope());
-  assert.equal(allocations, 1);
-  assert.equal(registrations, 1);
-  assert.equal(inspections, 1);
-  rmSync(
-    path.dirname(path.dirname(f.contentPath(normal.content[0].resource))),
-    { recursive: true },
-  );
-  allocations = 0;
-  registrations = 0;
-  inspections = 0;
+  const plain = await f.encoder.encode(value, f.scope());
+  assert.deepEqual(savedJSON(plain.data), value);
+  assert.equal(plain.content.length, 0);
+  const explicit = f.output.result({ content: [value] });
+  const normal = await f.encoder.encode(explicit, f.scope());
+  assert.equal(normal.content[0].type, "resource");
   const bounded = new ResultEncoder(f.artifacts, {
-    textBytes: Buffer.byteLength(text) - 1,
+    textBytes: Buffer.byteLength(text) - 1
   });
-  await assert.rejects(() => bounded.encode(value, f.scope()), {
-    code: "resource_read_too_large",
-  });
-  assert.equal(allocations, 0);
-  assert.equal(registrations, 0);
-  assert.equal(inspections, 0);
-  assert.deepEqual(readdirSync(f.artifacts.directory), []);
+  const saved = await bounded.encode(explicit, f.scope());
+  assert.equal(saved.content[0].type, "resource_link");
+  const resource = saved.content[0].resource;
+  const bytes = await f.artifacts.read(resource.uri, f.scope(), { maxBytes: Buffer.byteLength(text) });
+  assert.equal(bytes.data.toString("utf8"), text);
+  assert.equal(saved.content[0].resource.sha256, createHash("sha256").update(text).digest("hex"));
 });
 
-test("native and Blob lower inline budgets reject before actual copies, inspectors or resource publication", async (t) => {
-  const f = await fixture(t),
-    image = png(),
-    binary = Buffer.alloc(256, 65);
-  const imageBlob = new Blob([image], { type: "image/png" }),
-    binaryBlob = new Blob([binary]);
-  const tracked = [image, binary].map((item) => ({
-    buffer: item.buffer,
-    offset: item.byteOffset,
-    size: item.byteLength,
-  }));
-  const originalFrom = Buffer.from,
-    originalStream = Blob.prototype.stream,
-    originalRegister = f.artifacts.register;
-  let copies = 0,
-    streams = 0,
-    inspections = 0;
-  const registrations = [];
-  t.mock.method(Buffer, "from", function (...args) {
-    const item = args[0];
-    if (
-      ArrayBuffer.isView(item) &&
-      tracked.some(
-        (source) =>
-          item.buffer === source.buffer &&
-          item.byteOffset === source.offset &&
-          item.byteLength === source.size,
-      )
-    )
-      copies++;
-    return Reflect.apply(originalFrom, this, args);
-  });
-  t.mock.method(Blob.prototype, "stream", function (...args) {
-    // ArtifactStore streams its trusted native snapshot rather than the
-    // caller's Blob identity. Count the real delegated stream consumption.
-    streams++;
-    return Reflect.apply(originalStream, this, args);
-  });
-  t.mock.method(
-    f.artifacts,
-    "register",
-    function (source, scope, inspect, options) {
-      registrations.push(options?.maxBytes);
-      return Reflect.apply(originalRegister, this, [
-        source,
-        scope,
-        inspect &&
-          (async (...args) => {
-            inspections++;
-            return inspect(...args);
-          }),
-        options,
-      ]);
-    },
-  );
-  for (const source of [image, imageBlob]) {
-    const saved = await f.encoder.encode(
-      f.output.image({ data: source }),
-      f.scope(),
-    );
-    rmSync(
-      path.dirname(path.dirname(f.contentPath(saved.content[0].resource))),
-      { recursive: true },
-    );
-  }
-  assert.ok(copies > 0);
-  assert.ok(streams > 0);
-  assert.equal(inspections, 2);
-  copies = 0;
-  streams = 0;
-  inspections = 0;
-  registrations.length = 0;
+
+test("native bytes and Blob exceeding inline budgets still produce bounded, readable file resources", async (t) => {
+  const f = await fixture(t), image = png(), binary = Buffer.alloc(256, 65);
+  const imageBlob = new Blob([image], { type: "image/png" });
+  const binaryBlob = new Blob([binary]);
   for (const source of [image, imageBlob]) {
     const bounded = new ResultEncoder(f.artifacts, {
-      imageBytes: image.length - 1,
+      imageBytes: image.length - 1
     });
-    await assert.rejects(
-      () => bounded.encode(f.output.image({ data: source }), f.scope()),
-      { code: "inline_media_too_large" },
-    );
+    const saved = await bounded.encode(f.output.image({ data: source }), f.scope());
+    assert.equal(saved.content[0].type, "resource_link");
+    const identity = saved.content[0].resource;
+    assert.equal(identity.mimeType, "image/png");
+    const bytes = await f.artifacts.read(identity.uri, f.scope(), { maxBytes: image.length });
+    assert.deepEqual(Buffer.from(bytes.data), image);
   }
   for (const source of [binary, binaryBlob]) {
     const bounded = new ResultEncoder(f.artifacts, {
-      inlineBytes: binary.length - 1,
+      inlineBytes: binary.length - 1
     });
-    await assert.rejects(
-      () =>
-        bounded.encode(
-          f.output.resource({
-            data: source,
-            mimeType: "application/octet-stream",
-          }),
-          f.scope(),
-        ),
-      { code: "resource_read_too_large" },
-    );
+    const saved = await bounded.encode(f.output.resource({
+      data: source, mimeType: "application/octet-stream"
+    }), f.scope());
+    assert.equal(saved.content[0].type, "resource_link");
+    const identity = saved.content[0].resource;
+    const bytes = await f.artifacts.read(identity.uri, f.scope(), { maxBytes: binary.length });
+    assert.deepEqual(Buffer.from(bytes.data), binary);
   }
-  assert.deepEqual(registrations, [
-    image.length - 1,
-    image.length - 1,
-    binary.length - 1,
-    binary.length - 1,
-  ]);
-  assert.equal(copies, 0);
-  assert.equal(streams, 0);
-  assert.equal(inspections, 0);
-  assert.deepEqual(readdirSync(f.artifacts.directory), []);
-  assert.deepEqual((await f.artifacts.list(f.scope())).resources, []);
 });
 
 test("result descriptions retain five content kinds and actual resource coordinates without reading media bytes", async (t) => {

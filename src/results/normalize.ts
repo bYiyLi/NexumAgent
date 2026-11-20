@@ -16,7 +16,7 @@ export interface NormalizeOptions {
   mode?: "auto" | "data";
   pwd?: string;
   /** Diagnostic location; long prefixes are bounded and marked in conversions/errors. */
-  resolveContent?(value: unknown, position: string): Promise<JsonValue>;
+  resolveContent?(value: unknown, position: string, pointer: string): Promise<JsonValue>;
   /** Issued Offers use this same walk/budget, including explicit pure data. */
   resolveTransferOffer?(value: unknown): Promise<JsonValue>;
   /** Trusted remote protocol results use this same bounded data walk. */
@@ -31,6 +31,7 @@ export interface NormalizeOptions {
 export interface NormalizedData {
   data: JsonValue;
   conversions: JsonObject[];
+  references?: JsonObject[];
 }
 
 const href = Object.getOwnPropertyDescriptor(URL.prototype, "href")!.get!;
@@ -65,8 +66,10 @@ const regexFlags = [
 interface ResultPath {
   text: string;
   truncated: boolean;
+  /** Exact bounded JSON Pointer for reference and resource locations. */
+  pointer: string | null;
 }
-const rootPath: ResultPath = { text: "$", truncated: false };
+const rootPath: ResultPath = { text: "$", truncated: false, pointer: "" };
 const pathByteLimit = 512;
 function safePath(position: ResultPath): JsonObject {
   return {
@@ -81,19 +84,25 @@ function appendPath(
   position: ResultPath,
   segment: string,
   segmentTruncated = false,
+  pointerSegment?: string,
 ): ResultPath {
-  if (position.truncated) return position;
+  if (position.truncated && position.pointer === null) return position;
   // A field contributes at most 512 source code units, so even JSON escaping
   // cannot create a large temporary path before this independent limit applies.
   const candidate = position.text + segment;
   const encoded = Buffer.from(candidate);
+  const escaped = pointerSegment?.slice(0, pathByteLimit).replace(/~/g, "~0").replace(/\//g, "~1");
+  const pointer = position.pointer !== null && escaped !== undefined && Buffer.byteLength(pointerSegment!) <= pathByteLimit && Buffer.byteLength(position.pointer) + Buffer.byteLength(escaped) + 1 <= pathByteLimit
+    ? position.pointer + "/" + escaped
+    : null;
   if (!segmentTruncated && encoded.byteLength <= pathByteLimit)
-    return { text: candidate, truncated: false };
+    return { text: candidate, truncated: false, pointer };
   let end = Math.min(encoded.byteLength, pathByteLimit - 3);
   while (end > 0 && (encoded[end]! & 0xc0) === 0x80) end--;
   return {
     text: encoded.subarray(0, end).toString("utf8") + "…",
     truncated: true,
+    pointer,
   };
 }
 function field(position: ResultPath, key: string): ResultPath {
@@ -104,7 +113,7 @@ function field(position: ResultPath, key: string): ResultPath {
     complete && /^[A-Za-z_$][\w$]*$/.test(prefix)
       ? `.${prefix}`
       : `[${JSON.stringify(prefix)}]`;
-  return appendPath(position, segment, !complete);
+  return appendPath(position, segment, !complete, key);
 }
 function own(value: object, key: string): boolean {
   return Object.hasOwn(value, key);
@@ -185,9 +194,9 @@ export async function normalizeData(
       "invalid_normalization_options",
       "Data normalization needs valid bounded limits and a known mode.",
     );
-  const pwd = options.pwd ?? path.resolve(".");
   const conversions: JsonObject[] = [];
-  const ancestors = new Set<object>();
+  const references: JsonObject[] = [];
+  const seen = new WeakMap<object, string>();
   let nodes = 0,
     bytes = 0,
     conversionBytes = 2;
@@ -309,7 +318,9 @@ export async function normalizeData(
     options.assertCurrent?.();
     let reference: JsonValue;
     try {
-      reference = await options.resolveContent(input, position.text);
+      if (position.pointer === null)
+        problem("result_reference_path_too_long", "Resource location exceeds the bounded JSON Pointer budget.", position);
+      reference = await options.resolveContent(input, position.text, position.pointer);
     } catch (cause) {
       const code =
         cause &&
@@ -370,7 +381,6 @@ export async function normalizeData(
     position: ResultPath,
     depth: number,
     pure: boolean,
-    synthetic = false,
   ): Promise<JsonValue> {
     options.assertCurrent?.();
     if (++nodes > maximum.nodes || depth > maximum.depth)
@@ -447,14 +457,19 @@ export async function normalizeData(
         "Await nested Promises before returning their containing data.",
         position,
       );
-    if (ancestors.has(input))
-      problem(
-        "invalid_result_data",
-        "Circular data cannot be represented as JSON.",
-        position,
-      );
-    ancestors.add(input);
-    try {
+    const first = seen.get(input);
+    if (first !== undefined) {
+      if (position.pointer === null)
+        problem("result_reference_path_too_long", "A shared result location exceeds the JSON Pointer budget.", position);
+      if (references.length >= Math.min(maximum.nodes, 1000))
+        problem("result_data_too_large", "Too many object graph references.", position);
+      references.push({ path: position.pointer, target: first });
+      return await visit({ $nexumRef: first }, position, depth, true);
+    }
+    if (position.pointer === null)
+      problem("result_reference_path_too_long", "An object location exceeds the JSON Pointer budget.", position);
+    seen.set(input, position.pointer);
+    {
       if (mcpResult(input)) {
         if (!options.resolveMcpResult)
           problem(
@@ -491,20 +506,9 @@ export async function normalizeData(
           );
         return await media(known, position, depth, "content");
       }
-      if (!pure && !synthetic) {
-        let content: ReturnType<typeof contentValue>;
-        try {
-          content = contentValue(input, pwd);
-        } catch (cause) {
-          throw new AgentError(
-            "invalid_result_content",
-            "The content description is invalid.",
-            safePath(position),
-            { cause },
-          );
-        }
-        if (content) return await media(content, position, depth, "content");
-      }
+      // Ordinary business objects cannot claim MCP content semantics via
+      // type/path/data fields. Only trusted output intents and native media
+      // identities are automatically captured as content.
       if (types.isSharedArrayBuffer(input))
         problem(
           "invalid_result_data",
@@ -569,7 +573,7 @@ export async function normalizeData(
           entries.push([key, value]),
         );
         converted(position, "Map", "entries");
-        return await visit(entries, position, depth, pure, true);
+        return await visit(entries, position, depth, pure);
       }
       if (types.isSet(input)) {
         const size = Reflect.apply(setSize, input, []) as number;
@@ -582,7 +586,7 @@ export async function normalizeData(
         const items: unknown[] = [];
         Set.prototype.forEach.call(input, (item: unknown) => items.push(item));
         converted(position, "Set", "array");
-        return await visit(items, position, depth, pure, true);
+        return await visit(items, position, depth, pure);
       }
       if (types.isRegExp(input)) {
         const source = Reflect.apply(regexSource, input, []) as string;
@@ -591,7 +595,7 @@ export async function normalizeData(
           .map(({ flag }) => flag)
           .join("");
         converted(position, "RegExp", "object");
-        return await visit({ source, flags }, position, depth, pure, true);
+        return await visit({ source, flags }, position, depth, pure);
       }
       const url = nativeValue(href, input);
       if (typeof url === "string") {
@@ -621,7 +625,7 @@ export async function normalizeData(
           });
         }
         converted(position, "Error", "object");
-        return await visit(error, position, depth, pure, true);
+        return await visit(error, position, depth, pure);
       }
       if (Array.isArray(input)) {
         const length = dataProperty(input, "length", position) as number;
@@ -635,7 +639,7 @@ export async function normalizeData(
         charge(2, position);
         for (let index = 0; index < length; index++) {
           if (index) charge(1, position);
-          const itemPath = appendPath(position, `[${index}]`);
+          const itemPath = appendPath(position, `[${index}]`, false, String(index));
           const descriptor = Object.getOwnPropertyDescriptor(
             input,
             String(index),
@@ -684,17 +688,15 @@ export async function normalizeData(
         });
       }
       return result;
-    } finally {
-      ancestors.delete(input);
     }
   }
   const data = await visit(value, rootPath, 0, options.mode === "data");
   // Only fresh JSON produced above is serialized, never the original object graph.
-  if (Buffer.byteLength(JSON.stringify({ data, conversions })) > maximum.bytes)
+  if (Buffer.byteLength(JSON.stringify(references.length ? { data, conversions, references } : { data, conversions })) > maximum.bytes)
     problem(
       "result_data_too_large",
       "The final encoded data exceeds its byte budget.",
       rootPath,
     );
-  return { data, conversions };
+  return references.length ? { data, conversions, references } : { data, conversions };
 }

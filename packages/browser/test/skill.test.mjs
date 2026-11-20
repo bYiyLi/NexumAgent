@@ -7,7 +7,7 @@ import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const skillRoot = path.join(root, "skills", "browser-control");
-const read = (relative) => readFileSync(path.join(skillRoot, relative), "utf8");
+const read = (relative) => readFileSync(path.join(skillRoot, relative), "utf8").replace(/\r\n/g, "\n");
 const skill = read("SKILL.md");
 const references = path.join(skillRoot, "references");
 

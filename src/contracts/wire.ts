@@ -345,6 +345,9 @@ export interface WireResultV2 {
   };
   readonly resultType?: "complete";
   readonly mcpResults?: readonly JsonObject[];
+  readonly references?: readonly { readonly path: string; readonly target: string }[];
+  readonly contentAssociations?: readonly { readonly path: string; readonly contentIndex: number }[];
+  readonly resources?: readonly { readonly path: string; readonly uri: string; readonly name: string; readonly mimeType: string; readonly size: number; readonly sha256: string; readonly contentIndex: number; readonly delivery: "inline" | "resource_link" }[];
   readonly protocolMeta?:
     { readonly value: JsonObject } | { readonly stream: WireFixedStreamRefV2 };
 }

@@ -250,6 +250,8 @@ export class ResultEncoder {
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
     const result: StoredResult = { content: [] };
+    const resources: JsonObject[] = [];
+    const contentAssociations: JsonObject[] = [];
     const remoteResults: JsonObject[] = [],
       remoteSeen = new WeakMap<object, number>();
     let remoteMetaBytes = 2;
@@ -418,7 +420,15 @@ export class ResultEncoder {
         if (cacheKey) paths.set(cacheKey, pending);
         else if (objectKey) identities.set(objectKey, pending);
       }
-      return await pending;
+      try {
+        return await pending;
+      } catch (error) {
+        // A failed media-inline registration must not poison a later bounded
+        // resource-link registration for this same native source.
+        if (cacheKey) paths.delete(cacheKey);
+        else if (objectKey) identities.delete(objectKey);
+        throw error;
+      }
     };
     const resolveOffer = async (value: unknown): Promise<JsonObject> => {
       const known = transferOffer(value);
@@ -551,29 +561,94 @@ export class ResultEncoder {
       if (kind === "resource" && source.resource) {
         const embedded = source.resource as Readonly<Record<string, unknown>>;
         encoding = typeof embedded.text === "string" ? "text" : "blob";
-        if (encoding === "text")
-          requireCondition(
-            Buffer.byteLength(embedded.text as string) <= this.limits.textBytes,
-            "resource_read_too_large",
-            "Embedded text exceeds its inline context budget; choose a resource link.",
-          );
+        const textSize =
+          encoding === "text" ? Buffer.byteLength(embedded.text as string) : 0;
+        requireCondition(
+          textSize <= this.artifacts.maxFileBytes,
+          "resource_too_large",
+          "The embedded text exceeds the authorized file storage budget.",
+        );
         const bytes =
           encoding === "text"
             ? Buffer.from(embedded.text as string)
             : typeof embedded.blob === "string"
-              ? encodedBytes(embedded.blob, this.limits.inlineBytes)
+              ? encodedBytes(embedded.blob, this.artifacts.maxFileBytes)
               : embedded.blob;
-        resource = await fixed(
-          {
-            data: bytes,
-            ...(embedded.mimeType
-              ? { mimeType: embedded.mimeType }
-              : encoding === "text"
-                ? { mimeType: "text/plain; charset=utf-8" }
-                : {}),
-          },
-          kind,
-        );
+        const bodySource = {
+          data: bytes,
+          ...(embedded.mimeType
+            ? { mimeType: embedded.mimeType }
+            : encoding === "text"
+              ? { mimeType: "text/plain; charset=utf-8" }
+              : {}),
+        };
+        if (encoding === "text" && textSize > this.limits.textBytes) {
+          resource = await fixed(bodySource, "resource_link");
+          kind = "resource_link";
+        } else {
+          try {
+            resource = await fixed(bodySource, kind);
+          } catch (cause) {
+            if (
+              !(cause instanceof AgentError) ||
+              !["inline_content_too_large", "resource_read_too_large"].includes(cause.code)
+            ) throw cause;
+            resource = await fixed(bodySource, "resource_link");
+            kind = "resource_link";
+          }
+        }
+      } else if (kind === "image" || kind === "audio") {
+        const originalKind = kind;
+        try {
+          resource = await fixed(source, originalKind);
+        } catch (cause) {
+          if (
+            !(cause instanceof AgentError) ||
+            !["inline_media_too_large", "inline_content_too_large"].includes(cause.code)
+          ) throw cause;
+          // The inline ceiling does not invalidate the original media bytes.
+          // Save a resource link without treating a caller MIME hint as proof.
+          const genericSource = { ...source };
+          delete (genericSource as Record<string, unknown>).mimeType;
+          resource = await fixed(genericSource, "resource_link");
+          if (resource.size <= this.artifacts.maxReadBytes) {
+            // A file extension or declared MIME is not proof of actual media.
+            // For bounded media also verify the real saved bytes and any hint.
+            const bytes = await this.artifacts.read(resource.uri, scope, {
+              maxBytes: this.artifacts.maxReadBytes,
+            });
+            const detected = await validateMedia(
+              bytes.data,
+              originalKind,
+              typeof source.mimeType === "string" ? source.mimeType : undefined,
+              { signal: scope.signal, maxBytes: this.artifacts.maxReadBytes },
+            );
+            requireCondition(
+              resource.mimeType === "application/octet-stream" ||
+                resource.mimeType === detected.mimeType,
+              "media_type_mismatch",
+              "Registered media metadata differs from verified saved bytes.",
+            );
+          } else {
+            requireCondition(
+              resource.mimeType.startsWith(originalKind + "/"),
+              "unsupported_media_format",
+              "Large media source has no verified format; use a generic file.",
+            );
+          }
+          kind = "resource_link";
+        }
+      } else if (kind === "resource") {
+        try {
+          resource = await fixed(source, kind);
+        } catch (cause) {
+          if (
+            !(cause instanceof AgentError) ||
+            !["inline_content_too_large", "resource_read_too_large"].includes(cause.code)
+          ) throw cause;
+          resource = await fixed(source, "resource_link");
+          kind = "resource_link";
+        }
       } else resource = await fixed(source, kind);
       let mimeType = resource.mimeType;
       if (kind === "image" || kind === "audio") {
@@ -736,7 +811,9 @@ export class ResultEncoder {
           ? {}
           : { resultType: known.model.resultType }),
       };
-      if (known.model.isError === true) result.isError = true;
+      // A nested upstream MCP error is data about that upstream result, not
+      // an error in the containing Nexum Run. Only a top-level MCP result or
+      // an explicit output.error()/output.result({isError:true}) marks isError.
       result.mcpResults ??= [] as JsonValue[];
       if (explicit) {
         const normalized = await normalizeData(association, {
@@ -758,13 +835,43 @@ export class ResultEncoder {
         pwd: scope.pwd,
         maxBytes: this.limits.maxDataBytes,
         assertCurrent: () => scope.assertCurrent(),
-        resolveContent: (value) => append(value),
+        resolveContent: async (value, _diagnostic, pointer) => {
+          const reference = await append(value);
+          if (typeof reference.contentIndex === "number") {
+            requireCondition(contentAssociations.length < 1000, "result_content_too_large", "Too many nested content locations.");
+            contentAssociations.push({ path: pointer, contentIndex: reference.contentIndex });
+          }
+          if (typeof reference.uri === "string" && typeof reference.contentIndex === "number") {
+            const item = result.content[reference.contentIndex];
+            const resource = item?.resource as JsonObject | undefined;
+            if (resource && typeof resource.sha256 === "string") {
+              requireCondition(resources.length < 1000, "result_content_too_large", "Too many resource locations in one result.");
+              resources.push({
+                path: pointer,
+                uri: reference.uri,
+                name: String(resource.name ?? reference.name ?? ""),
+                mimeType: String(item?.mimeType ?? resource.mimeType ?? "application/octet-stream"),
+                size: Number(resource.size ?? reference.size ?? 0),
+                sha256: resource.sha256,
+                delivery: item?.type === "resource_link" ? "resource_link" : "inline",
+                contentIndex: reference.contentIndex,
+              });
+            }
+          }
+          return reference;
+        },
         resolveTransferOffer: resolveOffer,
         resolveMcpResult: (value) => resolveMcp(value),
       });
       result.data = normalized.data;
       if (normalized.conversions.length)
         result.conversions = normalized.conversions;
+      if (normalized.references?.length)
+        result.references = normalized.references;
+      if (resources.length)
+        result.resources = resources;
+      if (contentAssociations.length)
+        result.contentAssociations = contentAssociations;
     };
     const intent = outputIntent(value),
       remote = mcpResult(value);
@@ -788,11 +895,8 @@ export class ResultEncoder {
       if (body.isError !== undefined) result.isError = body.isError;
     } else if (intent?.kind === "json") await data(intent.value, true);
     else if (value === undefined) {
-    } else if (typeof value === "string")
-      await append(
-        createOutput(scope.pwd, () => scope.assertCurrent()).text(value),
-      );
-    else if (intent || contentValue(value, scope.pwd)) await append(value);
+    } else if (typeof value === "string") await data(value);
+    else if (intent) await append(value);
     else if (!types.isProxy(value) && Array.isArray(value) && value.length) {
       // Descriptor-based normalization below rejects holes/accessors without executing them.
       requireCondition(
@@ -807,7 +911,7 @@ export class ResultEncoder {
         if (
           !item ||
           !("value" in item) ||
-          !(mcpResult(item.value) || contentValue(item.value, scope.pwd))
+          !(mcpResult(item.value) || outputIntent(item.value))
         ) {
           all = false;
           break;
@@ -900,6 +1004,9 @@ export class ResultEncoder {
       run,
       ...(Object.hasOwn(result, "data") ? { data: result.data! } : {}),
       ...(result.conversions ? { conversions: result.conversions } : {}),
+      ...(result.references ? { references: result.references } : {}),
+      ...(result.resources ? { resultResources: result.resources } : {}),
+      ...(result.contentAssociations ? { contentAssociations: result.contentAssociations } : {}),
       ...(result.mcpResults
         ? {
             mcpResults: (result.mcpResults as JsonObject[]).map((entry) => ({
@@ -1094,12 +1201,16 @@ export class ResultEncoder {
   }
   async #fit(result: StoredResult, scope: ArtifactScope): Promise<void> {
     const hasData =
-      Object.hasOwn(result, "data") || Object.hasOwn(result, "mcpResults");
+      Object.hasOwn(result, "data") || Object.hasOwn(result, "mcpResults") ||
+      Object.hasOwn(result, "references") || Object.hasOwn(result, "resources") || Object.hasOwn(result, "contentAssociations");
     const dataText = hasData
       ? JSON.stringify({
           ...(Object.hasOwn(result, "data") ? { data: result.data } : {}),
           ...(result.mcpResults ? { mcpResults: result.mcpResults } : {}),
           ...(result.conversions ? { conversions: result.conversions } : {}),
+          ...(result.references ? { references: result.references } : {}),
+          ...(result.resources ? { resources: result.resources } : {}),
+          ...(result.contentAssociations ? { contentAssociations: result.contentAssociations } : {}),
         })
       : undefined;
     let obvious =
@@ -1140,6 +1251,9 @@ export class ResultEncoder {
       delete result.data;
       delete result.conversions;
       delete result.mcpResults;
+      delete result.references;
+      delete result.resources;
+      delete result.contentAssociations;
       changed = true;
       summary.push({
         type: "resource_link",
@@ -1329,6 +1443,15 @@ export class ResultEncoder {
       ...(result.conversions === undefined
         ? {}
         : { conversions: result.conversions }),
+      ...(result.references === undefined
+        ? {}
+        : { references: result.references }),
+      ...(result.resources === undefined
+        ? {}
+        : { resources: result.resources }),
+      ...(result.contentAssociations === undefined
+        ? {}
+        : { contentAssociations: result.contentAssociations }),
       ...(structured.mcpResults === undefined
         ? {}
         : { mcpResults: structured.mcpResults }),

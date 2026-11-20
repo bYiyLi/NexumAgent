@@ -632,7 +632,7 @@ test("nested and explicit pure-data MCP results preserve association, content an
       textFallback: false,
     });
     assert.equal(response.content[0].text, "remote");
-    assert.equal(response.isError, true);
+    assert.equal(response.isError, undefined);
     assert.equal(response.structuredContent.run.status, "succeeded");
     const associated =
       response.structuredContent.data.list?.[0].remote ??
@@ -642,6 +642,12 @@ test("nested and explicit pure-data MCP results preserve association, content an
     assert.equal(associated.structuredContent._meta.business, true);
     noSecret(modelOnly(response));
   }
+  const topLevel = await f.encoder.encode(remote, f.scope());
+  assert.equal(topLevel.isError, true, "explicit top-level upstream result preserves tool error");
+  const declared = await f.encoder.encode(f.output.result({
+    content: [remote], structuredContent: { handled: false }, isError: true
+  }), f.scope());
+  assert.equal(declared.isError, true, "author-declared tool error remains explicit");
   await assert.rejects(
     normalizeData(remote, {
       mode: "data",
@@ -862,7 +868,8 @@ test("Registry native copies preserve branded nested results while automatic log
   );
   assert.equal(completed.result.mcpSources.length, 1);
   assert.equal(completed.result.data.nested.mcpResult, 0);
-  assert.equal(completed.result.data.again[0].mcpResult, 0);
+  assert.deepEqual(completed.result.data.again[0], { $nexumRef: "/nested" });
+  assert.deepEqual(completed.result.references, [{ path: "/again/0", target: "/nested" }]);
   assert.deepEqual(
     completed.result.mcpResults?.map((entry) => entry.mcpResult),
     [0],
@@ -1102,7 +1109,8 @@ test("transport descriptions preserve remote result slots and isolate Host metad
   const described = await f.encoder.describe(saved, f.scope());
   noSecret(described.result);
   assert.equal(described.hostMeta.privateHostState, secret);
-  assert.equal(described.result.isError, true);
+  assert.equal(described.result.isError, undefined, "nested upstream errors are not the containing result error");
+  assert.equal(described.result.mcpResults[0].isError, true);
   assert.deepEqual(described.result.mcpResults[0].structuredContent, {
     count: 2,
   });
@@ -1118,4 +1126,29 @@ test("transport descriptions preserve remote result slots and isolate Host metad
   await assert.rejects(f.encoder.describe(saved, f.scope()), {
     code: "forbidden",
   });
+});
+
+
+test("V1.1 nested image above inline policy becomes a real readable resource link", async (t) => {
+  const f = await fixture(t, { limits: { imageBytes: 32 } });
+  const pngData = png();
+  const source = f.output.image({ data: pngData, mimeType: "image/png" });
+  const saved = await f.encoder.encode({ screenshot: source }, f.scope());
+  assert.equal(saved.content.length, 1);
+  assert.equal(saved.content[0].type, "resource_link");
+  assert.equal(saved.resources.length, 1);
+  assert.equal(saved.resources[0].path, "/screenshot");
+  assert.equal(saved.resources[0].delivery, "resource_link");
+  assert.equal(saved.resources[0].contentIndex, 0);
+  assert.equal(saved.data.screenshot.uri, saved.resources[0].uri);
+  assert.equal(saved.data.screenshot.mimeType, "image/png");
+  const bytes = await f.artifacts.read(saved.resources[0].uri, f.scope(), { maxBytes: 1024 });
+  assert.deepEqual(Buffer.from(bytes.data), pngData);
+  const described = await f.encoder.describe(saved, f.scope());
+  assert.equal(described.result.content[0].type, "resource_link");
+  assert.equal(described.result.resources[0].uri, saved.data.screenshot.uri);
+  await assert.rejects(
+    f.encoder.encode({ screenshot: f.output.image({ data: pngData, mimeType: "image/jpeg" }) }, f.scope()),
+    { code: "media_type_mismatch" },
+  );
 });

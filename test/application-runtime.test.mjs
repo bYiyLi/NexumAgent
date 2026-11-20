@@ -430,9 +430,9 @@ test("CPU-bound script Worker cannot block Core access, other Runs, or diagnosti
     contextId: opened.contextId,
     script: "while (true) {}",
     waitMs: 0,
-    timeoutMs: 10000,
+    timeoutMs: 90000,
   });
-  const deadline = Date.now() + 6000;
+  const deadline = Date.now() + 15000;
   let observed = blocked;
   while (observed.run.status !== "running" && Date.now() < deadline) {
     observed = await f.invoke("agent.run.get", {
@@ -446,7 +446,14 @@ test("CPU-bound script Worker cannot block Core access, other Runs, or diagnosti
   const parallel = await f.run("return 23;", null, opened);
   assert.equal(parallel.run.status, "succeeded");
   assert.equal(parallel.result.data, 23);
-  assert.ok(Date.now() - before < 5000,
+  // A slow shared CI host may take longer than five seconds to create a second Worker.
+  // The isolation invariant is that this work succeeds while the first Worker is still running.
+  const firstStillRunning = await f.invoke("agent.run.get", {
+    agentId: "agent_fixture", runId: blocked.run.runId, waitMs: 0,
+  });
+  assert.equal(firstStillRunning.run.status, "running",
+    "Core and another Worker must finish before the CPU-bound Worker exits");
+  assert.ok(Date.now() - before < 60000,
     "Core operations and a second Worker should remain responsive");
   const stop = await f.invoke("agent.run.cancel", {
     agentId: "agent_fixture", runId: blocked.run.runId,

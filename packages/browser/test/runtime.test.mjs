@@ -1081,7 +1081,7 @@ test("a proven remote lease admission refusal closes that Core run resource with
   await f.router.endLease("old-owner");
   const next = await f.start(select + "return await tab.title();");
   assert.equal(next.run.status, "succeeded");
-  assert.equal(next.result.content[0].text, "Actual native fixture");
+  assert.equal(next.result.data, "Actual native fixture");
 });
 test("handoff reaches the nonblocking control plane while a native command is pending and cannot be undone by getting the tab again", async (t) => {
   const f = await fixture(t, { gateCommand: true });
