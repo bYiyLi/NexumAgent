@@ -67,7 +67,7 @@ return {first,unchanged,delta,full,afterFull,bothState:both.state,screenshotLeng
     const nextRun = await f.run(select + "return await tab.ax.get();", {
       base: f.base + "next",
     });
-    assert.match(nextRun.result.content[0].text, /^AX full\n/);
+    assert.match(nextRun.result.data, /^AX full\n/);
     assert.deepEqual(result.run.cleanup.unconfirmed, []);
     assert.deepEqual(nextRun.run.cleanup.unconfirmed, []);
     t.diagnostic(

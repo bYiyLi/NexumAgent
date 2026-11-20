@@ -561,9 +561,18 @@ export async function installAgent(options) {
         manifestPath: plan.manifestPath,
       };
     } finally {
-      if (staging) await rm(staging, { recursive: true, force: true });
-      await lock.close();
-      await rm(lockPath);
+      try {
+        if (staging)
+          await rm(staging, {
+            recursive: true,
+            force: true,
+            maxRetries: process.platform === "win32" ? 20 : 0,
+            retryDelay: 200,
+          });
+      } finally {
+        await lock.close();
+        await rm(lockPath);
+      }
     }
   } finally {
     await checked.dispose();
