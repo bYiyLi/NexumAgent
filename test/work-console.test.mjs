@@ -167,7 +167,7 @@ test("owner inspection exposes disabled metadata by Agent/Project while ordinary
   });
   assert.equal(opened.agent.management, undefined);
   assert.equal(opened.project.management, undefined);
-  assert.equal(opened.project.descriptionItemId, null);
+  assert.equal(Object.hasOwn(opened.project, "descriptionItemId"), false);
   assert.equal(opened.project.instructions.length, 0);
   assert.equal(opened.project.skills.length, 0);
 });
@@ -473,76 +473,39 @@ test("Skill subtree rejects aggregate byte or entry overflow and honors cancella
   );
 });
 
-test("project documents expose only the authorized README and Markdown docs tree", async (t) => {
+test("Project documents are not exposed as a special material", async (t) => {
   const f = fixture(t);
-  f.write(f.project, "README.md", "# Project Home");
   f.write(f.project, "docs/design/architecture.md", "# Architecture");
-  f.write(f.project, "docs/design/example.ts", "secret");
-  f.write(f.project, "docs/.internal.md", "hidden");
-  f.write(f.project, "src/private.md", "private");
   const opened = await f.service.open(mcp, {
     agentId: "agent",
     projectId: "project",
   });
-  const entries = (
-    await f.service.readMaterialEntries(mcp, opened.contextId, "project:docs")
-  ).entries;
-  assert.deepEqual(
-    entries.map((x) => x.displayPath),
-    ["README.md", "docs", "docs/design", "docs/design/architecture.md"],
-  );
-  assert.equal(
-    (
-      await f.service.readMaterial(
-        mcp,
-        opened.contextId,
-        "project:docs",
-        "docs/design/architecture.md",
-      )
-    ).bytes.toString(),
-    "# Architecture",
-  );
-  for (const forbidden of [
-    "docs/../src/private.md",
-    "../other/secret.md",
-    "docs/design/example.ts",
-    "docs/.internal.md",
-    "src/private.md",
-    "/etc/passwd",
-  ]) {
-    await assert.rejects(
-      f.service.readMaterial(mcp, opened.contextId, "project:docs", forbidden),
-      { code: "material_path_escape" },
-    );
-  }
-  const external = f.write(f.other, "outside.md", "# External");
-  const redirect = path.join(f.project, "docs", "redirect.md");
-  symlinkSync(external, redirect);
-  await assert.rejects(
-    f.service.readMaterial(
-      mcp,
-      opened.contextId,
-      "project:docs",
-      "docs/redirect.md",
-    ),
-    { code: "material_path_escape" },
-  );
-  f.revoke();
-  await assert.rejects(
-    f.service.readMaterialEntries(mcp, opened.contextId, "project:docs"),
-    { code: "forbidden" },
-  );
-});
-
-test("project document browsing requires an actual Project-bound work", async (t) => {
-  const f = fixture(t);
-  const opened = await f.service.open(mcp, { agentId: "agent" });
   await assert.rejects(
     f.service.readMaterialEntries(mcp, opened.contextId, "project:docs"),
     { code: "material_forbidden" },
   );
   await assert.rejects(
-    f.service.readMaterial(mcp, opened.contextId, "project:docs", "README.md"),
+    f.service.readMaterial(
+      mcp,
+      opened.contextId,
+      "project:docs",
+      "docs/design/architecture.md",
+    ),
+    { code: "material_forbidden" },
+  );
+});
+
+test("regular MCP work does not publish Console README materials", async (t) => {
+  const f = fixture(t);
+  f.write(f.project, "README.md", "# Project description");
+  const opened = await f.service.open(mcp, {
+    agentId: "agent",
+    projectId: "project",
+  });
+  assert.equal(Object.hasOwn(opened.project, "descriptionItemId"), false);
+  assert.match(opened.project.description, /Project description/);
+  await assert.rejects(
+    f.service.readMaterial(mcp, opened.contextId, "readme:not-published"),
     { code: "material_forbidden" },
   );
 });

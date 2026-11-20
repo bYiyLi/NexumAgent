@@ -397,8 +397,18 @@ export class SqliteStore {
 
   close(): void {
     if (!this.#closed) {
-      this.#db.close();
-      this.#closed = true;
+      try {
+        // Bun 1.4.5 cannot reopen an exclusive WAL database read-only
+        // after its final writer exits. Transition to the ordinary DELETE
+        // journal only during shutdown, after all managed writes complete;
+        // a subsequent Node or Bun Core re-enables exclusive WAL at startup.
+        if ("bun" in process.versions) {
+          this.#db.exec("PRAGMA locking_mode=NORMAL; PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE");
+        }
+      } finally {
+        this.#db.close();
+        this.#closed = true;
+      }
     }
   }
 

@@ -8,15 +8,6 @@ import {
 import { snapshotBlob, type BlobSnapshot } from "../results/artifacts.js";
 
 const require = createRequire(import.meta.url);
-const swagger = require("swagger-client") as {
-  buildRequest(options: Record<string, unknown>): Record<string, any>;
-};
-// Pinned swagger-client serializer: unlike its OAS3 body adapter, this does not
-// JSON.parse arbitrary string form fields before serializing them.
-const { serializeRequest } =
-  require("swagger-client/lib/http/serializers/request/index.js") as {
-    serializeRequest(request: Record<string, any>): Record<string, any>;
-  };
 
 export interface OpenApiRequestOptions {
   document: Record<string, any>;
@@ -808,6 +799,11 @@ function build(options: OpenApiRequestOptions): OpenApiRequest {
     responseContentType: accept,
     attachContentTypeForEmptyPayload: hasBody,
   };
+  // Load the full Swagger client only when an API request is actually built.
+  // Node caches this require after the first invocation.
+  const swagger = require("swagger-client") as {
+    buildRequest(options: Record<string, unknown>): Record<string, any>;
+  };
   // Cookie builders overwrite Cookie. Build each cookie on its own operation
   // view and combine their already-encoded pairs in declaration order.
   const cookieHeaders: string[] = [];
@@ -830,6 +826,11 @@ function build(options: OpenApiRequestOptions): OpenApiRequest {
   document.paths[options.path]![method]!.parameters = operation.parameters;
   const request = swagger.buildRequest(buildOptions);
   if (form) {
+    // This pinned serializer preserves literal form fields without JSON.parse.
+    const { serializeRequest } =
+      require("swagger-client/lib/http/serializers/request/index.js") as {
+        serializeRequest(request: Record<string, any>): Record<string, any>;
+      };
     // Convert byte views only after all fields and their encoded bounds passed.
     for (const entry of Object.values(form)) {
       const type = entry.encoding?.contentType;

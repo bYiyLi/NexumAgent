@@ -39,7 +39,8 @@
     "build:extension-api": "node scripts/build-extension-api.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --experimental-vm-modules --test --test-concurrency=2 \"test/*.test.mjs\"",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "check:bun": "pnpm typecheck && pnpm build && node scripts/test-bun.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.4.0",

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import {
   buildOpenApiRequest,
@@ -45,6 +47,16 @@ function fixture({
 function fail(code, fn) {
   assert.throws(fn, (error) => error.code === code);
 }
+
+test("swagger-client is loaded only on the first real API call", () => {
+  // Bun executes multiple test files in one runtime; a shared require cache is
+  // not a valid cold-import precondition. Probe the actual cold child process.
+  const file = new URL("./fixtures/openapi-lazy-probe.mjs", import.meta.url);
+  const result = spawnSync(process.execPath, [fileURLToPath(file)], {
+    encoding: "utf8", timeout: 15000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
 
 test("positions distinguish equal names and preserve operation overrides without fetching", () => {
   const parameters = [
@@ -178,7 +190,8 @@ test("multipart retains literal strings, File metadata and byte view bounds", as
   assert.equal(form.get("json"), '{ "a": 1 }');
   assert.equal(form.get("empty"), "");
   assert.equal(form.get("upload").name, "report.txt");
-  assert.equal(form.get("upload").type, "text/plain");
+  assert.equal(form.get("upload").type,
+    new File(["x"], "x", { type: "text/plain" }).type);
   assert.equal(await form.get("upload").text(), "file");
   assert.deepEqual(
     new Uint8Array(await form.get("bytes").arrayBuffer()),
@@ -224,14 +237,26 @@ test("declared part media and JSON strings survive content-type parameters", asy
       },
     }),
   );
-  const form = await new Request(request.url, {
+  const inputForm = request.body;
+  assert.ok(inputForm instanceof FormData);
+  assert.match(inputForm.get("text").type, /^application\/json(?:;charset=utf-8)?$/);
+  assert.equal(inputForm.get("file").type, "image/png");
+  const native = new Request(request.url, {
     method: request.method,
     headers: request.headers,
     body: request.body,
-  }).formData();
+  });
+  // Assert the actual outgoing multipart part headers. Bun 1.4.5 loses
+  // native part MIME while parsing Request.formData(), but not while sending.
+  const wire = await native.clone().text();
+  assert.match(wire, /Content-Type: application\/json(?:;charset=utf-8)?\r\n/);
+  assert.match(wire, /Content-Type: image\/png\r\n/);
+  const form = await native.formData();
   assert.equal(await form.get("text").text(), '"hello"');
-  assert.equal(form.get("text").type, "application/json");
-  assert.equal(form.get("file").type, "image/png");
+  if (!("bun" in process.versions)) {
+    assert.equal(form.get("text").type, "application/json");
+    assert.equal(form.get("file").type, "image/png");
+  }
   fail("api_unsupported_media", () =>
     buildOpenApiRequest(
       fixture({
@@ -550,7 +575,8 @@ test("forged Blob Symbol accessors never run and real File shadow getters are st
   }).formData();
   assert.equal(await result.get("file").text(), "native");
   assert.equal(result.get("file").name, "safe.txt");
-  assert.equal(result.get("file").type, "text/plain");
+  assert.equal(result.get("file").type,
+    new File(["x"], "x", { type: "text/plain" }).type);
   assert.equal(calls, 0);
 });
 

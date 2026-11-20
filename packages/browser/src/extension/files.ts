@@ -41,20 +41,20 @@ const chunkBytes = 65536;
 const nativeBlob = Blob;
 const blobProbe = new nativeBlob([]);
 const symbols = Object.getOwnPropertySymbols(blobProbe);
+const bunBlob = "bun" in process.versions;
 const handleKey = symbols.find((key) => key.description === "kHandle")!;
 const sizeKey = symbols.find((key) => key.description === "kLength")!;
 const typeKey = symbols.find((key) => key.description === "kType")!;
-const handlePrototype = Object.getPrototypeOf(
+const handlePrototype = bunBlob ? null : Object.getPrototypeOf(
   Object.getOwnPropertyDescriptor(blobProbe, handleKey)!.value,
 );
-const handleSlice = Object.getOwnPropertyDescriptor(
-  handlePrototype,
-  "slice",
-)!.value;
-const handleReader = Object.getOwnPropertyDescriptor(
-  handlePrototype,
-  "getReader",
-)!.value;
+const handleSlice = handlePrototype === null ? null
+  : Object.getOwnPropertyDescriptor(handlePrototype, "slice")!.value;
+const handleReader = handlePrototype === null ? null
+  : Object.getOwnPropertyDescriptor(handlePrototype, "getReader")!.value;
+const nativeSize = Object.getOwnPropertyDescriptor(nativeBlob.prototype, "size")!.get!;
+const nativeType = Object.getOwnPropertyDescriptor(nativeBlob.prototype, "type")!.get!;
+
 const blobStream = Blob.prototype.stream;
 const getReader = ReadableStream.prototype.getReader;
 const typedPrototype = Object.getPrototypeOf(Uint8Array.prototype);
@@ -579,6 +579,25 @@ function blobSnapshot(
     prototype = Object.getPrototypeOf(prototype);
   }
   if (!found) return null;
+  if (bunBlob) {
+    // Bun stores native Blob slots privately, not in Node kHandle Symbols.
+    // Its captured intrinsic slice/getters verify the native brand without
+    // invoking user-overridden getters or copying uncontrolled source objects.
+    let size: number, type: string;
+    try {
+      Reflect.apply(nativeBlob.prototype.slice, value, [0, 0]);
+      size = Reflect.apply(nativeSize, value, []);
+      type = Reflect.apply(nativeType, value, []);
+    } catch {
+      throw failure("INVALID_ARGUMENT", "The Blob has no native runtime data.");
+    }
+    check(Number.isSafeInteger(size) && size >= 0 && size <= maximum,
+      "OUTPUT_TOO_LARGE", "Browser file inputs exceed the 128 MiB local protocol budget.");
+    check(typeof type === "string" && type.length <= 256 && !/[\r\n\0]/.test(type),
+      "INVALID_ARGUMENT", "Blob MIME metadata must be bounded text.");
+    const blob = Reflect.apply(nativeBlob.prototype.slice, value, [0, size, type]);
+    return { blob, size, mimeType: Reflect.apply(nativeType, blob, []) };
+  }
   const field = (key: symbol): unknown => {
     const d = Object.getOwnPropertyDescriptor(value, key);
     check(

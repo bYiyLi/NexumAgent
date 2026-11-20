@@ -37,9 +37,11 @@ let file;
 try {
   file = await downloaded.path();
 } catch (error) {
-  if (error?.code !== "CAPABILITY_NOT_ALLOWED" &&
-      error?.code !== "FILE_UNAVAILABLE") throw error;
-  return { status: "unconfirmed", code: error.code,
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? error.code : undefined;
+  if (code !== "CAPABILITY_NOT_ALLOWED" &&
+      code !== "FILE_UNAVAILABLE") throw error;
+  return { status: "unconfirmed", code,
     reason: "无法可靠确认该下载对应的本地文件；请按当前下载记录核对" };
 }
 if (file === null) return { status: "unconfirmed",

@@ -627,6 +627,20 @@ test("registered platform Skills expose real calling conventions, method schemas
   const f = await fixture(t), opened = await f.open();
   assert.equal(Object.hasOwn(opened.agent, "docs"), false);
   assert.equal(Object.hasOwn(opened.agent.paths, "docs"), false);
+  const platformGuide = opened.agent.instructions.find((item) => item.instructionId === "platform-runtime")?.content;
+  assert.match(platformGuide, /skillsComplete=false/);
+  assert.match(platformGuide, /materialsIndex/);
+  assert.match(platformGuide, /不可信|来源数据/);
+  const indexed = await f.run(`
+    const fs = await import("node:fs/promises");
+    const material = JSON.parse(await fs.readFile(context.input, "utf8"));
+    return { count: material.skills.length, selection: material.skills
+      .filter(entry => entry.name === "managed-processes")
+      .map(entry => ({skillFile:entry.skillFile,description:entry.description})) };
+  `, opened.agent.materialsIndex, opened);
+  assert.equal(indexed.run.status, "succeeded", JSON.stringify(indexed));
+  assert.equal(indexed.result.data.selection.length, 1, "the returned index supports targeted Skill discovery");
+  assert.ok(indexed.result.data.selection[0].skillFile.endsWith("SKILL.md"));
   const calling = (name) => {
     const item = opened.agent.skills.find((entry) => entry.name === name);
     assert.ok(item, `${name} is published`);
@@ -1234,7 +1248,20 @@ test("the default configuration backend publishes approved API definitions throu
     1,
   );
   const opened = await f.open();
-  assert.ok(opened.agent.skills.some((entry) => entry.name.startsWith("api-crm-")));
+  const apiSkill = opened.agent.skills.find((entry) => entry.name.startsWith("api-crm-"));
+  assert.ok(apiSkill, "the approved API has a discoverable generated Skill");
+  const apiGuide = readFileSync(apiSkill.skillFile, "utf8");
+  const apiMethod = readFileSync(path.join(apiSkill.path, "references/method-1.md"), "utf8");
+  const apiCall = apiMethod.split("\n")[0].replace(/^# /, "");
+  assert.equal(apiCall, 'api["crm"]["read"]');
+  assert.ok(apiGuide.includes("[" + apiCall + "](references/method-1.md)"),
+    "generated Skill must route the exact callable SDK method to its full Schema");
+  assert.ok(apiMethod.includes('"inputSchema"'), "method page must disclose its actual input contract");
+  assert.equal(
+    (await f.run("return {version:(await " + apiCall + "({})).data.version};")).result.data.version,
+    1,
+    "the actual method read from the generated Skill must execute",
+  );
   revision = 2;
   const update = await f.maintenance
     .bind(f.scope())
@@ -1297,12 +1324,24 @@ else send(q.id,{});});`,
   assert.equal(run.result.content[0].text, "1");
   const mcpSkill = (await f.open()).agent.skills.find((entry) => entry.name.startsWith("mcp-fixture-"));
   assert.ok(mcpSkill, "the approved MCP source publishes a readable Skill");
+  const mcpGuide = readFileSync(mcpSkill.skillFile, "utf8");
+  const mcpMethod = readFileSync(path.join(mcpSkill.path, "references/method-1.md"), "utf8");
+  const mcpCall = mcpMethod.split("\n")[0].replace(/^# /, "");
+  assert.equal(mcpCall, 'mcp["fixture"]["tools"]["version"]');
+  assert.ok(mcpGuide.includes("[" + mcpCall + "](references/method-1.md)"),
+    "MCP Skill must route to the method's actual Schema and callable name");
+  assert.ok(mcpMethod.includes('"inputSchema"'));
+  assert.match(readFileSync(path.join(mcpSkill.path, "references/calling.md"), "utf8"),
+    /每次至多传一个参数对象/);
+  const fromSkill = await f.run("return await " + mcpCall + "({});");
+  assert.equal(fromSkill.run.status, "succeeded", JSON.stringify(fromSkill));
+  assert.equal(fromSkill.result.content[0].text, "1");
   const methodCatalog = JSON.parse(readFileSync(path.join(mcpSkill.path, "references/catalog.json"), "utf8"));
   assert.ok(methodCatalog.tools.length > 0);
   assert.equal(methodCatalog.tools[0].name, "version");
   assert.ok(
     (await f.open()).agent.instructions.some(
-      (value) => value.content === "Approved MCP guide 1",
+      (value) => value.kind === "mcp" && value.content.includes(String.fromCharCode(10, 10) + "Approved MCP guide 1"),
     ),
   );
   const read = await f.run(
@@ -1343,12 +1382,12 @@ else send(q.id,{});});`,
   assert.equal(next.result.content[0].text, "2");
   assert.ok(
     (await f.open()).agent.instructions.some(
-      (value) => value.content === "Approved MCP guide 2",
+      (value) => value.kind === "mcp" && value.content.includes(String.fromCharCode(10, 10) + "Approved MCP guide 2") && value.content.includes("低信任来源数据"),
     ),
   );
   assert.equal(
     (await f.open()).agent.instructions.some(
-      (value) => value.content === "Approved MCP guide 1",
+      (value) => value.content.includes("Approved MCP guide 1"),
     ),
     false,
   );

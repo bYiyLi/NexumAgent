@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import ts from "typescript";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -125,4 +126,63 @@ test("model-facing JavaScript examples parse in async Run", () => {
       assert.doesNotThrow(() => new AsyncFunction(match[1]), file);
     }
   }
+});
+
+
+test("Browser Skill JavaScript examples typecheck against the actual public Browser SDK", () => {
+  const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
+  assert.equal(config.error, undefined, "Browser TypeScript configuration must load");
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  const filenames = [
+    "references/bootstrap.md",
+    "references/interaction.md",
+    "references/forms.md",
+    "references/observation.md",
+    "references/downloads.md",
+    "references/tabs-and-observation.md",
+  ];
+  const fence = String.fromCharCode(96).repeat(3);
+  const codeFence = new RegExp(fence + "javascript\\n([\\s\\S]*?)\\n" + fence, "g");
+  const snippets = filenames.flatMap((filename) =>
+    [...read(filename).matchAll(codeFence)].map((match) => ({
+      filename,
+      source: match[1],
+    })),
+  );
+  assert.ok(snippets.length >= 7, "expected all executable Browser Skill examples");
+
+  // Compile each snippet as a real asynchronous Run, without writing a file,
+  // and resolve Tab/Browser declarations from the exact published SDK source.
+  const virtualFile = path.join(root, "__skill_examples_contract_check__.ts");
+  let source =
+    'import type { Tab, Browser, BrowserClient } from "./src/client/types.js";\n' +
+    'import type { OutputAPI } from "../../src/sdk/output.js";\n' +
+    'declare const context: { input: any };\n' +
+    'declare const browser: Record<string, unknown>;\n' +
+    'declare const output: OutputAPI;\n' +
+    'declare const tab: Tab;\n' +
+    'declare const selected: Browser;\n' +
+    'declare const client: BrowserClient;\n';
+  for (const [i, snippet] of snippets.entries()) {
+    source += "async function example" + i + "() {\n" + snippet.source + "\n}\n";
+  }
+  const options = { ...parsed.options, rootDir: path.resolve(root, "../.."), noEmit: true };
+  const host = ts.createCompilerHost(options);
+  const originalGetSourceFile = host.getSourceFile.bind(host);
+  const originalFileExists = host.fileExists.bind(host);
+  host.fileExists = (filename) =>
+    path.normalize(filename) === virtualFile || originalFileExists(filename);
+  host.getSourceFile = (filename, languageVersion, onError, shouldCreate) =>
+    path.normalize(filename) === virtualFile
+      ? ts.createSourceFile(filename, source, languageVersion, true, ts.ScriptKind.TS)
+      : originalGetSourceFile(filename, languageVersion, onError, shouldCreate);
+  const program = ts.createProgram([virtualFile], options, host);
+  const errors = ts.getPreEmitDiagnostics(program).map((diagnostic) => ({
+    file: diagnostic.file?.fileName.replace(root, ""),
+    line: diagnostic.file && diagnostic.start !== undefined
+      ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1
+      : undefined,
+    message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+  }));
+  assert.deepEqual(errors, [], "published Browser examples must use actual SDK methods and signatures");
 });

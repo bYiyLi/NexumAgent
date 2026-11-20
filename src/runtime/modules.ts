@@ -314,12 +314,56 @@ export class ModuleLoader {
 
   #entry(authorized: AuthorizedModule, mode: "import" | "require"): string {
     if (authorized.kind === "builtin") return authorized.specifier;
-    const entry =
-      authorized.kind === "file"
+    let entry: string | undefined;
+    try {
+      entry = authorized.kind === "file"
         ? authorized.specifier
         : mode === "import"
           ? this.#bridge.resolveFromWork(authorized.specifier)
           : pathToFileURL(this.#require.resolve(authorized.specifier)).href;
+    } catch (cause) {
+      // Bun 1.4 may fail to walk from work/tmp/runtime/<worker>/importer.mjs
+      // back to work/node_modules after an approved package refresh. Resolve
+      // from the authenticated Work root, then enforce the same canonical
+      // approved-package containment check below. This does NOT bypass approval.
+      const bun = (globalThis as {
+        Bun?: { resolveSync: (specifier: string, from: string) => string };
+      }).Bun;
+      if (bun && mode === "import" && authorized.kind === "npm" &&
+          cause && typeof cause === "object" &&
+          (cause as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
+        try {
+          entry = pathToFileURL(bun.resolveSync(authorized.specifier, this.work)).href;
+        } catch { /* Preserve the native error or restricted-export diagnosis. */ }
+      }
+      if (!entry) {
+      // Bun reports ERR_MODULE_NOT_FOUND even for an excluded package
+      // subpath. Preserve Node's diagnostic only when the approved package
+      // manifest proves that no subpath is exported.
+      if ("bun" in process.versions && authorized.kind === "npm" &&
+          authorized.packageName && authorized.root &&
+          authorized.specifier.startsWith(authorized.packageName + "/") &&
+          cause && typeof cause === "object" &&
+          (cause as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
+        const manifest = JSON.parse(readFileSync(
+          path.join(authorized.root, "package.json"), "utf8",
+        )) as { exports?: unknown };
+        const exports = manifest.exports;
+        const keys = exports && typeof exports === "object" && !Array.isArray(exports)
+          ? Object.keys(exports) : [];
+        const rootOnly = exports !== undefined && keys.every(
+          (key) => !key.startsWith("./") || key === ".",
+        );
+        if (rootOnly) {
+          const subpath = authorized.specifier.slice(authorized.packageName.length);
+          throw Object.assign(new Error(
+            "Package subpath " + subpath + " is not exported by " + authorized.packageName + ".",
+          ), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+        }
+      }
+      throw cause;
+      }
+    }
     const actual = realpathSync.native(fileURLToPath(entry));
     requireCondition(
       authorized.root && contained(authorized.root, actual),
@@ -578,6 +622,24 @@ export class ModuleLoader {
         },
       );
     } catch (cause) {
+      // Bun 1.4 uses a generic compiler Error for invalid JavaScript.
+      // Parse in the VM without executing user code to retain SyntaxError.
+      if ("bun" in process.versions && cause instanceof Error &&
+          cause.message === "Failed to compile function") {
+        try {
+          const syntaxSource = [
+            "(function (" + names.join(",") + ") {",
+            '"use strict"; return (async function () {',
+            code,
+            "}).call(undefined);",
+            "})",
+          ].join("\n");
+          new vm.Script(syntaxSource, { filename });
+        } catch (syntax) {
+          report(syntax);
+          throw syntax;
+        }
+      }
       report(cause);
       throw cause;
     }

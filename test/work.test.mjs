@@ -80,7 +80,10 @@ function fixture(t) {
     reserveHook = async () => {};
   let projectName = "Original";
   const service = new WorkService(store, scripts, policy, {
-    reserve: async () => { await reserveHook(); return { release() {} }; },
+    reserve: async () => {
+      await reserveHook();
+      return { release() {} };
+    },
     home,
     agent: { name: "test Agent", version: "0.0.1", protocolVersion: "2" },
     authorize(who, target) {
@@ -283,6 +286,9 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   assert.equal(first.context, undefined);
   assert.equal(first.examples, undefined);
   assert.equal(first.agent.agentId, "agent");
+  assert.equal(first.agent.runtime.name, "bun" in process.versions ? "bun" : "node");
+  assert.equal(first.agent.runtime.version, process.versions.bun ?? process.version);
+  assert.equal(first.agent.runtime.workerHeapLimitEnforced, !("bun" in process.versions));
   assert.equal(first.agent.runtime.nodeVersion, process.version);
   assert.equal(first.agent.runtime.arch, process.arch);
   assert.equal(first.agent.system.platform, process.platform);
@@ -329,21 +335,10 @@ test("Project open separates its instructions/Skills and applies local visibilit
   assert.equal(opened.agent.skills.length, 0);
   assert.equal(opened.project.nestedInstructions[0].content, undefined);
   assert.match(opened.project.description, /# Project\\n/);
-  assert.ok(opened.project.descriptionItemId);
-  const readme = await service.readMaterial(
-    caller,
-    opened.contextId,
-    opened.project.descriptionItemId,
-  );
-  assert.equal(readme.bytes.toString(), "# Project\n\n介绍\t说明");
+  assert.equal(Object.hasOwn(opened.project, "descriptionItemId"), false);
   await assert.rejects(
-    service.readMaterial(
-      caller,
-      opened.contextId,
-      opened.project.descriptionItemId,
-      "AGENTS.md",
-    ),
-    { code: "material_path_escape" },
+    service.readMaterial(caller, opened.contextId, "readme:not-published"),
+    { code: "material_forbidden" },
   );
   for (const text of [
     JSON.stringify(opened),
@@ -628,9 +623,14 @@ test("the real work provider feeds captured Project identity and pwd to accepted
 
 test("script indexes retain captured discovery across refresh without a Docs catalog", async (t) => {
   const { open, scripts } = fixture(t);
-  scripts.enroll('/** {"scriptName":"one.js","scriptDesc":"One","scriptWhenUse":"One task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 1;');
-  const first = await open(), body = readFileSync(first.agent.scripts.index, "utf8");
-  scripts.enroll('/** {"scriptName":"two.js","scriptDesc":"Two","scriptWhenUse":"Two task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 2;');
+  scripts.enroll(
+    '/** {"scriptName":"one.js","scriptDesc":"One","scriptWhenUse":"One task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 1;',
+  );
+  const first = await open(),
+    body = readFileSync(first.agent.scripts.index, "utf8");
+  scripts.enroll(
+    '/** {"scriptName":"two.js","scriptDesc":"Two","scriptWhenUse":"Two task","scriptInputSchema":{"type":"object"},"scriptOpenDefault":true} */ return 2;',
+  );
   const second = await open();
   assert.notEqual(second.agent.scripts.index, first.agent.scripts.index);
   assert.equal(readFileSync(first.agent.scripts.index, "utf8"), body);

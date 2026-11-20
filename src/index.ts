@@ -12,7 +12,7 @@ const help =
     "      nexum-agent run --profile development|production",
     "",
     "run 使用所选 profile 的 config.json，连接其配置的 Server。",
-    "启动 run 时，Node 必须带 --experimental-vm-modules。",
+    "运行时支持 Node 与 Bun；Node 启动须带 --experimental-vm-modules，Bun 不需要。",
     "development 使用 ~/.nexum-dev，production 使用 ~/.nexum。",
   ].join("\n") + "\n";
 

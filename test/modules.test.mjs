@@ -357,5 +357,5 @@ test("script body supports await and native errors, and the required VM option i
     },
   );
   assert.equal(result.status, 0);
-  assert.equal(result.stdout.trim(), "runtime_configuration");
+  assert.equal(result.stdout.trim(), "bun" in process.versions ? "" : "runtime_configuration");
 });
