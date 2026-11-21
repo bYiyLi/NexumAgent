@@ -395,6 +395,27 @@ async function fixture(t, options = {}) {
   };
 }
 
+test("Cloud-issued requestId passes through Agent Wire into RunEngine and deduplicates", async (t) => {
+  const f = await fixture(t);
+  const opened = await f.open();
+  const issuedAt = Date.now();
+  const requestId = "req_" + issuedAt + "_" + "7".repeat(32);
+  const start = {
+    contextId: opened.contextId,
+    script: "return { cloudSubmission: true };",
+    requestId,
+    submission: { issuedAt, expiresAt: issuedAt + 86_400_000 },
+    waitMs: 0,
+  };
+  const accepted = await f.invoke("agent.run.start", start);
+  assert.ok(accepted.run.runId);
+  const completed = await f.finish(accepted);
+  assert.equal(completed.run.status, "succeeded", JSON.stringify(completed));
+  assert.equal(completed.result.data.cloudSubmission, true);
+  const replay = await f.invoke("agent.run.start", start);
+  assert.equal(replay.run.runId, accepted.run.runId, "Cloud submission deduplicates the same accepted Run");
+});
+
 test("unresponsive maintenance initialization does not block Core admission", async (t) => {
   const entered = Promise.withResolvers();
   const finish = Promise.withResolvers();

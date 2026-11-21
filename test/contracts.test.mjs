@@ -197,6 +197,15 @@ test("MCP selector presence rules remain exclusive", () => {
 });
 
 
+test("RunEngine accepts a Cloud-only requestId but the public MCP tool never does", () => {
+  const requestId = newRequestId();
+  const base = { contextId: "ctx_test", script: "return 1;", input: { requestId: "business_value" } };
+  assert.throws(() => validateContract("agent.run.start", { ...base, requestId }), { code: "invalid_arguments" });
+  assert.doesNotThrow(() => validateContract("runtime:agent.run.start", { ...base, requestId }));
+  assert.throws(() => validateContract("runtime:agent.run.start", { ...base, requestId: "invalid" }), { code: "invalid_arguments" });
+  assert.throws(() => validateContract("runtime:agent.run.start", { ...base, requestId, unwanted: true }), { code: "invalid_arguments" });
+});
+
 test("schema failures identify field and constraint without echoing rejected input", () => {
   const check = compileInputSchema({
     type: "object",

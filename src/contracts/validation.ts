@@ -58,6 +58,13 @@ for (const operation of ["agent.run.start", "agent.run.input"]) {
       ],
     },
   };
+  // Cloud-only submission correlation survives the Wire boundary and is
+  // consumed by RunEngine. It must not be exposed in the model-facing schema.
+  if (operation === "agent.run.start") {
+    source.properties.requestId = {
+      $ref: prefix + "common.schema.json#/$defs/requestId",
+    };
+  }
   ajv.addSchema(source as AnySchema);
 }
 
