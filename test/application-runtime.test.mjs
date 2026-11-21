@@ -414,6 +414,11 @@ test("Cloud-issued requestId passes through Agent Wire into RunEngine and dedupl
   assert.equal(completed.result.data.cloudSubmission, true);
   const replay = await f.invoke("agent.run.start", start);
   assert.equal(replay.run.runId, accepted.run.runId, "Cloud submission deduplicates the same accepted Run");
+  const recovered = await f.invoke("agent.run.get", {
+    agentId: "agent_fixture",
+    requestId,
+  });
+  assert.equal(recovered.run.runId, accepted.run.runId);
 });
 
 test("unresponsive maintenance initialization does not block Core admission", async (t) => {

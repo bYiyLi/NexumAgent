@@ -20,6 +20,7 @@ import { RunEngine, callerKey } from "../dist/runtime/engine.js";
 import { projectRunRecord } from "../dist/application/run-view.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson, newRequestId } from "../dist/contracts/json.js";
+import { validateContract } from "../dist/contracts/validation.js";
 
 const caller = { principalId: "user", clientId: "one", grantId: "grant-a" };
 const otherHost = { ...caller, clientId: "two", grantId: "grant-b" };
@@ -187,7 +188,9 @@ test("run title is optional, bounded and retained across start, get and list", a
   assert.equal(all(f).find((item) => item.runId === finished.run.runId)?.title, title);
   const fallback = await f.execute({ script: "return 'without title';" });
   assert.equal(projectRunRecord(fallback.run).title, "执行脚本");
-  await assert.rejects(f.start({ title: "x".repeat(121), script: "return 1;" }));
+  assert.throws(() => validateContract("wire.input:agent.run.start", {
+    contextId: f.initial.contextId, title: "x".repeat(121), script: "return 1;",
+  }), { code: "invalid_arguments" });
 });
 
 test("get confirms only the caller-scoped accepted run and never accepts, replays or revives a closed work", async (t) => {
@@ -226,7 +229,7 @@ test("get confirms only the caller-scoped accepted run and never accepts, replay
   assert.equal(f.engine.list(caller, { agentId: "a" }).runs.length, 2);
 });
 
-test("get and list validate exact contracts, target and current authorization without hiding configuration or storage failures", async (t) => {
+test("get and list enforce wire contracts, target and current authorization without hiding configuration or storage failures", async (t) => {
   const f = await fixture(t);
   const done = await f.execute({ script: "return 1;" });
   for (const input of [
@@ -235,7 +238,7 @@ test("get and list validate exact contracts, target and current authorization wi
     { agentId: "a", runId: done.run.runId, waitMs: 30001 },
     { agentId: "a", runId: done.run.runId, extra: true },
   ])
-    await assert.rejects(f.engine.get(caller, input), {
+    assert.throws(() => validateContract("wire.input:agent.run.get", input), {
       code: "invalid_arguments",
     });
   await assert.rejects(
@@ -251,7 +254,7 @@ test("get and list validate exact contracts, target and current authorization wi
     { agentId: "a", source: "script" },
     { agentId: "a", from: "not-a-time" },
   ])
-    assert.throws(() => f.engine.list(caller, input), {
+    assert.throws(() => validateContract("wire.input:agent.run.list", input), {
       code: "invalid_arguments",
     });
   assert.throws(

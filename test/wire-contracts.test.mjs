@@ -169,7 +169,7 @@ test("Run caller snapshot retains original Host association without changing cal
   );
 });
 
-test("public Host attachments and private normalized Core input have separate derived views", () => {
+test("public Host attachments and normalized Wire input use their own contracts", () => {
   const source = { sourceId: "att_" + "a".repeat(64) };
   for (const [name, input] of [
     [
@@ -190,7 +190,7 @@ test("public Host attachments and private normalized Core input have separate de
     assert.throws(() => validateContract(name, input), {
       code: "invalid_arguments",
     });
-    assert.doesNotThrow(() => validateContract(`runtime:${name}`, input));
+    assert.doesNotThrow(() => validateContract(`wire.input:${name}`, input));
     const raw = {
       ...input,
       attachments: [
@@ -198,7 +198,6 @@ test("public Host attachments and private normalized Core input have separate de
       ],
     };
     assert.doesNotThrow(() => validateContract(name, raw));
-    assert.doesNotThrow(() => validateContract(`runtime:${name}`, raw));
     assert.throws(() => validateContract(`wire.input:${name}`, raw), {
       code: "invalid_arguments",
     });

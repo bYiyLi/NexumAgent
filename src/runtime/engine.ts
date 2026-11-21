@@ -32,10 +32,7 @@ import type {
   WorkRecord,
 } from "../contracts/types.js";
 import { terminalStatuses } from "../contracts/types.js";
-import {
-  compileInputSchema,
-  validateContract,
-} from "../contracts/validation.js";
+import { compileInputSchema } from "../contracts/validation.js";
 import { SqliteStore } from "../storage/sqlite.js";
 import { ModuleLoader, type ModuleUse } from "./modules.js";
 import { ScriptCatalog, scriptHeader, type ScriptSnapshot } from "./scripts.js";
@@ -407,7 +404,6 @@ export class RunEngine extends EventEmitter {
     input: GetInput,
     signal?: AbortSignal,
   ): Promise<RunDetails> {
-    validateContract("agent.run.get", input);
     input = JSON.parse(canonicalJson(input)) as GetInput;
     caller = fixedCaller(caller);
     this.#agent(input.agentId);
@@ -437,7 +433,6 @@ export class RunEngine extends EventEmitter {
     caller: Caller,
     input: ListInput,
   ): { runs: RunSummary[]; nextCursor: string | null } {
-    validateContract("agent.run.list", input);
     input = JSON.parse(canonicalJson(input)) as ListInput;
     caller = fixedCaller(caller);
     this.#agent(input.agentId);
@@ -862,7 +857,6 @@ export class RunEngine extends EventEmitter {
     input: StartInput,
     observationSignal?: AbortSignal,
   ) {
-    validateContract("runtime:agent.run.start", input);
     input = JSON.parse(canonicalJson(input)) as StartInput;
     caller = fixedCaller(caller);
     this.#authorize(caller, { action: "start" });
@@ -1754,7 +1748,6 @@ export class RunEngine extends EventEmitter {
     },
     signal?: AbortSignal,
   ) {
-    validateContract("runtime:agent.run.input", input);
     input = JSON.parse(canonicalJson(input)) as typeof input;
     requireCondition(
       input.agentId === this.store.binding.agentId,

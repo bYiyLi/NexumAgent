@@ -29,6 +29,7 @@ const [
   { ResourceManager },
   { AgentError },
   { canonicalJson, digest, newRequestId },
+  { validateContract },
   controls,
 ] = await Promise.all(
   [
@@ -41,6 +42,7 @@ const [
     "extensions/resources.js",
     "contracts/errors.js",
     "contracts/json.js",
+    "contracts/validation.js",
     "runtime/control-scripts.js",
   ].map((file) => import(new URL(file, dist))),
 );
@@ -576,11 +578,15 @@ test("copied inline code, external names and changed platform code cannot claim 
     () => f.start({ script: '/** {"control":true} */ return 1;' }),
     { code: "runtime_busy" },
   );
-  await assert.rejects(() => f.start({ script: "return 1;", control: true }), {
+  assert.throws(() => validateContract("wire.input:agent.run.start", {
+    contextId: "ctx_test", script: "return 1;", control: true,
+  }), {
     code: "invalid_arguments",
   });
-  await assert.rejects(
-    () => f.start({ script: "return 1;", admissionClass: "control" }),
+  assert.throws(
+    () => validateContract("wire.input:agent.run.start", {
+      contextId: "ctx_test", script: "return 1;", admissionClass: "control",
+    }),
     { code: "invalid_arguments" },
   );
   const filename = sourceFile(f, "sh/get.js");

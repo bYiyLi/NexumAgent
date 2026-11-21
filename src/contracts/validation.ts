@@ -38,36 +38,6 @@ for (const directory of ["model", "wire"]) {
   }
 }
 
-// Core consumes the same public argument contract after Cloud has replaced Host
-// attachments by stable source identities. Keep this private view derived from
-// the public source instead of maintaining another copy of its fields.
-for (const operation of ["agent.run.start", "agent.run.input"]) {
-  const source = JSON.parse(
-    readFileSync(new URL(`model/${operation}.input.schema.json`, base), "utf8"),
-  );
-  const common = JSON.parse(
-    readFileSync(new URL("common.schema.json", base), "utf8"),
-  );
-  source.$id = prefix + `runtime/${operation}.input.schema.json`;
-  source.properties.attachments = {
-    ...common.$defs.attachments,
-    items: {
-      anyOf: [
-        common.$defs.hostAttachment,
-        { $ref: prefix + "wire/types.schema.json#/$defs/Attachment" },
-      ],
-    },
-  };
-  // Cloud-only submission correlation survives the Wire boundary and is
-  // consumed by RunEngine. It must not be exposed in the model-facing schema.
-  if (operation === "agent.run.start") {
-    source.properties.requestId = {
-      $ref: prefix + "common.schema.json#/$defs/requestId",
-    };
-  }
-  ajv.addSchema(source as AnySchema);
-}
-
 export function validateContract(contract: string, value: unknown): void {
   canonicalJson(
     value,
@@ -77,9 +47,8 @@ export function validateContract(contract: string, value: unknown): void {
         ? MAX_JSON_BODY_BYTES_V2
         : 1024 * 1024,
   );
-  const id = contract.startsWith("runtime:")
-    ? prefix + `runtime/${contract.slice(8)}.input.schema.json`
-    : contract === "wire"
+  const id =
+    contract === "wire"
       ? prefix + "wire/envelope.schema.json"
       : contract === "wire.stream"
         ? prefix + "wire/stream.schema.json"

@@ -1883,7 +1883,6 @@ export class AgentRuntime {
         });
       return dispatchApplication(
         message,
-        this.#connection.binding,
         this.#handlers(message, signal),
       );
     });
