@@ -12,7 +12,6 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { ScriptCatalog, scriptHeader } from "../dist/runtime/scripts.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 
 function code(name, more = {}, body = "return context.input;") {
@@ -282,57 +281,6 @@ test("open uses Agent-wide 30 default + Top 20 slots with local priority, source
   assert.equal(bounded.items.length, 0);
   assert.equal(bounded.omitted.length, 50);
   assert.equal(bounded.complete, false);
-});
-
-test("frequency comes from retained started runs with trusted owner/name and excludes preparation failures", (t) => {
-  const { root } = fixture(t),
-    store = new SqliteStore(root, {
-      agentId: "a",
-      profile: "development",
-      cloudEnvironment: "test",
-    });
-  t.after(() => store.close());
-  const work = store.openWork({
-    callerKey: "caller",
-    pwd: root,
-    snapshotRef: "work.json",
-  });
-  function accepted(callerKey = "caller") {
-    return store.acceptRun({
-      callerKey,
-      contextId: work.contextId,
-      sourceKind: "inline",
-      source: {},
-    }).run;
-  }
-  let failed = accepted();
-  failed = store.transitionRun(
-    failed.runId,
-    failed.revision,
-    "preparing_inputs",
-    { source: { origin: { owner: "local:a" } }, scriptName: "prepare.js" },
-  );
-  store.transitionRun(failed.runId, failed.revision, "failed");
-  let run = accepted();
-  run = store.transitionRun(run.runId, run.revision, "preparing_inputs", {
-    source: { origin: { owner: "local:a" } },
-    scriptName: "started.js",
-  });
-  run = store.transitionRun(run.runId, run.revision, "running");
-  store.requestStop(run.runId, { kind: "cancel" });
-  assert.deepEqual(
-    store.scriptUsage("caller").map((item) => ({ ...item })),
-    [
-      {
-        owner: "local:a",
-        scriptName: "started.js",
-        count: 1,
-        lastStartedAt: run.startedAt,
-      },
-    ],
-  );
-  assert.equal(store.scriptUsage("other").length, 0);
-  store.close();
 });
 
 test("native compilation is separate from invocation and rejects syntax before side effects or actual-start counting", async (t) => {

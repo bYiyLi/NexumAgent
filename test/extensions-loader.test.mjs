@@ -23,8 +23,8 @@ import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
 
@@ -126,7 +126,7 @@ export default async function createExtension(host){
   const enabled = new Set([name]);
   const permissions = new Set(["read"]);
   const policy = { builtins: () => [], approvedPackages: () => approved };
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -191,7 +191,7 @@ export default async function createExtension(host){
     pwd: work,
     snapshotRef: "work/snapshot.json",
   });
-  const engine = new RunEngine(store, modules, scripts, {
+  const engine = new ExecutionFixture(store, modules, scripts, {
     authorize() {},
     loadWork: (item) =>
       JSON.parse(readFileSync(path.join(root, item.snapshotRef), "utf8")),

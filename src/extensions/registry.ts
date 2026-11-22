@@ -20,7 +20,7 @@ import type {
   JsonValue,
 } from "../contracts/types.js";
 import { compileMethodSchema } from "../contracts/validation.js";
-import type { RunServices } from "../runtime/engine.js";
+import type { RunServices } from "../runtime/invocation.js";
 import {
   bindHostRequests,
   type HostRequestBinding,
@@ -30,7 +30,7 @@ import {
   unavailableMaintenance,
   type MaintenanceScope,
   type MaintenanceService,
-} from "../maintenance/requests.js";
+} from "./maintenance.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
 import { isIsolatedHandler, isolatedHandlerNormalizes } from "./worker-bridge.js";
@@ -83,11 +83,14 @@ export interface ExtensionSource {
   config?: JsonObject;
   /** Trusted platform adapters may expose e.g. mcp.github.tools without renaming the source tool. */
   bindingPath?: readonly string[];
+  /** Optional direct script binding for an approved adapter source. */
+  scriptName?: string;
 }
 export interface ExtensionHandle {
   readonly id: string;
   readonly origin: ContributionOrigin;
   readonly methods: readonly JsonObject[];
+  readonly scriptName?: string;
 }
 /** Core-only proof of one prepared successor; never passed to an extension host. */
 export interface ExtensionReplacement {
@@ -338,6 +341,17 @@ const prefix = (left: readonly string[], right: readonly string[]) =>
 
 /** Core factory/method lifecycle. Package parsing and five-contribution preparation own publication readiness. */
 export class ExtensionRegistry {
+  canBindScriptName(name: string, previous?: ExtensionHandle): boolean {
+    try {
+      extensionNamespace(name);
+    } catch {
+      return false;
+    }
+    return ![...this.#entries].some((entry) =>
+      entry.handle !== previous &&
+      (entry.root[0] === name || entry.source.scriptName === name),
+    );
+  }
   readonly resources: ResourceManager;
   #options: RegistryOptions;
   #entries = new Set<Entry>();
@@ -463,6 +477,16 @@ export class ExtensionRegistry {
       "invalid_namespace",
       "The SDK path must stay inside its actual source namespace.",
     );
+    if (source.scriptName !== undefined) {
+      requireCondition(
+        source.origin.type === "platform" &&
+          root.length === 2 &&
+          (root[0] === "mcp" || root[0] === "api"),
+        "invalid_namespace",
+        "Only approved MCP and API sources may provide a direct binding.",
+      );
+      extensionNamespace(source.scriptName);
+    }
     this.#authorize({
       origin: source.origin,
       action: "prepare",
@@ -472,6 +496,7 @@ export class ExtensionRegistry {
     if (replaces)
       requireCondition(
         same(replaces.root, root) &&
+          replaces.source.scriptName === source.scriptName &&
           replaces.source.origin.type === source.origin.type &&
           replaces.source.origin.owner === source.origin.owner &&
           replaces.source.origin.namespace === source.origin.namespace,
@@ -481,7 +506,10 @@ export class ExtensionRegistry {
     const previous = [...this.#entries].find(
       (entry) =>
         entry !== replaces &&
-        (prefix(entry.root, root) || prefix(root, entry.root)),
+        (prefix(entry.root, root) || prefix(root, entry.root) ||
+          (source.scriptName !== undefined &&
+            (entry.source.scriptName === source.scriptName || entry.root[0] === source.scriptName)) ||
+          (entry.source.scriptName !== undefined && entry.source.scriptName === root[0])),
     );
     if (previous) {
       requireCondition(
@@ -524,6 +552,7 @@ export class ExtensionRegistry {
       id: newId("extension"),
       origin: source.origin,
       methods: [] as JsonObject[],
+      ...(source.scriptName === undefined ? {} : { scriptName: source.scriptName }),
     };
     const preparation = Promise.withResolvers<ExtensionHandle>();
     void preparation.promise.catch(() => {});
@@ -1378,24 +1407,31 @@ export class ExtensionRegistry {
   }
   bindings(services: RunServices): Readonly<Record<string, unknown>> {
     const result = Object.create(null) as Record<string, unknown>;
+    const add = (keys: readonly string[], entry: Entry, method: Method) => {
+      let node = result;
+      for (const key of keys.slice(0, -1)) {
+        if (!Object.hasOwn(node, key))
+          Object.defineProperty(node, key, {
+            value: Object.create(null),
+            enumerable: true,
+          });
+        node = node[key] as Record<string, unknown>;
+      }
+      Object.defineProperty(node, keys.at(-1)!, {
+        value: (...args: unknown[]) => this.#invoke(entry, method, services, args),
+        enumerable: true,
+      });
+    };
     for (const entry of this.#entries)
       if (entry.state === "published")
         for (const method of entry.methods) {
-          const keys = [...entry.root, ...method.path];
-          let node = result;
-          for (const key of keys.slice(0, -1)) {
-            if (!Object.hasOwn(node, key))
-              Object.defineProperty(node, key, {
-                value: Object.create(null),
-                enumerable: true,
-              });
-            node = node[key] as Record<string, unknown>;
+          add([...entry.root, ...method.path], entry, method);
+          if (entry.source.scriptName) {
+            const exposed = entry.root[0] === "mcp" && method.path[0] === "tools"
+              ? [`tool_${method.path[1]}`]
+              : method.path;
+            add([entry.source.scriptName, ...exposed], entry, method);
           }
-          Object.defineProperty(node, keys.at(-1)!, {
-            value: (...args: unknown[]) =>
-              this.#invoke(entry, method, services, args),
-            enumerable: true,
-          });
         }
     const freeze = (node: Record<string, unknown>): void => {
       for (const value of Object.values(node))

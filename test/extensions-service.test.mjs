@@ -19,9 +19,9 @@ import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine } from "../dist/runtime/engine.js";
+import { ExecutionFixture } from "./helpers/runtime-fixture.mjs";
 import { WorkService } from "../dist/work/service.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
 
@@ -166,7 +166,7 @@ export default async function createExtension(host){
   const enabled = new Set(approved.keys()),
     permissions = new Set(["read"]);
   const policy = { builtins: () => [], approvedPackages: () => approved };
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -246,7 +246,7 @@ export default async function createExtension(host){
     },
     materials: () => materials.published(),
   });
-  const engine = new RunEngine(store, modules, scripts, {
+  const engine = new ExecutionFixture(store, modules, scripts, {
     authorize: authorizeCaller,
     loadWork: (record) => workService.load(record),
     resources,

@@ -12,10 +12,10 @@ import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { AgentError } from "../dist/contracts/errors.js";
@@ -63,7 +63,7 @@ async function fixture(t, options = {}) {
   const workDir = path.join(root, "work");
   mkdirSync(workDir);
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -106,7 +106,7 @@ async function fixture(t, options = {}) {
     snapshotRef: "work/snapshot.json",
   });
   const bindings = [];
-  const engine = new RunEngine(store, loader, scripts, {
+  const engine = new ExecutionFixture(store, loader, scripts, {
     authorize(who, target) {
       if (target.run && target.run.callerKey !== callerKey(who))
         throw new AgentError("forbidden", "Wrong caller.");
@@ -1229,15 +1229,15 @@ test("10 MiB image and 32 MiB audio SDK buffers complete in a heap that cannot h
     import assert from "node:assert/strict";
     import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
     import {tmpdir} from "node:os";import path from "node:path";
-    import {SqliteStore} from ${JSON.stringify(base + "storage/sqlite.js")};
+    import {FixtureStore} from ${JSON.stringify(new URL("./helpers/runtime-fixture.mjs", import.meta.url).href)};
     import {ResourceManager} from ${JSON.stringify(base + "extensions/resources.js")};
     import {ExtensionRegistry} from ${JSON.stringify(base + "extensions/registry.js")};
     import {ScriptCatalog} from ${JSON.stringify(base + "runtime/scripts.js")};
     import {ModuleLoader} from ${JSON.stringify(base + "runtime/modules.js")};
-    import {RunEngine,callerKey} from ${JSON.stringify(base + "runtime/engine.js")};
+    import {ExecutionFixture,callerKey} from ${JSON.stringify(new URL("./helpers/runtime-fixture.mjs", import.meta.url).href)};
     const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),"nexum-large-byte-result-")));
     const work=path.join(root,"work");mkdirSync(work);writeFileSync(path.join(work,"package.json"),'{"type":"module"}');
-    const store=new SqliteStore(root,{agentId:"agent",profile:"development",cloudEnvironment:"test"});
+    const store=new FixtureStore(root,{agentId:"agent",profile:"development",cloudEnvironment:"test"});
     const caller={principalId:"user",clientId:"client",host:"memory-test"};
     const manager=new ResourceManager(store,{cleanupTimeoutMs:20});
     const registry=new ExtensionRegistry(manager,{permissions:new Set(),authorize(){},log(){},progress(){}});
@@ -1254,10 +1254,13 @@ test("10 MiB image and 32 MiB audio SDK buffers complete in a heap that cannot h
           return call.output.result({content:[call.output.image({data:values[0]}),call.output.audio({data:values[1]})]});
         }
       }}}));registry.publish(handle);
-      const engine=new RunEngine(store,loader,scripts,{resources:manager,authorize(){},loadWork:()=>({}),
+      const engine=new ExecutionFixture(store,loader,scripts,{resources:manager,authorize(){},loadWork:()=>({}),
         bindings:services=>registry.bindings(services),encodeResult:async value=>({content:[],data:value})});
-      const result=await engine.start(caller,{contextId:context.contextId,script:
+      let result=await engine.start(caller,{contextId:context.contextId,script:
         'const result=demo.media();const bytes=result.value.content.map(item=>item.value.data);return {sizes:bytes.map(item=>item.byteLength),range:bytes.every(item=>item.byteOffset===0&&item.buffer.byteLength===item.byteLength),hidden:bytes.some(item=>Object.hasOwn(item,"hidden")||Object.hasOwn(item,"constructor")),first:bytes.map(item=>item[0])};',waitMs:3000});
+      const deadline=Date.now()+10000;
+      while (["accepted","preparing_inputs","running"].includes(result.run.status) && Date.now()<deadline)
+        result=await engine.observe(caller,result.run.runId,Math.max(1,deadline-Date.now()));
       assert.equal(result.run.status,"succeeded");assert.deepEqual(result.result.data,{sizes:[10*1024*1024,32*1024*1024],range:true,hidden:false,first:[37,73]});
       assert.equal(getters,0);assert.equal((await registry.disable(handle)).status,"disabled");
       console.log("bounded-byte-snapshots-ok");

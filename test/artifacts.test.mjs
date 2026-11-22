@@ -189,10 +189,7 @@ test("Blob/File use native data reads and preserve appropriate display metadata"
   assert.equal(snapshotBlob(file).lastModified, 1234567890);
   const record = await f.store.register({ data: file }, scope);
   assert.equal(record.name, "report.txt");
-  // Bun normalizes text Blob MIME with charset=utf-8; preserve the actual
-  // native MIME without invoking the subclass's untrusted type getter.
-  assert.equal(record.mimeType,
-    Reflect.apply(Object.getOwnPropertyDescriptor(Blob.prototype, "type").get, file, []));
+  assert.equal(record.mimeType, "text/plain");
   assert.equal(
     (await f.store.read(record.uri, scope, { maxBytes: 100 })).data.toString(),
     "file bytes",
@@ -205,7 +202,7 @@ test("Blob/File use native data reads and preserve appropriate display metadata"
   assert.equal(blob.mimeType, "application/octet-stream");
 });
 
-test("Blob branding and snapshots never execute forged Symbol, handle or File metadata hooks", { skip: "bun" in process.versions }, async (t) => {
+test("Blob branding and snapshots never execute forged Symbol, handle or File metadata hooks", async (t) => {
   const f = fixture(t),
     scope = f.scope();
   const reference = new Blob(["native bytes"], { type: "text/plain" });
@@ -214,6 +211,16 @@ test("Blob branding and snapshots never execute forged Symbol, handle or File me
   const handleKey = symbols.find((key) => key.description === "kHandle");
   const nativeHandle = fields[handleKey].value;
   let calls = 0;
+  const intercepted = new Proxy(reference, {
+    getPrototypeOf() {
+      calls++;
+      throw new Error("proxy trap");
+    },
+  });
+  await assert.rejects(f.store.register({ data: intercepted }, scope), {
+    code: "invalid_artifact_source",
+  });
+  assert.equal(calls, 0);
   const forgedSymbols = Object.create(Blob.prototype);
   for (const key of symbols)
     Object.defineProperty(forgedSymbols, key, {
@@ -340,35 +347,6 @@ test("Blob branding and snapshots never execute forged Symbol, handle or File me
   assert.equal(calls, 0);
   assert.equal(snapshotBlob({ ordinary: true }), null);
   assert.deepEqual(readdirSync(f.store.directory), [copied.resourceId]);
-});
-
-test("Bun native Blob and File branding rejects forged sources without running user hooks", { skip: !("bun" in process.versions) }, async (t) => {
-  const f = fixture(t), scope = f.scope();
-  let calls = 0;
-  const fake = Object.create(Blob.prototype);
-  Object.defineProperty(fake, "size", { get() { calls++; throw Error("spoof"); } });
-  await assert.rejects(f.store.register({ data: fake }, scope), { code: "invalid_artifact_source" });
-  const original = new Blob(["actual bytes"], { type: "application/octet-stream" });
-  const intercepted = new Proxy(original, {
-    getPrototypeOf() { calls++; throw Error("proxy trap"); },
-  });
-  await assert.rejects(f.store.register({ data: intercepted }, scope), { code: "invalid_artifact_source" });
-  const dangerous = new Blob(["actual bytes"], { type: "application/octet-stream" });
-  Object.defineProperty(dangerous, "stream", { get() { calls++; throw Error("untrusted stream"); } });
-  const snapshot = snapshotBlob(dangerous, 128);
-  assert.equal(snapshot.size, 12);
-  assert.notEqual(snapshot.blob, dangerous);
-  const stored = await f.store.register({ data: dangerous }, scope);
-  assert.equal((await f.store.read(stored.uri, scope, { maxBytes: 128 })).data.toString(), "actual bytes");
-  class NativeFile extends File {
-    get name() { calls++; throw Error("untrusted name"); }
-    get size() { calls++; throw Error("untrusted size"); }
-  }
-  const file = new NativeFile(["content"], "safe.txt", { type: "application/octet-stream", lastModified: 42 });
-  const info = snapshotBlob(file, 128);
-  assert.equal(info.name, "safe.txt");
-  assert.equal(info.lastModified, 42);
-  assert.equal(calls, 0);
 });
 
 test("trusted inspection validates the fixed pending bytes before any resource publication", async (t) => {

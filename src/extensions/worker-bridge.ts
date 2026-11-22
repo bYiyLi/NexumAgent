@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncResource } from "node:async_hooks";
 import { Worker } from "node:worker_threads";
 import { serialize } from "node:v8";
 import { types } from "node:util";
@@ -62,6 +63,7 @@ interface HostResource {
 }
 interface RemoteCall {
   readonly call: Invocation;
+  readonly context: AsyncResource;
   readonly methods: ReadonlySet<string>;
   readonly abort: () => void;
   readonly issuedIds: Set<string>;
@@ -482,9 +484,10 @@ export function isolatedExtensionFactory(
         try {
           const name = String(message.name);
           const args = Array.isArray(message.args) ? message.args : [];
-          const value = method(message.owner,
-            typeof message.callId === "string" ? message.callId : null,
-            name, args);
+          const callId = typeof message.callId === "string" ? message.callId : null;
+          const value = message.owner === "call"
+            ? lookupCall(callId).context.runInAsyncScope(() => method("call", callId, name, args))
+            : method("host", callId, name, args);
           if (types.isPromise(value)) {
             if (entry.sync instanceof SharedArrayBuffer &&
                 entry.sync.byteLength === headerBytes + maxRpcBytes) {
@@ -539,7 +542,8 @@ export function isolatedExtensionFactory(
           };
           call.signal.addEventListener("abort", onAbort, { once: true });
           const issuedIds = new Set<string>();
-          calls.set(id, { call, methods: callMethods, abort: onAbort,
+          const context = new AsyncResource("NexumExtensionInvocation");
+          calls.set(id, { call, context, methods: callMethods, abort: onAbort,
             issuedIds });
           try {
             // Normalization runs on the third-party Worker, but Schema
@@ -567,6 +571,7 @@ export function isolatedExtensionFactory(
             }, rpcTimeout);
           } finally {
             calls.delete(id);
+            context.emitDestroy();
             for (const issuedId of issuedIds) issued.delete(issuedId);
             call.signal.removeEventListener("abort", onAbort);
           }

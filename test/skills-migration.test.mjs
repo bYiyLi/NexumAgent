@@ -13,10 +13,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { methodSkill, writeMethodSkill } from "../dist/work/method-skills.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { WorkService } from "../dist/work/service.js";
-import { RunEngine } from "../dist/runtime/engine.js";
+import { ExecutionFixture } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
@@ -89,7 +89,7 @@ test("preserved browser-control and script-authoring Skills retain valid selecti
 
 test("generated Skill is a closed projection of actual prepared Registry metadata, including dialects and referenced schemas", async (t) => {
   const f = fixture(t),
-    store = new SqliteStore(f.root, {
+    store = new FixtureStore(f.root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -255,7 +255,7 @@ test("every generated Skill write admits exact UTF-8 bytes, rechecks paths and r
 
 test("Skill-private scripts stay readable but never enter independent script discovery, indexes, Schema selection or scriptName execution", async (t) => {
   const f = fixture(t),
-    store = new SqliteStore(f.root, {
+    store = new FixtureStore(f.root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -296,7 +296,7 @@ test("Skill-private scripts stay readable but never enter independent script dis
     },
   });
   const loader = await ModuleLoader.create(f.work, store.bootId, policy),
-    engine = new RunEngine(store, loader, scripts, {
+    engine = new ExecutionFixture(store, loader, scripts, {
       authorize() {},
       loadWork: (work) => service.load(work),
       bindings: () => ({}),

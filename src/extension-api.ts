@@ -37,7 +37,7 @@ export type {
   MaintenanceCreated,
   MaintenanceRequestView,
   MaintenanceListOptions,
-} from "./maintenance/requests.js";
+} from "./extensions/maintenance.js";
 export type {
   OutputAPI,
   OutputIntent,
@@ -51,7 +51,7 @@ export type {
   McpReadScope,
   McpAccess,
 } from "./results/mcp.js";
-export type { InputRequest } from "./runtime/engine.js";
+export type { InputRequest } from "./runtime/invocation.js";
 export type { SchemaDialect } from "./contracts/validation.js";
 export type {
   ContributionOrigin,

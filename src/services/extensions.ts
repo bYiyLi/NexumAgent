@@ -218,6 +218,14 @@ export class ExtensionServices {
     const entry = this.#entries.get(name);
     return entry ? this.#view(entry) : null;
   }
+  /** Trusted host catalog of the currently published method definitions. */
+  methodCatalog(name: string): { origin: Entry["prepared"]["handle"]["origin"]; methods: readonly JsonObject[] } {
+    this.#name(name);
+    const entry = this.#entries.get(name);
+    requireCondition(entry?.status === "enabled", "extension_unavailable",
+      "This extension has no published method catalog.");
+    return { origin: entry.prepared.handle.origin, methods: entry.prepared.handle.methods };
+  }
   list(): readonly JsonObject[] {
     return [...this.#entries.values()]
       .sort((left, right) =>

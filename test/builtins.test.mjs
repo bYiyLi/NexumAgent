@@ -9,13 +9,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
-import { StateServices } from "../dist/services/state.js";
+import { StateFixture } from "./helpers/runtime-fixture.mjs";
 import { runtimeExtension } from "../dist/sdk/runtime.js";
 import { stateExtension } from "../dist/sdk/state.js";
 import { outputExtension } from "../dist/sdk/output-extension.js";
@@ -39,13 +39,13 @@ async function fixture(t, user) {
     work = path.join(root, "work");
   mkdirSync(work);
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "cloud-test",
   });
   const resources = new ResourceManager(store),
-    states = new StateServices(store, user),
+    states = new StateFixture(store, user),
     policies = [];
   let allowed = true;
   const registry = new ExtensionRegistry(resources, {
@@ -95,7 +95,7 @@ async function fixture(t, user) {
     pwd: work,
     snapshotRef: "work/snapshot.json",
   });
-  const engine = new RunEngine(
+  const engine = new ExecutionFixture(
     store,
     loader,
     new ScriptCatalog(work, "agent"),

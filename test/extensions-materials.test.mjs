@@ -27,7 +27,7 @@ import { inspectExtensionPackage } from "../dist/extensions/packages.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { WorkService } from "../dist/work/service.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 
 function write(filename, value) {
   mkdirSync(path.dirname(filename), { recursive: true });
@@ -544,7 +544,7 @@ test("published guidance integrates with WorkService and old work retains fixed 
   const f = await fixture(t),
     catalog = new ExtensionMaterials(f.work),
     prepared = await catalog.prepare(f.descriptor, f.handle());
-  const store = new SqliteStore(f.root, {
+  const store = new FixtureStore(f.root, {
     agentId: "a",
     profile: "development",
     cloudEnvironment: "test",

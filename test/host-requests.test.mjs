@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { bindHostRequests } from "../dist/extensions/host-requests.js";
 import { AgentError } from "../dist/contracts/errors.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
@@ -154,7 +154,7 @@ test("Registry binds each public Host service to its own Run and prevents return
   const work = path.join(root, "work");
   mkdirSync(work);
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "isolated-host-service",
@@ -215,7 +215,7 @@ test("Registry binds each public Host service to its own Run and prevents return
     builtins: () => [],
     approvedPackages: () => new Map(),
   });
-  const engine = new RunEngine(
+  const engine = new ExecutionFixture(
     store,
     modules,
     new ScriptCatalog(work, "agent"),

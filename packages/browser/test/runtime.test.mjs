@@ -19,6 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import WebSocket from "ws";
+import { FixtureStore, ExecutionFixture, callerKey } from "../../../test/helpers/runtime-fixture.mjs";
 
 // This is a Core conformance harness. No private Core value is passed to the
 // production factory: it receives exactly ExtensionHost and Invocation.
@@ -28,7 +29,6 @@ const coreEntry = process.env.NEXUM_BROWSER_CORE_DIST
   : new URL("../../../dist/index.js", import.meta.url).href;
 const core = (relative) => import(new URL(relative, coreEntry).href);
 const [
-  { SqliteStore },
   { ResourceManager },
   { ExtensionRegistry },
   { ExtensionPackageLoader },
@@ -36,13 +36,11 @@ const [
   { ExtensionServices },
   { ModuleLoader },
   { ScriptCatalog },
-  { RunEngine, callerKey },
   { ArtifactStore },
   { ResultEncoder },
   { createOutput },
   { isolatedExtensionFactory },
 ] = await Promise.all([
-  core("storage/sqlite.js"),
   core("extensions/resources.js"),
   core("extensions/registry.js"),
   core("extensions/package-loader.js"),
@@ -50,7 +48,6 @@ const [
   core("services/extensions.js"),
   core("runtime/modules.js"),
   core("runtime/scripts.js"),
-  core("runtime/engine.js"),
   core("results/artifacts.js"),
   core("results/encoder.js"),
   core("sdk/output.js"),
@@ -190,7 +187,7 @@ async function fixture(
       dependencies: { "@nexum-hub/browser": version },
     }),
   );
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "browser-agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -262,7 +259,7 @@ async function fixture(
       },
       authorize() {},
     });
-  const engine = new RunEngine(store, modules, scripts, {
+  const engine = new ExecutionFixture(store, modules, scripts, {
     authorize() {},
     loadWork: (item) =>
       JSON.parse(readFileSync(path.join(root, item.snapshotRef), "utf8")),

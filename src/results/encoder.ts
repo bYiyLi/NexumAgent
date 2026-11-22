@@ -44,6 +44,9 @@ export interface ResultScope extends ArtifactScope {
   readonly grantId?: string;
   readonly authorizeTarget?: (target: AccessTarget) => void;
 }
+export type ResultArtifacts = Pick<ArtifactStore,
+  "agentId" | "root" | "maxFileBytes" | "maxReadBytes" |
+  "register" | "metadata" | "read" | "list">;
 interface StoredTransfer {
   reference: TransferReference;
   snapshot: IssuedTransferSnapshot;
@@ -196,7 +199,7 @@ function record(value: JsonValue | undefined): ArtifactRecord {
 export class ResultEncoder {
   readonly limits: Required<ResultLimits>;
   constructor(
-    readonly artifacts: ArtifactStore,
+    readonly artifacts: ResultArtifacts,
     limits: ResultLimits = {},
     readonly offers?: TransferOfferDelivery,
     readonly mcp?: McpResultResources,

@@ -5,10 +5,45 @@ import { canonicalJson, isPlainRecord, newId } from "../contracts/json.js";
 import { authorizeCall } from "../contracts/caller.js";
 import type {
   ContributionOrigin,
+  Binding,
   JsonObject,
   ResourceRecord,
+  RunRecord,
 } from "../contracts/types.js";
-import { SqliteStore, type ResourceHistoryRecord } from "../storage/sqlite.js";
+
+/** Synchronous storage contract used by the live resource coordinator. */
+export interface ResourceStore {
+  readonly root: string;
+  readonly binding: Readonly<Binding>;
+  readonly bootId: string;
+  getRun(id: string): RunRecord;
+  getResource(id: string): ResourceRecord;
+  resourceHistory(id: string): ResourceHistoryRecord;
+  scanResourceHistory(filter: ResourceHistoryFilter, caller: string, limit?: number, cursor?: string): {
+    items: { record: ResourceHistoryRecord; cursor: string }[];
+    more: boolean;
+  };
+  registerResource(input: {
+    callerKey: string; kind: string; source: JsonObject; runId?: string; status?: string;
+  }, now?: number): ResourceRecord;
+  handoff(resourceId: string, runId: string, revision: number, now?: number): ResourceRecord;
+  resourceDiagnostic(id: string, status: string, diagnostic: JsonObject): ResourceRecord;
+  closeResource(id: string, revision: number, diagnostic?: JsonObject, now?: number): ResourceRecord;
+  resourcesForRun(runId: string, limit?: number): ResourceRecord[];
+}
+export interface ResourceHistoryFilter {
+  readonly owner: string;
+  readonly namespace: string;
+  readonly type: ContributionOrigin["type"];
+  readonly kind?: string;
+  readonly status?: string;
+  readonly state?: string;
+  readonly runId?: string;
+  readonly contextId?: string;
+}
+export interface ResourceHistoryRecord extends ResourceRecord {
+  readonly contextId: string | null;
+}
 
 /** Extension-side control objects. Neither these nor ResourceRef cross the script/wire boundary. */
 export interface ManagedResource {
@@ -159,24 +194,30 @@ function resourceId(value: unknown): asserts value is string {
 
 /** One manager per live Agent/profile, backed by that profile's existing resource rows. */
 export class ResourceManager extends EventEmitter {
-  readonly store: SqliteStore;
+  readonly store: ResourceStore;
   #entries = new Map<string, Entry>();
   #identities = new WeakMap<ManagedResource, Entry>();
   #references = new WeakMap<ResourceRef, Entry>();
   #owners = new Set<Owner>();
   #timeout: number;
   #capacity: number;
+  #allocateOwner?: (origin: ContributionOrigin) => string;
+  #releaseOwner?: (id: string) => void;
   #stopping = false;
   #shutdownAttempt?: Promise<CleanupReport>;
   constructor(
-    store: SqliteStore,
-    options: { cleanupTimeoutMs?: number; capacity?: number } = {},
+    store: ResourceStore,
+    options: { cleanupTimeoutMs?: number; capacity?: number;
+      allocateOwner?: (origin: ContributionOrigin) => string;
+      releaseOwner?: (id: string) => void } = {},
   ) {
     super();
     this.setMaxListeners(0);
     this.store = store;
     this.#timeout = options.cleanupTimeoutMs ?? 5000;
     this.#capacity = options.capacity ?? 4096;
+    this.#allocateOwner = options.allocateOwner;
+    this.#releaseOwner = options.releaseOwner;
     requireCondition(
       Number.isSafeInteger(this.#timeout) &&
         this.#timeout > 0 &&
@@ -198,18 +239,21 @@ export class ResourceManager extends EventEmitter {
     );
     authorizeCall(() => binding.assertActive());
     binding.signal.throwIfAborted();
+    const fixedOrigin = JSON.parse(canonicalJson(origin)) as ContributionOrigin;
+    requireCondition(
+      fixedOrigin.owner && fixedOrigin.version && fixedOrigin.namespace && fixedOrigin.revision,
+      "invalid_resource_owner",
+      "A resource instance needs its trusted source and effective version.",
+    );
     const owner: Owner = {
-      id: newId("instance"),
-      origin: JSON.parse(canonicalJson(origin)),
+      id: this.#allocateOwner?.(fixedOrigin) ?? newId("instance"),
+      origin: fixedOrigin,
       signal: binding.signal,
       stopping: false,
       authorize: binding.authorize,
     };
     requireCondition(
-      owner.origin.owner &&
-        owner.origin.version &&
-        owner.origin.namespace &&
-        owner.origin.revision,
+      /^instance_[0-9a-f]{32}$/.test(owner.id),
       "invalid_resource_owner",
       "A resource instance needs its trusted source and effective version.",
     );
@@ -249,7 +293,10 @@ export class ResourceManager extends EventEmitter {
         );
         await Promise.all(entries.map((entry) => this.#dispose(entry, reason)));
         const report = this.#report(entries.map((entry) => entry.ref.id));
-        if (!report.unconfirmed.length) this.#owners.delete(owner);
+        if (!report.unconfirmed.length) {
+          this.#releaseOwner?.(owner.id);
+          this.#owners.delete(owner);
+        }
         return report;
       },
     });

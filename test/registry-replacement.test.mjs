@@ -11,10 +11,10 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { canonicalJson } from "../dist/contracts/json.js";
@@ -48,7 +48,7 @@ async function fixture(t) {
   mkdirSync(workDir);
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
   writeFileSync(path.join(workDir, "snapshot.json"), '{"project":null}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -70,7 +70,7 @@ async function fixture(t) {
     pwd: workDir,
     snapshotRef: "work/snapshot.json",
   });
-  const engine = new RunEngine(
+  const engine = new ExecutionFixture(
     store,
     loader,
     new ScriptCatalog(workDir, "agent", () => []),

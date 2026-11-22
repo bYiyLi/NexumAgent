@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { WorkService } from "../dist/work/service.js";
 import { selectorKey } from "../dist/work/discovery.js";
@@ -44,7 +44,7 @@ function fixture(t) {
     writeFileSync(filename, content);
     return realpathSync.native(filename);
   };
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",

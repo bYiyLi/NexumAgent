@@ -8,22 +8,11 @@ import { requireCondition } from "../contracts/errors.js";
 const current = new AsyncLocalStorage<NativePromiseAudit>();
 const owners = new WeakMap<Promise<unknown>, NativePromiseAudit>();
 const active = new Set<NativePromiseAudit>();
-const bunPromiseHooks = "bun" in process.versions;
-const bunUnhandledOwners = new WeakMap<Promise<unknown>, NativePromiseAudit[]>();
 let stop: (() => void) | undefined;
 function unhandled(reason: unknown, promise: Promise<unknown>): void {
   const owner = owners.get(promise);
   if (owner && active.has(owner)) {
     owner.rejected(promise);
-    return;
-  }
-  if (bunPromiseHooks && active.size > 0) {
-    // Bun 1.4 does not implement node:v8 promiseHooks. Without creation-time
-    // ownership, conservatively fail every active audit rather than silently
-    // reporting success for an unhandled asynchronous side effect.
-    const candidates = [...active];
-    bunUnhandledOwners.set(promise, candidates);
-    for (const candidate of candidates) candidate.rejected(promise);
     return;
   }
   // A runtime listener must not quietly swallow unrelated Agent failures.
@@ -37,15 +26,10 @@ function unhandled(reason: unknown, promise: Promise<unknown>): void {
 }
 function handled(promise: Promise<unknown>): void {
   owners.get(promise)?.handled(promise);
-  const candidates = bunUnhandledOwners.get(promise);
-  if (candidates) {
-    for (const candidate of candidates) candidate.handled(promise);
-    bunUnhandledOwners.delete(promise);
-  }
 }
 function monitor(): void {
   if (stop) return;
-  const close = bunPromiseHooks ? () => {} : promiseHooks.onInit((promise, parent) => {
+  const close = promiseHooks.onInit((promise, parent) => {
     const owner = current.getStore() ?? (parent && owners.get(parent));
     if (owner) owners.set(promise, owner);
   });

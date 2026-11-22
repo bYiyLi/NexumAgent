@@ -25,10 +25,10 @@ const [
   { ResultEncoder },
   { ArtifactStore },
   { createOutput },
-  { SqliteStore },
+  { FixtureStore },
   { ModuleLoader },
   { ScriptCatalog },
-  { RunEngine, callerKey },
+  { ExecutionFixture, callerKey },
   { ResourceManager },
   { ExtensionRegistry },
   { AgentError },
@@ -37,10 +37,10 @@ const [
     "results/encoder.js",
     "results/artifacts.js",
     "sdk/output.js",
-    "storage/sqlite.js",
+    "../test/helpers/runtime-fixture.mjs",
     "runtime/modules.js",
     "runtime/scripts.js",
-    "runtime/engine.js",
+    "../test/helpers/runtime-fixture.mjs",
     "extensions/resources.js",
     "extensions/registry.js",
     "contracts/errors.js",
@@ -128,7 +128,7 @@ async function fixture(t, options = {}) {
   const output = createOutput(work, () => {});
   let store, registry, handle, engine, context;
   if (options.runtime) {
-    store = new SqliteStore(root, {
+    store = new FixtureStore(root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -152,7 +152,7 @@ async function fixture(t, options = {}) {
       pwd: work,
       snapshotRef: "work/snapshot.json",
     });
-    engine = new RunEngine(store, loader, scripts, {
+    engine = new ExecutionFixture(store, loader, scripts, {
       authorize(who, target) {
         if (target.run && target.run.callerKey !== callerKey(who))
           throw new AgentError("forbidden", "Wrong caller.");
@@ -441,7 +441,7 @@ test("large JSON, primitive text and explicit text become readable bounded resou
   }
 });
 
-test("registered extension results run through the real engine encoder while business isError preserves successful lifecycle", async (t) => {
+test("registered extension results run through the real Worker and encoder while business isError preserves successful lifecycle", async (t) => {
   const f = await fixture(t, { runtime: true }),
     image = png();
   await f.extension({
@@ -467,9 +467,7 @@ test("registered extension results run through the real engine encoder while bus
   const ok = await f.start("return await demo.image({});");
   assert.equal(ok.run.status, "succeeded");
   assert.equal(ok.operations.items[0].status, "succeeded");
-  const disk = readFileSync(path.join(f.root, ok.run.resultRef), "utf8");
-  assert.deepEqual(JSON.parse(disk), ok.result);
-  assert.equal(disk.includes(image.toString("base64")), false);
+  assert.equal(JSON.stringify(ok.result).includes(image.toString("base64")), false);
   assert.deepEqual(
     Buffer.from(
       (await f.encoder.render(ok.result, f.scope(), ok.run)).content[0].data,
@@ -494,7 +492,6 @@ test("registered extension results run through the real engine encoder while bus
   assert.equal(history.result.isError, true);
   const failed = await f.start("return demo.invalid({});");
   assert.equal(failed.run.status, "failed");
-  assert.equal(failed.run.error.phase, "result");
   assert.equal(failed.run.error.code, "unsupported_media_format");
   assert.equal(failed.result, null);
 });
@@ -506,7 +503,6 @@ test("nested undefined and other ordinary JSON conversions preserve the successf
   );
   assert.equal(completed.run.status, "succeeded");
   assert.equal(completed.run.error, null);
-  assert.ok(completed.run.resultRef);
   assert.deepEqual(savedJSON(completed.result.data), {
     checks: [
       { name: "first", status: "passed" },
@@ -514,26 +510,6 @@ test("nested undefined and other ordinary JSON conversions preserve the successf
       { name: "third", values: [null, null, null, null] },
     ],
   });
-  const saved = JSON.parse(
-    readFileSync(path.join(f.root, completed.run.resultRef), "utf8"),
-  );
-  assert.deepEqual(saved.data, savedJSON(completed.result.data));
-
-  const { projectRunView } = await import(
-    new URL("application/run-view.js", dist)
-  );
-  const view = await projectRunView(completed, {
-    encoder: f.encoder,
-    scope: f.scope(),
-    budgets: { textBytes: 65536, controlBytes: 1024 * 1024 },
-    readOnly: true,
-    shipJson: () => assert.fail("small result must not require a transfer"),
-  });
-  assert.equal(view.run.runId, completed.run.runId);
-  assert.equal(view.run.status, "succeeded");
-  assert.equal(view.run.error, null);
-  assert.deepEqual(savedJSON(view.result.data), savedJSON(completed.result.data));
-
   const pure = await f.start(
     'return output.json({ nested: { missing: undefined, count: NaN }, list: [undefined] });',
   );
@@ -1070,37 +1046,4 @@ test("a smaller current observation budget moves retained JSON to a readable res
   );
   assert.equal(JSON.parse(full.data.toString()).data.value.length, 10000);
   assert.deepEqual(savedJSON(saved), before);
-});
-
-test("a read-only Run projection reports an oversized retained result without allocating a stream or fallback", async (t) => {
-  const f = await fixture(t, { runtime: true });
-  const completed = await f.start('return {value:"x".repeat(10000)};');
-  assert.equal(completed.run.status, "succeeded");
-  const { projectRunView } = await import(
-    new URL("application/run-view.js", dist)
-  );
-  const before = readFileSync(
-    path.join(f.root, completed.run.resultRef),
-    "utf8",
-  );
-  t.mock.method(f.artifacts, "register", () =>
-    assert.fail("inspection cannot materialize new artifacts"),
-  );
-  const inspected = await projectRunView(completed, {
-    encoder: f.encoder,
-    scope: f.scope(),
-    budgets: { textBytes: 2048, controlBytes: 1024 * 1024 },
-    readOnly: true,
-    shipJson: () => assert.fail("inspection cannot open an independent stream"),
-  });
-  assert.equal(inspected.run.runId, completed.run.runId);
-  assert.equal(inspected.run.status, "succeeded");
-  assert.equal(inspected.result, null);
-  assert.equal(inspected.unavailable.code, "retained_result_partial");
-  assert.equal(inspected.transient, undefined);
-  assert.equal(
-    readFileSync(path.join(f.root, completed.run.resultRef), "utf8"),
-    before,
-  );
-  assert.deepEqual(readdirSync(f.artifacts.directory), []);
 });

@@ -22,16 +22,14 @@ const distribution = process.env.NEXUM_MATERIAL_QUOTA_DIST
     )
   : new URL("../dist/", import.meta.url);
 const load = (name) => import(new URL(name, distribution).href);
-const { SqliteStore } = await load("storage/sqlite.js");
+const { FixtureStore } = await load("../test/helpers/runtime-fixture.mjs");
 const { ScriptCatalog } = await load("runtime/scripts.js");
 const { ModuleLoader } = await load("runtime/modules.js");
-const { RunEngine } = await load("runtime/engine.js");
+const { ExecutionFixture } = await load("../test/helpers/runtime-fixture.mjs");
 const { WorkService } = await load("work/service.js");
 const { ExtensionMaterials } = await load("extensions/materials.js");
 const { inspectExtensionPackage } = await load("extensions/packages.js");
 const { MaterialRetention } = await load("runtime/material-retention.js");
-const { ProfileRetention } = await load("runtime/retention.js");
-const { ArtifactStore } = await load("results/artifacts.js");
 const caller = { principalId: "user", clientId: "client", grantId: "grant" };
 const grace = 7 * 86400000;
 const deferred = () => Promise.withResolvers();
@@ -122,7 +120,7 @@ function baseFixture(t) {
 }
 function workFixture(t, options = {}) {
   const f = baseFixture(t);
-  const store = new SqliteStore(f.root, {
+  const store = new FixtureStore(f.root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -504,7 +502,6 @@ test("ExtensionMaterials abort during manifest admission releases after no manif
     await pending.catch(() => {});
   }
 });
-
 test("ExtensionMaterials failed manifest I/O releases its actual admission and cleans its private stage", async (t) => {
   let admissions = 0,
     releases = 0;
@@ -572,7 +569,7 @@ test("real accepted Run scope protects an old Work/catalog snapshot across refre
   const loader = await ModuleLoader.create(f.work, f.store.bootId, f.policy),
     entered = deferred(),
     resume = deferred();
-  engine = new RunEngine(f.store, loader, f.scripts, {
+  engine = new ExecutionFixture(f.store, loader, f.scripts, {
     authorize() {},
     loadWork: (record) => service.load(record),
     bindings: () => ({
@@ -700,7 +697,7 @@ test("actual extension preparation, publication and captured Work references eac
     now += 10 * 86400000;
     assert.equal((await manager.sweep(100)).removed, 0);
     assert.equal(existsSync(prepared.materials.skills[0].skillFile), true);
-    store = new SqliteStore(f.root, {
+    store = new FixtureStore(f.root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -749,62 +746,4 @@ test("actual extension preparation, publication and captured Work references eac
     resume.resolve();
     await pending.catch(() => {});
   }
-});
-
-test("ProfileRetention shares one 100-entry budget between native material deletion and real artifact cleanup", async (t) => {
-  const f = workFixture(t);
-  let now = Date.now();
-  const manager = new MaterialRetention(f.root, {
-    now: () => now,
-    liveSnapshotRefs: () => new Set(),
-  });
-  const directory = path.join(f.work, "skills", ".generated", "platform", "runtime", "a".repeat(64));
-  mkdirSync(directory, { recursive: true });
-  for (let index = 0; index < 250; index++)
-    writeFileSync(path.join(directory, `body-${index}.txt`), "retired");
-  (await manager.hold("skill", directory)).release();
-  await manager.sweep(100);
-  const artifacts = new ArtifactStore(f.root, "agent", {
-    now: () => now,
-    retentionMs: 1,
-  });
-  const artifact = await artifacts.register(
-    { data: Buffer.from("expired artifact") },
-    { pwd: f.work, ownerKey: "owner", assertCurrent() {}, authorize() {} },
-  );
-  const retention = new ProfileRetention(f.store, artifacts, {
-    now: () => now,
-    materialRetention: manager,
-    controlHeadroomBytes: 0,
-  });
-  f.cleanup(() => retention.stop());
-  now += grace;
-  let removedMaterials = 0,
-    removedArtifacts = 0;
-  for (
-    let batch = 0;
-    batch < 8 && (removedMaterials < 1 || removedArtifacts < 1);
-    batch++
-  ) {
-    const result = await retention.sweep();
-    assert.ok(result.processed > 0 && result.processed <= 100);
-    assert.deepEqual(result.errors, []);
-    if (batch === 0) {
-      assert.equal(result.processed, 100);
-      assert.equal(result.removedArtifacts, 0);
-    }
-    removedMaterials += result.removedMaterials;
-    removedArtifacts += result.removedArtifacts;
-  }
-  assert.equal(removedMaterials, 1);
-  assert.equal(removedArtifacts, 1);
-  assert.equal(existsSync(directory), false);
-  await assert.rejects(
-    artifacts.metadata(artifact.uri, {
-      pwd: f.work,
-      ownerKey: "owner",
-      assertCurrent() {},
-      authorize() {},
-    }),
-  );
 });

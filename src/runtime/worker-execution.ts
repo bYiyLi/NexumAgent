@@ -9,8 +9,10 @@ import { safeErrorData } from "../contracts/error-data.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 import { mcpResult } from "../results/mcp.js";
+import { snapshotBlob } from "../results/artifacts.js";
 import { outputIntent } from "../sdk/output.js";
 import { transferOffer } from "../transfer/offers.js";
+import { packWorkerBinary, unpackWorkerBinary } from "./worker-binary.js";
 import type { ModuleUse } from "./modules.js";
 
 export interface WorkerCompile {
@@ -51,6 +53,7 @@ const syncHeaderBytes = 8;
 const validSegment = /^[A-Za-z0-9_$][A-Za-z0-9_.$-]{0,256}$/;
 function aliasTree(
   bindings: Readonly<Record<string, unknown>>,
+  token: string,
 ): { template: Record<string, unknown>;
   handlers: Map<string, Function>;
   bindingHandles: Map<string, object> } {
@@ -71,13 +74,14 @@ function aliasTree(
       const id = randomUUID();
       bindingHandles.set(id, value);
       return { __nexumBindingData: id,
-        data: structuredClone(value), isBuffer: Buffer.isBuffer(value) };
+        data: packWorkerBinary(value, token) ?? structuredClone(value) };
     }
     requireCondition(isPlainRecord(value) || Array.isArray(value),
       "worker_binding_invalid", "SDK constant bindings must be plain data.");
     const data = Object.create(null) as Record<string, unknown>;
     for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      requireCondition(validSegment.test(key) && "value" in descriptor,
+      requireCondition((keys.length === 0 ? validSegment.test(key) : key.length <= 8192) &&
+        "value" in descriptor,
         "worker_binding_invalid", "SDK bindings need stable named properties.");
       data[key] = visit(descriptor.value, [...keys, key], depth + 1);
     }
@@ -93,17 +97,23 @@ function aliasTree(
 function decode(
   value: unknown,
   handles: ReadonlyMap<string, { value: unknown; snapshot?: unknown }>,
+  token: string,
   depth = 0,
 ): unknown {
   requireCondition(depth <= maxDepth, "worker_message_invalid",
     "Worker data exceeds the nested value budget.");
   if (!value || typeof value !== "object") return value;
+  const binary = unpackWorkerBinary(value, token);
+  if (binary !== undefined) return binary;
+  if (types.isMap(value)) return new Map([...value].map(([key, item]) =>
+    [decode(key, handles, token, depth + 1), decode(item, handles, token, depth + 1)]));
+  if (types.isSet(value)) return new Set([...value].map((item) => decode(item, handles, token, depth + 1)));
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer ||
       value instanceof Blob || value instanceof Date ||
       value instanceof Map || value instanceof Set)
     return value;
   if (Array.isArray(value))
-    return value.map((entry) => decode(entry, handles, depth + 1));
+    return value.map((entry) => decode(entry, handles, token, depth + 1));
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source);
   if (keys.length === 1 && keys[0] === "__nexumIntent") {
@@ -134,7 +144,7 @@ function decode(
   }
   const result = Object.create(null) as Record<string, unknown>;
   for (const [key, item] of Object.entries(source))
-    result[key] = decode(item, handles, depth + 1);
+    result[key] = decode(item, handles, token, depth + 1);
   return result;
 }
 
@@ -143,8 +153,8 @@ export async function compileWorker(
   options: WorkerCompile,
 ): Promise<IsolatedExecution> {
   options.signal?.throwIfAborted();
-  const { template, handlers, bindingHandles } = aliasTree(options.bindings);
   const bootId = "runworker_" + randomUUID().replaceAll("-", "");
+  const { template, handlers, bindingHandles } = aliasTree(options.bindings, bootId);
   const context = structuredClone(options.context);
   const syncReplyChannel = new MessageChannel();
   const worker = new Worker(new URL("./worker-entry.js", import.meta.url), {
@@ -194,7 +204,7 @@ export async function compileWorker(
     options.signal?.removeEventListener("abort", abort);
     stopping = (async () => {
       // Confirm actual Worker exit. Do NOT await pending Core SDK calls here:
-      // RunEngine can only cancel an abandoned runtime.requestInput after it
+      // The host can only cancel an abandoned runtime.requestInput after it
       // observes the guest's returned root value. Waiting here deadlocks it.
       // Core's RunOperations and managed resources own their own cleanup.
       await worker.terminate();
@@ -297,7 +307,10 @@ export async function compileWorker(
           error.code ?? "worker_callback_failed",
           error.message ?? "The guest callback failed.",
         ));
-      } else pending.resolve(entry.value);
+      } else {
+        try { pending.resolve(decode(entry.value, handles, bootId)); }
+        catch (cause) { pending.reject(cause); }
+      }
       return;
     }
     if (entry.type === "audit-result" && auditResponse) {
@@ -413,12 +426,29 @@ export async function compileWorker(
             typeof cause === "object") {
           const descriptor = Object.getOwnPropertyDescriptor(cause, "response");
           if (descriptor && "value" in descriptor &&
-              isPlainRecord(descriptor.value) &&
-              Number.isSafeInteger(descriptor.value.status)) {
+              isPlainRecord(descriptor.value)) {
             try {
-              publicResponse = JSON.parse(canonicalJson(
-                descriptor.value, 64 * 1024,
-              )) as object;
+              const status = Object.getOwnPropertyDescriptor(descriptor.value, "status");
+              requireCondition(status && "value" in status && Number.isSafeInteger(status.value),
+                "invalid_json", "The response status is invalid.");
+              const data = Object.getOwnPropertyDescriptor(descriptor.value, "data");
+              const binary = data && "value" in data ? snapshotBlob(data.value, 64 * 1024 * 1024) : null;
+              if (binary) {
+                const fields = Object.getOwnPropertyDescriptors(descriptor.value);
+                const safe: Record<string, unknown> = Object.create(null);
+                for (const [key, field] of Object.entries(fields)) {
+                  if (!field.enumerable) continue;
+                  requireCondition("value" in field, "invalid_json", "Response accessors are not supported.");
+                  safe[key] = key === "data" ? null : field.value;
+                }
+                const response = JSON.parse(canonicalJson(safe, 64 * 1024)) as Record<string, unknown>;
+                response.data = binary.blob;
+                publicResponse = response;
+              } else {
+                publicResponse = JSON.parse(canonicalJson(
+                  descriptor.value, 64 * 1024,
+                )) as object;
+              }
             } catch {
               // An oversized/invalid response must not cross the boundary.
             }
@@ -447,6 +477,8 @@ export async function compileWorker(
             "An SDK result exceeds the nested data budget.");
           if (!item || typeof item !== "object") return item;
           if (seen.has(item)) return seen.get(item);
+          const binary = packWorkerBinary(item, bootId);
+          if (binary !== undefined) { seen.set(item, binary); return binary; }
           const issuedOutput = outputIntent(item);
           if (issuedOutput) {
             const id = randomUUID();
@@ -491,12 +523,17 @@ export async function compileWorker(
             for (const nested of item) result.push(visit(nested, depth + 1));
             return result;
           }
-          if (Buffer.isBuffer(item)) {
-            const marker = {
-              __nexumBufferBytes: new Uint8Array(item),
-            };
-            seen.set(item, marker);
-            return marker;
+          if (types.isMap(item)) {
+            const result = new Map();
+            seen.set(item, result);
+            for (const [key, value] of item) result.set(visit(key, depth + 1), visit(value, depth + 1));
+            return result;
+          }
+          if (types.isSet(item)) {
+            const result = new Set();
+            seen.set(item, result);
+            for (const value of item) result.add(visit(value, depth + 1));
+            return result;
           }
           if (item instanceof Error) {
             const marker: Record<string, unknown> = {
@@ -573,7 +610,7 @@ export async function compileWorker(
               void task.catch(() => {});
               try {
                 worker.postMessage({
-                  type: "invoke-callback", callbackId, requestId, args,
+                  type: "invoke-callback", callbackId, requestId, args: args.map(encode),
                 });
               } catch {
                 pending.reject(new AgentError("worker_callback_invalid",
@@ -606,7 +643,7 @@ export async function compileWorker(
           return value;
         };
         const args = (entry.args as unknown[]).map((arg, index) => {
-          const data = reconstruct(decode(arg, handles));
+          const data = reconstruct(decode(arg, handles, bootId));
           return nativeTypes[index] === "buffer" &&
             data instanceof Uint8Array && !Buffer.isBuffer(data)
             ? Buffer.from(data) : data;
@@ -648,7 +685,7 @@ export async function compileWorker(
     if (entry.type === "done") {
       try {
         if (rootComplete) return;
-        const value = decode(entry.value, handles);
+        const value = decode(entry.value, handles, bootId);
         observe("completed", "worker_completed");
         rootComplete = true;
         // The Root can finish while Core-owned accepted SDK operations still

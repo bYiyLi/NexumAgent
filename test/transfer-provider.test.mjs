@@ -11,10 +11,10 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { AgentError } from "../dist/contracts/errors.js";
@@ -62,7 +62,7 @@ async function fixture(t, options = {}) {
   const workDir = path.join(root, "work");
   mkdirSync(workDir);
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -92,7 +92,7 @@ async function fixture(t, options = {}) {
     pwd: workDir,
     snapshotRef: "work/snapshot.json",
   });
-  const engine = new RunEngine(store, loader, scripts, {
+  const engine = new ExecutionFixture(store, loader, scripts, {
     authorize(who, target) {
       if (target.run && target.run.callerKey !== callerKey(who))
         throw new AgentError("forbidden", "Wrong caller.");

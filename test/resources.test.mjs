@@ -6,9 +6,7 @@ import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { DatabaseSync } from "node:sqlite";
-import { SqliteStore } from "../dist/storage/sqlite.js";
-import { schemaVersion } from "../dist/storage/schema.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 
 const origin = {
@@ -23,7 +21,7 @@ function fixture(t, options = {}) {
     mkdtempSync(path.join(tmpdir(), "nexum-resources-")),
   );
   mkdirSync(path.join(root, "work"));
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -482,136 +480,6 @@ test("bounded denied scans return an opaque continuation instead of hiding later
   assert.ok(next.items.some((item) => item.id === visible));
 });
 
-test("v2 migration preserves state/resource history and restart readers cannot reacquire old controls", async (t) => {
-  const root = realpathSync.native(
-    mkdtempSync(path.join(tmpdir(), "nexum-resource-history-migration-")),
-  );
-  mkdirSync(path.join(root, "work"));
-  const binding = {
-    agentId: "agent",
-    profile: "development",
-    cloudEnvironment: "test",
-  };
-  const filename = path.join(root, "state", "runtime.sqlite");
-  let store = new SqliteStore(root, binding);
-  t.after(() => {
-    store.close();
-    rmSync(root, { recursive: true, force: true });
-  });
-  const row = store.registerResource({
-    callerKey: "old-caller",
-    kind: "process",
-    source: { ...origin, instanceId: "old-instance" },
-  });
-  store.resourceDiagnostic(row.resourceId, "registered", {
-    details: { state: "running", pid: 123 },
-  });
-  store.setState("kept", { value: 1 }, null);
-  store.setState("deleted", 1, null);
-  store.deleteState("deleted", 1);
-  store.close();
-  let db = new DatabaseSync(filename);
-  db.exec(
-    "DROP TABLE project_closures; DROP TABLE task_artifacts; DROP INDEX resources_history; ALTER TABLE runs DROP COLUMN admission_class; " +
-      "ALTER TABLE runs DROP COLUMN retention_history_ms; ALTER TABLE runs DROP COLUMN retention_logs_ms; ALTER TABLE runs DROP COLUMN retention_inputs_ms; " +
-      "ALTER TABLE operations DROP COLUMN retention_history_ms; ALTER TABLE managed_resources DROP COLUMN retention_history_ms; " +
-      "ALTER TABLE managed_resources DROP COLUMN retention_logs_ms; ALTER TABLE transfers DROP COLUMN retention_history_ms; " +
-      "ALTER TABLE runtime_meta ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'legacy'; " +
-      "ALTER TABLE runtime_meta ADD COLUMN profile TEXT NOT NULL DEFAULT 'development'; " +
-      "ALTER TABLE runtime_meta ADD COLUMN cloud_environment TEXT NOT NULL DEFAULT 'development'; " +
-      "PRAGMA user_version=2",
-  );
-  db.close();
-  db = new DatabaseSync(filename);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
-  assert.equal(
-    db
-      .prepare("PRAGMA table_info(runs)")
-      .all()
-      .some((column) => column.name === "admission_class"),
-    false,
-  );
-  assert.equal(
-    db
-      .prepare(
-        "SELECT count(*) n FROM sqlite_master WHERE name='resources_history'",
-      )
-      .get().n,
-    0,
-  );
-  assert.equal(
-    db
-      .prepare(
-        "SELECT count(*) n FROM sqlite_master WHERE name='task_artifacts'",
-      )
-      .get().n,
-    0,
-  );
-  assert.equal(
-    db.prepare("SELECT version FROM agent_state WHERE key='deleted'").get()
-      .version,
-    2,
-  );
-  db.close();
-  store = new SqliteStore(root, { ...binding, agentId: "new_cloud_agent" });
-  assert.deepEqual(store.getState("kept").value, { value: 1 });
-  assert.equal(store.getState("deleted"), null);
-  assert.equal(store.setState("deleted", 2, null).version, 3);
-  const work = store.openWork({
-    callerKey: "new-caller",
-    pwd: path.join(root, "work"),
-    snapshotRef: "work/test",
-  });
-  let run = store.acceptRun({
-    callerKey: "new-caller",
-    contextId: work.contextId,
-    sourceKind: "inline",
-    source: {},
-  }).run;
-  run = store.transitionRun(run.runId, run.revision, "preparing_inputs");
-  run = store.transitionRun(run.runId, run.revision, "running");
-  const signal = new AbortController(),
-    manager = new ResourceManager(store);
-  const instance = manager.instance(
-    { ...origin, version: "2", revision: "two" },
-    { signal: signal.signal, assertActive() {}, authorize() {} },
-  );
-  const reader = instance.bind({
-    runId: run.runId,
-    signal: signal.signal,
-    assertActive() {},
-    authorize() {},
-  });
-  const snapshot = await reader.describe(row.resourceId);
-  assert.equal(snapshot.status, "unavailable");
-  assert.equal(snapshot.closedAt, null);
-  assert.equal(snapshot.controlAvailable, false);
-  assert.equal(snapshot.details.pid, 123);
-  assert.equal(
-    (await reader.list({ state: "running" })).items[0].id,
-    row.resourceId,
-  );
-  await assert.rejects(() => reader.get(row.resourceId), {
-    code: "resource_owner_mismatch",
-  });
-  store.close();
-  db = new DatabaseSync(filename);
-  assert.equal(
-    db.prepare("PRAGMA user_version").get().user_version,
-    schemaVersion,
-  );
-  const plan = db
-    .prepare(
-      `EXPLAIN QUERY PLAN SELECT * FROM managed_resources
-    WHERE json_extract(source_json,'$.owner')=? AND json_extract(source_json,'$.namespace')=? AND json_extract(source_json,'$.type')=?
-    ORDER BY created_at DESC,resource_id DESC LIMIT 20`,
-    )
-    .all(origin.owner, origin.namespace, origin.type);
-  assert.ok(plan.some((item) => item.detail.includes("resources_history")));
-  assert.ok(plan.every((item) => !item.detail.includes("TEMP B-TREE")));
-  db.close();
-});
-
 test("resource facts follow the registered lifetime without granting ownership or completion authority", async (t) => {
   const f = fixture(t),
     r = f.run(),
@@ -691,23 +559,9 @@ test("run cancellation requests disposal but cannot claim closure until the real
   const report = await f.manager.cleanupRun(r.row.runId);
   assert.equal(report.unconfirmed[0].id, ref.id);
   assert.equal(c.stops(), 1);
-  assert.throws(
-    () =>
-      f.store.transitionRun(
-        r.row.runId,
-        f.store.getRun(r.row.runId).revision,
-        "succeeded",
-      ),
-    { code: "run_cleanup_pending" },
-  );
   c.closed.resolve();
   await f.manager.waitForRunClosure(r.row.runId);
   assert.equal(f.store.getResource(ref.id).status, "closed");
-  const row = f.store.getRun(r.row.runId);
-  assert.equal(
-    f.store.transitionRun(row.runId, row.revision, "succeeded").status,
-    "succeeded",
-  );
 });
 
 test("successful handoff commits before detaching the old signal; later runs borrow without acquiring ownership", async (t) => {
@@ -874,7 +728,7 @@ test("instance resources are shared rather than run-owned, and another version c
   });
 });
 
-test("capacity and malformed controls fail before registration or startup; diagnostic APIs cannot manufacture closure", async (t) => {
+test("capacity and malformed controls fail before registration or startup", async (t) => {
   const f = fixture(t, { capacity: 1 }),
     r = f.run(),
     c = control();
@@ -899,9 +753,6 @@ test("capacity and malformed controls fail before registration or startup; diagn
     () => r.resources.register({ kind: "other", value: control().value }),
     { code: "resource_busy" },
   );
-  assert.throws(() => f.store.resourceDiagnostic(ref.id, "closed", {}), {
-    code: "invalid_resource_diagnostic",
-  });
   c.closed.resolve();
   await f.manager.waitForRunClosure(r.row.runId);
   const next = control();
@@ -925,15 +776,6 @@ test("a failed closure write rejects confirmation without inventing closure or l
   await assert.rejects(() => r.resources.get(ref.id), {
     code: "resource_unavailable",
   });
-  assert.throws(
-    () =>
-      f.store.transitionRun(
-        r.row.runId,
-        f.store.getRun(r.row.runId).revision,
-        "succeeded",
-      ),
-    { code: "run_cleanup_pending" },
-  );
 });
 
 test("a native process starts only after registration; real stream/child close confirms cleanup", async (t) => {

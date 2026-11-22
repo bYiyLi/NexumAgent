@@ -53,6 +53,7 @@ void extension;void example;`,
     process.execPath,
     [
       tsc,
+      "--ignoreConfig",
       "--noEmit",
       "--strict",
       "--target",

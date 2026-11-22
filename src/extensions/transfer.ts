@@ -1,9 +1,19 @@
 import { AgentError } from "../contracts/errors.js";
 import type { JsonObject } from "../contracts/types.js";
 import type { ArtifactRecord } from "../results/artifacts.js";
-import type { TransferStatus } from "../storage/transfers.js";
 import type { UploadFileReceipt } from "../transfer/io.js";
 import type { TransferOffer } from "../transfer/offers.js";
+
+export type TransferStatus =
+  | "preparing"
+  | "pending"
+  | "transferring"
+  | "cancelling"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "interrupted";
 
 export interface UploadOptions {
   readonly path: string;

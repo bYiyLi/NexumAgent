@@ -15,12 +15,12 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, digest, newId } from "../contracts/json.js";
 import { validateContract } from "../contracts/validation.js";
 import type {
+  Binding,
   ContributionOrigin,
   JsonObject,
   JsonValue,
   WorkRecord,
 } from "../contracts/types.js";
-import { SqliteStore } from "../storage/sqlite.js";
 import {
   authorizeCall,
   callerKey,
@@ -63,6 +63,7 @@ export type PublishedSkill = Omit<SkillMetadata, "disabled">;
 export interface PublishedMaterials {
   instructions: readonly PublishedInstruction[];
   skills: readonly PublishedSkill[];
+  goSourceOrigins?: readonly ContributionOrigin[];
 }
 export interface OpenInput {
   agentId: string;
@@ -72,7 +73,7 @@ export interface OpenInput {
 }
 export interface WorkOptions {
   readonly reserve?: ManagedReserve;
-  readonly materialRetention?: MaterialRetention;
+  readonly materialRetention?: Pick<MaterialRetention, "hold">;
   home: string | null;
   agent: {
     name: string;
@@ -99,6 +100,30 @@ export interface WorkOptions {
   materials?: (caller: Caller) => PublishedMaterials;
   scriptUsage?: (caller: Caller) => readonly ScriptUsage[];
   canUseScript?: (caller: Caller, origin: ContributionOrigin) => boolean;
+}
+export interface WorkSnapshotStore {
+  readonly root: string;
+  readonly binding: Readonly<Binding>;
+  readonly bootId: string;
+  activeWork(id: string, callerKey: string, now?: number): WorkRecord;
+  getWork(id: string): WorkRecord;
+  openWork(input: {
+    callerKey: string;
+    projectId?: string;
+    pwd: string;
+    snapshotRef: string;
+  }, now?: number): WorkRecord;
+  refreshWork(id: string, callerKey: string, revision: number,
+    snapshotRef: string, now?: number): WorkRecord;
+  closeWork(id: string, callerKey: string, now?: number): JsonObject;
+  closeProject(projectId: string, now?: number): JsonObject;
+  scriptUsage(callerKey: string): ScriptUsage[];
+}
+
+export interface PreparedWorkSnapshot {
+  readonly ref: string;
+  readonly view: JsonObject;
+  release(committed: boolean): void;
 }
 interface Bundle {
   agentId: string;
@@ -129,14 +154,14 @@ function modelBytes(value: JsonObject): number {
 }
 
 export class WorkService {
-  #store: SqliteStore;
+  #store: WorkSnapshotStore;
   #scripts: ScriptCatalog;
   #policy: ModulePolicy;
   #options: WorkOptions;
   #refreshes = new Map<string, Promise<void>>();
   #operations = new Set<Promise<void>>();
   constructor(
-    store: SqliteStore,
+    store: WorkSnapshotStore,
     scripts: ScriptCatalog,
     policy: ModulePolicy,
     options: WorkOptions,
@@ -294,14 +319,40 @@ export class WorkService {
   ): void {
     authorizeCall(() => this.#options.authorize(caller, target));
   }
+  /** Prepare a snapshot for a separate storage owner without writing SQLite. */
+  async prepareSnapshot(
+    caller: Caller,
+    input: OpenInput,
+    previous: WorkRecord | null,
+    signal: AbortSignal,
+  ): Promise<PreparedWorkSnapshot> {
+    validateContract("agent.open", input);
+    caller = fixedCaller(caller);
+    requireCondition(input.agentId === this.#store.binding.agentId,
+      "agent_mismatch", "Open targets a different Agent.");
+    requireCondition((previous?.contextId ?? undefined) === input.contextId &&
+      (!previous || previous.callerKey === callerKey(caller)),
+    "context_binding_mismatch", "The previous work does not match this caller.");
+    let prepared: PreparedWorkSnapshot | undefined;
+    await this.#build(caller, json(input) as unknown as OpenInput, signal, {
+      previous,
+      publish(snapshot) { prepared = snapshot; },
+    });
+    requireCondition(prepared, "work_snapshot_unavailable", "The snapshot was not prepared.");
+    return prepared;
+  }
   async #build(
     caller: Caller,
     input: OpenInput,
     signal: AbortSignal,
+    preparation?: {
+      previous: WorkRecord | null;
+      publish(snapshot: PreparedWorkSnapshot): void;
+    },
   ): Promise<JsonObject> {
     signal.throwIfAborted();
     const key = callerKey(caller);
-    const previous = input.contextId
+    const previous = preparation ? preparation.previous : input.contextId
       ? this.#store.activeWork(input.contextId, key)
       : null;
     if (previous) {
@@ -439,6 +490,7 @@ export class WorkService {
       newId("snapshot"),
     );
     let committed = false;
+    let handedOff = false;
     let hold: { release(): void } | undefined;
     const write = async (filename: string, text: string): Promise<void> => {
       signal.throwIfAborted();
@@ -536,12 +588,10 @@ export class WorkService {
             locale: Intl.DateTimeFormat().resolvedOptions().locale,
           },
           runtime: {
-            name: "bun" in process.versions ? "bun" : "node",
-            version: process.versions.bun ?? process.version,
-            // Node worker_threads enforces its JS old-generation heap limit;
-            // Bun 1.4.5 ignores the same option. Neither is an OS sandbox.
-            workerHeapLimitEnforced: !("bun" in process.versions),
-            // Under Bun, nodeVersion reports its Node-compatibility facade.
+            name: "node",
+            version: process.version,
+            // Node's JS old-generation heap limit is not an OS sandbox.
+            workerHeapLimitEnforced: true,
             nodeVersion: process.version,
             v8Version: process.versions.v8,
             modulesAbi: process.versions.modules,
@@ -608,6 +658,30 @@ export class WorkService {
         .relative(this.#store.root, filename)
         .split(path.sep)
         .join("/");
+      if (preparation) {
+        let released = false;
+        const snapshotHold = hold;
+        preparation.publish({
+          ref: relative,
+          view,
+          release(committed) {
+            if (released) return;
+            if (!committed && lstatSync(directory, { throwIfNoEntry: false })) {
+              requireCondition(
+                realpathSync.native(directory) === directory &&
+                  lstatSync(directory).isDirectory() &&
+                  !lstatSync(directory).isSymbolicLink(),
+                "material_path_escape", "A failed work snapshot cannot redirect its cleanup.",
+              );
+              rmSync(directory, { recursive: true, force: true });
+            }
+            released = true;
+            snapshotHold?.release();
+          },
+        });
+        handedOff = true;
+        return view;
+      }
       const work = previous
         ? this.#store.refreshWork(
             previous.contextId,
@@ -625,7 +699,7 @@ export class WorkService {
       return { contextId: work.contextId, revision: work.revision, ...view };
     } finally {
       try {
-        if (!committed && lstatSync(directory, { throwIfNoEntry: false })) {
+        if (!committed && !handedOff && lstatSync(directory, { throwIfNoEntry: false })) {
           requireCondition(
             realpathSync.native(directory) === directory &&
               lstatSync(directory).isDirectory() &&
@@ -636,7 +710,7 @@ export class WorkService {
           rmSync(directory, { recursive: true, force: true });
         }
       } finally {
-        hold?.release();
+        if (!handedOff) hold?.release();
       }
     }
   }
@@ -685,14 +759,17 @@ export class WorkService {
   #validatePublished(published: PublishedMaterials): void {
     canonicalJson(published, 4 * 1024 * 1024);
     for (const item of [...published.instructions, ...published.skills]) {
+      const goSource = item.origin.type === "local" &&
+        published.skills.includes(item as PublishedSkill) &&
+        published.goSourceOrigins?.some((origin) => canonicalJson(origin) === canonicalJson(item.origin));
       requireCondition(
-        ["platform", "extension"].includes(item.origin.type) &&
+        (["platform", "extension"].includes(item.origin.type) || goSource) &&
           item.origin.owner &&
           item.origin.version &&
           item.origin.revision &&
           item.scope.type === "agent",
         "invalid_material_source",
-        "Published guidance must keep its actual platform/extension owner, version and Agent scope.",
+        "Published guidance must keep its actual approved source, version and Agent scope.",
       );
     }
     for (const item of published.instructions)

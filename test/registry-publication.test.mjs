@@ -6,7 +6,7 @@ import test from "node:test";
 import { AgentError } from "../dist/contracts/errors.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 
 const source = {
   apiVersion: 1,
@@ -35,7 +35,7 @@ const methods = {
 
 function fixture(t, authorize = () => {}) {
   const root = mkdtempSync(path.join(tmpdir(), "nexum-publication-"));
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent-publication",
     profile: "development",
     cloudEnvironment: "isolated-publication-fixture",

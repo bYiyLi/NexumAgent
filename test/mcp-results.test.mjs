@@ -34,12 +34,12 @@ const [
   { ArtifactStore },
   { createOutput },
   { normalizeData },
-  { SqliteStore },
+  { FixtureStore },
   { ResourceManager },
   { ExtensionRegistry },
   { ModuleLoader },
   { ScriptCatalog },
-  { RunEngine, callerKey },
+  { ExecutionFixture, callerKey },
   { AgentError },
 ] = await Promise.all(
   [
@@ -48,12 +48,12 @@ const [
     "results/artifacts.js",
     "sdk/output.js",
     "results/normalize.js",
-    "storage/sqlite.js",
+    "../test/helpers/runtime-fixture.mjs",
     "extensions/resources.js",
     "extensions/registry.js",
     "runtime/modules.js",
     "runtime/scripts.js",
-    "runtime/engine.js",
+    "../test/helpers/runtime-fixture.mjs",
     "contracts/errors.js",
   ].map((file) => import(new URL(file, dist))),
 );
@@ -231,7 +231,7 @@ async function fixture(t, options = {}) {
   );
   const output = createOutput(work, () => {}, source);
   if (options.runtime) {
-    store = new SqliteStore(root, {
+    store = new FixtureStore(root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -265,7 +265,7 @@ async function fixture(t, options = {}) {
       pwd: work,
       snapshotRef: "work/snapshot.json",
     });
-    engine = new RunEngine(store, loader, scripts, {
+    engine = new ExecutionFixture(store, loader, scripts, {
       authorize(who, target) {
         if (target.run && target.run.callerKey !== callerKey(who))
           throw new AgentError("forbidden", "Wrong run owner.");

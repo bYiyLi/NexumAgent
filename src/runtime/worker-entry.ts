@@ -9,6 +9,7 @@ import type { JsonObject } from "../contracts/types.js";
 import { ModuleLoader } from "./modules.js";
 import { NativePromiseAudit } from "./promises.js";
 import { types } from "node:util";
+import { packWorkerBinary, unpackWorkerBinary } from "./worker-binary.js";
 
 interface WorkerStart {
   work: string;
@@ -83,6 +84,20 @@ function fromCore(
     "A Core SDK response exceeded the nested data budget.");
   if (!value || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value);
+  const binary = unpackWorkerBinary(value, data.bootId);
+  if (binary !== undefined) { seen.set(value, binary); return binary; }
+  if (types.isMap(value)) {
+    const result = new Map();
+    seen.set(value, result);
+    for (const [key, item] of value) result.set(fromCore(key, depth + 1, seen), fromCore(item, depth + 1, seen));
+    return result;
+  }
+  if (types.isSet(value)) {
+    const result = new Set();
+    seen.set(value, result);
+    for (const item of value) result.add(fromCore(item, depth + 1, seen));
+    return result;
+  }
   if (Array.isArray(value)) {
     const result: unknown[] = [];
     seen.set(value, result);
@@ -207,6 +222,8 @@ async function settle(
     return { __nexumOfferHandle: issuedOfferViews.get(value)!.id };
   if (value && typeof value === "object" && bindingViews.has(value))
     return { __nexumBoundData: bindingViews.get(value)! };
+  const binary = packWorkerBinary(value, data.bootId);
+  if (binary !== undefined) return binary;
   if (value && typeof value === "object" && mcpViews.has(value)) {
     const entry = mcpViews.get(value)!;
     return { ...entry.snapshot, __nexumMcpHandle: entry.id };
@@ -264,9 +281,7 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
     if (isPlainRecord(value) &&
         typeof value.__nexumBindingData === "string" &&
         "data" in value) {
-      const result = value.isBuffer &&
-        value.data instanceof Uint8Array
-        ? Buffer.from(value.data) : fromCore(value.data);
+      const result = fromCore(value.data);
       if (result && typeof result === "object")
         bindingViews.set(result, value.__nexumBindingData);
       return result;
@@ -310,6 +325,7 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
         // Guest Buffer and AgentError identities are not preserved by the
         // structured-clone algorithm. Encode only the exact, supported types
         // without evaluating guest getters or toJSON implementations.
+        const seen = new WeakMap<object, unknown>();
         const transfer = (value: unknown): unknown => {
           if (value && typeof value === "object" &&
               bindingViews.has(value))
@@ -334,6 +350,36 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
               __nexumIssuedError: issuedErrors.get(value)!,
               ...(issue.details === undefined ? {} : { details: issue.details }),
             };
+          }
+          const binary = packWorkerBinary(value, data.bootId);
+          if (binary !== undefined) return binary;
+          if (value && typeof value === "object") {
+            if (seen.has(value)) return seen.get(value);
+            if (Array.isArray(value)) {
+              const result: unknown[] = [];
+              seen.set(value, result);
+              for (const item of value) result.push(transfer(item));
+              return result;
+            }
+            if (types.isMap(value)) {
+              const result = new Map();
+              seen.set(value, result);
+              for (const [key, item] of value) result.set(transfer(key), transfer(item));
+              return result;
+            }
+            if (types.isSet(value)) {
+              const result = new Set();
+              seen.set(value, result);
+              for (const item of value) result.add(transfer(item));
+              return result;
+            }
+            if (isPlainRecord(value)) {
+              const result = Object.create(null) as Record<string, unknown>;
+              seen.set(value, result);
+              for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value)))
+                if (descriptor.enumerable && "value" in descriptor) result[key] = transfer(descriptor.value);
+              return result;
+            }
           }
           return value;
         };
@@ -562,9 +608,9 @@ async function prepare() {
             "The original JavaScript callback is no longer available.");
         const args = Array.isArray(entry.args) ? entry.args : [];
         return await callback(...args.map((one) => fromCore(one)));
-      }).then((value) =>
-        send({ type: "callback-result", requestId: entry.requestId, value }),
-      (cause) =>
+      }).then(async (value) =>
+        send({ type: "callback-result", requestId: entry.requestId, value: await settle(value, 0, true) }),
+      ).catch((cause) =>
         send({ type: "callback-result", requestId: entry.requestId,
           error: safeErrorData(cause, {
             code: "worker_callback_failed",

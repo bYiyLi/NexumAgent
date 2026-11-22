@@ -105,32 +105,26 @@ const chunkSize = 65536;
 const NativeBlob = Blob;
 const nativeBlob = new NativeBlob([]);
 const blobSymbols = Object.getOwnPropertySymbols(nativeBlob);
-// Node exposes native Blob handles via private Symbols. Bun uses opaque native
-// slots instead; its captured intrinsic methods provide a brand-checked path.
-const bunBlob = "bun" in process.versions;
 const blobHandleKey = blobSymbols.find((key) => key.description === "kHandle")!;
 const blobLengthKey = blobSymbols.find((key) => key.description === "kLength")!;
 const blobTypeKey = blobSymbols.find((key) => key.description === "kType")!;
-const nativeHandle = bunBlob ? null : Object.getOwnPropertyDescriptor(
+const nativeHandle = Object.getOwnPropertyDescriptor(
   nativeBlob, blobHandleKey,
- )!.value;
-const nativeHandlePrototype = nativeHandle === null
-  ? null : Object.getPrototypeOf(nativeHandle);
-const nativeHandleSlice = nativeHandlePrototype === null ? null
-  : Object.getOwnPropertyDescriptor(nativeHandlePrototype, "slice")!.value;
-const nativeHandleReader = nativeHandlePrototype === null ? null
-  : Object.getOwnPropertyDescriptor(nativeHandlePrototype, "getReader")!.value;
+)!.value;
+const nativeHandlePrototype = Object.getPrototypeOf(nativeHandle);
+const nativeHandleSlice = Object.getOwnPropertyDescriptor(
+  nativeHandlePrototype, "slice",
+)!.value;
+const nativeHandleReader = Object.getOwnPropertyDescriptor(
+  nativeHandlePrototype, "getReader",
+)!.value;
 const nativeFile = new File([], "reference", { lastModified: 0 });
 const fileStateKey = Object.getOwnPropertySymbols(nativeFile).find(
   (key) => !blobSymbols.includes(key),
 )!;
-const nativeFileStatePrototype = bunBlob ? null : Object.getPrototypeOf(
+const nativeFileStatePrototype = Object.getPrototypeOf(
   Object.getOwnPropertyDescriptor(nativeFile, fileStateKey)!.value,
 );
-const blobSizeGetter = Object.getOwnPropertyDescriptor(Blob.prototype, "size")!.get!;
-const blobTypeGetter = Object.getOwnPropertyDescriptor(Blob.prototype, "type")!.get!;
-const fileNameGetter = Object.getOwnPropertyDescriptor(File.prototype, "name")!.get!;
-const fileTimeGetter = Object.getOwnPropertyDescriptor(File.prototype, "lastModified")!.get!;
 
 const arrayBufferSize = Object.getOwnPropertyDescriptor(
   ArrayBuffer.prototype,
@@ -191,6 +185,7 @@ export interface BlobSnapshot {
 export function snapshotBlob(
   value: unknown,
   maximum = Number.MAX_SAFE_INTEGER,
+  rawFileName = false,
 ): BlobSnapshot | null {
   requireCondition(
     Number.isSafeInteger(maximum) && maximum >= 0,
@@ -214,53 +209,7 @@ export function snapshotBlob(
     }
     prototype = Object.getPrototypeOf(prototype);
   }
-  // Bun may clone an authentic Blob into a different realm with a different
-  // JS prototype. Native methods remain the authority for its real identity.
-  if (!isBlob && !bunBlob) return null;
-  if (!isBlob && bunBlob) {
-    try { Reflect.apply(Blob.prototype.slice, value, [0, 0]); }
-    catch { return null; }
-  }
-  if (bunBlob) {
-    // Captured native methods reject Blob.prototype lookalikes without using
-    // any user getters, overridden methods or arbitrary source enumeration.
-    let size: number, type: string;
-    try {
-      Reflect.apply(Blob.prototype.slice, value, [0, 0]);
-      size = Reflect.apply(blobSizeGetter, value, []);
-      type = Reflect.apply(blobTypeGetter, value, []);
-    } catch (cause) {
-      throw new AgentError("invalid_artifact_source",
-        "The Blob is not backed by a native runtime value.", undefined, { cause });
-    }
-    requireCondition(boundedInteger(size, maximum), "resource_too_large",
-      "The Blob exceeds the configured content-size policy.");
-    requireCondition(typeof type === "string" && type.length <= 256,
-      "invalid_artifact_source", "Blob MIME metadata must be bounded text.");
-    let name: string | undefined, lastModified: number | undefined;
-    let nativeName: unknown, nativeTime: unknown;
-    try {
-      nativeName = Reflect.apply(fileNameGetter, value, []);
-      nativeTime = Reflect.apply(fileTimeGetter, value, []);
-    } catch (cause) {
-      if (isFile) {
-        throw new AgentError("invalid_artifact_source",
-          "The File is not backed by native metadata.", undefined, { cause });
-      }
-    }
-    // Bun exposes File getters on Blob too: a regular Blob has no name.
-    if (nativeName !== undefined) {
-      name = displayName(nativeName);
-      lastModified = nativeTime as number;
-    }
-    // Native slice returns a fresh real Blob without invoking source hooks.
-    const blob = Reflect.apply(Blob.prototype.slice, value, [0, size, type]);
-    return Object.freeze({
-      blob, size, mimeType: Reflect.apply(blobTypeGetter, blob, []),
-      ...(name === undefined ? {} : { name }),
-      ...(lastModified === undefined ? {} : { lastModified }),
-    });
-  }
+  if (!isBlob) return null;
   const data = (key: symbol): unknown => {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     requireCondition(
@@ -332,7 +281,7 @@ export function snapshotBlob(
       "invalid_artifact_source",
       "File name and time metadata cannot use accessors.",
     );
-    name = displayName(fields.name.value);
+    name = rawFileName ? binaryFileName(fields.name.value) : displayName(fields.name.value);
     lastModified = fields.lastModified.value;
   }
   // Only a fresh controlled carrier reaches Node's constructor. Cloning the
@@ -371,6 +320,11 @@ function mime(value: unknown): string {
       { cause },
     );
   }
+}
+function binaryFileName(value: unknown): string {
+  requireCondition(typeof value === "string" && Buffer.byteLength(value) <= 8192,
+    "invalid_artifact_source", "The File name exceeds the binary transfer budget.");
+  return value;
 }
 function displayName(value: unknown): string {
   requireCondition(

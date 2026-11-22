@@ -14,10 +14,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { WorkService } from "../dist/work/service.js";
 import { selectorKey } from "../dist/work/discovery.js";
 import { canonicalJson } from "../dist/contracts/json.js";
@@ -61,7 +61,7 @@ function fixture(t) {
     "node_modules/tiny/index.d.ts",
     "export declare function tiny(): number;\n",
   );
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
@@ -286,9 +286,9 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   assert.equal(first.context, undefined);
   assert.equal(first.examples, undefined);
   assert.equal(first.agent.agentId, "agent");
-  assert.equal(first.agent.runtime.name, "bun" in process.versions ? "bun" : "node");
-  assert.equal(first.agent.runtime.version, process.versions.bun ?? process.version);
-  assert.equal(first.agent.runtime.workerHeapLimitEnforced, !("bun" in process.versions));
+  assert.equal(first.agent.runtime.name, "node");
+  assert.equal(first.agent.runtime.version, process.version);
+  assert.equal(first.agent.runtime.workerHeapLimitEnforced, true);
   assert.equal(first.agent.runtime.nodeVersion, process.version);
   assert.equal(first.agent.runtime.arch, process.arch);
   assert.equal(first.agent.system.platform, process.platform);
@@ -587,7 +587,7 @@ test("the real work provider feeds captured Project identity and pwd to accepted
     entered = Promise.withResolvers();
   const loader = await ModuleLoader.create(work, store.bootId, policy);
   let block = true;
-  const engine = new RunEngine(store, loader, scripts, {
+  const engine = new ExecutionFixture(store, loader, scripts, {
     authorize() {},
     loadWork: async (record) => {
       if (block) {

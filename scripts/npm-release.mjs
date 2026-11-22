@@ -146,7 +146,9 @@ function prepare() {
   save("packages/browser/browser-extension/release-info.json", extension);
   writeEnv("RELEASE_VERSION", plan.version);
   writeEnv("RELEASE_TAG", plan.tag);
-  console.log(`npm ${plan.mode}: ${plan.version} (dist-tag: ${plan.tag})`);
+  console.log(
+    `npm ${plan.mode}: ${plan.version} (${plan.tag})`,
+  );
 }
 
 function inspectRelease() {
@@ -178,7 +180,8 @@ function inspectRelease() {
     for (const required of {
       sdk: ["dist/index.js", "dist/index.d.ts"],
       agent: [
-        "dist/cli.js",
+        "dist/index.js",
+        "dist/host/main.js",
         "contracts/v2/common.schema.json",
       ],
       browser: [
@@ -195,7 +198,7 @@ function inspectRelease() {
         assert.doesNotMatch(
           filename,
           /^(?:native\/|native-src\/|scripts\/(?:npm-install|service|service-runner|build-native|startup-report))/,
-          "Core npm package must not own native binaries or lifecycle installation",
+          "Node host npm package must not own native binaries or lifecycle installation",
         );
     }
     for (const filename of names)
@@ -257,7 +260,7 @@ async function publish() {
   for (const item of entries) {
     const registry = await registryPackage(item.name);
     const found = registry?.versions?.[version];
-    const latest = registry?.["dist-tags"]?.latest;
+    const latest = registry?.["dist-tags"]?.[tag];
     if (
       tag === "latest" &&
       latest &&
@@ -265,7 +268,7 @@ async function publish() {
       compareParts(parseTag(`v${latest}`), parseTag(`v${version}`)) > 0
     )
       throw new Error(
-        `${item.name}: refusing to downgrade latest from ${latest} to ${version}.`,
+        `${item.name}: refusing to downgrade ${tag} from ${latest} to ${version}.`,
       );
     if (found && found.dist?.shasum !== item.pack.shasum)
       throw new Error(

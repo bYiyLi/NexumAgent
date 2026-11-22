@@ -1,10 +1,10 @@
-name: Core npm package candidates
+name: Node host npm package candidates
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  core-package:
+  host-package:
     strategy:
       fail-fast: false
       matrix:

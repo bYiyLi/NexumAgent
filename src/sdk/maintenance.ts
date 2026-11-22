@@ -1,6 +1,6 @@
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
-import { maintenanceMethods } from "../maintenance/requests.js";
+import { maintenanceMethods } from "../extensions/maintenance.js";
 
 export const maintenanceSdkUsage = `## JavaScript 维护申请示例
 

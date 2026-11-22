@@ -12,10 +12,10 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { SqliteStore } from "../dist/storage/sqlite.js";
+import { FixtureStore, ReservationFixture } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { RunEngine, callerKey } from "../dist/runtime/engine.js";
+import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { shExtension } from "../dist/sdk/sh.js";
@@ -24,8 +24,6 @@ import { ManagedProcess } from "../dist/process/managed.js";
 import { normalizeLaunch } from "../dist/process/launch.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
-import { ProfileRetention } from "../dist/runtime/retention.js";
-import { ArtifactStore } from "../dist/results/artifacts.js";
 
 const caller = { principalId: "user", clientId: "client", host: "sh-test" };
 const origin = {
@@ -52,18 +50,14 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
     work = path.join(root, "work");
   mkdirSync(work);
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
-  const store = new SqliteStore(root, {
+  const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
     cloudEnvironment: "test",
   });
   const resources = new ResourceManager(store, { cleanupTimeoutMs: 50 }),
     policies = [],
-    retention = new ProfileRetention(
-      store,
-      new ArtifactStore(root, "agent"),
-      retentionOptions,
-    );
+    retention = new ReservationFixture(retentionOptions.maxManagedBytes);
   const registry = new ExtensionRegistry(resources, {
     permissions: new Set([
       "sh.execute",
@@ -97,7 +91,7 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
     pwd: work,
     snapshotRef: "work/snapshot.json",
   });
-  const engine = new RunEngine(
+  const engine = new ExecutionFixture(
     store,
     loader,
     new ScriptCatalog(work, "agent"),
@@ -135,7 +129,7 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
     const runs = store.listRuns({}, "cleanup", 100).runs;
     for (const run of runs)
       if (run.endedAt === null)
-        await engine.cancel(caller, run.runId).catch(() => {});
+        await Promise.resolve(engine.cancel(caller, run.runId)).catch(() => {});
     const live = new Set(
       runs
         .flatMap((run) => store.resourcesForRun(run.runId))

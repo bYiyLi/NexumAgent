@@ -30,8 +30,8 @@ const [
   { ResultEncoder },
   { createOutput },
   { normalizeData },
-  { SqliteStore },
-  { RunEngine, callerKey },
+  { FixtureStore },
+  { ExecutionFixture, callerKey },
   { ModuleLoader },
   { ScriptCatalog },
   { ResourceManager },
@@ -44,8 +44,8 @@ const [
     "results/encoder.js",
     "sdk/output.js",
     "results/normalize.js",
-    "storage/sqlite.js",
-    "runtime/engine.js",
+    "../test/helpers/runtime-fixture.mjs",
+    "../test/helpers/runtime-fixture.mjs",
     "runtime/modules.js",
     "runtime/scripts.js",
     "extensions/resources.js",
@@ -146,7 +146,7 @@ async function fixture(t, options = {}) {
   };
   let store, registry, engine, context, handle;
   if (options.runtime) {
-    store = new SqliteStore(root, {
+    store = new FixtureStore(root, {
       agentId: "agent",
       profile: "development",
       cloudEnvironment: "test",
@@ -173,7 +173,7 @@ async function fixture(t, options = {}) {
       pwd: work,
       snapshotRef: "work/snapshot.json",
     });
-    engine = new RunEngine(store, loader, scripts, {
+    engine = new ExecutionFixture(store, loader, scripts, {
       authorize(who, target) {
         if (target.run && target.run.callerKey !== callerKey(who))
           throw new AgentError("forbidden", "Wrong run owner.");

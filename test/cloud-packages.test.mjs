@@ -4,9 +4,9 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { cloudManagedPackages } from "../dist/application/cloud-packages.js";
+import { cloudManagedPackages } from "../dist/host/cloud-packages.js";
 
-test("Cloud-managed work uses declared, installed pnpm packages without legacy approvals", async (t) => {
+test("Go-managed work uses declared, installed pnpm packages without legacy approvals", async (t) => {
   const root = realpathSync.native(await mkdtemp(path.join(tmpdir(), "nexum-cloud-pnpm-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const work = path.join(root, "work"), modules = path.join(work, "node_modules");
@@ -26,8 +26,7 @@ test("Cloud-managed work uses declared, installed pnpm packages without legacy a
   const actual = cloudManagedPackages(root);
   assert.deepEqual([...actual], [["@nexum-hub/browser", "1.2.3"]]);
   assert.equal(actual.has("@nexum-hub/agent"), false,
-    "Agent Core is not a user-callable npm extension");
+    "The Node host is not a user-callable npm extension");
   await writeFile(path.join(work, "package.json"), "{invalid");
-  assert.equal(cloudManagedPackages(root).size, 0,
-    "A bad manifest never becomes an import permission");
+  assert.throws(() => cloudManagedPackages(root), { code: "package_manifest_invalid" });
 });

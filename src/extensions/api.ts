@@ -1,12 +1,12 @@
 import type { JsonObject } from "../contracts/types.js";
 import type { SchemaDialect } from "../contracts/validation.js";
-import type { InputRequest } from "../runtime/engine.js";
+import type { InputRequest } from "../runtime/invocation.js";
 import type { OutputAPI } from "../sdk/output.js";
 import type { ResourceService } from "./resources.js";
 import type { StateService } from "./state.js";
 import type { TransferService } from "./transfer.js";
 import type { HostRequestServices } from "./host-requests.js";
-import type { MaintenanceService } from "../maintenance/requests.js";
+import type { MaintenanceService } from "./maintenance.js";
 
 export interface AccessTarget {
   type:
