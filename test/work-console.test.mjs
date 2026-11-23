@@ -503,9 +503,25 @@ test("regular MCP work does not publish Console README materials", async (t) => 
     projectId: "project",
   });
   assert.equal(Object.hasOwn(opened.project, "descriptionItemId"), false);
-  assert.match(opened.project.description, /Project description/);
+  assert.equal(Object.hasOwn(opened.project, "description"), false);
+  assert.equal(Object.hasOwn(opened.project, "summary"), false);
   await assert.rejects(
     f.service.readMaterial(mcp, opened.contextId, "readme:not-published"),
     { code: "material_forbidden" },
   );
+});
+
+test("MCP open does not read README just to construct an optional project summary", async (t) => {
+  const f = fixture(t);
+  // Malformed README bytes would cause the old eager summary reader to warn.
+  // They are irrelevant to opening an authorized project work context.
+  f.write(f.project, "README.md", Buffer.from([0xff, 0xfe]));
+  const opened = await f.service.open(mcp, {
+    agentId: "agent",
+    projectId: "project",
+  });
+  assert.equal(opened.project.projectId, "project");
+  assert.equal(Object.hasOwn(opened.project, "description"), false);
+  assert.equal(Object.hasOwn(opened.project, "summary"), false);
+  assert.equal(opened.warnings.some((warning) => warning.code === "readme_unavailable"), false);
 });

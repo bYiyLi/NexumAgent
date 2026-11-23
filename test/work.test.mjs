@@ -334,7 +334,8 @@ test("Project open separates its instructions/Skills and applies local visibilit
   assert.equal(opened.project.skills.length, 0);
   assert.equal(opened.agent.skills.length, 0);
   assert.equal(opened.project.nestedInstructions[0].content, undefined);
-  assert.match(opened.project.description, /# Project\\n/);
+  assert.equal(Object.hasOwn(opened.project, "description"), false);
+  assert.equal(Object.hasOwn(opened.project, "summary"), false);
   assert.equal(Object.hasOwn(opened.project, "descriptionItemId"), false);
   await assert.rejects(
     service.readMaterial(caller, opened.contextId, "readme:not-published"),

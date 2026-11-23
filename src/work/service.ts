@@ -423,7 +423,9 @@ export class WorkService {
         : {}),
       signal,
     });
-    const summary = project
+    // README summaries are Console-only material. Ordinary MCP callers can
+    // read project files themselves when the task actually needs them.
+    const summary = project && caller.source === "owner_session"
       ? await readProjectSummary(project.root, signal)
       : null;
     let description: Bundle["description"];
@@ -454,7 +456,7 @@ export class WorkService {
         });
       }
     }
-    if (project && summary?.description !== null)
+    if (project && summary && summary.description !== null)
       project.description = summary?.description ?? "";
     if (summary?.status === "unavailable")
       discovered.warnings.push({
@@ -618,10 +620,17 @@ export class WorkService {
         },
         project: project
           ? {
-              ...project,
-              summary,
+              projectId: project.projectId,
+              name: project.name,
+              root: project.root,
               ...(caller.source === "owner_session"
-                ? { descriptionItemId: description?.itemId ?? null }
+                ? {
+                    ...(project.description === undefined
+                      ? {}
+                      : { description: project.description }),
+                    summary,
+                    descriptionItemId: description?.itemId ?? null,
+                  }
                 : {}),
               instructions: projectInstructions,
               skills: projectSkills,
