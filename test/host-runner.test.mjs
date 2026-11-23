@@ -196,6 +196,22 @@ test("failed execution joins operation cleanup and closes its Worker", async (t)
   assert.equal(await loader.withPackageChanges(async () => 7), 7);
 });
 
+test("a literal script throw preserves its useful message without leaking dynamic secrets", async (t) => {
+  const { runner } = await fixture(t);
+  await assert.rejects(
+    runner.start(run("run_literal_error", 'throw new Error("读取配置失败");')),
+    (error) => error.code === "script_execution_failed" && error.message === "读取配置失败",
+  );
+  await assert.rejects(
+    runner.start(run("run_dynamic_error", 'const fragments=["private", "value"];throw new Error(fragments.join("-"));')),
+    (error) => error.code === "script_execution_failed" && !error.message.includes("private-value"),
+  );
+  await assert.rejects(
+    runner.start(run("run_secret_literal", 'throw new Error("token=private");')),
+    (error) => error.code === "script_execution_failed" && !error.message.includes("token=private"),
+  );
+});
+
 test("Go scope rejects path collisions and preserves prototype keys safely", () => {
   const controller = new AbortController();
   const scope = { instanceId: "host_1", runId: "run_8", methods: [

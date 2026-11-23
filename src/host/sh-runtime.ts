@@ -39,7 +39,7 @@ export async function restoreManagedShell(options: ManagedShellOptions) {
     sh: ["path", "resource", "sh.execute", "sh.read", "sh.control", "storage.reserve"],
     runtime: ["runtime.input", "maintenance.execute"],
     state: ["state.agent.read", "state.agent.write", "state.user.read", "state.user.write"],
-    output: ["output"], transfer: ["createUpload", "createDownload", "get", "list", "cancel"].map((name) => `transfer.${name}`),
+    transfer: ["createUpload", "createDownload", "get", "list", "cancel"].map((name) => `transfer.${name}`),
     maintenance: [...maintenanceMethods, "get", "list", "cancel"].map((name) => `maintenance.${name}`),
   }[namespace];
   const resources = new ResourceManager(options.store, {

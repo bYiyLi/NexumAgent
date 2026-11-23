@@ -50,6 +50,27 @@ const syncBytes = 64 * 1024;
 const syncHeaderBytes = 8;
 const send = (value: object) => port.postMessage(value);
 
+// A literal message authored in the submitted script is already visible to
+// its AI caller. Return that useful message instead of hiding every explicit
+// throw behind a generic Worker error. Never forward a dynamically assembled
+// exception, private SDK error, stack, path, URL, or credential-like content.
+function explicitScriptErrorMessage(cause: unknown): string | null {
+  if (!cause || typeof cause !== "object" ||
+      types.isProxy(cause) || !types.isNativeError(cause)) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(cause, "message");
+  if (!descriptor || !("value" in descriptor) ||
+      typeof descriptor.value !== "string") return null;
+  const message = descriptor.value;
+  if (message.length === 0 || message.length > 300 ||
+      /[\x00-\x1f]|https?:\/\/|(?:[A-Za-z]:\\|\/Users\/|\/home\/|\/etc\/)|(?:password|secret|token|api[_-]?key|bearer|authorization|cookie|credential)/i.test(message)) return null;
+  const literals = [
+    JSON.stringify(message),
+    "'" + message.replaceAll("\\", "\\\\").replaceAll("'", "\\'") + "'",
+    "`" + message.replaceAll("\\", "\\\\").replaceAll("`", "\\`") + "`",
+  ];
+  return literals.some((literal) => data.code.includes(literal)) ? message : null;
+}
+
 /** Preserve bounded factual status from an already verified Core error,
  * without transporting arbitrary exception properties or private targets. */
 function attachFailureFacts(
@@ -686,12 +707,15 @@ async function prepare() {
           }
           send({ type: "done", value: fixed });
         } catch (cause) {
+          const error = safeErrorData(cause, {
+            code: "script_execution_failed",
+            message: "The JavaScript execution failed.",
+          });
+          const authoredMessage = explicitScriptErrorMessage(cause);
+          if (authoredMessage) error.message = authoredMessage;
           send({
             type: "failed",
-            ...safeErrorData(cause, {
-              code: "script_execution_failed",
-              message: "The JavaScript execution failed.",
-            }),
+            ...error,
             ...(lastScriptDiagnostic
               ? { diagnostic: lastScriptDiagnostic } : {}),
           });

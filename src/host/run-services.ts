@@ -5,7 +5,6 @@ import { callerKey, type Caller } from "../contracts/caller.js";
 import type { ArtifactRecord, ArtifactScope, ArtifactSource } from "../results/artifacts.js";
 import type { ResultArtifacts } from "../results/encoder.js";
 import { TransferOfferDelivery } from "../transfer/offers.js";
-import { createOutput } from "../sdk/output.js";
 import { decodeGoResult, encodeGoArguments } from "./blob.js";
 import type { HostRunServices } from "./service.js";
 
@@ -59,8 +58,7 @@ export function createRunServices(root: string, agentId: string, instanceId: str
   const offers = new TransferOfferDelivery({ agentId, profileRoot: root,
     authorize(current) { requireCondition(current.ownerKey === ownerKey && current.grantId === grantId && current.signal === signal && !signal.aborted,
       "transfer_not_authorized", "The transfer result belongs to another Run."); } });
-  const output = createOutput(context.pwd, assertCurrent);
-  return { bindings: { output },
+  return { bindings: {},
     brands: { offers, transferScope, authorizeMcp: (source) => source.agentId === agentId && source.profileRoot === root && !signal.aborted },
     result: { artifacts, offers, scope: { ...transferScope, pwd: context.pwd,
       authorize() { assertCurrent(); } } } };

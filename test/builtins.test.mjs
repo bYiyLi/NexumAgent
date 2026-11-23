@@ -18,14 +18,11 @@ import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { StateFixture } from "./helpers/runtime-fixture.mjs";
 import { runtimeExtension } from "../dist/sdk/runtime.js";
 import { stateExtension } from "../dist/sdk/state.js";
-import { outputExtension } from "../dist/sdk/output-extension.js";
-import { outputIntent } from "../dist/sdk/output.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
 
 const caller = { principalId: "verified-user", clientId: "verified-client" };
 const permissions = [
-  "output",
   "runtime.input",
   "state.agent.read",
   "state.agent.write",
@@ -67,7 +64,6 @@ async function fixture(t, user) {
       stateExtension,
       permissions.filter((p) => p.startsWith("state.")),
     ],
-    ["output", outputExtension, ["output"]],
   ]) {
     const handle = await registry.prepare(
       {
@@ -407,22 +403,16 @@ test("runtime input is a registered operation resuming the same execution stack"
   assert.equal(resumed.result.data.sum, 12);
 });
 
-test("output script helpers are registered operations using the same private intent constructors", async (t) => {
+test("ordinary script returns work without the removed output namespace", async (t) => {
   const f = await fixture(t);
-  const result = await f.start(
-    'const text=output.text("ready");const image=output.image("not-read.png");const json=output.json([{type:"image",path:"business"}]);return {text:text.kind,image:image.kind,json:json.kind};',
-  );
+  const result = await f.start('return { text: "ready", list: [1, 2, 3] };');
   assert.equal(result.run.status, "succeeded");
   assert.deepEqual(result.result.data, {
-    text: "text",
-    image: "image",
-    json: "json",
+    text: "ready",
+    list: [1, 2, 3],
   });
-  assert.equal(f.store.operationsForRun(result.run.runId).length, 3);
-  const bad = await f.start(
-    'return output.text("x",{annotations:{priority:2}});',
-  );
+  assert.equal(f.store.operationsForRun(result.run.runId).length, 0);
+  const bad = await f.start('return output.text("unused");');
   assert.equal(bad.run.status, "failed");
-  assert.equal(bad.run.error.code, "invalid_arguments");
-  assert.equal(outputIntent({ kind: "image", value: "fake" }), null);
+  assert.equal(bad.run.error.code, "script_execution_failed");
 });

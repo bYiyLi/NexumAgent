@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Blob } from "node:buffer";
+import { Blob, File } from "node:buffer";
 import { createHash } from "node:crypto";
 import {
   mkdtempSync,
@@ -89,6 +89,35 @@ function wav(samples = 40) {
   data.writeUInt32LE(samples * 2, 40);
   return data;
 }
+
+test("native bytes automatically produce real MCP media; native File produces an addressable link", async (t) => {
+  const f = await fixture(t);
+  const image = await f.encoder.encode(png(), f.scope());
+  assert.equal(image.content.length, 1);
+  assert.equal(image.content[0].type, "image");
+  assert.equal(image.content[0].mimeType, "image/png");
+  const photo = await f.encoder.render(savedJSON(image), f.scope(), run);
+  assert.equal(photo.content[0].type, "image");
+  assert.ok(photo.content[0].data);
+
+  const audio = await f.encoder.encode(wav(), f.scope());
+  assert.equal(audio.content[0].type, "audio");
+  const file = await f.encoder.encode(new File(["report body"], "report.pdf", { type: "application/pdf" }), f.scope());
+  assert.equal(file.content[0].type, "resource_link");
+  assert.equal(file.content[0].resource.name, "report.pdf");
+  const generic = await f.encoder.encode(Buffer.from([0, 1, 2]), f.scope());
+  assert.equal(generic.content[0].type, "resource_link");
+
+  // Large on-disk files do not need to be fully buffered in JavaScript.
+  f.source("source-report.pdf", Buffer.from("%PDF-1.7\nreal file"));
+  const fileLink = await f.encoder.encode({ type: "resource_link", path: "source-report.pdf" }, f.scope());
+  assert.equal(fileLink.content[0].type, "resource_link");
+  assert.equal(fileLink.content[0].resource.name, "source-report.pdf");
+  const ordinaryRecord = await f.encoder.encode({ type: "image", path: "chart.png" }, f.scope());
+  assert.deepEqual(savedJSON(ordinaryRecord.data), { type: "image", path: "chart.png" });
+  const businessLink = await f.encoder.encode({ type: "resource_link", path: "irrelevant", subject: "business" }, f.scope());
+  assert.deepEqual(savedJSON(businessLink.data), { type: "resource_link", path: "irrelevant", subject: "business" });
+});
 async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-encoder-")),
@@ -143,7 +172,7 @@ async function fixture(t, options = {}) {
     });
     const scripts = new ScriptCatalog(work, "agent", () => []);
     const loader = await ModuleLoader.create(work, store.bootId, {
-      builtins: () => [],
+      builtins: () => ["fs"],
       approvedPackages: () => new Map(),
     });
     writeFileSync(path.join(work, "snapshot.json"), '{"project":null}');
@@ -162,7 +191,6 @@ async function fixture(t, options = {}) {
       encodeResult: (value, services) => encoder.encode(value, scope(services)),
       bindings: (services) => ({
         ...registry.bindings(services),
-        output: createOutput(work, () => services.assertCurrent()),
       }),
       resources,
     });
@@ -511,7 +539,7 @@ test("nested undefined and other ordinary JSON conversions preserve the successf
     ],
   });
   const pure = await f.start(
-    'return output.json({ nested: { missing: undefined, count: NaN }, list: [undefined] });',
+    'return { nested: { missing: undefined, count: NaN }, list: [undefined] };',
   );
   assert.equal(pure.run.status, "succeeded");
   assert.deepEqual(savedJSON(pure.result.data), {
@@ -519,7 +547,7 @@ test("nested undefined and other ordinary JSON conversions preserve the successf
     list: [null],
   });
   const explicit = await f.start(
-    'return output.result({ content: [], structuredContent: { good: 1, missing: undefined } });',
+    'return { good: 1, missing: undefined };',
   );
   assert.equal(explicit.run.status, "succeeded");
   assert.deepEqual(savedJSON(explicit.result.data), { good: 1 });
@@ -541,7 +569,7 @@ test("non-cloneable ordinary values reach the Core result normalizer without fai
     set: [null, null, 4],
   });
   const wrapped = await f.start(
-    'return output.json({ ok: true, ignored: () => 1, list: [Symbol("value")] });',
+    'return { ok: true, ignored: () => 1, list: [Symbol("value")] };',
   );
   assert.equal(wrapped.run.status, "succeeded");
   assert.deepEqual(savedJSON(wrapped.result.data), {
@@ -555,7 +583,7 @@ test("historical results retain original image snapshots and recheck current res
     original = png(80),
     replacement = png(180);
   const source = f.source("history.png", original);
-  const first = await f.start('return output.image("history.png");');
+  const first = await f.start('const fs=await import("node:fs/promises");return await fs.readFile(context.pwd+"/history.png");');
   assert.equal(first.run.status, "succeeded");
   writeFileSync(source, replacement);
   const historical = await f.engine.observe(caller, first.run.runId);

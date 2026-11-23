@@ -15,6 +15,7 @@ import {
 } from "../sdk/output.js";
 import {
   ArtifactStore,
+  snapshotBlob,
   type ArtifactRecord,
   type ArtifactScope,
   type ArtifactSource,
@@ -43,6 +44,18 @@ import {
 export interface ResultScope extends ArtifactScope {
   readonly grantId?: string;
   readonly authorizeTarget?: (target: AccessTarget) => void;
+}
+
+function explicitFileLink(value: unknown, pwd: string): boolean {
+  if (!value || typeof value !== "object" || types.isProxy(value) || Array.isArray(value))
+    return false;
+  const tag = Object.getOwnPropertyDescriptor(value, "type");
+  if (!tag || !("value" in tag) || tag.value !== "resource_link")
+    return false;
+  // Do not reinterpret ordinary business objects with unrelated properties.
+  const allowed = new Set(["type", "path", "uri", "data", "mimeType", "name", "description", "annotations"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
+  return contentValue(value, pwd) !== null;
 }
 export type ResultArtifacts = Pick<ArtifactStore,
   "agentId" | "root" | "maxFileBytes" | "maxReadBytes" |
@@ -524,8 +537,28 @@ export class ResultEncoder {
           types.isAnyArrayBuffer(input) ||
           (input && typeof input === "object")
         ) {
-          kind = "resource_link";
-          source = { data: input };
+          // Native bytes can carry the actual image/audio payload without
+          // forcing an AI to learn a separate output.* JavaScript namespace.
+          // Never infer media from a filename or caller-provided MIME alone.
+          let detected: string | undefined;
+          if (types.isArrayBufferView(input)) {
+            const bytes = new Uint8Array(input.buffer, input.byteOffset, Math.min(input.byteLength, 8192));
+            detected = (await fileTypeFromBuffer(bytes))?.mime;
+          } else if (types.isArrayBuffer(input)) {
+            detected = (await fileTypeFromBuffer(new Uint8Array(input, 0, Math.min(input.byteLength, 8192))))?.mime;
+          }
+          const blob = input && typeof input === "object"
+            ? snapshotBlob(input, this.artifacts.maxFileBytes) : null;
+          // Blob/File MIME metadata is only a candidate: fixed() validates
+          // the actual bytes before publishing a native MCP media block.
+          const mimeType = detected ?? blob?.mimeType;
+          kind = mimeType?.startsWith("image/") ? "image"
+            : mimeType?.startsWith("audio/") ? "audio" : "resource_link";
+          source = {
+            data: input,
+            ...(blob?.name ? { name: blob.name } : {}),
+            ...(mimeType ? { mimeType } : {}),
+          };
           meta = {};
         } else
           throw new AgentError(
@@ -900,6 +933,10 @@ export class ResultEncoder {
     else if (value === undefined) {
     } else if (typeof value === "string") await data(value);
     else if (intent) await append(value);
+    // A complete, validated standard content descriptor is an explicit
+    // source declaration, not an arbitrary path string. This preserves
+    // large-path resource delivery without a model-facing output.* SDK.
+    else if (explicitFileLink(value, scope.pwd)) await append(value);
     else if (!types.isProxy(value) && Array.isArray(value) && value.length) {
       // Descriptor-based normalization below rejects holes/accessors without executing them.
       requireCondition(
@@ -914,7 +951,8 @@ export class ResultEncoder {
         if (
           !item ||
           !("value" in item) ||
-          !(mcpResult(item.value) || outputIntent(item.value))
+          !(mcpResult(item.value) || outputIntent(item.value) ||
+            explicitFileLink(item.value, scope.pwd))
         ) {
           all = false;
           break;
