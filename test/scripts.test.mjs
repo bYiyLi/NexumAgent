@@ -187,7 +187,8 @@ test("namespace lookup, source disabling, path containment and portable collisio
   );
   assert.throws(() => catalog.resolve("capture.js"));
   assert.equal(
-    catalog.discover((origin) => origin.owner !== source.owner).entries.length,
+    catalog.discover((origin) => origin.owner !== source.owner).entries
+      .filter((item) => item.origin.type === "extension").length,
     0,
   );
   setSources([]);
@@ -257,7 +258,7 @@ test("open uses Agent-wide 30 default + Top 20 slots with local priority, source
     }
   }
   const selected = catalog.select(usage);
-  assert.equal(selected.total, 112);
+  assert.equal(selected.total, 118); // Existing 112 plus six official platform scripts.
   assert.equal(selected.items.length, 50);
   assert.equal(selected.complete, false);
   assert.equal(selected.items[0].scriptName, "local0.js");
@@ -265,13 +266,13 @@ test("open uses Agent-wide 30 default + Top 20 slots with local priority, source
     selected.items.filter(
       (item) => item.reason === "default" && item.origin.owner === a.owner,
     ).length,
-    14,
+    11,
   );
   assert.equal(
     selected.items.filter(
       (item) => item.reason === "default" && item.origin.owner === b.owner,
     ).length,
-    14,
+    11,
   );
   assert.equal(selected.items[30].executions, 15);
   assert.equal(selected.items[30].scriptName, "alpha/top14.js");

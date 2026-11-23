@@ -1,2 +1,10 @@
 packages:
   - "."
+supportedArchitectures:
+  os:
+    - darwin
+    - linux
+    - win32
+  cpu:
+    - arm64
+    - x64

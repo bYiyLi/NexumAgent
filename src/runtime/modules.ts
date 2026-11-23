@@ -523,15 +523,25 @@ export class ModuleLoader {
       ),
       require: guardedRequire,
     };
-    const names = Object.keys(publicParameters);
+    const identifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
+    const names = Object.keys(publicParameters).filter((name) => identifier.test(name));
+    const properties = Object.keys(publicParameters).filter((name) => !identifier.test(name));
     requireCondition(
-      names.every((name) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)),
+      properties.every((name) => /^[A-Za-z_$][A-Za-z0-9_.$-]{0,63}$/.test(name) &&
+        !["__proto__", "prototype", "constructor"].includes(name)),
       "invalid_namespace",
-      "A public SDK alias is not a JavaScript identifier.",
+      "An MCP connection key must be a safe JSON property name.",
     );
     const realm = vm.createContext(
       Object.assign(Object.create(null), executionGlobals(options.console)),
     );
+    // Non-identifier MCP keys remain addressable as globalThis["remote-api"].
+    // They cannot be vm.compileFunction parameter identifiers.
+    for (const name of properties) {
+      Object.defineProperty(realm, name, {
+        value: publicParameters[name], configurable: false, writable: false, enumerable: true,
+      });
+    }
     const filename = options.filename ?? "nexum:script.js";
     const nativeStackGetter = vm.runInContext(
       "Object.getOwnPropertyDescriptor(new Error(), 'stack').get",

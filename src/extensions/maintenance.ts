@@ -96,8 +96,8 @@ export interface MaintenanceService {
     disable(input: { name: string }): Promise<MaintenanceCreated>;
   };
   readonly mcp: {
-    add(input: { name: string; config: JsonObject }): Promise<MaintenanceCreated>;
-    update(input: { name: string; config: JsonObject }): Promise<MaintenanceCreated>;
+    add(input: Record<string, JsonObject>): Promise<MaintenanceCreated>;
+    update(input: Record<string, JsonObject>): Promise<MaintenanceCreated>;
     remove(input: { name: string }): Promise<MaintenanceCreated>;
   };
   readonly api: {

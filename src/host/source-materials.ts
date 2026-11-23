@@ -21,7 +21,8 @@ interface Source {
 }
 
 const expression = (root: string, parts: readonly string[]) =>
-  root + parts.map((part) => `[${JSON.stringify(part)}]`).join("");
+  (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(root) ? root : "globalThis[" + JSON.stringify(root) + "]") +
+    parts.map((part) => "[" + JSON.stringify(part) + "]").join("");
 
 /** Renders Go's already-approved method table; no transport, vault or Registry lives here. */
 export function prepareSourceMaterials(instanceId: string, value: unknown) {
@@ -32,7 +33,8 @@ export function prepareSourceMaterials(instanceId: string, value: unknown) {
   const fixed = JSON.parse(canonicalJson(value, 4 * 1024 * 1024)) as typeof value;
   const source = fixed.source as unknown as Source;
   requireCondition((source.kind === "mcp" || source.kind === "api") &&
-    /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(source.name) && !["mcp", "api"].includes(source.name) &&
+    (source.kind === "mcp" ? /^[A-Za-z_$][A-Za-z0-9_.$-]{0,63}$/.test(source.name) :
+      /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(source.name)) && !["mcp", "api"].includes(source.name) &&
     [source.objectId, source.revision, source.approvalRevision, source.instanceId].every((part) =>
       typeof part === "string" && part.length > 0 && part.length <= 256 && !/[\0\r\n]/.test(part)) &&
     Array.isArray(source.methods) && source.methods.length <= 10000,

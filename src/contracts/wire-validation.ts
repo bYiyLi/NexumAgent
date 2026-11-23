@@ -33,6 +33,8 @@ export function validateWireSemantics(contract: string, value: unknown): void {
             "agent.project.inspect",
             "agent.project.close",
             "agent.run.inspect",
+            "agent.console.inspect",
+            "agent.run.list",
             "agent.context.read",
             "agent.process.list",
             "agent.process.get",
@@ -41,6 +43,7 @@ export function validateWireSemantics(contract: string, value: unknown): void {
           "An owner session may only use its authorized Console operations.",
         );
       if (
+        data.operation === "agent.console.inspect" ||
         data.operation === "agent.run.inspect" ||
         data.operation === "agent.project.close" ||
         String(data.operation).startsWith("agent.process.")

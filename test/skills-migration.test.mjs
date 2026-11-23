@@ -322,10 +322,12 @@ test("Skill-private scripts stay readable but never enter independent script dis
       { code: "invalid_arguments" },
     );
   assert.deepEqual(
-    scripts.discover().entries.map((item) => item.scriptName),
+    scripts.discover().entries
+      .filter((item) => item.origin.type === "local")
+      .map((item) => item.scriptName),
     ["registered.js"],
   );
-  assert.equal(opened.agent.scripts.total, 1);
+  assert.equal(opened.agent.scripts.total, 7); // Local script plus six official builtins.
   assert.deepEqual(opened.agent.scripts.items[0].scriptInputSchema.required, [
     "value",
   ]);
@@ -364,5 +366,8 @@ test("Skill-private scripts stay readable but never enter independent script dis
   assert.equal(invalid.run.error.code, "invalid_arguments");
   const privateRun = await run("private-only.js", { value: 9 });
   assert.equal(privateRun.run.status, "failed");
-  assert.equal(scripts.discover().entries.length, 1);
+  assert.equal(
+    scripts.discover().entries.filter((item) => item.origin.type === "local").length,
+    1,
+  );
 });

@@ -116,3 +116,12 @@ test("source preparation rejects stale identity, invalid examples and unsafe pub
   assert.throws(() => service.prepareSource(sourceInput(), new AbortController().signal),
     { code: "source_materials_unavailable" });
 });
+
+test("MCP materials use globalThis bracket access for hyphenated mcpServers names", async () => {
+  const input = sourceInput();
+  input.source.name = "remote-api";
+  const files = filesOf(prepareSourceMaterials("host_source", input));
+  assert.match(files["references/calling.md"], /globalThis\["remote-api"\]\["tool_list-issues"\]/);
+  const observed = await invokeExample("globalThis", { "remote-api": { "tool_list-issues": async ({repo}) => repo } }, exampleOf(files));
+  assert.equal(observed, "demo");
+});

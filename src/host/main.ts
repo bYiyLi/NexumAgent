@@ -20,6 +20,8 @@ const peer = new Peer(process.stdin, process.stdout, async (method, params, sign
   if (!service) throw new Error("host is not initialized");
   if (method === "host.configure") return await service.configure(params);
   if (method === "host.ready") return await service.ready(params, signal);
+  if (method === "console.inspect") return await service.inspectConsole(params, signal);
+  if (method === "profile.inspect") return await service.inspectProfile(params, signal);
   if (method === "run.execute") return await service.execute(params, signal);
   if (method === "run.prepare") return service.prepareRun(params, signal);
   if (method === "input.validate") return service.validateInput(params);

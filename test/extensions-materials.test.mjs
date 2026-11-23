@@ -238,7 +238,12 @@ test("preparation keeps authored trees, fixed source hashes and complete referen
     scripts.resolve("guidance/report.js").code.includes("return 1"),
     true,
   );
-  assert.deepEqual(scripts.discover().entries.map((item) => item.scriptName), ["guidance/report.js"]);
+  assert.deepEqual(
+    scripts.discover().entries
+      .filter((item) => item.origin.type === "extension")
+      .map((item) => item.scriptName),
+    ["guidance/report.js"],
+  );
   assert.throws(() => scripts.resolve("guidance/private-only.js"));
   assert.match(readFileSync(path.join(skill.path, "scripts/private-only.js"), "utf8"), /private helper/);
   catalog.withdraw("not-the-handle");

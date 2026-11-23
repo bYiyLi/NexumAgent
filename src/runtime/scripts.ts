@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, newId } from "../contracts/json.js";
 import type {
@@ -19,6 +20,7 @@ import type {
 import { compileInputSchema } from "../contracts/validation.js";
 import { extensionNamespace, scriptFilename } from "./names.js";
 import { atomicText, contains, privateDirectory } from "./paths.js";
+import { CONTROL_VERSION } from "./control-scripts.js";
 
 export interface ScriptMetadata {
   scriptName: string;
@@ -168,7 +170,18 @@ export class ScriptCatalog {
 
   #registered(targetNamespace?: string): ScriptSource[] {
     const namespaces = new Set<string>();
-    const result = [...this.#sources()];
+    // Installed, versioned scripts share ScriptCatalog and the existing Run
+    // path. Their identity is code-owned, never supplied by caller metadata.
+    const builtin: ScriptSource = {
+      type: "platform",
+      // The installed Node Host archive has its own package name; the Go
+      // Agent's authenticated platform identity remains @nexum-hub/agent.
+      owner: "@nexum-hub/agent",
+      namespace: "nexum",
+      version: CONTROL_VERSION,
+      directory: fileURLToPath(new URL("../../builtin/", import.meta.url)),
+    };
+    const result = [builtin, ...this.#sources()];
     for (const source of result) {
       if (source.type === "extension") extensionNamespace(source.namespace);
       else

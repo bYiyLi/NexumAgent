@@ -359,3 +359,28 @@ test("script body supports await and native errors, and the required VM option i
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), "runtime_configuration");
 });
+
+test("non-identifier MCP connection keys remain callable through globalThis without renaming", async (t) => {
+  const { loader } = await fixture(t);
+  const observed = await loader.execute(
+    'return await globalThis["remote-api"]["tool_list-issues"]({repo:"demo"});',
+    { context: {}, "remote-api": { "tool_list-issues": async ({ repo }) => ({ repo }) } },
+  );
+  assert.equal(observed.repo, "demo");
+  await assert.rejects(loader.execute("return 1;", {
+    context: {}, "invalid key": { ping: () => 1 },
+  }), { code: "invalid_namespace" });
+});
+
+test("an actual Run Worker calls an approved hyphenated MCP binding", async (t) => {
+  const { loader } = await fixture(t);
+  const run = await loader.compileIsolated(
+    'return await globalThis["remote-api"]["tool_ping"]({ count: 41 });',
+    { context: {}, "remote-api": { tool_ping: async ({ count }) => count + 1 } },
+  );
+  try {
+    assert.equal(await run(), 42);
+  } finally {
+    await run.close();
+  }
+});

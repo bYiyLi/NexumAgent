@@ -19,7 +19,7 @@ MCP 配置新增、修改或移除时，申请返回 status 为 pending，只表
 ## JavaScript 参数与返回
 
 - packages.install/update({name, version?})、packages.remove({name})；extensions.enable/disable({name})。
-- mcp.add/update({name, config})、mcp.remove({name})。
+- mcp.add/update({连接名: {command, args?, env?} 或 {url, headers?}})，一次提交一个 mcpServers 条目；mcp.remove({name})。
 - api.import/update({name, url?, path?, config?})、api.remove({name})；API 导入的实际字段组合由对应方法 Schema 和导入结果校验。
 - 上述变更返回 {requestId, status, expiresAt, approvalUrl?}。
 - get(requestId: string)、cancel(requestId: string) 返回申请视图，包含 requestId、target/action/name、status、revision/candidateRevision、summary、authStatus、createdAt/expiresAt，以及实际存在的 approvalUrl、decision、execution 等状态证据。
@@ -62,8 +62,8 @@ export const maintenanceExtension: ExtensionFactory = () => {
     if (group === "packages" && action !== "remove")
       properties.version = { type: "string", minLength: 1, maxLength: 256 };
     if (group === "mcp" && action !== "remove") {
-      properties.config = { type: "object" };
-      required.push("config");
+      delete properties.name;
+      required.length = 0;
     }
     if (group === "api" && action !== "remove")
       Object.assign(properties, {
@@ -74,7 +74,7 @@ export const maintenanceExtension: ExtensionFactory = () => {
     methods[name] = {
       description: group
         ? group === "mcp"
-          ? `申请 ${name}；返回 approvalUrl 供用户确认，批准后自动更新 MCP 连接。用 maintenance.get(requestId) 核对执行结果，无需重启 Agent。`
+          ? `申请 ${name}；配置申请直接传入一个命名 mcpServers 条目（如 filesystem: {command, args} 或 remote: {type: "sse" | "http", url, headers}），不包裹 name/config。返回 approvalUrl 供用户确认，批准后自动更新 MCP 连接。用 maintenance.get(requestId) 核对执行结果，无需重启 Agent。`
           : `申请 ${name}；用户确认最终修订后才实际执行。`
         : `${name === "get" ? "读取" : name === "list" ? "筛选" : "撤销尚未执行的"}维护申请；不批准或重签。`,
       permissions: [`maintenance.${name}`],
@@ -91,13 +91,38 @@ export const maintenanceExtension: ExtensionFactory = () => {
             ? (args[0] ?? {})
             : { requestId: args[0] };
       },
-      inputSchema: {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "object",
-        additionalProperties: false,
-        properties,
-        required,
-      },
+      inputSchema: group === "mcp" && action !== "remove"
+        ? {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            minProperties: 1,
+            maxProperties: 1,
+            propertyNames: { pattern: "^[A-Za-z_$][A-Za-z0-9_.$-]{0,63}$" },
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                type: { enum: ["stdio", "sse", "http", "streamable-http"] },
+                command: { type: "string", minLength: 1 },
+                args: { type: "array", maxItems: 256, items: { type: "string" } },
+                cwd: { type: "string" },
+                env: { type: "object", additionalProperties: { type: "string" } },
+                url: { type: "string", minLength: 1 },
+                headers: { type: "object", additionalProperties: { type: "string" } },
+              },
+              oneOf: [
+                { type: "object", properties: { command: { type: "string", minLength: 1 } }, required: ["command"] },
+                { type: "object", properties: { url: { type: "string", minLength: 1 } }, required: ["url"] },
+              ],
+            },
+          }
+        : {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            additionalProperties: false,
+            properties,
+            required,
+          },
       handle(input, call) {
         if (group) {
           const service = call.maintenance[

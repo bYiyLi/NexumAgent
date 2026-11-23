@@ -26,6 +26,7 @@ export const wireOperationsV2 = [
   "agent.project.inspect",
   "agent.project.close",
   "agent.open",
+  "agent.console.inspect",
   "agent.close",
   "agent.run.start",
   "agent.run.get",
@@ -954,6 +955,7 @@ export interface WireInputsV2 {
     readonly contextId?: string;
   };
   "agent.open": WireOpenInputV2;
+  "agent.console.inspect": { readonly agentId: string; readonly resourceId?: string; readonly filePath?: string };
   "agent.close": WireCloseInputV2;
   "agent.run.start": WireRunStartInputV2;
   "agent.run.get": WireRunGetInputV2;
@@ -1004,6 +1006,20 @@ export interface WireOutputsV2 {
   "agent.project.close": WireProjectCloseOutputV2;
   "agent.project.inspect": WireOpenOutputV2;
   "agent.open": WireOpenOutputV2;
+  "agent.console.inspect": {
+    readonly observedAt: string;
+    readonly complete: boolean;
+    readonly resources: readonly { readonly id: string; readonly name: string; readonly type: "instruction" | "skill" | "script" | "npm" | "mcp" | "openapi"; readonly description?: string; readonly parentId?: string }[];
+    readonly skill?: {
+      readonly id: string;
+      readonly name: string;
+      readonly entries: readonly { readonly displayPath: string; readonly kind: "directory" | "file" }[];
+      readonly selected: { readonly displayPath: string; readonly content: string; readonly revision: string; readonly truncated: boolean };
+      readonly treeTruncated: boolean;
+    };
+    readonly telemetry: { readonly scope: "node_host"; readonly observedAt: string; readonly cpuPercent?: number; readonly memoryRssMb?: number };
+    readonly warnings?: readonly string[];
+  };
   "agent.close": WireCloseOutputV2;
   "agent.run.start": WireRunViewV2;
   "agent.run.get": WireRunViewV2;

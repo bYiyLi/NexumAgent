@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexum.local/agent/v2/model/agent.console.inspect.output.schema.json",
+  "$ref": "https://schemas.nexum.local/agent/v2/wire/operations.schema.json#/$defs/agent.console.inspect.output"
+}
