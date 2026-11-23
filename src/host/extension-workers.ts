@@ -5,6 +5,7 @@ import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { Binding, JsonObject } from "../contracts/types.js";
 import type { ScriptSource } from "../runtime/scripts.js";
 import type { PublishedMaterials } from "../work/service.js";
+import { platformNamespaces } from "../sdk/platform.js";
 import { serveSyncRPC } from "./sync-rpc.js";
 import { maxFrameBytes } from "./peer.js";
 import type { ExtensionApproval } from "./extension-runtime.js";
@@ -55,7 +56,7 @@ export class ExtensionWorkers {
     readonly instanceId: string, readonly call: Call) {}
 
   platformsReady(): boolean {
-    return !this.#closed && ["runtime", "state", "output", "sh", "transfer", "maintenance"].every((name) => {
+    return !this.#closed && platformNamespaces.every((name) => {
       const entry = this.#entries.get(`platform:${name}`);
       return entry?.isPublished === true && entry.worker.threadId !== -1;
     });
@@ -71,7 +72,7 @@ export class ExtensionWorkers {
 
   async #activate(input: Omit<ExtensionActivation, "approval"> & { approval?: ExtensionApproval }, signal: AbortSignal, platform: boolean): Promise<JsonObject> {
     requireCondition(!this.#closed && !this.#packageTransaction && typeof input.packageName === "string" &&
-      (platform ? /^platform:(?:runtime|state|output|sh|transfer|maintenance)$/.test(input.packageName) : /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(input.packageName)) &&
+      (platform ? platformNamespaces.some((name) => input.packageName === `platform:${name}`) : /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(input.packageName)) &&
       typeof input.preparationId === "string" && /^preparation_[0-9a-f]{32}$/.test(input.preparationId) &&
       Array.isArray(input.permissions) && input.permissions.length <= 256 &&
       input.permissions.every((permission) => typeof permission === "string" && permission.length <= 256) &&

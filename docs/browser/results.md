@@ -10,8 +10,8 @@ browser 方法返回普通业务数据、原生 bytes 或公开结果意图；No
 
 | 结果                                    | SDK 实际值与交付                                                                                                                                                                                          |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 页面结构/文字、WebMCP 数据              | 结构化数据或文本；结构化快照超预算时提供截断标志和实际本机全文产物，脚本再经 output 固定为资源                                                                                                            |
-| screenshot、elementScreenshot、AX 图像  | 返回真实 JPEG/PNG bytes（Uint8Array）及必要尺寸/标注；脚本用 output.image({data,mimeType}) 或 SDK 已声明的 typed result 交付                                                                              |
+| 页面结构/文字、WebMCP 数据              | 结构化数据或文本；结构化快照超预算时提供截断标志和实际本机全文产物，脚本显式返回标准 resource_link 路径描述以固定为资源                                                                                                            |
+| screenshot、elementScreenshot、AX 图像  | 返回真实 JPEG/PNG bytes（Uint8Array）及必要尺寸/标注；脚本直接 return 真实 bytes，由结果层自动识别并交付                                                                              |
 | 图片/音频/视频                          | 按实际 MIME/bytes/尺寸/时长检查；内联或资源按协议/Host/预算；不靠改 MIME 或扩展名冒充转码                                                                                                                 |
 | PDF/HTML/Markdown、Gsuite、页面内容导出 | 用当前页面/站点登录态取得实际内容并保存本机产物；提供 file path/name/MIME/size/hash；无 Host 专属文件库依赖                                                                                               |
 | 下载/媒体获取、资产 bundle              | 观察到真实下载完成、校验可读后返回产物及逐项失败；部分成功不得冒充全部完成                                                                                                                                |
@@ -24,10 +24,10 @@ const client = createBrowserClient(browser);
 const selectedBrowser = await client.browsers.get(context.input.browserId);
 const tab = await selectedBrowser.tabs.get(context.input.tabId);
 const image = await tab.screenshot();
-return output.image({ data: image, mimeType: "image/jpeg" });
+return image;
 ```
 
-需要正文给模型时交付实际标准内容；只返回路径/URI 不表示模型已读取。原始 Uint8Array 作为普通二进制返回时不能自动猜成图片；显式 image 用途与 MIME/bytes 验证共同决定。混合结果保留顺序和原类型，SDK 不在后台秘密发送额外模型消息。AX write 映射为可 return 的内容意图。
+需要正文给模型时交付实际标准内容；只返回路径/URI 不表示模型已读取。原始 Uint8Array 根据真实字节签名识别受支持图片/音频；无法验证时保留为资源链接。混合结果保留顺序和原类型，SDK 不在后台秘密发送额外模型消息。AX write 映射为可 return 的内容意图。
 
 ## 上传与文件选择
 
@@ -49,7 +49,7 @@ Google Markdown 的文本响应兼容 `text/x-markdown` 等同义 MIME，结果�
 
 `selected.downloads.list({limit?})` 读取当前已连接浏览器配置的正常下载记录，包括其他标签、此前运行及不同目录中的记录；不按 Agent 的工作目录筛选，也不声称每条记录都由当前任务触发。记录沿用浏览器的数字 `id`、`filename` 本机完整路径、状态、时间、大小和 MIME 等字段，按开始时间倒序返回；默认与浏览器 API 一样最多取 1000 条，调用方可用 `limit` 调整数量，`0` 表示全部。记录的文件路径是浏览器报告的状态，读取时仍需实际检查文件及当前路径授权。为避免把下载内容或带凭据的链接塞进列表，不返回来源 URL；`data:` 文件内容通过文件或 Resource 读取。
 
-AI 可以从这份列表选择具体完成的文件，然后使用 Node 或 `output.file(record.filename)`；后者沿用平台现有规则登记标准 MCP Resource。浏览器原生记录的数字 `id` 不是 `tab.downloads()` 或 `waitForDownload()` 返回的页面下载身份，不能互换。没有唯一目标时由调用方根据列表判断，不把某条记录自动当作当前任务的结果。
+AI 可以从这份列表选择具体完成的文件，然后使用 `{type:"resource_link",path:record.filename}`；后者沿用平台现有规则登记标准 MCP Resource。浏览器原生记录的数字 `id` 不是 `tab.downloads()` 或 `waitForDownload()` 返回的页面下载身份，不能互换。没有唯一目标时由调用方根据列表判断，不把某条记录自动当作当前任务的结果。
 
 先注册下载等待器，再触发网页操作；记录 downloadId、目标/页面/连接、当前 run/operation 与实际状态。文件实际完成、可读且与已知的浏览器文件大小一致后，复制到本次临时目录或已授权明确目标；原子 no-replace，失败保留已发生下载事实并清理未提交临时文件，不重复点击下载。
 
@@ -67,13 +67,13 @@ AI 可以从这份列表选择具体完成的文件，然后使用 Node 或 `out
 
 ## 原始 CDP 的协议保真
 
-raw cdp.send 的返回在当前 Node 脚本内保留浏览器原始 JSON 形态，某些命令的编码媒体字段不在插件桥接时擅自改型；大 JSON 使用 connection.md 定义的有界流。需要实际图片/文件交付时，脚本或本包高层封装显式解码、验证并交给 output，不自动复制原始响应作为媒体展示。审计和默认运行摘要只保留方法/目标/结果状态，原始协议正文不自动落日志；显式业务结果仍遵守平台数据预算与当前授权。
+raw cdp.send 的返回在当前 Node 脚本内保留浏览器原始 JSON 形态，某些命令的编码媒体字段不在插件桥接时擅自改型；大 JSON 使用 connection.md 定义的有界流。需要实际图片/文件交付时，脚本或本包高层封装显式解码、验证并交给最终结果转换器，不自动复制原始响应作为媒体展示。审计和默认运行摘要只保留方法/目标/结果状态，原始协议正文不自动落日志；显式业务结果仍遵守平台数据预算与当前授权。
 
 ## 大快照与资源注册时机
 
 公开 call.output 是意图包装，call.resources 管运行控制；两者都不是给扩展直接注册 ArtifactStore URI 的私有入口。本包只把完整内容写到当前 profile 已授权的本机产物路径，返回 BrowserArtifact（path/name/MIME/size/hash）。PageSnapshot/VisibleDomTree/文本导出的 truncated=true 与 artifact 明确保留全文位置；没有实际全文文件时不填 artifact。纯字符串接口 domSnapshot/AX state/innerText 等不能偷偷拼入不可用 URI 或在类型外加元数据，超出它声明的返回预算则报 OUTPUT_TOO_LARGE，并提示用有范围的结构化观察或导出。
 
-脚本需要将全文交付 Host 时显式 `return output.file(snapshot.artifact.path)`，或与摘要一起组合结果；平台在最终结果处理时核对权限、固定实际 bytes 并注册可用 URI。返回本机 path 只表示文件已存在；不表示已经注册 Resource 或外部可下载。BrowserUserTabContext 的 resource 分支只用于公开平台已提供且当前可访问的 URI；新提取文档走 document bytes 或 artifact 分支。不再暴露没有 read 方法的 nextCursor，也不在 SDK 返回尚未注册的 resourceUri。
+脚本需要将全文交付 Host 时显式 `return {type:"resource_link",path:snapshot.artifact.path}`，或与摘要一起组合结果；平台在最终结果处理时核对权限、固定实际 bytes 并注册可用 URI。返回本机 path 只表示文件已存在；不表示已经注册 Resource 或外部可下载。BrowserUserTabContext 的 resource 分支只用于公开平台已提供且当前可访问的 URI；新提取文档走 document bytes 或 artifact 分支。不再暴露没有 read 方法的 nextCursor，也不在 SDK 返回尚未注册的 resourceUri。
 
 WebMCP/任意页面 JS 返回需符合其 Schema 和本机流预算，巨大业务对象可显式导出文件或报超限，不能无限缓冲。原始 CDP 的协议保真是本机传输例外；原始响应若直接成为运行最终结果，仍按标准平台 JSON/媒体预算验证，不绕过 final response 限额。
 
@@ -85,6 +85,6 @@ PlaywrightDownload 门面绑定原始 downloadId/browserSession/generation 与�
 
 对受控标签中直接点击、或由该次点击同步创建并触发的 HTTP/Blob/data 下载链接，在已准备下载等待器的情况下，仅在实际点击周围为该链接暂时设置唯一下载名称，并在点击后恢复原链接属性；由浏览器正常执行原始下载，随后仍按同一编号确认原生记录。部分异步生成、未连接页面、跨 frame 及其他无法确认身份的下载不推断为当前目标。
 
-脚本可将已固定的下载文件通过 `output.file(...)` 交给平台；结果编码成功时，平台才把完整内容登记到该 Agent 的 `work/resources` 并返回标准 MCP `resource_link`。Host 后续使用 `resources/read` 读取内容。浏览器下载路径、临时产物、平台资源是各自独立的事实；当前授权、大小预算或资源登记失败时不返回伪造的成功链接。
+脚本可将已固定的下载文件通过 `{type:"resource_link",path:...}` 交给平台；结果编码成功时，平台才把完整内容登记到该 Agent 的 `work/resources` 并返回标准 MCP `resource_link`。Host 后续使用 `resources/read` 读取内容。浏览器下载路径、临时产物、平台资源是各自独立的事实；当前授权、大小预算或资源登记失败时不返回伪造的成功链接。
 
 本包控制等待器/run 结束后，浏览器原生下载可能仍继续；不声称已经取消网站下载。下载后的固定产物独立于活跃下载控制器，历史通过平台保存的结果读取，不借读取产物恢复旧控制。artifact 临时文件在平台尚未物化完成前必须可用，不能在单方法 finally 或 RunScope.dispose 中删掉结果源；按平台保留/无活动引用清理，失败清理仅删除未提交的本包临时片段。

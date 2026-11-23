@@ -92,7 +92,7 @@ interface Browser {
 }
 ```
 
-`downloads.list()` 返回当前浏览器配置的原生下载记录和文件路径；它不按标签或目录筛选，也不将记录自动归属当前运行。选定文件后可用 Node 读取或通过 `output.file` 登记 MCP Resource；文件访问仍检查当前权限。
+`downloads.list()` 返回当前浏览器配置的原生下载记录和文件路径；它不按标签或目录筛选，也不将记录自动归属当前运行。选定文件后可用 Node 读取或通过 `{type:"resource_link",path:...}` 登记 MCP Resource；文件访问仍检查当前权限。
 
 ## BrowserUser
 

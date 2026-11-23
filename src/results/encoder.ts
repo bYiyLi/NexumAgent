@@ -46,16 +46,28 @@ export interface ResultScope extends ArtifactScope {
   readonly authorizeTarget?: (target: AccessTarget) => void;
 }
 
-function explicitFileLink(value: unknown, pwd: string): boolean {
+function explicitFileLink(value: unknown, pwd: string): OutputIntent | null {
   if (!value || typeof value !== "object" || types.isProxy(value) || Array.isArray(value))
-    return false;
+    return null;
   const tag = Object.getOwnPropertyDescriptor(value, "type");
   if (!tag || !("value" in tag) || tag.value !== "resource_link")
-    return false;
+    return null;
   // Do not reinterpret ordinary business objects with unrelated properties.
-  const allowed = new Set(["type", "path", "uri", "data", "mimeType", "name", "description", "annotations"]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
-  return contentValue(value, pwd) !== null;
+  const allowed = new Set(["type", "path", "mimeType", "name"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return null;
+  const source: {path: string; mimeType?: string; name?: string} = { path: "" };
+  for (const key of ["path", "mimeType", "name"] as const) {
+    const field = Object.getOwnPropertyDescriptor(value, key);
+    if (!field) {
+      if (key === "path") return null;
+      continue;
+    }
+    if (!("value" in field) || typeof field.value !== "string") return null;
+    source[key] = field.value;
+  }
+  // A descriptor is a local source declaration, NOT a pre-registered MCP
+  // ResourceLink (which must already have a verified URI and name).
+  return createOutput(pwd, () => {}).file(source);
 }
 export type ResultArtifacts = Pick<ArtifactStore,
   "agentId" | "root" | "maxFileBytes" | "maxReadBytes" |
@@ -910,7 +922,8 @@ export class ResultEncoder {
         result.contentAssociations = contentAssociations;
     };
     const intent = outputIntent(value),
-      remote = mcpResult(value);
+      remote = mcpResult(value),
+      localFile = explicitFileLink(value, scope.pwd);
     if (remote) {
       await resolveMcp(value);
       if (Object.hasOwn(remote.model, "structuredContent"))
@@ -936,7 +949,7 @@ export class ResultEncoder {
     // A complete, validated standard content descriptor is an explicit
     // source declaration, not an arbitrary path string. This preserves
     // large-path resource delivery without a model-facing output.* SDK.
-    else if (explicitFileLink(value, scope.pwd)) await append(value);
+    else if (localFile) await append(localFile);
     else if (!types.isProxy(value) && Array.isArray(value) && value.length) {
       // Descriptor-based normalization below rejects holes/accessors without executing them.
       requireCondition(
@@ -948,16 +961,17 @@ export class ResultEncoder {
       let all = true;
       for (let i = 0; i < value.length; i++) {
         const item = Object.getOwnPropertyDescriptor(value, String(i));
+        const localItem = explicitFileLink(item?.value, scope.pwd);
         if (
           !item ||
           !("value" in item) ||
           !(mcpResult(item.value) || outputIntent(item.value) ||
-            explicitFileLink(item.value, scope.pwd))
+            localItem)
         ) {
           all = false;
           break;
         }
-        items.push(item.value);
+        items.push(localItem ?? item.value);
       }
       if (all) for (const item of items) await append(item);
       else await data(value);

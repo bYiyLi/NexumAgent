@@ -64,7 +64,7 @@ MV3 manifest 仅声明实现所需的 debugger、tabs、scripting、storage、al
 
 CDP 原始参数和返回值保留浏览器协议类型，包括某些命令原生的 base64 字段；不改字段名或伪装成普通截图 API。超过控制帧预算的原始 JSON 参数/响应以 kind=json 的有界 UTF-8 二进制流传输，接收完成再还原对象；双方限额由 ready.limits 协商，初始上限不得超过本轮平台 128 MiB，仍受当前方法输入/最终输出各自预算约束，真实 bytes/期限/背压均检查。该流只改变本机传输，不能把 1 MiB 控制帧上限当成所有 CDP 方法的结果上限。
 
-高层截图/文件 SDK 返回原生 bytes/产物，不携带 base64。脚本需要将 raw CDP 媒体交给 Host 时，先将原生编码字段解码为 bytes，再使用 output.image/file 等标准结果；SDK 不自动把 raw CDP payload 塞入日志、审计或 structuredContent。普通 Node 代码能自行编码数据不构成本协议的隔离保证。
+高层截图/文件 SDK 返回原生 bytes/产物，不携带 base64。脚本需要将 raw CDP 媒体交给 Host 时，先将原生编码字段解码为 bytes，直接 return 真实媒体 bytes，或显式返回标准 resource_link 文件描述；SDK 不自动把 raw CDP payload 塞入日志、审计或 structuredContent。普通 Node 代码能自行编码数据不构成本协议的隔离保证。
 
 ## 用户加载插件与版本核对
 

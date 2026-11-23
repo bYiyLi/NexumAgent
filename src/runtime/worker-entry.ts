@@ -62,7 +62,7 @@ function explicitScriptErrorMessage(cause: unknown): string | null {
       typeof descriptor.value !== "string") return null;
   const message = descriptor.value;
   if (message.length === 0 || message.length > 300 ||
-      /[\x00-\x1f]|https?:\/\/|(?:[A-Za-z]:\\|\/Users\/|\/home\/|\/etc\/)|(?:password|secret|token|api[_-]?key|bearer|authorization|cookie|credential)/i.test(message)) return null;
+      /[\x00-\x1f]|https?:\/\/|(?:[A-Za-z]:\\|\/Users\/|\/home\/|\/etc\/)|(?:password|secret|token|private|stack|api[_-]?key|bearer|authorization|cookie|credential)/i.test(message)) return null;
   const literals = [
     JSON.stringify(message),
     "'" + message.replaceAll("\\", "\\\\").replaceAll("'", "\\'") + "'",

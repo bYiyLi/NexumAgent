@@ -9,7 +9,6 @@ const root = path.dirname(
 );
 const packages = [
   { key: "sdk", name: "@nexum-hub/sdk", dir: "packages/extension-api" },
-  { key: "agent", name: "@nexum-hub/agent", dir: "." },
   { key: "browser", name: "@nexum-hub/browser", dir: "packages/browser" },
 ];
 const defaultVersion = "0.0.1";
@@ -179,11 +178,6 @@ function inspectRelease() {
     assertNoSourceMaps(item.name, names);
     for (const required of {
       sdk: ["dist/index.js", "dist/index.d.ts"],
-      agent: [
-        "dist/index.js",
-        "dist/host/main.js",
-        "contracts/v2/common.schema.json",
-      ],
       browser: [
         "dist/client/index.js",
         "dist/extension/index.js",
@@ -193,14 +187,6 @@ function inspectRelease() {
       ],
     }[item.key])
       assert.ok(names.has(required), `${item.name} is missing ${required}`);
-    if (item.key === "agent") {
-      for (const filename of names)
-        assert.doesNotMatch(
-          filename,
-          /^(?:native\/|native-src\/|scripts\/(?:npm-install|service|service-runner|build-native|startup-report))/,
-          "Node host npm package must not own native binaries or lifecycle installation",
-        );
-    }
     for (const filename of names)
       assert.doesNotMatch(
         filename,

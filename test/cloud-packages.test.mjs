@@ -16,17 +16,24 @@ test("Go-managed work uses declared, installed pnpm packages without legacy appr
   await writeFile(path.join(installed, "package.json"),
     '{"name":"@nexum-hub/browser","version":"1.2.3"}');
   await symlink(installed, path.join(modules, "@nexum-hub", "browser"));
+  const retired = path.join(modules, ".pnpm", "retired-core", "node_modules", "@nexum-hub", "agent");
+  await mkdir(retired, { recursive: true });
+  await writeFile(path.join(retired, "package.json"), '{"name":"@nexum-hub/agent","version":"1.0.3"}');
+  await symlink(retired, path.join(modules, "@nexum-hub", "agent"));
   await writeFile(path.join(work, "package.json"), JSON.stringify({
     private: true, dependencies: {
-      "@nexum-hub/agent": "0.0.3-next.22",
+      "@nexum/node-host": "1.0.0",
+      "@nexum-hub/agent": "1.0.3",
       "@nexum-hub/browser": "^1.2.0",
       "not-installed": "1.0.0",
     },
   }));
   const actual = cloudManagedPackages(root);
   assert.deepEqual([...actual], [["@nexum-hub/browser", "1.2.3"]]);
-  assert.equal(actual.has("@nexum-hub/agent"), false,
+  assert.equal(actual.has("@nexum/node-host"), false,
     "The Node host is not a user-callable npm extension");
+  assert.equal(actual.has("@nexum-hub/agent"), false,
+    "The retired Core cannot reappear as an authorized work package");
   await writeFile(path.join(work, "package.json"), "{invalid");
   assert.throws(() => cloudManagedPackages(root), { code: "package_manifest_invalid" });
 });

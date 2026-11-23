@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { defaultBuiltins, ModuleLoader } from "../dist/runtime/modules.js";
-import { CONTROL_VERSION } from "../dist/runtime/control-scripts.js";
+import { CONTROL_OWNER, CONTROL_VERSION } from "../dist/runtime/control-scripts.js";
 
 const names = [
   "file.list.js", "file.patch.js", "file.read.js", "file.search.js",
@@ -36,6 +36,7 @@ function fixture(t) {
 
 test("six versioned builtins are discovered through ScriptCatalog without overriding local scripts", (t) => {
   const { catalog } = fixture(t);
+  assert.equal(CONTROL_OWNER, "nexum");
   const discovered = catalog.discover();
   for (const name of names) {
     const full = "nexum/" + name;
@@ -43,7 +44,7 @@ test("six versioned builtins are discovered through ScriptCatalog without overri
     assert.ok(entry, `missing ${full}`);
     assert.equal(entry.scriptOpenDefault, true);
     assert.equal(entry.origin.type, "platform");
-    assert.equal(entry.origin.owner, "@nexum-hub/agent");
+    assert.equal(entry.origin.owner, CONTROL_OWNER);
     assert.equal(entry.origin.version, CONTROL_VERSION);
     assert.equal(entry.origin.revision, sha(readFileSync(entry.path)));
     assert.deepEqual(catalog.resolve(full).metadata.scriptInputSchema, entry.scriptInputSchema);

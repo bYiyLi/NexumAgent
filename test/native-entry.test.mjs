@@ -9,7 +9,8 @@ const root = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 test("the npm Node host contains no competing CLI, native binaries or OS lifecycle installers", () => {
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-  assert.equal(manifest.name, "@nexum-hub/agent");
+  assert.equal(manifest.name, "@nexum/node-host");
+  assert.equal(manifest.private, true);
   assert.ok(!manifest.files.some((x) => x === "native" || x.startsWith("scripts/")),
     "Cloud owns the Go Agent and bootstrap");
   assert.equal(manifest.bin, undefined, "The Go Agent owns the nexum-agent CLI");

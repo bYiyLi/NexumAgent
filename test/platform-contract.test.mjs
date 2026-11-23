@@ -6,7 +6,12 @@ import test from "node:test";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
-import { platformFactories, platformMethodProjection, platformSkill } from "../dist/sdk/platform.js";
+import { platformFactories, platformMethodProjection, platformNamespaces, platformSkill } from "../dist/sdk/platform.js";
+
+test("platform registry and host readiness share the same supported namespaces", () => {
+  assert.deepEqual([...platformNamespaces], Object.keys(platformFactories(() => null)));
+  assert.equal(platformNamespaces.includes("output"), false);
+});
 
 test("platform Skills and Go projections use actual prepared Registry methods", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-platform-")));
@@ -26,7 +31,7 @@ test("platform Skills and Go projections use actual prepared Registry methods", 
   const factories = platformFactories(() => null);
   for (const namespace of ["runtime", "state"]) {
     const handle = await registry.prepare({ apiVersion: 1, origin: {
-      type: "platform", owner: "@nexum-hub/agent", namespace, version: "1", revision: "1",
+    type: "platform", owner: "nexum", namespace, version: "1", revision: "1",
     }, permissions }, factories[namespace]);
     registry.publish(handle);
     handles.push(handle);

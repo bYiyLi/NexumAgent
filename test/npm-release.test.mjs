@@ -8,11 +8,11 @@ import {
 
 test("npm release rejects source maps in any package archive", () => {
   assert.doesNotThrow(() =>
-    assertNoSourceMaps("@nexum-hub/agent", ["dist/cli.js", "dist/cli.d.ts"]),
+    assertNoSourceMaps("@nexum/node-host", ["dist/cli.js", "dist/cli.d.ts"]),
   );
   for (const map of ["dist/cli.js.map", "dist/main.css.map", "dist/cli.js.MAP"])
     assert.throws(
-      () => assertNoSourceMaps("@nexum-hub/agent", ["dist/cli.js", map]),
+      () => assertNoSourceMaps("@nexum/node-host", ["dist/cli.js", map]),
       /source maps must not be published/,
     );
 });

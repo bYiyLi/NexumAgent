@@ -20,7 +20,7 @@ import type {
 import { compileInputSchema } from "../contracts/validation.js";
 import { extensionNamespace, scriptFilename } from "./names.js";
 import { atomicText, contains, privateDirectory } from "./paths.js";
-import { CONTROL_VERSION } from "./control-scripts.js";
+import { CONTROL_OWNER, CONTROL_VERSION } from "./control-scripts.js";
 
 export interface ScriptMetadata {
   scriptName: string;
@@ -174,9 +174,8 @@ export class ScriptCatalog {
     // path. Their identity is code-owned, never supplied by caller metadata.
     const builtin: ScriptSource = {
       type: "platform",
-      // The installed Node Host archive has its own package name; the Go
-      // Agent's authenticated platform identity remains @nexum-hub/agent.
-      owner: "@nexum-hub/agent",
+      // The installed package name does not redefine Go's platform identity.
+      owner: CONTROL_OWNER,
       namespace: "nexum",
       version: CONTROL_VERSION,
       directory: fileURLToPath(new URL("../../builtin/", import.meta.url)),
@@ -190,7 +189,6 @@ export class ScriptCatalog {
             [
               "sh",
               "transfer",
-              "output",
               "runtime",
               "state",
               "maintenance",

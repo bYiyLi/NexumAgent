@@ -18,15 +18,14 @@ const installed = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as Record<string, unknown>;
 requireCondition(
-  typeof installed.name === "string" &&
-    installed.name.length > 0 &&
-    installed.name.length <= 256 &&
+  installed.name === "@nexum/node-host" &&
     typeof installed.version === "string" &&
     /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(installed.version),
   "invalid_control_package",
-  "Fixed platform scripts require the actual installed Agent name and version.",
+  "Fixed platform scripts require a recognized Host package and version.",
 );
-export const CONTROL_OWNER = installed.name;
+// This is Nexum's platform identity, not the Node Host's npm package name.
+export const CONTROL_OWNER = "nexum";
 export const CONTROL_VERSION = installed.version;
 export { DEFAULT_CONTROL_CAPACITY } from "../contracts/types.js";
 

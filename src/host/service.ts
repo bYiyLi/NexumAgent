@@ -32,6 +32,7 @@ import {
   type ExtensionInvocation,
 } from "./extension-workers.js";
 import { parseExtensionApproval } from "./extension-runtime.js";
+import { platformNamespaces } from "../sdk/platform.js";
 import type { WorkOptions } from "../work/service.js";
 
 type Call = (
@@ -805,14 +806,7 @@ export class HostService {
         isPlainRecord(value) &&
         value.instanceId === this.#instanceId &&
         typeof value.namespace === "string" &&
-        [
-          "runtime",
-          "state",
-          "output",
-          "sh",
-          "transfer",
-          "maintenance",
-        ].includes(value.namespace) &&
+        platformNamespaces.some((name) => name === value.namespace) &&
         typeof value.preparationId === "string" &&
         Array.isArray(value.permissions) &&
         value.permissions.every(

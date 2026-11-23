@@ -9,7 +9,8 @@ import { shExtension, shSdkUsage } from "./sh.js";
 import { transferExtension, transferSdkUsage } from "./transfer.js";
 import { maintenanceExtension, maintenanceSdkUsage } from "./maintenance.js";
 
-export type PlatformNamespace = "runtime" | "state" | "sh" | "transfer" | "maintenance";
+export const platformNamespaces = ["runtime", "state", "sh", "transfer", "maintenance"] as const;
+export type PlatformNamespace = (typeof platformNamespaces)[number];
 
 /** These are the factories used by the existing application, including their normalizers. */
 export function platformFactories(restart: (reason: string, call: Invocation) => unknown): Record<PlatformNamespace, ExtensionFactory> {

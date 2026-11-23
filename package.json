@@ -1,16 +1,12 @@
 {
-  "name": "@nexum-hub/agent",
+  "name": "@nexum/node-host",
   "version": "0.0.1",
-  "private": false,
+  "private": true,
   "description": "Nexum Agent managed Node execution host",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bYiyLi/NexumAgent.git"
-  },
-  "publishConfig": {
-    "access": "public",
-    "tag": "next"
   },
   "type": "module",
   "engines": {

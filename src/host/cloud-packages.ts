@@ -28,7 +28,7 @@ export function cloudManagedPackages(root: string): ReadonlyMap<string, string> 
     requireCondition(isPlainRecord(declared), "package_manifest_invalid",
       "The work package dependencies must be an object.");
     for (const [packageName, specifier] of Object.entries(declared)) {
-      if (packageName === "@nexum-hub/agent" || !name.test(packageName) ||
+      if (packageName === "@nexum/node-host" || packageName === "@nexum-hub/agent" || !name.test(packageName) ||
           packageName.length > 214 || typeof specifier !== "string") continue;
       try {
         const rootOfPackage = realpathSync.native(path.join(modules, packageName));
