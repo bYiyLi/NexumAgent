@@ -31,7 +31,7 @@ const { ExtensionMaterials } = await load("extensions/materials.js");
 const { inspectExtensionPackage } = await load("extensions/packages.js");
 const { MaterialRetention } = await load("runtime/material-retention.js");
 const caller = { principalId: "user", clientId: "client", grantId: "grant" };
-const grace = 7 * 86400000;
+const grace = 45 * 86400000;
 const deferred = () => Promise.withResolvers();
 async function enteredWithin(promise) {
   let timer;
@@ -106,9 +106,9 @@ function baseFixture(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-material-quota-")),
   );
-  const work = path.join(root, "work"),
+  const work = root,
     project = path.join(root, "project");
-  mkdirSync(work);
+  mkdirSync(work, { recursive: true });
   mkdirSync(project);
   write(path.join(work, "package.json"), { type: "module" });
   const cleanups = [];
@@ -255,7 +255,7 @@ async function extensionFixture(t, options = {}) {
     descriptor,
     handle,
     materials,
-    reading: path.join(f.work, "skills", ".generated", "extensions"),
+    reading: path.join(f.work, "cache", "materials", "extensions"),
   };
 }
 

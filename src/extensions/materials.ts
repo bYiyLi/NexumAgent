@@ -251,8 +251,8 @@ export class ExtensionMaterials {
     );
     const parent = privateDirectory(
       this.work,
-      "skills",
-      ".generated",
+      "cache",
+      "materials",
       "extensions",
       segment(origin.namespace!),
       segment(descriptor.version),

@@ -9,7 +9,7 @@ import { prepareSourceMaterials } from "../dist/host/source-materials.js";
 
 test("material Worker admits local source Skills only from their exact Go source snapshot", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-source-guidance-")));
-  const work = path.join(root, "work"); mkdirSync(work);
+  const work = root; mkdirSync(work, { recursive: true });
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "development" };
   const caller = { principalId: "user", clientId: "client" };
   const source = { kind: "mcp", objectId: "source_issues", name: "github", revision: "actual_revision",
@@ -17,7 +17,7 @@ test("material Worker admits local source Skills only from their exact Go source
       metadata: { name: "tools/read", path: ["tool_read"], description: "Read fixture data.", normalizes: true,
         permissions: ["mcp.use"], schemaDialect: "2020-12", inputSchema: { type: "object" } } }] };
   const prepared = prepareSourceMaterials("host", { instanceId: "host", source, version: "1", description: "Fixture source." });
-  const directory = path.join(work, "skills/.generated/adapters/mcp/source/revision");
+  const directory = path.join(work, "cache/materials/adapters/mcp/source/revision");
   for (const file of prepared.files) {
     const filename = path.join(directory, file.name);
     mkdirSync(path.dirname(filename), { recursive: true });
@@ -57,7 +57,7 @@ test("material Worker admits local source Skills only from their exact Go source
 
 test("material Worker calls Go for live authority, quota and snapshot retention", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-material-worker-")));
-  const work = path.join(root, "work"); mkdirSync(work);
+  const work = root; mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "AGENTS.md"), "Worker instructions\n");
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "development" };
   const caller = { principalId: "user", clientId: "client" };
@@ -102,7 +102,7 @@ test("material Worker calls Go for live authority, quota and snapshot retention"
 
 test("material release waits for an in-flight Go authorization and cleans the candidate", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-material-cancel-")));
-  const work = path.join(root, "work"); mkdirSync(work);
+  const work = root; mkdirSync(work, { recursive: true });
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "development" };
   const caller = { principalId: "user", clientId: "client" };
   const seen = Promise.withResolvers();
@@ -138,7 +138,7 @@ test("material release waits for an in-flight Go authorization and cleans the ca
 
 test("HostService exposes material Worker only with actual Agent metadata", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-material-host-service-")));
-  const work = path.join(root, "work"); mkdirSync(work);
+  const work = root; mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "AGENTS.md"), "Agent instructions\n");
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "development" };
   const caller = { principalId: "user", clientId: "client" };
@@ -172,7 +172,7 @@ test("HostService exposes material Worker only with actual Agent metadata", asyn
 
 test("material Worker shutdown reports an unconfirmed Go hold release", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-material-close-")));
-  const work = path.join(root, "work"); mkdirSync(work);
+  const work = root; mkdirSync(work, { recursive: true });
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "development" };
   const caller = { principalId: "user", clientId: "client" };
   let serial = 0;

@@ -30,7 +30,7 @@ const distribution = process.env.NEXUM_MATERIAL_RETENTION_DIST
 const { MaterialRetention } = await import(
   new URL("runtime/material-retention.js", distribution).href
 );
-const grace = 7 * 86400000;
+const grace = 45 * 86400000;
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const deferred = () => {
   let resolve;
@@ -58,7 +58,7 @@ function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-material-retention-")),
   );
-  mkdirSync(path.join(root, "work"));
+  mkdirSync(root, { recursive: true });
   let now = 1700000000000;
   const live = new Set();
   const manager = new MaterialRetention(root, {
@@ -73,14 +73,14 @@ function fixture(t, options = {}) {
     return directory;
   };
   const skill = (name = "skill") =>
-    make(path.join("work", "skills", ".generated", "platform", "runtime", hash(name)));
+    make(path.join("cache", "materials", "platform", "runtime", hash(name)));
   const extension = (name = "skill") =>
-    make(path.join("work", "skills", ".generated", "extensions", name, "v1", hash(name)));
+    make(path.join("cache", "materials", "extensions", name, "v1", hash(name)));
   const snapshot = (
     name = "snapshot",
     bundle = { view: {}, published: {} },
   ) => {
-    const ref = `work/tmp/contexts/snapshot_${hash(name).slice(0, 32)}/bundle.json`;
+    const ref = `tmp/contexts/snapshot_${hash(name).slice(0, 32)}/bundle.json`;
     const directory = path.dirname(path.join(root, ref));
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(root, ref), JSON.stringify(bundle));

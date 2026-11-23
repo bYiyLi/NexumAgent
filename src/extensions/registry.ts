@@ -903,9 +903,8 @@ export class ExtensionRegistry {
         agentId: this.resources.store.binding.agentId,
         profile: this.resources.store.binding.profile,
         paths: {
-          work: path.join(root, "work"),
-          skills: path.join(root, "work", "skills"),
-          resources: path.join(root, "work", "resources"),
+          work: root,
+          resources: path.join(root, "resources"),
           logs: path.join(root, "logs"),
         },
       }),

@@ -10,7 +10,7 @@ import { ModuleLoader } from "../dist/runtime/modules.js";
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-package-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   const write = async (versions) => {
     const manifest = JSON.stringify({ private: true, type: "module", dependencies: versions });

@@ -15,7 +15,7 @@ test("platform registry and host readiness share the same supported namespaces",
 
 test("platform Skills and Go projections use actual prepared Registry methods", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-platform-")));
-  mkdirSync(path.join(root, "work"));
+  mkdirSync(root, { recursive: true });
   const store = new FixtureStore(root, { agentId: "agent", profile: "development", cloudEnvironment: "test" });
   const permissions = ["runtime.input", "maintenance.execute", "state.agent.read", "state.agent.write", "state.user.read", "state.user.write"];
   const registry = new ExtensionRegistry(new ResourceManager(store), {

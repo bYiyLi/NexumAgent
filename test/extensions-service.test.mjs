@@ -63,7 +63,7 @@ async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-extension-service-")),
   );
-  const work = path.join(root, "work"),
+  const work = root,
     key = `nexum-service:${randomUUID()}`;
   const controls = { alpha: box(), beta: box() },
     packages = {};

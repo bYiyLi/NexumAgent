@@ -41,7 +41,7 @@ async function fixture(t, { pnpm = false } = {}) {
     mkdtempSync(path.join(tmpdir(), "nexum-extension-package-")),
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const work = path.join(root, "work"),
+  const work = root,
     modules = path.join(work, "node_modules");
   const installed = path.join(modules, ...name.split("/"));
   const packageRoot = pnpm

@@ -16,7 +16,7 @@ import { HostService } from "../dist/host/service.js";
 test("only separately verified Go response brands cross a real script Worker", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-brands-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   await writeFile(path.join(work, "package.json"), '{"type":"module"}');
   const loader = await ModuleLoader.create(work, `boot_${randomUUID()}`, {

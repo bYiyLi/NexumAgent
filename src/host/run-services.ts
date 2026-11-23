@@ -40,7 +40,7 @@ export function createRunServices(root: string, agentId: string, instanceId: str
       }
       let record = await rpc("artifacts.register", { source: encoded, ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }) as ArtifactRecord;
       if (inspect) {
-        const observed = await inspect({ path: path.join(root, "work", "resources", record.resourceId, "content", "data"),
+        const observed = await inspect({ path: path.join(root, "resources", record.resourceId, "content", "data"),
           size: record.size, name: record.name, mimeType: record.mimeType });
         if (observed.mimeType && observed.mimeType !== record.mimeType)
           record = await rpc("artifacts.register", { source: { uri: record.uri, name: record.name, mimeType: observed.mimeType } }) as ArtifactRecord;

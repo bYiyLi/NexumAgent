@@ -28,12 +28,12 @@ const skill = (name, description = "用途") =>
 function fixture(t) {
   const temporary = mkdtempSync(path.join(tmpdir(), "nexum-work-"));
   const root = realpathSync.native(temporary),
-    work = path.join(root, "work"),
+    work = root,
     home = path.join(root, "home"),
     project = path.join(root, "project"),
     secondProject = path.join(root, "other-project");
   for (const directory of [work, home, project, secondProject])
-    mkdirSync(directory);
+    mkdirSync(directory, { recursive: true });
   function write(base, relative, text) {
     const filename = path.join(base, relative);
     mkdirSync(path.dirname(filename), { recursive: true });
@@ -280,7 +280,7 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   const first = await open();
   assert.equal(first.revision, 1);
   assert.equal(first.project, null);
-  assert.equal(first.pwd, work);
+  assert.equal(first.pwd, path.join(work, "scripts"));
   assert.equal(first.paths, undefined);
   assert.equal(first.instructions, undefined);
   assert.equal(first.context, undefined);
@@ -302,7 +302,7 @@ test("Agent-only open returns grouped real environment, instructions, metadata a
   assert.doesNotMatch(JSON.stringify(first), /BODY FOR review/);
   assert.equal(Object.hasOwn(first.agent, "docs"), false);
   assert.equal(Object.hasOwn(first.agent.paths, "docs"), false);
-  assert.equal(first.agent.paths.skills, path.join(work, "skills"));
+  assert.equal(Object.hasOwn(first.agent.paths, "skills"), false);
   assert.deepEqual(first.agent.modules.approvedPackages, { tiny: "1.0.0" });
   assert.match(readFileSync(first.agent.scripts.index, "utf8"), /可用脚本/);
   assert.equal(service.get(caller, first.contextId).revision, 1);
@@ -485,7 +485,7 @@ test("platform/SDK guidance and namespaced Skills keep Agent scope, versioned pa
   const { open, work, write, setPublished, service } = fixture(t);
   const directory = path.join(
     work,
-    "skills/.generated/extensions/browser/1.0.0/rev/skills/audit",
+    "cache/materials/extensions/browser/1.0.0/rev/skills/audit",
   );
   const file = write(directory, "SKILL.md", skill("audit"));
   const owner = {

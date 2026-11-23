@@ -18,9 +18,9 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function fixture(t) {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-builtin-")));
   const project = path.join(root, "project");
-  const work = path.join(root, "work");
+  const work = root;
   mkdirSync(project);
-  mkdirSync(work);
+  mkdirSync(work, { recursive: true });
   mkdirSync(path.join(project, "src"));
   writeFileSync(path.join(project, "src", "example.txt"), "first line\nsecond line\nthird line");
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -112,7 +112,7 @@ test("Git scripts use the existing managed sh command, not a second execution en
 
 test("named builtin file reads execute in the real isolated Node Worker", async (t) => {
   const { catalog, project, root } = fixture(t);
-  const work = path.join(root, "work");
+  const work = root;
   mkdirSync(path.join(work, "modules"));
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const loader = await ModuleLoader.create(work, "builtin_workertest", {

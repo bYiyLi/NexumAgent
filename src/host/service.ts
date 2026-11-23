@@ -120,7 +120,7 @@ export class HostService {
         "invalid_host_configuration",
         "The profile root cannot redirect.",
       );
-      const work = path.join(root, "work");
+      const work = root;
       requireCondition(
         realpathSync.native(work) === work,
         "invalid_host_configuration",
@@ -395,7 +395,7 @@ export class HostService {
     );
     return inspectConsoleAgent({
       agentId: this.#materials.binding.agentId,
-      work: path.join(this.#materials.root, "work"),
+      work: this.#materials.root,
       home: this.#materials.home,
       sources: value.sourceSnapshot as ConsoleSourceSnapshot[],
       approvedPackages: this.#packages.policy.approvedPackages(),

@@ -12,7 +12,7 @@ test("the real host Worker audits caught, ignored, propagated and detached nativ
       import {ModuleLoader} from '${base}runtime/modules.js';
       import {HostRunner} from '${base}host/runner.js';
       const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),'nexum-native-promises-')));
-      const work=path.join(root,'work');mkdirSync(work);writeFileSync(path.join(work,'package.json'),'{}');
+      const work=root;mkdirSync(work, { recursive: true });writeFileSync(path.join(work,'package.json'),'{}');
       const loader=await ModuleLoader.create(work,'audit',{builtins:()=>[],approvedPackages:()=>new Map()});
       const runner=new HostRunner(loader);const results=[];
       try {

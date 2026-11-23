@@ -59,8 +59,8 @@ async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-transfer-provider-")),
   );
-  const workDir = path.join(root, "work");
-  mkdirSync(workDir);
+  const workDir = root;
+  mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -90,7 +90,7 @@ async function fixture(t, options = {}) {
   const work = store.openWork({
     callerKey: callerKey(caller),
     pwd: workDir,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const engine = new ExecutionFixture(store, loader, scripts, {
     authorize(who, target) {

@@ -59,7 +59,7 @@ async function start(): Promise<void> {
     publishedDirectories: () => runtime?.activeDirectories() ?? new Set(),
   });
   try {
-    const modules = await ModuleLoader.create(path.join(root, "work"), `registry_${randomUUID()}`, packages.policy);
+    const modules = await ModuleLoader.create(root, `registry_${randomUUID()}`, packages.policy);
     const registryOptions = {
         permissions: new Set(workerData.permissions as string[]),
         authorize(policy: import("../extensions/registry.js").RegistryPolicy) {

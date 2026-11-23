@@ -13,7 +13,7 @@ import { AgentError } from "../dist/contracts/errors.js";
 async function fixture(t, call) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-service-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   await writeFile(path.join(work, "package.json"), '{"private":true,"type":"module"}');
   const service = new HostService("host_1", call);
@@ -72,8 +72,8 @@ test("host cancellation waits for the active Worker to finish", async (t) => {
 test("a host closed during configuration cannot accept later Runs", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-close-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "work", "modules"), { recursive: true });
-  await writeFile(path.join(root, "work", "package.json"), '{"private":true,"type":"module"}');
+  await mkdir(path.join(root, "modules"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   const service = new HostService("host_1", async () => null);
   const configuring = service.configure({ instanceId: "host_1", profileRoot: root, profile: "development" });
   await service.close();
@@ -86,8 +86,8 @@ test("a host closed during configuration cannot accept later Runs", async (t) =>
 test("extension RPC requires the Go-authenticated host binding and valid preparation", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-binding-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "work", "modules"), { recursive: true });
-  await writeFile(path.join(root, "work", "package.json"), '{"private":true,"type":"module"}');
+  await mkdir(path.join(root, "modules"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   const service = new HostService("host_1", async () => null);
   t.after(() => service.close());
   await service.configure({ instanceId: "host_1", profileRoot: root, profile: "development",
@@ -161,8 +161,8 @@ test("request cancellation keeps already accepted log delivery open until acknow
 test("stdio RPC runs a Worker, handles reverse SDK calls and routes cancellation", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-rpc-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "work", "modules"), { recursive: true });
-  await writeFile(path.join(root, "work", "package.json"), '{"private":true,"type":"module"}');
+  await mkdir(path.join(root, "modules"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   const child = spawn(process.execPath, ["--experimental-vm-modules",
     fileURLToPath(new URL("../dist/host/main.js", import.meta.url))],
   { stdio: ["pipe", "pipe", "pipe"] });
@@ -254,8 +254,8 @@ test("stdio RPC runs a Worker, handles reverse SDK calls and routes cancellation
 test("disconnect closes the host after initialization has already completed", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-disconnect-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "work", "modules"), { recursive: true });
-  await writeFile(path.join(root, "work", "package.json"), '{"private":true,"type":"module"}');
+  await mkdir(path.join(root, "modules"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   const child = spawn(process.execPath, ["--experimental-vm-modules",
     fileURLToPath(new URL("../dist/host/main.js", import.meta.url))],
   { stdio: ["pipe", "pipe", "pipe"] });
@@ -287,8 +287,8 @@ test("disconnect closes the host after initialization has already completed", as
 test("request cancellation waits for the Go SDK and accepted log to settle", async (t) => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-rpc-cancel-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "work", "modules"), { recursive: true });
-  await writeFile(path.join(root, "work", "package.json"), '{"private":true,"type":"module"}');
+  await mkdir(path.join(root, "modules"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
   const child = spawn(process.execPath, ["--experimental-vm-modules",
     fileURLToPath(new URL("../dist/host/main.js", import.meta.url))],
   { stdio: ["pipe", "pipe", "pipe"] });

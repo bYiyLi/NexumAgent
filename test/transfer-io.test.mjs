@@ -37,8 +37,8 @@ function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-transfer-io-")),
   );
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   const controller = new AbortController(),
     events = [];
   let authorized = true;
@@ -451,7 +451,7 @@ test("already redirected parents fail before temporary creation; canonical write
   const restricted = {
     ...f.scope,
     authorize(target) {
-      if (target.path && !target.path.startsWith(f.work + path.sep))
+      if (target.path && target.path.startsWith(outside + path.sep))
         throw new AgentError("path_not_allowed", "canonical escape");
     },
   };

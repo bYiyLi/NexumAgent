@@ -480,10 +480,10 @@ export class ArtifactStore {
     );
     artifactUri(agentId, "res_00000000000000000000000000000000");
     this.agentId = agentId;
-    this.directory = privateDirectory(this.root, "work", "resources");
+    this.directory = privateDirectory(this.root, "resources");
     this.maxFileBytes = options.maxFileBytes ?? 256 * 1024 * 1024;
     this.maxReadBytes = options.maxReadBytes ?? 64 * 1024 * 1024;
-    this.retentionMs = options.retentionMs ?? 7 * 86400000;
+	this.retentionMs = options.retentionMs ?? 45 * 86400000;
     this.#now = options.now ?? Date.now;
     this.#retentionUntil = options.retentionUntil;
     this.#reserve = options.reserve;
@@ -538,7 +538,7 @@ export class ArtifactStore {
     try {
       requireCondition(
         realpathSync.native(this.root) === this.root &&
-          lstatSync(path.join(this.root, "work")).isDirectory() &&
+          lstatSync(this.root).isDirectory() &&
           lstatSync(this.directory).isDirectory() &&
           realpathSync.native(this.directory) === this.directory,
         "storage_path_escape",

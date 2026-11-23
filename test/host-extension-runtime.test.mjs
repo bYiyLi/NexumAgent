@@ -20,7 +20,7 @@ const reserve = async () => ({ release() {} });
 
 async function fixture(t, enabled) {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-host-extension-")));
-  const work = path.join(root, "work");
+  const work = root;
   const pkg = path.join(work, "node_modules", ...name.split("/"));
   mkdirSync(pkg, { recursive: true });
   writeFileSync(path.join(work, "package.json"), JSON.stringify({ type: "module", dependencies: { [name]: "1.0.0" } }));
@@ -80,7 +80,7 @@ test("refuses to restore a package without an enabled approval", async (t) => {
 
 test("host inspection reads the actual package declaration without evaluating its entry", async (t) => {
   const input = await fixture(t, false);
-  const entry = path.join(input.root, "work", "node_modules", name, "extension.js");
+  const entry = path.join(input.root, "node_modules", name, "extension.js");
   writeFileSync(entry, `throw new Error("Entry must not be evaluated during inspection");
     export default () => ({ methods: {} });`);
   const service = new HostService("host-one", async (method) => {
@@ -205,7 +205,7 @@ test("host publishes the actual extension methods only after Go accepts them", a
       const runId = `run_${"0".repeat(32)}`;
       const duringPublish = await extensions.invoke({ sourceInstanceId: params.scope.sourceInstanceId,
         runId, methodId: params.methods[0].methodId, operationId: `operation_${"0".repeat(32)}`,
-        context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+        context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
         arguments: [{ duringPublish: true }] }, new AbortController().signal);
       assert.deepEqual(duringPublish, { value: { duringPublish: true }, binaryOutputs: [] });
       return {};
@@ -233,29 +233,29 @@ test("host publishes the actual extension methods only after Go accepts them", a
     const runId = `run_${"e".repeat(32)}`;
     const resultValue = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"f".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ example: 42 }] }, new AbortController().signal);
     assert.deepEqual(resultValue, { value: { example: 42 }, binaryOutputs: [] });
     const answered = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"1".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ ask: true }] }, new AbortController().signal);
     assert.deepEqual(answered, { value: { accepted: true }, binaryOutputs: [] });
     const binaryInput = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"2".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ asset: null }], binaryInputs: [{ path: [0, "asset"], ref: { id: "input-ref" } }] },
     new AbortController().signal);
     assert.deepEqual(binaryInput, { value: { data: "input-bytes" }, binaryOutputs: [] });
     const binaryOutput = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"3".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ media: true }] }, new AbortController().signal);
     assert.deepEqual(binaryOutput, { value: null, binaryOutputs: [{ path: [], ref: { id: "output-ref", contentType: "text/plain", kind: "blob", originalType: "text/plain" } }] });
     assert.equal(readFileSync(outputPath, "utf8"), "output-bytes");
     const kept = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"8".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ keep: true }] }, new AbortController().signal);
     assert.deepEqual(kept, { value: { created: true }, binaryOutputs: [] });
     assert.equal(resource.closedAt, null);
@@ -267,7 +267,7 @@ test("host publishes the actual extension methods only after Go accepts them", a
     const anotherRun = `run_${"9".repeat(32)}`;
     await assert.rejects(extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId: anotherRun, methodId: published.methods[0].methodId, operationId: `operation_${"5".repeat(32)}`,
-      context: { runId: anotherRun, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId: anotherRun, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{}] }, new AbortController().signal), { code: "extension_busy" });
     await extensions.finishPackages(transactionId);
     const next = `package_${"6".repeat(32)}`;
@@ -385,7 +385,7 @@ test("cancelling an extension input waits for the host callback to finish", asyn
     let settled = false;
     const operation = extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId, runId,
       methodId: published.methods[0].methodId, operationId: `operation_${"f".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ ask: true }] }, controller.signal).finally(() => { settled = true; });
     void operation.catch(() => {});
     await entered.promise;
@@ -434,24 +434,24 @@ test("HostService routes a prepared extension and its real invocation", async (t
     const runId = `run_${"e".repeat(32)}`;
     const result = await service.invokeExtension({ instanceId: "host-one", sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"f".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ example: 42 }] }, new AbortController().signal);
     assert.deepEqual(result, { value: { example: 42 }, binaryOutputs: [] });
     const transactionId = `package_${"9".repeat(32)}`;
     await service.beginPackages({ instanceId: "host-one", transactionId });
     await assert.rejects(service.invokeExtension({ instanceId: "host-one", sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"a".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{}] }, new AbortController().signal), { code: "extension_busy" });
     await assert.rejects(service.disableExtension({ instanceId: "host-one", packageName: name }), { code: "extension_busy" });
     await service.finishPackages({ instanceId: "host-one", transactionId });
-    const invalidLock = path.join(input.root, "work", "pnpm-lock.yaml");
+    const invalidLock = path.join(input.root, "pnpm-lock.yaml");
     mkdirSync(invalidLock);
     await assert.rejects(service.beginPackages({ instanceId: "host-one", transactionId: `package_${"b".repeat(32)}` }));
     rmSync(invalidLock, { recursive: true });
     const afterFailure = await service.invokeExtension({ instanceId: "host-one", sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"c".repeat(32)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ after: true }] }, new AbortController().signal);
     assert.deepEqual(afterFailure, { value: { after: true }, binaryOutputs: [] });
     assert.deepEqual(service.extensionRunStatus({ instanceId: "host-one", runId }), { status: "unknown" });
@@ -505,7 +505,7 @@ test("stopping one Run waits for its callbacks without stopping another Run", as
       permissions: ["read"], approval: input.approval }, new AbortController().signal);
     const invoke = (runId) => extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId, runId,
       methodId: published.methods[0].methodId, operationId: `operation_${runId.slice(4)}`,
-      context: { runId, pwd: path.join(input.root, "work") }, deadlineAt: Date.now() + 10_000,
+      context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
       arguments: [{ ask: true }] }, new AbortController().signal);
     const firstCall = invoke(first);
     const secondCall = invoke(second);

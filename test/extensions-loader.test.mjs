@@ -51,7 +51,7 @@ async function fixture(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-extension-loader-")),
   );
-  const work = path.join(root, "work");
+  const work = root;
   const pkg = path.join(work, "node_modules", ...name.split("/"));
   const sentinel = path.join(root, "events");
   const key = `nexum-package-test:${randomUUID()}`;
@@ -189,7 +189,7 @@ export default async function createExtension(host){
   const context = store.openWork({
     callerKey: callerKey(caller),
     pwd: work,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const engine = new ExecutionFixture(store, modules, scripts, {
     authorize() {},

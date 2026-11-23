@@ -339,11 +339,16 @@ export async function discoverMaterials(
     matcher: Ignore | null = null,
     nested = false,
     custom?: ReturnType<typeof groups>,
+    knownNames?: ReadonlySet<string>,
   ): Promise<void> {
     let actualScope: MaterialScope | undefined;
     for (const group of custom ?? groups(root)) {
       check(options.signal);
       for (const candidate of group.paths) {
+        // The directory was enumerated for this very walk. Do not issue
+        // several known-missing realpath/stat requests for every directory.
+        // Existing candidates still receive their full security/read checks.
+        if (knownNames && !knownNames.has(path.basename(candidate))) continue;
         if (ignored(candidate, false, matcher, boundary)) continue;
         const actual = await canonicalFile(candidate, boundary);
         if (!actual) continue;
@@ -430,13 +435,18 @@ export async function discoverMaterials(
           "discovery_limit",
           "Nested instruction discovery exceeded its effective directory budget.",
         );
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => compare(a.name, b.name));
+      const knownNames = new Set(entries.map((entry) => entry.name));
       let matcher = inherited;
       const control = path.join(directory, ".gitignore");
       let entry;
-      try {
-        entry = await lstat(control);
-      } catch (error) {
-        if (!missing(error)) throw error;
+      if (knownNames.has(".gitignore")) {
+        try {
+          entry = await lstat(control);
+        } catch (error) {
+          if (!missing(error)) throw error;
+        }
       }
       if (entry?.isFile() && !entry.isSymbolicLink()) {
         const actual = await realpath(control);
@@ -461,11 +471,11 @@ export async function discoverMaterials(
           project!,
           matcher,
           true,
+          undefined,
+          knownNames,
         );
         if (!result.nestedComplete) return;
       }
-      const entries = await readdir(directory, { withFileTypes: true });
-      entries.sort((a, b) => compare(a.name, b.name));
       for (const child of entries) {
         check(options.signal);
         if (
@@ -494,11 +504,8 @@ export async function discoverMaterials(
         scope: { type: "project", root: project },
         boundary: project,
       });
-  collections.push({
-    root: path.join(work, "skills"),
-    scope: { type: "agent", root: work },
-    boundary: work,
-  });
+  // Nexum-derived method descriptions are not user Skills. They are injected
+  // from the authorized live capability catalog, never rediscovered as files.
   if (home)
     for (const parts of [
       [".agents", "skills"],

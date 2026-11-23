@@ -60,8 +60,8 @@ async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-registry-")),
   );
-  const workDir = path.join(root, "work");
-  mkdirSync(workDir);
+  const workDir = root;
+  mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -103,7 +103,7 @@ async function fixture(t, options = {}) {
   const work = store.openWork({
     callerKey: callerKey(caller),
     pwd: workDir,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const bindings = [];
   const engine = new ExecutionFixture(store, loader, scripts, {
@@ -1236,14 +1236,14 @@ test("10 MiB image and 32 MiB audio SDK buffers complete in a heap that cannot h
     import {ModuleLoader} from ${JSON.stringify(base + "runtime/modules.js")};
     import {ExecutionFixture,callerKey} from ${JSON.stringify(new URL("./helpers/runtime-fixture.mjs", import.meta.url).href)};
     const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),"nexum-large-byte-result-")));
-    const work=path.join(root,"work");mkdirSync(work);writeFileSync(path.join(work,"package.json"),'{"type":"module"}');
+    const work=root;mkdirSync(work, { recursive: true });writeFileSync(path.join(work,"package.json"),'{"type":"module"}');
     const store=new FixtureStore(root,{agentId:"agent",profile:"development",cloudEnvironment:"test"});
     const caller={principalId:"user",clientId:"client",host:"memory-test"};
     const manager=new ResourceManager(store,{cleanupTimeoutMs:20});
     const registry=new ExtensionRegistry(manager,{permissions:new Set(),authorize(){},log(){},progress(){}});
     const scripts=new ScriptCatalog(work,"agent");
     const loader=await ModuleLoader.create(work,store.bootId,{builtins:()=>[],approvedPackages:()=>new Map()});
-    const context=store.openWork({callerKey:callerKey(caller),pwd:work,snapshotRef:"work/snapshot.json"});
+    const context=store.openWork({callerKey:callerKey(caller),pwd:work,snapshotRef:"snapshot.json"});
     let getters=0;const originals=[];
     try {
       const handle=await registry.prepare({apiVersion:1,origin:${JSON.stringify(origin)},permissions:[]},()=>({methods:{media:{

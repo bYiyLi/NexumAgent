@@ -45,7 +45,7 @@ export function parseExtensionApproval(value: unknown): ExtensionApproval {
 /** Restores one already-approved npm instance and its actual contributions. */
 export async function restoreExtension(options: ExtensionRuntimeOptions) {
   const root = realpathSync.native(options.root);
-  const work = path.join(root, "work");
+  const work = root;
   requireCondition(root === options.root && options.store.root === root &&
     options.modules.work === work && realpathSync.native(work) === work &&
     options.retention.root === root && typeof options.reserve === "function",

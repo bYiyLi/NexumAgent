@@ -24,9 +24,10 @@ function fixture(t) {
   t.after(() => rmSync(temporary, { recursive: true, force: true }));
   const root = realpathSync.native(temporary),
     home = path.join(root, "home"),
-    work = path.join(root, "work"),
+    work = root,
     project = path.join(root, "project");
-  for (const folder of [home, work, project]) mkdirSync(folder);
+  for (const folder of [home, work, project])
+    mkdirSync(folder, { recursive: true });
   function write(base, relative, text) {
     const file = path.join(base, relative);
     mkdirSync(path.dirname(file), { recursive: true });

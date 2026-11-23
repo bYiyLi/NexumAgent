@@ -13,8 +13,8 @@ const caller = { principalId: "user", clientId: "client" };
 
 function fixture(t) {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-material-host-")));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "AGENTS.md"), "Work instructions\n");
   const scripts = new ScriptCatalog(work, "agent");
   writeFileSync(path.join(scripts.local, "find.js"), `/**
@@ -51,7 +51,7 @@ test("Go-owned work prepares the existing snapshot without opening SQLite", asyn
   const bundle = JSON.parse(readFileSync(path.join(f.root, prepared.ref), "utf8"));
   assert.equal(bundle.agentId, "agent");
   assert.equal(bundle.bootId, "boot");
-  assert.equal(bundle.view.pwd, f.work);
+  assert.equal(bundle.view.pwd, path.join(f.work, "scripts"));
   assert.equal(bundle.view.agent.instructions[0].content, "Work instructions\n");
   assert.equal(bundle.view.agent.scripts.items[0].scriptName, "find.js");
   assert.equal(f.holds(), 1);

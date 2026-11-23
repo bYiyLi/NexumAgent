@@ -42,8 +42,8 @@ function fixture(t) {
     mkdtempSync(path.join(tmpdir(), "nexum-scripts-")),
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(path.join(root, "work"));
-  const work = path.join(root, "work");
+  mkdirSync(root, { recursive: true });
+  const work = root;
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   let sources = [];
   const catalog = new ScriptCatalog(work, "agent_test", () => sources);

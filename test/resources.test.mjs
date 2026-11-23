@@ -20,7 +20,7 @@ function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-resources-")),
   );
-  mkdirSync(path.join(root, "work"));
+  mkdirSync(root, { recursive: true });
   const store = new FixtureStore(root, {
     agentId: "agent",
     profile: "development",
@@ -46,7 +46,7 @@ function fixture(t, options = {}) {
   function run(key = "caller") {
     const work = store.openWork({
       callerKey: key,
-      pwd: path.join(root, "work"),
+      pwd: root,
       snapshotRef: "work/test",
     });
     let row = store.acceptRun({

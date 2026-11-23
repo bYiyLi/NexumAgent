@@ -495,9 +495,6 @@
                 "work": {
                   "type": "string"
                 },
-                "skills": {
-                  "type": "string"
-                },
                 "scripts": {
                   "type": "string"
                 },
@@ -507,7 +504,6 @@
               },
               "required": [
                 "work",
-                "skills",
                 "scripts",
                 "resources"
               ],

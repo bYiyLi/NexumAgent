@@ -11,7 +11,7 @@ import { File } from "node:buffer";
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-runner-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   await writeFile(path.join(work, "package.json"), '{"private":true,"type":"module"}');
   const loader = await ModuleLoader.create(work, `boot_${randomUUID()}`, {
