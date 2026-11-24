@@ -1,5 +1,31 @@
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
+import { object, output, string, boolean, nullable, nonnegative, array, enumeration, jsonObject } from "./schema.js";
+import type { TransferService, UploadOptions, DownloadOptions } from "../extensions/transfer.js";
+
+export interface TransferSDK extends Omit<TransferService, "createUpload" | "createDownload"> {
+  createUpload(options: UploadOptions | string): ReturnType<TransferService["createUpload"]>;
+  createDownload(options: DownloadOptions | string): ReturnType<TransferService["createDownload"]>;
+}
+const transferStatus = enumeration("preparing", "pending", "transferring", "cancelling", "succeeded", "failed", "cancelled", "expired", "interrupted");
+const resource = object({ uri: string, name: string, mimeType: string, size: nullable(nonnegative) });
+const file = object({ path: string, name: string, size: nonnegative, mimeType: string, sha256: string, revision: string });
+const snapshotFields = {
+  transferId: string, direction: enumeration("upload", "download"), status: transferStatus,
+  runId: nullable(string), contextId: nullable(string), projectId: nullable(string), maxBytes: nullable(nonnegative),
+  progress: object({ bytesTransferred: nonnegative, totalBytes: nullable(nonnegative) }),
+  createdAt: string, expiresAt: nullable(string), startedAt: nullable(string),
+  deadlineAt: nullable(string), finishedAt: nullable(string), error: nullable(jsonObject),
+};
+const snapshotProperties = { ...snapshotFields, path: string, resource, file };
+const snapshotSchema = object(snapshotProperties, Object.keys(snapshotFields));
+const offerSchema = (direction: "upload" | "download") => object({
+  ...snapshotProperties, direction: { const: direction }, status: { const: "pending" },
+  expiresAt: string, ...(direction === "upload" ? { maxBytes: nonnegative } :
+    { resource: object({ uri: string, name: string, mimeType: string, size: nonnegative }) }),
+  request: object({ method: { const: direction === "upload" ? "PUT" : "GET" }, url: string,
+    headers: { type: "object", additionalProperties: string }, expiresAt: string }),
+}, [...Object.keys(snapshotFields), "request", direction === "upload" ? "path" : "resource"]);
 
 export const transferSdkUsage = `## JavaScript 传输示例
 
@@ -21,7 +47,7 @@ return await transfer.createDownload({ path: file, name: "report.pdf" });
 - list(options?: {direction?, status?, runId?, limit?, cursor?}) 返回 {transfers: TransferSnapshot[], nextCursor: string | null}。
 - cancel(transferId: string) 返回 {accepted: boolean, transfer: TransferSnapshot}；accepted 不代表已经关闭。
 
-TransferSnapshot 包含 transferId、direction、status、runId/contextId/projectId、progress {bytesTransferred,totalBytes}、createdAt/expiresAt/startedAt/deadlineAt/finishedAt、error，以及实际存在的 path/resource/file。Offer 另有一次性传输信息；查询不重签 URL。参数枚举、hash、大小及等待上限以选中方法 Schema 为准。transfer_unavailable 表示该服务未配置；其他权限、期限、完整性或 I/O 错误保留原 code/message 与 transferId，先查询原通道再判断恢复。
+TransferSnapshot 包含 transferId、direction、status、runId/contextId/projectId、maxBytes、progress {bytesTransferred,totalBytes}、createdAt/expiresAt/startedAt/deadlineAt/finishedAt、error，以及实际存在的 path/resource/file。Offer 另有 request {method,url,headers,expiresAt}；查询不重签 URL。直接 return 原 Offer 才能保留受管的一次性交付身份，不复制或记录其 URL。参数枚举、hash、大小及等待上限以选中方法 Schema 为准。transfer_unavailable 表示该服务未配置；其他权限、期限、完整性或 I/O 错误保留原 code/message 与 transferId，先查询原通道再判断恢复。
 `;
 
 const boundedText = { type: "string", minLength: 1, maxLength: 4096 };
@@ -58,20 +84,8 @@ const query = {
   type: "object",
   additionalProperties: false,
   properties: {
-    direction: { enum: ["upload", "download"] },
-    status: {
-      enum: [
-        "preparing",
-        "pending",
-        "transferring",
-        "cancelling",
-        "succeeded",
-        "failed",
-        "cancelled",
-        "expired",
-        "interrupted",
-      ],
-    },
+    direction: enumeration("upload", "download"),
+    status: transferStatus,
     runId: boundedText,
     limit: { type: "integer", minimum: 1, maximum: 100 },
     cursor: boundedText,
@@ -153,6 +167,11 @@ export const transferExtension: ExtensionFactory = () => {
                       : ["transferId"],
                 }),
       },
+      outputSchema: output(action === "createUpload" ? offerSchema("upload") :
+        action === "createDownload" ? offerSchema("download") :
+        action === "get" ? snapshotSchema :
+        action === "list" ? object({ transfers: array(snapshotSchema), nextCursor: nullable(string) }) :
+        object({ accepted: boolean, transfer: snapshotSchema })),
       handle(input, call) {
         if (action === "createUpload") return call.transfer.createUpload(input);
         if (action === "createDownload")

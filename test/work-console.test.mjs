@@ -32,11 +32,11 @@ function fixture(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-work-console-")),
   );
-  const work = path.join(root, "work"),
+  const work = root,
     home = path.join(root, "home"),
     project = path.join(root, "project"),
     other = path.join(root, "other");
-  for (const directory of [work, home, project, other]) mkdirSync(directory);
+  for (const directory of [work, home, project, other]) mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const write = (base, relative, content) => {
     const filename = path.join(base, relative);

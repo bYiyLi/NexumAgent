@@ -18,7 +18,7 @@ export class RunPreparation {
         typeof source.version === "string" && typeof source.directory === "string"),
     "invalid_run_scope", "Script preparation needs a Go-established Run and source snapshot.");
     signal.throwIfAborted();
-    const catalog = new ScriptCatalog(path.join(this.root, "work"), this.agentId,
+    const catalog = new ScriptCatalog(this.root, this.agentId,
       () => value.sources as unknown as ScriptSource[]);
     let snapshot: ScriptSnapshot;
     if (typeof value.code === "string") snapshot = catalog.enroll(value.code).snapshot;

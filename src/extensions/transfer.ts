@@ -30,8 +30,8 @@ export type DownloadOptions = (
 };
 export type TransferResource = Pick<
   ArtifactRecord,
-  "uri" | "name" | "mimeType" | "size"
->;
+  "uri" | "name" | "mimeType"
+> & { readonly size: number | null };
 /** A retained point-in-time view. No request URL or live controller is included. */
 export interface TransferSnapshot {
   readonly transferId: string;
@@ -40,6 +40,7 @@ export interface TransferSnapshot {
   readonly runId: string | null;
   readonly contextId: string | null;
   readonly projectId: string | null;
+  readonly maxBytes: number | null;
   readonly path?: string;
   readonly resource?: TransferResource;
   readonly progress: {
@@ -66,7 +67,7 @@ export type DownloadOffer = TransferSnapshot &
   TransferOffer & {
     readonly direction: "download";
     readonly status: "pending";
-    readonly resource: TransferResource;
+    readonly resource: TransferResource & { readonly size: number };
     readonly expiresAt: string;
   };
 export interface TransferListOptions {

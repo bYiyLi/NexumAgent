@@ -171,7 +171,7 @@ test("the public type entry has no runtime exports or service initialization and
   const home = path.join(f.root, "isolated-home"),
     work = path.join(f.consumer, "runtime-work");
   mkdirSync(home);
-  mkdirSync(work);
+  mkdirSync(work, { recursive: true });
   const entry = pathToFileURL(
     realpathSync.native(path.join(agent, "dist", "extension-api.js")),
   ).href;

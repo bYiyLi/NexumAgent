@@ -75,6 +75,47 @@ export interface MaintenanceCreated {
   readonly expiresAt: string;
 }
 
+export type McpConnectionOptions = (
+  { type?: "stdio"; command: string; args?: string[]; cwd?: string; env?: Record<string, string>;
+    url?: never; headers?: never } |
+  { type?: "sse" | "http" | "streamable-http"; url: string; headers?: Record<string, string>;
+    command?: never; args?: never; cwd?: never; env?: never }
+) & { credentialBindings?: Record<string, string> };
+export interface ApiOAuthOptions {
+  issuer?: string;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  deviceAuthorizationEndpoint?: string;
+  jwksUri?: string;
+  clientId?: string;
+  clientAuthentication?: "" | "none" | "client_secret_basic" | "client_secret_post";
+  flow?: "" | "authorizationCode" | "device" | "clientCredentials";
+  scopes?: string[];
+  oidc?: boolean;
+  allowHttp?: boolean;
+}
+export interface ApiMaintenanceConfig {
+  name?: string;
+  serviceUrl?: string;
+  authentication?: {
+    operationSelections?: Record<string, number>;
+    credentialBindings?: Record<string, string>;
+    /** OpenAPI security scheme objects from the approved specification. */
+    supplementalSchemes?: Record<string, JsonObject>;
+    supplementalSecurity?: Record<string, string[]>[];
+  };
+  oauth?: Record<string, ApiOAuthOptions>;
+  sourceAuthentication?: { type: "none" | "apiKey" | "basic" | "bearer"; name?: string;
+    in?: "header" | "query"; credentialRef?: string };
+  credentialBindings?: Record<string, string>;
+  limits?: Partial<Record<"documentBytes" | "totalDocumentBytes" | "referenceCount" | "operationCount" |
+    "requestBytes" | "responseBytes" | "requestTimeoutMs", number>> | null;
+}
+export type ApiImportOptions = { name: string; config?: ApiMaintenanceConfig } &
+  ({ url: string; path?: never } | { path: string; url?: never });
+export type ApiUpdateOptions = { name: string; config?: ApiMaintenanceConfig } &
+  ({ url?: string; path?: never } | { path?: string; url?: never });
+
 export interface MaintenanceScope {
   readonly caller: Caller;
   readonly operationId: string;
@@ -96,13 +137,13 @@ export interface MaintenanceService {
     disable(input: { name: string }): Promise<MaintenanceCreated>;
   };
   readonly mcp: {
-    add(input: Record<string, JsonObject>): Promise<MaintenanceCreated>;
-    update(input: Record<string, JsonObject>): Promise<MaintenanceCreated>;
+    add(input: Record<string, McpConnectionOptions>): Promise<MaintenanceCreated>;
+    update(input: Record<string, McpConnectionOptions>): Promise<MaintenanceCreated>;
     remove(input: { name: string }): Promise<MaintenanceCreated>;
   };
   readonly api: {
-    import(input: { name: string; url?: string; path?: string; config?: JsonObject }): Promise<MaintenanceCreated>;
-    update(input: { name: string; url?: string; path?: string; config?: JsonObject }): Promise<MaintenanceCreated>;
+    import(input: ApiImportOptions): Promise<MaintenanceCreated>;
+    update(input: ApiUpdateOptions): Promise<MaintenanceCreated>;
     remove(input: { name: string }): Promise<MaintenanceCreated>;
   };
   get(requestId: string): Promise<MaintenanceRequestView>;

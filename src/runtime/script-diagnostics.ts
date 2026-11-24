@@ -23,12 +23,19 @@ export function inspectScriptError(
     return diagnostic;
   for (const field of ["name", "message"]) {
     const own = Object.getOwnPropertyDescriptor(cause, field);
-    if (own && !("value" in own)) return diagnostic;
+    if (own && (!("value" in own) || typeof own.value !== "string" ||
+        /[\r\n]/.test(own.value))) return diagnostic;
   }
   const ownStack = Object.getOwnPropertyDescriptor(cause, "stack");
   let stack: unknown;
-  if (ownStack && "get" in ownStack && ownStack.get === nativeStackGetter)
-    stack = nativeStackGetter.call(cause);
+  if (ownStack && "get" in ownStack && ownStack.get === nativeStackGetter) {
+    try {
+      stack = nativeStackGetter.call(cause);
+    } catch {
+      // Diagnostics must not replace the original script failure.
+      return diagnostic;
+    }
+  }
   // Guest-supplied getters *and* writable stack strings are untrusted.
   // V8's lazy getter is captured in the VM realm and compared by identity.
   if (typeof stack !== "string") return diagnostic;

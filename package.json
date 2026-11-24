@@ -23,7 +23,6 @@
   "files": [
     "dist",
     "builtin",
-    "contracts",
     "skills",
     "!**/*.map"
   ],

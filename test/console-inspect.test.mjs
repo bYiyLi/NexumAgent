@@ -18,8 +18,8 @@ function fixture(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-console-inspect-")),
   );
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(
     path.join(work, "AGENTS.md"),
     "Read-only fixture instructions\n",
@@ -215,7 +215,8 @@ test("on-demand instruction detail contains only a current discovered instructio
 
 test("Console Skill details read current nested text files but never arbitrary paths or symlinks", async (t) => {
   const f = fixture(t);
-  const skillRoot = path.join(f.work, "skills", "code-review");
+  const home = path.join(f.root, "home");
+  const skillRoot = path.join(home, ".agents", "skills", "code-review");
   mkdirSync(path.join(skillRoot, "references", "examples"), { recursive: true });
   writeFileSync(
     path.join(skillRoot, "SKILL.md"),
@@ -230,7 +231,7 @@ test("Console Skill details read current nested text files but never arbitrary p
   const options = {
     agentId: "agent-test",
     work: f.work,
-    home: null,
+    home,
     sources: [],
     approvedPackages: new Map(),
     signal: new AbortController().signal,

@@ -57,7 +57,7 @@ export class ExtensionPackageLoader {
   ) {
     requireCondition(
       modules.work ===
-        realpathSync.native(path.join(registry.resources.store.root, "work")),
+        realpathSync.native(registry.resources.store.root),
       "extension_profile_mismatch",
       "The extension registry and module loader must use the same Agent profile work directory.",
     );

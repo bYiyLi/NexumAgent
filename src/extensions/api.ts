@@ -1,6 +1,6 @@
 import type { JsonObject } from "../contracts/types.js";
 import type { SchemaDialect } from "../contracts/validation.js";
-import type { InputRequest } from "../runtime/invocation.js";
+import type { InputRequest, InputReply } from "../runtime/invocation.js";
 import type { OutputAPI } from "../sdk/output.js";
 import type { ResourceService } from "./resources.js";
 import type { StateService } from "./state.js";
@@ -59,7 +59,7 @@ export interface Invocation {
   log(entry: LogEntry): void;
   progress(value: JsonObject): void;
   authorize(target: AccessTarget): void;
-  requestInput(request: InputRequest): Promise<JsonObject>;
+  requestInput(request: InputRequest): Promise<InputReply>;
 }
 export interface MethodDefinition {
   description: string;

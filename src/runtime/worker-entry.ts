@@ -63,6 +63,21 @@ function explicitScriptErrorMessage(cause: unknown): string | null {
   const message = descriptor.value;
   if (message.length === 0 || message.length > 300 ||
       /[\x00-\x1f]|https?:\/\/|(?:[A-Za-z]:\\|\/Users\/|\/home\/|\/etc\/)|(?:password|secret|token|private|stack|api[_-]?key|bearer|authorization|cookie|credential)/i.test(message)) return null;
+  // Native ReferenceErrors are not literal throws. Reveal only the fixed
+  // V8 wording and an identifier already present in the caller's script.
+  // Do not expose arbitrary exception text assembled from SDK or file data.
+  const type = lastScriptDiagnostic?.exceptionType;
+  const reference = /^(?:([A-Za-z_$][A-Za-z0-9_$]{0,127}) is not defined|Cannot access '([A-Za-z_$][A-Za-z0-9_$]{0,127})' before initialization)$/.exec(message);
+  if (type === "ReferenceError" && reference &&
+      data.code.includes((reference[1] ?? reference[2])!)) return message;
+  if (type === "TypeError") {
+    const property = /^Cannot read properties of (?:null|undefined) \(reading '([A-Za-z_$][A-Za-z0-9_$]{0,127})'\)$/.exec(message);
+    const callable = /^([A-Za-z_$][A-Za-z0-9_$.]{0,127}) is not a function$/.exec(message);
+    if (message === "Assignment to constant variable." ||
+        (property && data.code.includes(property[1]!)) ||
+        (callable && data.code.includes(callable[1]!))) return message;
+  }
+  if (type === "RangeError" && message === "Maximum call stack size exceeded") return message;
   const literals = [
     JSON.stringify(message),
     "'" + message.replaceAll("\\", "\\\\").replaceAll("'", "\\'") + "'",
@@ -712,7 +727,7 @@ async function prepare() {
             message: "The JavaScript execution failed.",
           });
           const authoredMessage = explicitScriptErrorMessage(cause);
-          if (authoredMessage) error.message = authoredMessage;
+          if (authoredMessage && !isAgentError(cause)) error.message = authoredMessage;
           send({
             type: "failed",
             ...error,

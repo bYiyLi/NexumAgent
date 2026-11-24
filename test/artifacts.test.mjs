@@ -27,7 +27,7 @@ function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-artifacts-")),
   );
-  mkdirSync(path.join(root, "work"));
+  mkdirSync(root, { recursive: true });
   let now = 1800000000000;
   const store = new ArtifactStore(root, "agent /%一", {
     now: () => now,
@@ -39,7 +39,7 @@ function fixture(t, options = {}) {
     authorize = () => {},
     controller = new AbortController(),
   ) => ({
-    pwd: path.join(root, "work"),
+    pwd: root,
     ownerKey,
     runId: "run_source",
     signal: controller.signal,
@@ -94,7 +94,7 @@ test("local resources are complete fixed snapshots with directory-backed identit
   assert.equal(record.originRunId, "run_source");
   assert.equal(
     record.expiresAt,
-    new Date(Date.parse(record.createdAt) + 7 * 86400000).toISOString(),
+    new Date(Date.parse(record.createdAt) + 45 * 86400000).toISOString(),
   );
   assert.deepEqual(parseArtifactUri(record.uri), {
     agentId: "agent /%一",
@@ -749,7 +749,7 @@ test("non-regular files, catalog redirects and pending redirects cannot become p
   const escape = path.join(scope.pwd, "escape");
   symlinkSync(outside, escape, "junction");
   const restricted = f.scope("owner", (target) => {
-    if (target.path && !target.path.startsWith(scope.pwd + path.sep))
+    if (target.path && target.path.startsWith(outside + path.sep))
       throw Object.assign(new Error("denied canonical path"), {
         code: "path_not_allowed",
       });

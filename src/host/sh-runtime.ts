@@ -25,7 +25,7 @@ export interface ManagedShellOptions {
 /** Prepares the existing shell SDK on a Go-backed resource store. */
 export async function restoreManagedShell(options: ManagedShellOptions) {
   const root = realpathSync.native(options.root);
-  const work = path.join(root, "work");
+  const work = root;
   requireCondition(root === options.root && options.store.root === root &&
     options.retention.root === root && realpathSync.native(work) === work,
   "invalid_process_context", "The shell SDK needs the established Agent profile.");

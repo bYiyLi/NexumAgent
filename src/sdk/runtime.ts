@@ -1,6 +1,24 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, Invocation } from "../extensions/api.js";
+import type { InputRequest, InputReply } from "../runtime/invocation.js";
+import { output, object, string, nonnegative, jsonValue, array, nullValue, enumeration } from "./schema.js";
+
+export interface RestartReceipt {
+  requested: true;
+  reason: "apply-approved-updates" | "recover-agent";
+  afterRun: string;
+}
+export interface RuntimeSDK {
+  sleep(milliseconds: number): Promise<null>;
+  requestInput(request: InputRequest): Promise<InputReply>;
+  restart(request: { reason: RestartReceipt["reason"] }): Promise<RestartReceipt>;
+}
+const inputReplySchema = object({
+  input: jsonValue,
+  attachments: array(object({ path: string, name: string, mimeType: string, size: nonnegative,
+    sha256: string, revision: string, resourceUri: string })),
+});
 
 export const runtimeSdkUsage = `## JavaScript 调用示例
 
@@ -8,7 +26,14 @@ export const runtimeSdkUsage = `## JavaScript 调用示例
 - \`await runtime.sleep(milliseconds)\`：可取消的等待，单位毫秒，范围 1–3600000。取消原 Run 会立即打断此等待。
 - \`await runtime.restart({reason:"apply-approved-updates"})\`：在当前 Run 完成后请求安全退出，让 systemd/launchd/Windows 启动器拉起新版 Core；执行前核实其他活跃任务，不自动重放脚本。
 
-sleep 成功返回 null。requestInput 接受 {message: string, inputSchema: object | boolean, timeoutMs?: number}，返回原 Run 收到的 JSON 对象；只使用原 waitId 续接。restart 的 reason 只接受 apply-approved-updates 或 recover-agent，返回实际重启申请回执，不能据此声称新进程已上线；restart_unavailable 表示当前启动器不支持该操作。参数范围读取对应方法的真实 Schema；取消后不重放原脚本。
+sleep 成功返回 null。requestInput 返回 {input, attachments}；业务数据读取 reply.input，附件读取 reply.attachments（本地 path、name、mimeType、size、sha256、revision、resourceUri），不覆盖初始 context.input/context.attachments。只使用原 waitId 续接。
+
+~~~javascript
+const reply = await runtime.requestInput({message:"Answer",inputSchema:{type:"object",properties:{answer:{type:"integer"}},required:["answer"]}});
+return reply.input.answer;
+~~~
+
+restart 返回 {requested:true, reason, afterRun}，不能据此声称新进程已上线；restart_unavailable 表示当前启动器不支持该操作。参数范围读取对应方法的真实 Schema；取消后不重放原脚本。
 
 脚本需要等待时，直接使用 \`await runtime.sleep(ms)\`，不要写 \`await new Promise(resolve => setTimeout(resolve, ms))\`。后者及不支持取消的第三方 Promise 不会因 Run 收到取消请求而自动结束，Run 会如实保持 \`cancelling\` 直至主体和受管资源完成收尾。独立后台进程仍需按其资源 ID 管理。
 `;
@@ -37,7 +62,8 @@ export function createRuntimeExtension(
         required: ["milliseconds"],
         additionalProperties: false,
       },
-      async handle(input, call) {
+      outputSchema: output(nullValue),
+      async handle(input: { milliseconds: number }, call): Promise<null> {
         await delay(input.milliseconds, undefined, { signal: call.signal });
         return null;
       },
@@ -61,7 +87,8 @@ export function createRuntimeExtension(
         required: ["message", "inputSchema"],
         additionalProperties: false,
       },
-      handle: (input, call) => call.requestInput(input),
+      outputSchema: output(inputReplySchema),
+      handle: (input: InputRequest, call): Promise<InputReply> => call.requestInput(input),
     },
     ...(restart ? { restart: {
       description:
@@ -79,6 +106,7 @@ export function createRuntimeExtension(
         required: ["reason"],
         additionalProperties: false,
       },
+      outputSchema: output(object({ requested: { const: true }, reason: enumeration("apply-approved-updates", "recover-agent"), afterRun: string })),
       handle(input, call) {
         call.authorize({ type: "maintenance", value: "agent", access: "execute" });
         requireCondition(restart, "restart_unavailable",

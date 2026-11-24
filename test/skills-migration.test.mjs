@@ -20,7 +20,6 @@ import { ExecutionFixture } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
-import { validateContract } from "../dist/contracts/validation.js";
 import { fileURLToPath } from "node:url";
 import { parseSkillFrontmatter } from "../dist/work/discovery.js";
 
@@ -29,8 +28,8 @@ function fixture(t) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-skills-migration-")),
   );
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const cleanups = [];
   t.after(async () => {
@@ -267,7 +266,7 @@ test("Skill-private scripts stay readable but never enter independent script dis
     };
   const code = (name, body) =>
     `/** ${JSON.stringify({ scriptName: name, scriptDesc: "测试脚本", scriptWhenUse: "测试操作", scriptInputSchema: { type: "object", properties: { value: { type: "integer" } }, required: ["value"], additionalProperties: false }, scriptOpenDefault: true })} */\n${body}`;
-  const privateRoot = path.join(scripts.skills, "private-resources");
+  const privateRoot = path.join(f.root, ".agents", "skills", "private-resources");
   mkdirSync(path.join(privateRoot, "scripts"), { recursive: true });
   writeFileSync(
     path.join(privateRoot, "SKILL.md"),
@@ -288,7 +287,7 @@ test("Skill-private scripts stay readable but never enter independent script dis
     ),
   );
   const service = new WorkService(store, scripts, policy, {
-    home: null,
+    home: f.root,
     agent: { name: "test", version: "1", protocolVersion: "2" },
     authorize() {},
     resolveProject() {
@@ -308,19 +307,8 @@ test("Skill-private scripts stay readable but never enter independent script dis
   });
   const opened = await service.open(caller, { agentId: "agent" });
   assert.equal(Object.hasOwn(opened.agent, "docs"), false);
-  validateContract("wire.output:agent.open", opened);
-  for (const agent of [
-    { ...opened.agent, docs: {} },
-    { ...opened.agent, paths: { ...opened.agent.paths, docs: "removed" } },
-    {
-      ...opened.agent,
-      modules: { ...opened.agent.modules, packagesIndex: "removed" },
-    },
-  ])
-    assert.throws(
-      () => validateContract("wire.output:agent.open", { ...opened, agent }),
-      { code: "invalid_arguments" },
-    );
+  assert.equal(Object.hasOwn(opened.agent.paths, "docs"), false);
+  assert.equal(Object.hasOwn(opened.agent.modules, "packagesIndex"), false);
   assert.deepEqual(
     scripts.discover().entries
       .filter((item) => item.origin.type === "local")

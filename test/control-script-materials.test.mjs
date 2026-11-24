@@ -9,8 +9,8 @@ import { CONTROL_OWNER, CONTROL_VERSION, FIXED_CONTROL_SCRIPTS, materializeContr
 
 test("control imports are read-only and materialization preserves the nine actual platform definitions", (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-control-materials-")));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const imported = spawnSync(process.execPath, ["--input-type=module"], {

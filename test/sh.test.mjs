@@ -47,8 +47,8 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-sh-")),
     ),
-    work = path.join(root, "work");
-  mkdirSync(work);
+    work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -89,7 +89,7 @@ async function fixture(t, authorize = () => {}, retentionOptions = {}) {
   const context = store.openWork({
     callerKey: callerKey(caller),
     pwd: work,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const engine = new ExecutionFixture(
     store,
@@ -326,11 +326,13 @@ test("real sh exec preserves argv/cwd, consumes input through EOF and retains no
   assert.match(text(failed), /failure-output/);
   const checked = data(
     await start(
-      "try{await sh.exec(context.input);}catch(e){return {code:e.code,processId:e.details.processId,exitCode:e.details.exitCode};}",
+      "try{await sh.exec(context.input);}catch(e){return {code:e.code,message:e.message,method:e.details.method,processId:e.details.processId,exitCode:e.details.exitCode};}",
       { input: command("process.exitCode=9;", { check: true }) },
     ),
   );
   assert.equal(checked.code, "process_exit_failed");
+  assert.equal(checked.method, "sh.exec");
+  assert.match(checked.message, /code 9/);
   assert.equal(checked.exitCode, 9);
   assert.match(checked.processId, /^res_/);
   const eof = data(

@@ -8,7 +8,7 @@ import {
 } from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
 import { isPlainRecord } from "../contracts/json.js";
-import type { JsonObject } from "../contracts/types.js";
+import type { ContributionOrigin, JsonObject } from "../contracts/types.js";
 import type {
   ExtensionFactory,
   Invocation,
@@ -30,6 +30,49 @@ import {
   whichExecutable,
 } from "../process/environment.js";
 import { ProcessOutputLog } from "../process/output-log.js";
+import type { ProcessOutputPage } from "../process/output-log.js";
+import type { Executable } from "../process/environment.js";
+import type { ProcessFacts, ProcessSignalReceipt } from "../process/backend.js";
+import { object, output, string, integer, boolean, nullable, array, enumeration, nonnegative, jsonObject } from "./schema.js";
+
+type LaunchOptions = ({ command: string; args?: string[]; shellCommand?: never; shell?: never } |
+  { shellCommand: string; shell?: string; command?: never; args?: never }) &
+  { cwd?: string; env?: Record<string, string | null>; tty?: boolean; cols?: number; rows?: number;
+    input?: string | Uint8Array; timeoutMs?: number };
+export type ExecOptions = LaunchOptions & { check?: boolean; background?: false };
+export type StartOptions = LaunchOptions & { background?: boolean; check?: false };
+export interface ProcessSnapshot {
+  processId: string;
+  status: string;
+  state: string;
+  lifetime: ResourceSnapshot["lifetime"];
+  originRunId: string | null;
+  contextId: string | null;
+  origin: ContributionOrigin;
+  createdAt: number;
+  closedAt: number | null;
+  handedOffAt: number | null;
+  controlAvailable: boolean;
+  pid: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  outputComplete: boolean;
+  details: JsonObject;
+}
+export type ProcessRead = ProcessSnapshot & Omit<ProcessOutputPage, "nextCursor"> & { nextCursor: string | null };
+export type ProcessStop = { processId: string; accepted: boolean; confirmed: boolean; facts: ProcessFacts } & Partial<ProcessSnapshot>;
+export interface ShSDK {
+  exec(options: ExecOptions | string): Promise<ProcessRead>;
+  start(options: StartOptions | string): Promise<ProcessSnapshot>;
+  get(input: ReadInput): Promise<ProcessRead>;
+  list(input?: Omit<ResourceQuery, "kind">): Promise<{ items: ProcessSnapshot[]; nextCursor: string | null }>;
+  write(input: { processId: string; data: string | Uint8Array; eof?: boolean } |
+    { processId: string; data?: string | Uint8Array; eof: true }): Promise<{ processId: string; accepted: true; bytes: number; eof: boolean }>;
+  resize(input: { processId: string; cols: number; rows: number }): Promise<{ processId: string; accepted: true; cols: number; rows: number }>;
+  signal(input: { processId: string; signal: NodeJS.Signals }): Promise<{ processId: string } & ProcessSignalReceipt>;
+  stop(input: { processId: string; graceMs?: number; forceMs?: number }): Promise<ProcessStop>;
+  which(input: string | { command: string; cwd?: string }): Promise<Executable>;
+}
 
 export const shSdkUsage = `## JavaScript 进程示例
 
@@ -53,12 +96,56 @@ return result;
 - signal({processId,signal}) 返回投递回执；stop({processId,graceMs?,forceMs?}) 返回 accepted、confirmed 和真实 facts，不能把 accepted 当退出。
 - which(command: string | {command: string,cwd?: string}) 返回实际可执行文件解析结果，不启动命令。
 
-进程快照含 processId/status/state/lifetime、originRunId/contextId/origin、createdAt/closedAt/handedOffAt、controlAvailable、pid/exitCode/signal/outputComplete/details。exec 等待实际退出和输出收尾，start 返回启动快照。精确读取/控制参数范围见各方法 Schema；exec/start 的注册 Schema 只声明对象，额外参数由真实启动归一化器校验，不能从该宽 Schema 猜字段。invalid_process_arguments、invalid_process_input、invalid_output_encoding 表示输入不合法；process_exit_failed、process_timeout 或 I/O 失败时保留 processId，回读原进程及输出，不盲目重启同一业务。
+进程快照含 processId/status/state/lifetime、originRunId/contextId/origin、createdAt/closedAt/handedOffAt、controlAvailable、pid/exitCode/signal/outputComplete/details。exec 等待实际退出和输出收尾，返回进程快照与输出页；start 返回启动快照。exec/start 的方法 inputSchema 描述归一化后的对象（包含默认 args/env/tty/cols/rows/background/check）；调用时这些默认字段可省略。cols/rows 启动范围 1–10000，resize 范围 1–1000；文本和参数另有 UTF-8 字节预算。write.data 和启动 input 在归一化后是原生 Uint8Array；output[].data 为字符串或原生 Buffer，不是 JSON 数组。invalid_process_arguments、invalid_process_input、invalid_output_encoding 表示输入不合法；process_exit_failed、process_timeout 或 I/O 失败时保留 processId，回读原进程及输出，不盲目重启同一业务。
 `;
 
 const kind = "sh.process";
 const dialect = "https://json-schema.org/draft/2020-12/schema";
 const idSchema = { type: "string", pattern: "^res_[0-9a-f]{32}$" };
+const nativeBytes = { type: "object", description: "Native Uint8Array/Buffer; verified and copied by the native byte normalizer. Not a JSON object or number array." };
+const boundedText = { type: "string", maxLength: 262144, pattern: "^[^\\u0000]*$" };
+const commandText = { ...boundedText, minLength: 1, pattern: "^[^\\u0000\\r\\n]+$" };
+const launchSchema = (mode: "exec" | "start") => ({
+  $schema: dialect,
+  ...object({
+    command: commandText,
+    shellCommand: { ...boundedText, minLength: 1, maxLength: 1048576 },
+    shell: commandText,
+    cwd: { ...boundedText, minLength: 1 },
+    args: { type: "array", maxItems: 4096, items: boundedText },
+    env: { type: "object", maxProperties: 4096, additionalProperties: nullable(boundedText),
+      propertyNames: { minLength: 1, maxLength: 1024, pattern: "^[^=\\u0000]+$" } },
+    tty: boolean,
+    cols: { type: "integer", minimum: 1, maximum: 10000 },
+    rows: { type: "integer", minimum: 1, maximum: 10000 },
+    input: nativeBytes,
+    background: mode === "exec" ? { const: false } : boolean,
+    check: mode === "start" ? { const: false } : boolean,
+    timeoutMs: { type: "integer", minimum: 1, maximum: 2147483647 },
+  }, ["args", "env", "tty", "cols", "rows", "background", "check"]),
+  oneOf: [
+    { properties: { command: commandText }, required: ["command"], not: { properties: { shell: commandText }, required: ["shell"] } },
+    { properties: { shellCommand: { type: "string" }, args: { type: "array", maxItems: 0 } }, required: ["shellCommand"] },
+  ],
+});
+const originSchema = object({ type: enumeration("local", "platform", "extension"), owner: string,
+  namespace: nullable(string), version: nullable(string), revision: string });
+const processFields = {
+  processId: idSchema, status: string, state: string, lifetime: enumeration("run", "instance", "background"),
+  originRunId: nullable(string), contextId: nullable(string), origin: originSchema,
+  createdAt: nonnegative, closedAt: nullable(nonnegative), handedOffAt: nullable(nonnegative),
+  controlAvailable: boolean, pid: nullable(integer), exitCode: nullable(integer), signal: nullable(string),
+  outputComplete: boolean, details: jsonObject,
+};
+const snapshotSchema = object(processFields);
+const readSchema = object({ ...processFields, output: array(object({
+  stream: enumeration("stdout", "stderr", "terminal"), data: { anyOf: [string, nativeBytes] },
+})), nextCursor: nullable(string), hasMoreOutput: boolean, truncated: boolean });
+const factsSchema = object({ pid: nullable(integer), startedAt: nullable(nonnegative), rootExited: boolean,
+  exitCode: nullable(integer), exitSignal: nullable(string), outputComplete: boolean,
+  treeStopped: boolean, closed: boolean, stopRequested: boolean, forceRequested: boolean });
+const stopSchema = object({ ...processFields, accepted: boolean, confirmed: boolean, facts: factsSchema },
+  ["processId", "accepted", "confirmed", "facts"]);
 const textSchema = { type: "string", minLength: 1, maxLength: 1024 };
 const readProperties = {
   processId: idSchema,
@@ -69,7 +156,7 @@ const readProperties = {
   },
   waitMs: { type: "integer", minimum: 0, maximum: 30000 },
 };
-type ReadInput = {
+export type ReadInput = {
   processId: string;
   cursor?: string;
   maxBytes?: number;
@@ -180,7 +267,7 @@ function processError(cause: unknown, processId: string): AgentError {
     } as JsonObject,
   );
 }
-function snapshot(resource: ResourceSnapshot): JsonObject {
+function snapshot(resource: ResourceSnapshot): ProcessSnapshot {
   requireCondition(
     resource.kind === kind,
     "resource_kind_mismatch",
@@ -193,7 +280,7 @@ function snapshot(resource: ResourceSnapshot): JsonObject {
     state:
       resource.status === "unavailable"
         ? "unavailable"
-        : (detail.state ?? resource.status),
+        : (typeof detail.state === "string" ? detail.state : resource.status),
     lifetime: resource.lifetime,
     originRunId: resource.originRunId,
     contextId: resource.contextId,
@@ -202,10 +289,10 @@ function snapshot(resource: ResourceSnapshot): JsonObject {
     closedAt: resource.closedAt,
     handedOffAt: resource.handedOffAt,
     controlAvailable: resource.controlAvailable,
-    pid: detail.pid ?? null,
-    exitCode: detail.exitCode ?? null,
-    signal: detail.exitSignal ?? null,
-    outputComplete: detail.outputComplete ?? false,
+    pid: typeof detail.pid === "number" ? detail.pid : null,
+    exitCode: typeof detail.exitCode === "number" ? detail.exitCode : null,
+    signal: typeof detail.exitSignal === "string" ? detail.exitSignal : null,
+    outputComplete: detail.outputComplete === true,
     details: detail,
   };
 }
@@ -241,7 +328,7 @@ export const shExtension: ExtensionFactory = (host) => {
     call: Invocation,
     input: ReadInput,
     known?: ManagedProcess,
-  ): Promise<JsonObject> {
+  ): Promise<ProcessRead> {
     let resource = await call.resources.describe(input.processId);
     snapshot(resource);
     currentOutput(call, input.processId);
@@ -296,7 +383,7 @@ export const shExtension: ExtensionFactory = (host) => {
       }
       resource = await call.resources.describe(input.processId);
       currentOutput(call, input.processId);
-      return { ...snapshot(resource), ...output } as unknown as JsonObject;
+      return { ...snapshot(resource), ...output };
     } finally {
       await historical?.close();
     }
@@ -305,7 +392,7 @@ export const shExtension: ExtensionFactory = (host) => {
     input: LaunchInput,
     call: Invocation,
     mode: "exec" | "start",
-  ): Promise<JsonObject> {
+  ): Promise<ProcessSnapshot | ProcessRead> {
     // Admission belongs to this current caller; the ticket's release remains
     // valid after explicit background handoff and the creating call settles.
     const storage = call.storage ?? host.storage;
@@ -340,8 +427,11 @@ export const shExtension: ExtensionFactory = (host) => {
       if (input.check && (result.exitCode !== 0 || result.signal !== null))
         throw new AgentError(
           "process_exit_failed",
-          "The process exited with a non-zero status or signal; retained output remains readable.",
+          result.signal !== null
+            ? "The managed process exited on a signal; inspect its retained output."
+            : "The managed process exited with code " + String(result.exitCode) + "; inspect its retained output.",
           {
+            method: "sh.exec",
             processId: ref.id,
             exitCode: result.exitCode!,
             signal: result.signal!,
@@ -357,12 +447,14 @@ export const shExtension: ExtensionFactory = (host) => {
     description: string,
     permission: string | readonly string[],
     inputSchema: unknown,
+    outputSchema: object,
     normalize: MethodDefinition["normalize"],
     handle: MethodDefinition["handle"],
   ): MethodDefinition => ({
     description,
     permissions: typeof permission === "string" ? [permission] : permission,
     inputSchema,
+    outputSchema: output(outputSchema),
     normalize,
     handle,
   });
@@ -371,14 +463,16 @@ export const shExtension: ExtensionFactory = (host) => {
       exec: method(
         "执行命令并等待真实退出、受管后代及输出收尾。",
         ["sh.execute", "storage.reserve"],
-        { $schema: dialect, type: "object" },
+        launchSchema("exec"),
+        readSchema,
         (args) => normalizeLaunch(args, "exec"),
         (input, call) => launch(input, call, "exec"),
       ),
       start: method(
         "登记并启动受管进程；仅显式background才交接到后台。",
         ["sh.execute", "storage.reserve"],
-        { $schema: dialect, type: "object" },
+        launchSchema("start"),
+        snapshotSchema,
         (args) => normalizeLaunch(args, "start"),
         (input, call) => launch(input, call, "start"),
       ),
@@ -386,6 +480,7 @@ export const shExtension: ExtensionFactory = (host) => {
         "读取同一托管进程的状态、增量输出并可有界等待。",
         "sh.read",
         schema(readProperties, ["processId"]),
+        readSchema,
         (args) => {
           const value = record(args, Object.keys(readProperties));
           requireCondition(
@@ -411,6 +506,7 @@ export const shExtension: ExtensionFactory = (host) => {
           limit: { type: "integer", minimum: 1, maximum: 100 },
           cursor: { type: "string", maxLength: 4096 },
         }),
+        object({ items: array(snapshotSchema), nextCursor: nullable(string) }),
         (args) =>
           record(
             args,
@@ -428,9 +524,10 @@ export const shExtension: ExtensionFactory = (host) => {
       write: method(
         "按序写入托管进程；eof仅关闭普通管道输入。",
         "sh.control",
-        schema({ processId: idSchema, data: true, eof: { type: "boolean" } }, [
+        schema({ processId: idSchema, data: nativeBytes, eof: { type: "boolean" } }, [
           "processId",
         ]),
+        object({ processId: idSchema, accepted: { const: true }, bytes: nonnegative, eof: boolean }),
         (args) => {
           const value = record(args, ["processId", "data", "eof"]);
           requireCondition(
@@ -468,6 +565,7 @@ export const shExtension: ExtensionFactory = (host) => {
           },
           ["processId", "cols", "rows"],
         ),
+        object({ processId: idSchema, accepted: { const: true }, cols: integer, rows: integer }),
         (args) => record(args, ["processId", "cols", "rows"]),
         async (input, call) => {
           await (
@@ -491,6 +589,8 @@ export const shExtension: ExtensionFactory = (host) => {
           },
           ["processId", "signal"],
         ),
+        object({ processId: idSchema, requested: string, delivered: boolean,
+          mechanism: enumeration("process-group", "job-object", "terminal-input") }),
         (args) => record(args, ["processId", "signal"]),
         async (input, call) => ({
           processId: input.processId,
@@ -510,6 +610,7 @@ export const shExtension: ExtensionFactory = (host) => {
           },
           ["processId"],
         ),
+        stopSchema,
         (args) => record(args, ["processId", "graceMs", "forceMs"]),
         async (input, call) => {
           let managed: ManagedProcess;
@@ -567,6 +668,8 @@ export const shExtension: ExtensionFactory = (host) => {
           },
           ["command"],
         ),
+        object({ command: string, launchPath: string, path: string,
+          kind: enumeration("native", "batch"), platform: string }),
         (args) => {
           if (args.length === 1 && typeof args[0] === "string")
             return { command: args[0] };

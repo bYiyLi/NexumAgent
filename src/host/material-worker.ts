@@ -51,7 +51,7 @@ async function start(): Promise<void> {
       });
     }),
   };
-  const work = path.join(root, "work");
+  const work = root;
   const packages = await HostPackagePolicy.open(root);
   const reserve = async (bytes: number) => {
     const value = callHostSync(port, "work.storage.reserve", { ...scope, bytes });

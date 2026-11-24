@@ -47,7 +47,7 @@ async function fixture(t, options = {}) {
     for (const cleanup of cleanups) cleanup();
     rmSync(root, { recursive: true, force: true });
   });
-  const work = path.join(root, "work"),
+  const work = root,
     name = options.name ?? "@test/guidance",
     namespace = options.namespace ?? "guidance",
     version = options.version ?? "1.0.0";
@@ -356,7 +356,8 @@ test("reading parents reject symlinks and source/handle/profile identities canno
   );
   const outside = path.join(f.root, "outside");
   mkdirSync(outside);
-  symlinkSync(outside, path.join(f.work, "skills"), "junction");
+  mkdirSync(path.join(f.work, "cache"), { recursive: true });
+  symlinkSync(outside, path.join(f.work, "cache", "materials"), "junction");
   await assert.rejects(catalog.prepare(f.descriptor, f.handle()), {
     code: "storage_path_escape",
   });
@@ -492,7 +493,7 @@ test("an injected stage symlink is rejected before any nested directory is creat
   );
   const descriptor = await f.inspect(),
     catalog = new ExtensionMaterials(f.work);
-  const parent = path.join(f.work, "skills/.generated/extensions/guidance/1.0.0"),
+  const parent = path.join(f.work, "cache/materials/extensions/guidance/1.0.0"),
     outside = path.join(f.root, "outside");
   mkdirSync(parent, { recursive: true });
   mkdirSync(outside);

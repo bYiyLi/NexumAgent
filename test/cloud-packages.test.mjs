@@ -9,7 +9,7 @@ import { cloudManagedPackages } from "../dist/host/cloud-packages.js";
 test("Go-managed work uses declared, installed pnpm packages without legacy approvals", async (t) => {
   const root = realpathSync.native(await mkdtemp(path.join(tmpdir(), "nexum-cloud-pnpm-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work"), modules = path.join(work, "node_modules");
+  const work = root, modules = path.join(work, "node_modules");
   const installed = path.join(modules, ".pnpm", "browser@1.2.3", "node_modules", "@nexum-hub", "browser");
   await mkdir(installed, { recursive: true });
   await mkdir(path.join(modules, "@nexum-hub"), { recursive: true });

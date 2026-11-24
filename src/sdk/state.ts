@@ -1,12 +1,15 @@
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
+import { object, output, nullable, jsonValue, nonnegative } from "./schema.js";
 
-const key = { type: "string", minLength: 1, maxLength: 256 };
+const key = { type: "string", minLength: 1, maxLength: 256, pattern: "^[^\\u0000]+$", description: "At most 256 UTF-8 bytes." };
 const positiveVersion = {
   type: "integer",
   minimum: 1,
   maximum: Number.MAX_SAFE_INTEGER,
 };
+const stateValue = object({ value: jsonValue, version: positiveVersion, updatedAt: nonnegative });
+const deletion = object({ deleted: { const: true }, version: positiveVersion, updatedAt: nonnegative });
 
 // Keep callable examples beside the positional normalizer that owns them.
 // inputSchema below describes the *normalized* object, not JS arguments.
@@ -61,7 +64,7 @@ export const stateExtension: ExtensionFactory = () => {
           additionalProperties: false,
           properties: {
             key,
-            ...(action === "set" ? { value: {} } : {}),
+            ...(action === "set" ? { value: jsonValue } : {}),
             ...(action === "get"
               ? {}
               : {
@@ -85,6 +88,7 @@ export const stateExtension: ExtensionFactory = () => {
                 ? ["key", "options"]
                 : ["key"],
         },
+        outputSchema: output(action === "get" ? nullable(stateValue) : action === "set" ? stateValue : deletion),
         handle(input, call) {
           const data = call.state[scope];
           if (action === "get") return data.get(input.key);

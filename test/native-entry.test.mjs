@@ -23,7 +23,8 @@ test("the npm Node host contains no competing CLI, native binaries or OS lifecyc
   const names = pack.files.map((entry) => entry.path);
   assert.ok(names.includes("dist/host/main.js"));
   assert.ok(!names.includes("dist/cli.js"));
-  assert.ok(names.includes("contracts/v2/common.schema.json"));
+  assert.ok(!names.some((name) => name.startsWith("contracts/")),
+    "Fixed protocol definitions and shared test data must not ship as Node Host schema files");
   for (const name of names) {
     assert.doesNotMatch(name, /^(native\/|native-src\/|scripts\/)/,
       "Node host npm must not ship a native binary or installation tool");

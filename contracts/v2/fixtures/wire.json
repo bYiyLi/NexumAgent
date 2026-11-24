@@ -6402,5 +6402,44 @@
       "affectedContextCount": -1,
       "closedAt": "2026-11-14T00:00:00.000Z"
     }
+  },
+  {
+    "name": "Owner session may query authorized original Run history",
+    "contract": "wire",
+    "valid": true,
+    "value": {
+      "type": "invoke",
+      "id": "rpc_a",
+      "operation": "agent.run.list",
+      "context": {
+        "caller": {
+          "principalId": "user_a",
+          "clientId": "nexum-console:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "owner_session",
+          "sessionRef": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authorization": {
+          "agentId": "agent_a",
+          "allowedRoots": [
+            "/tmp/work"
+          ],
+          "budgets": {
+            "imageBytes": 10485760
+          },
+          "revision": "policy_1"
+        },
+        "connection": {
+          "agentId": "agent_a",
+          "profile": "development",
+          "bootId": "boot_a",
+          "cloudEnvironment": "development",
+          "connectionId": "conn_a"
+        }
+      },
+      "input": {
+        "agentId": "agent_a",
+        "limit": 5
+      }
+    }
   }
 ]

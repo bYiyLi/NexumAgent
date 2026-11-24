@@ -33,8 +33,8 @@ async function fixture(t, user) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-builtins-")),
     ),
-    work = path.join(root, "work");
-  mkdirSync(work);
+    work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -89,7 +89,7 @@ async function fixture(t, user) {
   const context = store.openWork({
     callerKey: callerKey(caller),
     pwd: work,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const engine = new ExecutionFixture(
     store,

@@ -8,7 +8,7 @@ import { encodeHostResult } from "../../dist/host/result.js";
 import { ModuleLoader } from "../../dist/runtime/modules.js";
 
 const [root, runId] = process.argv.slice(2);
-const work = path.join(root, "work");
+const work = root;
 const peer = new Peer(process.stdin, process.stdout, () => { throw new Error("unexpected request"); });
 peer.start();
 const controller = new AbortController();

@@ -100,12 +100,12 @@ export function methodSkill(input: MethodSkillInput) {
       `# ${call}\n\n${String(method.description)}\n\n` +
         (method.normalizes === false
           ? `调用形式：\`${call}(input)\`；无参数调用按空对象校验。\n\n`
-          : "此方法存在归一化或隔离适配。inputSchema 是校验输入，不定义 JavaScript 参数顺序；先读本 Skill 的调用说明或类型引用，未声明的签名不可猜测。\n\n") +
+          : "此方法存在归一化或隔离适配。inputSchema 描述归一化后的校验输入，不定义 JavaScript 参数顺序或调用时必填的默认字段；先读本 Skill 的调用说明或类型引用，未声明的签名不可猜测。\n\n") +
         "以下元数据逐项来自本次 Registry，包含完整 inputSchema、已声明的 outputSchema、Schema 方言、依赖 schemas 和权限。\n\n```json\n" +
         canonicalJson(method, 4 * 1024 * 1024) +
         "\n```\n\n" +
         (Object.hasOwn(method, "outputSchema")
-          ? "输出按上方声明校验；媒体或 MCP 结果仍沿实际结果协议交付，不能把传输回执当业务成功。\n"
+          ? "上方 outputSchema 描述来源声明的业务结果；核对实际返回值及状态。原生二进制、媒体和 MCP 结果仍按调用约定及实际结果协议交付，不把传输回执当业务成功。\n"
           : "来源未声明 outputSchema；不得补造返回字段或输出 Schema。返回语义仅以调用说明、类型引用和实际结果为据。\n") +
         "\n错误与恢复见 [调用边界](errors.md)；来源专属错误以调用说明和实际错误为准。\n",
     );

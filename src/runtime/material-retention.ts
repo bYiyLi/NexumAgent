@@ -56,15 +56,15 @@ export interface MaterialSweep {
   readonly errors: readonly { code: string; ref: string }[];
 }
 const markerBytes = 4096,
-  grace = 7 * 86400000;
+  grace = 45 * 86400000;
 const absent = (cause: unknown) =>
   (cause as NodeJS.ErrnoException)?.code === "ENOENT";
 const key = (ref: string) => createHash("sha256").update(ref).digest("hex");
 function generation(ref: string): { kind: MaterialKind; ref: string } | null {
   const work =
-    /^(work\/tmp\/contexts\/snapshot_[0-9a-f]{32})(?:\/[^\0]*)?$/.exec(ref);
+    /^(tmp\/contexts\/snapshot_[0-9a-f]{32})(?:\/[^\0]*)?$/.exec(ref);
   if (work) return { kind: "work", ref: work[1]! };
-  const skill = /^(work\/skills\/\.generated\/(?:extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|adapters\/(?:api|mcp)\/[0-9a-f]{64}|platform\/[A-Za-z0-9_-]+)\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(ref);
+  const skill = /^(cache\/materials\/(?:extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|adapters\/(?:api|mcp)\/[0-9a-f]{64}|platform\/[A-Za-z0-9_-]+)\/[0-9a-f]{64})(?:\/[^\0]*)?$/.exec(ref);
   if (skill && !skill[1]!.split("/").some((part) => part === "." || part === ".."))
     return { kind: "skill", ref: skill[1]! };
   return null;
@@ -434,7 +434,7 @@ export class MaterialRetention {
     this.#assertOpen();
     const ref = path.relative(this.root, directory).split(path.sep).join("/");
     requireCondition(
-      /^work\/skills\/\.generated\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.prepare-[A-Za-z0-9_-]+$/.test(
+      /^cache\/materials\/extensions\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.prepare-[A-Za-z0-9_-]+$/.test(
         ref,
       ),
       "material_path_escape",
@@ -526,7 +526,7 @@ export class MaterialRetention {
     };
     for (const ref of snapshots) {
       requireCondition(
-        /^work\/tmp\/contexts\/snapshot_[0-9a-f]{32}\/bundle\.json$/.test(ref),
+        /^tmp\/contexts\/snapshot_[0-9a-f]{32}\/bundle\.json$/.test(ref),
         "invalid_material_reference",
         "Live work references must retain their actual private snapshot coordinate.",
       );

@@ -181,8 +181,9 @@ export class FixtureStore {
   deleteState(key, expectedVersion) {
     const old = this.getState(key);
     assert(old?.version === expectedVersion, "state_version_conflict");
-    this.state.set(key, { ...old, version: old.version + 1, deleted: true });
-    return { deleted: true, version: old.version + 1 };
+    const receipt = { deleted: true, version: old.version + 1, updatedAt: Date.now() };
+    this.state.set(key, { ...old, ...receipt });
+    return receipt;
   }
 }
 

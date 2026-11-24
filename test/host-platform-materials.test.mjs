@@ -12,8 +12,8 @@ import { preparePlatformMaterials } from "../dist/host/platform-materials.js";
 
 test("platform Skill uses the actual Registry methods and holds its prepared revision", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-platform-materials-")));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   const store = new FixtureStore(root, { agentId: "agent", profile: "development", cloudEnvironment: "test" });
   const reserve = async () => ({ release() {} });
   const retention = new MaterialRetention(root, { reserve, liveSnapshotRefs: () => new Set() });

@@ -2,8 +2,24 @@ import type { ContributionOrigin, JsonObject, JsonValue } from "../contracts/typ
 
 export interface InputRequest {
   message: string;
-  inputSchema: JsonValue;
+  inputSchema: JsonObject | boolean;
   timeoutMs?: number;
+}
+
+export interface InputAttachment {
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  revision: string;
+  resourceUri: string;
+}
+
+/** Continuation input does not replace the original context.input. */
+export interface InputReply {
+  input: JsonValue;
+  attachments: InputAttachment[];
 }
 
 export interface OperationHooks<T> {
@@ -26,5 +42,5 @@ export interface RunServices {
     action: (operationId: string) => T | Promise<T>,
     hooks?: OperationHooks<T>,
   ): T | Promise<T>;
-  requestInput(request: InputRequest): Promise<JsonObject>;
+  requestInput(request: InputRequest): Promise<InputReply>;
 }

@@ -27,11 +27,11 @@ export async function inspectProfileInventory(input: {
   scriptSources: readonly ScriptSource[];
   signal: AbortSignal;
 }): Promise<ProfileInventory> {
-  const work = path.join(input.root, "work");
+  const work = input.root;
   const discovered = enabledMaterials(await discoverMaterials({
     agentId: input.agentId, work, home: input.home, signal: input.signal,
   }));
-  const generatedRoot = path.join(work, "skills", ".generated") + path.sep;
+  const generatedRoot = path.join(work, "cache", "materials") + path.sep;
   const resources: ProfileResource[] = [];
   for (const item of discovered.instructions) {
     if (item.path.startsWith(generatedRoot)) continue;

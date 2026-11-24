@@ -21,7 +21,7 @@ async function fixture(t) {
     mkdtempSync(path.join(tmpdir(), "nexum-modules-")),
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   const modules = path.join(work, "modules");
   const pkg = path.join(work, "node_modules", "fixture");
   mkdirSync(modules, { recursive: true });

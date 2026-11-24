@@ -698,17 +698,34 @@ export async function compileWorker(
       return;
     }
     if (entry.type === "failed") {
-      if (entry.diagnostic && typeof entry.diagnostic === "object")
-        options.onScriptError?.(entry.diagnostic as Parameters<NonNullable<
-          WorkerCompile["onScriptError"]>>[0]);
+      const details: JsonObject = entry.details && typeof entry.details === "object" &&
+        !Array.isArray(entry.details) ? { ...entry.details as JsonObject } : {};
+      if (entry.diagnostic && typeof entry.diagnostic === "object") {
+        const diagnostic = entry.diagnostic as Parameters<NonNullable<
+          WorkerCompile["onScriptError"]>>[0];
+        options.onScriptError?.(diagnostic);
+        // The Worker computed these from the original script realm. Only
+        // carry bounded script-relative coordinates, never the raw stack or
+        // an absolute filename, through IPC and into retained Run errors.
+        if (["Error", "SyntaxError", "TypeError", "ReferenceError", "RangeError",
+          "URIError", "EvalError", "AggregateError"].includes(diagnostic.exceptionType)) {
+          details.exceptionType = diagnostic.exceptionType;
+          const location = diagnostic.location;
+          if (location && Number.isSafeInteger(location.line) && location.line > 0) {
+            details.location = {
+              line: location.line,
+              ...(typeof location.column === "number" && Number.isSafeInteger(location.column) &&
+                location.column > 0 ? { column: location.column } : {}),
+            };
+          }
+        }
+      }
       fail(typeof entry.code === "string" &&
         /^[a-z][a-z0-9_]{0,127}$/.test(entry.code)
         ? entry.code : "worker_script_failed",
       typeof entry.message === "string" && entry.message.length <= 1024
         ? entry.message : "The script Worker reported an execution failure.",
-      entry.details && typeof entry.details === "object" &&
-        !Array.isArray(entry.details)
-        ? entry.details as JsonObject : undefined);
+      Object.keys(details).length ? details : undefined);
     }
   });
   return ready.promise;

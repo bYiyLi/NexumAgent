@@ -10,7 +10,7 @@ const version = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
 export function cloudManagedPackages(root: string): ReadonlyMap<string, string> {
   const packages = new Map<string, string>();
   try {
-    const work = path.join(root, "work");
+    const work = root;
     const modules = path.join(work, "node_modules");
     requireCondition(realpathSync.native(root) === root &&
         realpathSync.native(work) === work &&

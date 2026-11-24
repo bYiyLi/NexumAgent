@@ -8,7 +8,7 @@ import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { Binding, JsonObject } from "../contracts/types.js";
 import { MaterialRetention } from "../runtime/material-retention.js";
 import { ModuleLoader } from "../runtime/modules.js";
-import type { RunServices } from "../runtime/invocation.js";
+import type { InputReply, RunServices } from "../runtime/invocation.js";
 import { parseExtensionApproval, restoreExtension } from "./extension-runtime.js";
 import { restoreManagedShell } from "./sh-runtime.js";
 import { decodeGoResult, encodeGoArguments } from "./blob.js";
@@ -59,7 +59,7 @@ async function start(): Promise<void> {
     publishedDirectories: () => runtime?.activeDirectories() ?? new Set(),
   });
   try {
-    const modules = await ModuleLoader.create(path.join(root, "work"), `registry_${randomUUID()}`, packages.policy);
+    const modules = await ModuleLoader.create(root, `registry_${randomUUID()}`, packages.policy);
     const registryOptions = {
         permissions: new Set(workerData.permissions as string[]),
         authorize(policy: import("../extensions/registry.js").RegistryPolicy) {
@@ -221,7 +221,7 @@ async function start(): Promise<void> {
           },
           async requestInput(request) {
             return await asyncHost.call("extension.requestInput", { ...owner.scope(), operationId, request },
-              runSignal) as JsonObject;
+              runSignal) as InputReply;
           },
         };
         void owner.withRun(runId, () => activeInput.run({ runId, operationId,

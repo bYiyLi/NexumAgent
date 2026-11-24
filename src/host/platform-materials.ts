@@ -19,10 +19,10 @@ export async function preparePlatformMaterials(
   reserve: ManagedReserve,
 ) {
   requireCondition(path.isAbsolute(work) && realpathSync.native(work) === work &&
-    retention.root === path.dirname(work) && typeof reserve === "function",
+    retention.root === work && typeof reserve === "function",
   "invalid_platform_source", "Platform materials require their established profile and storage authority.");
   const { name, generated } = platformSkill(namespace, handle);
-  const directory = path.join(work, "skills", ".generated", "platform", namespace, generated.revision);
+  const directory = path.join(work, "cache", "materials", "platform", namespace, generated.revision);
   const hold = await retention.hold("skill", directory);
   try {
     await writeMethodSkill(work, directory, generated.files, reserve);

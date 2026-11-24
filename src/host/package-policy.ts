@@ -35,7 +35,7 @@ export class HostPackagePolicy {
   }
 
   async #fingerprint(): Promise<string> {
-    const work = path.join(this.root, "work");
+    const work = this.root;
     const files = ["package.json", "package-lock.json", "pnpm-lock.yaml"];
     const hash = createHash("sha256");
     for (const name of files) {
@@ -48,7 +48,7 @@ export class HostPackagePolicy {
   async begin(loader: ModuleLoader, transactionId?: string): Promise<{ transactionId: string }> {
     requireCondition(!this.#closed && !this.#change, "maintenance_busy",
       "A package change is already active or the host is closing.");
-    requireCondition(loader.work === path.join(this.root, "work"), "runtime_profile_mismatch",
+    requireCondition(loader.work === this.root, "runtime_profile_mismatch",
       "The package change belongs to another work environment.");
     const ready = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

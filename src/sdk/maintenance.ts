@@ -1,6 +1,58 @@
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionFactory, MethodDefinition } from "../extensions/api.js";
 import { maintenanceMethods } from "../extensions/maintenance.js";
+import { object, output, string, boolean, integer, nullable, array, enumeration, jsonObject } from "./schema.js";
+
+const target = enumeration("package", "extension", "mcp", "api");
+const status = enumeration("pending", "approved", "denied", "cancelled", "expired");
+const authStatus = enumeration("not_required", "required", "ready", "failed");
+const createdFields = { requestId: string, status, expiresAt: string, approvalUrl: string };
+const created = object(createdFields, ["requestId", "status", "expiresAt"]);
+const summary = object({ title: string, changeKinds: array(string), permissions: array(string),
+  version: nullable(string), namespace: nullable(string), restartMayBeRequired: boolean });
+const view = object({
+  ...createdFields, agentId: string, profile: enumeration("development", "production"),
+  target, action: string, name: string, revision: integer, candidateRevision: string,
+  objectId: nullable(string), baseRevision: nullable(string), summary, authStatus, createdAt: string,
+  agentName: string, source: object({ name: string }, []), decidedAt: string,
+  decision: object({ status: enumeration("approved", "denied"), revision: integer, candidateRevision: string,
+    decidedAt: string, decisionId: string }),
+  execution: object({ operationId: string, startedAt: string, status: string, result: jsonObject,
+    error: object({ code: string, message: string }) }, ["operationId", "startedAt"]),
+}, ["requestId", "status", "expiresAt", "agentId", "profile", "target", "action", "name",
+  "revision", "candidateRevision", "objectId", "baseRevision", "summary", "authStatus", "createdAt"]);
+const stringMap = { type: "object", additionalProperties: string };
+const mcpServer = { oneOf: [
+  object({ type: { const: "stdio" }, command: { type: "string", minLength: 1 },
+    args: { type: "array", maxItems: 256, items: string }, cwd: string,
+    env: { ...stringMap, maxProperties: 256 }, credentialBindings: { ...stringMap, maxProperties: 256,
+      propertyNames: { pattern: "^env\\..+$" } } }, ["command"]),
+  object({ type: enumeration("sse", "http", "streamable-http"), url: { type: "string", minLength: 1, maxLength: 1024 },
+    headers: { ...stringMap, maxProperties: 64 }, credentialBindings: { ...stringMap, maxProperties: 256,
+      propertyNames: { pattern: "^headers\\..+$" } } }, ["url"]),
+] };
+const apiConfig = object({
+  name: string, serviceUrl: string,
+  authentication: object({
+    operationSelections: { type: "object", additionalProperties: { type: "integer", minimum: 0 } },
+    credentialBindings: stringMap,
+    supplementalSchemes: { type: "object", additionalProperties: jsonObject },
+    supplementalSecurity: array({ type: "object", additionalProperties: array(string) }),
+  }, []),
+  oauth: { type: "object", additionalProperties: object({
+    issuer: string, authorizationEndpoint: string, tokenEndpoint: string, deviceAuthorizationEndpoint: string,
+    jwksUri: string, clientId: string, clientAuthentication: enumeration("", "none", "client_secret_basic", "client_secret_post"),
+    flow: enumeration("", "authorizationCode", "device", "clientCredentials"),
+    scopes: array(string), oidc: boolean, allowHttp: boolean,
+  }, []) },
+  sourceAuthentication: object({ type: enumeration("none", "apiKey", "basic", "bearer"), name: string,
+    in: enumeration("header", "query"), credentialRef: string }, ["type"]),
+  credentialBindings: stringMap,
+  limits: nullable(object(Object.fromEntries(
+    ["documentBytes", "totalDocumentBytes", "referenceCount", "operationCount", "requestBytes", "responseBytes", "requestTimeoutMs"]
+      .map(key => [key, { type: "integer", minimum: 1, maximum: 2147483647 }]),
+  ), [])),
+}, []);
 
 export const maintenanceSdkUsage = `## JavaScript 维护申请示例
 
@@ -20,7 +72,7 @@ MCP 配置新增、修改或移除时，申请返回 status 为 pending，只表
 
 - packages.install/update({name, version?})、packages.remove({name})；extensions.enable/disable({name})。
 - mcp.add/update({连接名: {command, args?, env?} 或 {url, headers?}})，一次提交一个 mcpServers 条目；mcp.remove({name})。
-- api.import/update({name, url?, path?, config?})、api.remove({name})；API 导入的实际字段组合由对应方法 Schema 和导入结果校验。
+- api.import({name, url 或 path, config?})、api.update({name, url? 或 path?, config?})、api.remove({name})；import 必须且只能选择 url/path 之一，update 可仅调整已有配置。config 只提供实际支持的公开配置字段，授权页负责凭据，不在脚本或示例中填写密钥。
 - 上述变更返回 {requestId, status, expiresAt, approvalUrl?}。
 - get(requestId: string)、cancel(requestId: string) 返回申请视图，包含 requestId、target/action/name、status、revision/candidateRevision、summary、authStatus、createdAt/expiresAt，以及实际存在的 approvalUrl、decision、execution 等状态证据。
 - list(options?: {target?, name?, status?, limit?, cursor?}) 返回 {requests: 申请视图[], nextCursor: string | null}。
@@ -45,13 +97,11 @@ export const maintenanceExtension: ExtensionFactory = () => {
       ? { name: { type: "string", minLength: 1, maxLength: 214 } }
       : name === "list"
         ? {
-            target: { enum: ["package", "extension", "mcp", "api"] },
+            target,
             name: text,
-            status: {
-              enum: ["pending", "approved", "denied", "cancelled", "expired"],
-            },
+            status,
             limit: { type: "integer", minimum: 1, maximum: 100 },
-            cursor: text,
+            cursor: { type: "string", minLength: 1, maxLength: 2048 },
           }
         : { requestId: text };
     const required: string[] = group
@@ -69,11 +119,11 @@ export const maintenanceExtension: ExtensionFactory = () => {
       Object.assign(properties, {
         url: text,
         path: text,
-        config: { type: "object" },
+        config: apiConfig,
       });
     methods[name] = {
       description: group
-        ? group === "mcp"
+        ? group === "mcp" && action !== "remove"
           ? `申请 ${name}；配置申请直接传入一个命名 mcpServers 条目（如 filesystem: {command, args} 或 remote: {type: "sse" | "http", url, headers}），不包裹 name/config。返回 approvalUrl 供用户确认，批准后自动更新 MCP 连接。用 maintenance.get(requestId) 核对执行结果，无需重启 Agent。`
           : `申请 ${name}；用户确认最终修订后才实际执行。`
         : `${name === "get" ? "读取" : name === "list" ? "筛选" : "撤销尚未执行的"}维护申请；不批准或重签。`,
@@ -98,23 +148,7 @@ export const maintenanceExtension: ExtensionFactory = () => {
             minProperties: 1,
             maxProperties: 1,
             propertyNames: { pattern: "^[A-Za-z_$][A-Za-z0-9_.$-]{0,63}$" },
-            additionalProperties: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                type: { enum: ["stdio", "sse", "http", "streamable-http"] },
-                command: { type: "string", minLength: 1 },
-                args: { type: "array", maxItems: 256, items: { type: "string" } },
-                cwd: { type: "string" },
-                env: { type: "object", additionalProperties: { type: "string" } },
-                url: { type: "string", minLength: 1 },
-                headers: { type: "object", additionalProperties: { type: "string" } },
-              },
-              oneOf: [
-                { type: "object", properties: { command: { type: "string", minLength: 1 } }, required: ["command"] },
-                { type: "object", properties: { url: { type: "string", minLength: 1 } }, required: ["url"] },
-              ],
-            },
+            additionalProperties: mcpServer,
           }
         : {
             $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -122,7 +156,15 @@ export const maintenanceExtension: ExtensionFactory = () => {
             additionalProperties: false,
             properties,
             required,
+            ...(group === "api" && action !== "remove" ? {
+              ...(action === "import" ? { oneOf: [
+                { properties: { url: text }, required: ["url"] },
+                { properties: { path: text }, required: ["path"] },
+              ] } : { not: { properties: { url: text, path: text }, required: ["url", "path"] } }),
+            } : {}),
           },
+      outputSchema: output(group ? created : name === "list" ?
+        object({ requests: array(view), nextCursor: nullable(string) }) : view),
       handle(input, call) {
         if (group) {
           const service = call.maintenance[

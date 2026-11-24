@@ -13,7 +13,7 @@ import { performance } from "node:perf_hooks";
 import { createHash } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson, digest, newId } from "../contracts/json.js";
-import { validateContract } from "../contracts/validation.js";
+import { validateOpenInputV2 } from "../contracts/fixed-open-input.js";
 import type {
   Binding,
   ContributionOrigin,
@@ -167,7 +167,7 @@ export class WorkService {
     options: WorkOptions,
   ) {
     requireCondition(
-      scripts.work === path.join(store.root, "work") &&
+      scripts.work === store.root &&
         scripts.owner === `local:${store.binding.agentId}`,
       "runtime_profile_mismatch",
       "Work metadata must use this Agent's own profile/work environment.",
@@ -182,7 +182,7 @@ export class WorkService {
     input: OpenInput,
     signal?: AbortSignal,
   ): Promise<JsonObject> {
-    validateContract("agent.open", input);
+    validateOpenInputV2(input);
     caller = fixedCaller(caller);
     requireCondition(
       input.agentId === this.#store.binding.agentId,
@@ -326,7 +326,7 @@ export class WorkService {
     previous: WorkRecord | null,
     signal: AbortSignal,
   ): Promise<PreparedWorkSnapshot> {
-    validateContract("agent.open", input);
+    validateOpenInputV2(input);
     caller = fixedCaller(caller);
     requireCondition(input.agentId === this.#store.binding.agentId,
       "agent_mismatch", "Open targets a different Agent.");
@@ -406,7 +406,9 @@ export class WorkService {
         );
     }
     const project = resolved?.project ?? null;
-    const pwd = project?.root ?? this.#scripts.work;
+    // A profile root contains secrets and runtime state. Agent-only work
+    // defaults to its public scripts directory, not the profile itself.
+    const pwd = project?.root ?? path.join(this.#scripts.work, "scripts");
     this.#authorize(caller, {
       action: previous ? "refresh" : "open",
       ...(previous ? { work: previous } : {}),
@@ -602,7 +604,6 @@ export class WorkService {
           },
           paths: {
             work: this.#scripts.work,
-            skills: this.#scripts.skills,
             scripts: this.#scripts.local,
             resources: path.join(this.#scripts.work, "resources"),
           },

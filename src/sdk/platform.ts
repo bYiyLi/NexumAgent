@@ -35,6 +35,8 @@ const selections: Record<PlatformNamespace, readonly [string, string, string]> =
 export function platformSkill(namespace: PlatformNamespace, handle: ExtensionHandle) {
   requireCondition(handle.origin.type === "platform" && handle.origin.namespace === namespace,
     "invalid_platform_source", "The platform Skill must use its actual Registry source.");
+  requireCondition(handle.methods.every(method => Object.hasOwn(method, "outputSchema")),
+    "invalid_platform_contract", "Every registered platform SDK method must declare its successful result contract.");
   const [name, description, usage] = selections[namespace];
   return { name, generated: methodSkill({ name, description, usage,
     origin: handle.origin, bindingPath: [namespace], methods: handle.methods }) };

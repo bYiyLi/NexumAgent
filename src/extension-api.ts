@@ -27,7 +27,10 @@ export type {
   DownloadOptions,
   TransferListOptions,
 } from "./extensions/transfer.js";
-export type { StateService } from "./extensions/state.js";
+export type { StateService, StateNamespace, StateValue, StateDeletion } from "./extensions/state.js";
+export type { RuntimeSDK, RestartReceipt } from "./sdk/runtime.js";
+export type { ShSDK, ExecOptions, StartOptions, ProcessSnapshot, ProcessRead, ProcessStop } from "./sdk/sh.js";
+export type { TransferSDK } from "./sdk/transfer.js";
 export type {
   HostRequestServices,
   HostRequestOptions,
@@ -37,6 +40,11 @@ export type {
   MaintenanceCreated,
   MaintenanceRequestView,
   MaintenanceListOptions,
+  McpConnectionOptions,
+  ApiMaintenanceConfig,
+  ApiOAuthOptions,
+  ApiImportOptions,
+  ApiUpdateOptions,
 } from "./extensions/maintenance.js";
 export type {
   OutputAPI,
@@ -51,7 +59,7 @@ export type {
   McpReadScope,
   McpAccess,
 } from "./results/mcp.js";
-export type { InputRequest } from "./runtime/invocation.js";
+export type { InputRequest, InputReply, InputAttachment } from "./runtime/invocation.js";
 export type { SchemaDialect } from "./contracts/validation.js";
 export type {
   ContributionOrigin,

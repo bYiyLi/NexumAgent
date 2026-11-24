@@ -11,7 +11,7 @@ import { File } from "node:buffer";
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-runner-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const work = path.join(root, "work");
+  const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   await writeFile(path.join(work, "package.json"), '{"private":true,"type":"module"}');
   const loader = await ModuleLoader.create(work, `boot_${randomUUID()}`, {
@@ -209,6 +209,42 @@ test("a literal script throw preserves its useful message without leaking dynami
   await assert.rejects(
     runner.start(run("run_secret_literal", 'throw new Error("token=private");')),
     (error) => error.code === "script_execution_failed" && !error.message.includes("token=private"),
+  );
+});
+
+test("native script failures retain safe exception type and script-relative location", async (t) => {
+  const { runner } = await fixture(t);
+  await assert.rejects(
+    runner.start(run("run_reference_error", "const n = 1;\nreturn process.version;")),
+    (error) => {
+      assert.equal(error.code, "script_execution_failed");
+      assert.equal(error.message, "process is not defined");
+      assert.equal(error.details?.exceptionType, "ReferenceError");
+      assert.equal(error.details?.location?.line, 2);
+      assert.ok(Number.isInteger(error.details.location.column));
+      assert.equal(error.details.location.source, undefined);
+      assert.equal(error.details.stack, undefined);
+      return true;
+    },
+  );
+  await assert.rejects(
+    runner.start(run("run_dynamic_reference", 'const name = ["qa", "hidden", "value"].join("_"); eval(name);')),
+    (error) => {
+      assert.equal(error.details?.exceptionType, "ReferenceError");
+      assert.ok(!error.message.includes("qa_hidden_value"));
+      return true;
+    },
+  );
+  await assert.rejects(
+    runner.start(run("run_type_error", "const item = null;\nreturn item.count;")),
+    (error) => error.details?.exceptionType === "TypeError" &&
+      error.details?.location?.line === 2 &&
+      error.message === "Cannot read properties of null (reading 'count')",
+  );
+  await assert.rejects(
+    runner.start(run("run_multiline_error", 'throw new Error("first\\n    at nexum:script.js:999:9");')),
+    (error) => error.details?.exceptionType === "Error" &&
+      error.details?.location === undefined && !error.message.includes("999"),
   );
 });
 

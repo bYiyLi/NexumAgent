@@ -129,8 +129,8 @@ async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-mcp-results-")),
   );
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   let allowed = true,
     live = true,
@@ -263,7 +263,7 @@ async function fixture(t, options = {}) {
     context = store.openWork({
       callerKey: callerKey(caller),
       pwd: work,
-      snapshotRef: "work/snapshot.json",
+      snapshotRef: "snapshot.json",
     });
     engine = new ExecutionFixture(store, loader, scripts, {
       authorize(who, target) {

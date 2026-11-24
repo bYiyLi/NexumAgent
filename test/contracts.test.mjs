@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import {
-  validateContract,
   compileInputSchema,
 } from "../dist/contracts/validation.js";
+import { validateOpenInputV2 } from "../dist/contracts/fixed-open-input.js";
 import {
   canonicalJson,
   digest,
@@ -19,20 +19,30 @@ const fixtures = JSON.parse(
     "utf8",
   ),
 );
-test("shared positive and negative public/wire fixtures", () => {
-  for (const fixture of fixtures) {
-    if (fixture.valid)
-      assert.doesNotThrow(
-        () => validateContract(fixture.contract, fixture.value),
-        JSON.stringify(fixture),
-      );
-    else
-      assert.throws(
-        () => validateContract(fixture.contract, fixture.value),
-        undefined,
-        JSON.stringify(fixture),
-      );
+test("Node Open input matches the public Open fixtures", () => {
+  const cases = fixtures.filter((fixture) => fixture.contract === "agent.open");
+  assert(cases.length > 0);
+  for (const fixture of cases) {
+    if (fixture.valid) assert.doesNotThrow(() => validateOpenInputV2(fixture.value));
+    else assert.throws(() => validateOpenInputV2(fixture.value), { code: "invalid_arguments" });
   }
+});
+
+test("Node Open input rejects invalid fields without echoing secrets", () => {
+  for (const value of [
+    {}, null, [], { agentId: null }, { agentId: "" }, { agentId: "x".repeat(257) },
+    { agentId: "agt", projectId: "prj", path: "/tmp" },
+    { agentId: "agt", path: "x".repeat(8193) },
+    { agentId: "agt", "secret-token": true },
+  ]) {
+    assert.throws(() => validateOpenInputV2(value), (error) => {
+      assert.equal(error.code, "invalid_arguments");
+      assert(!JSON.stringify(error.toJSON()).includes("secret-token"));
+      return true;
+    });
+  }
+  validateOpenInputV2({ agentId: "😀".repeat(256), path: "/tmp" });
+  assert.throws(() => validateOpenInputV2({ agentId: "😀".repeat(257) }), {code: "invalid_arguments"});
 });
 
 test("validation does not coerce or mutate script input", () => {
@@ -171,41 +181,6 @@ test("SDK JSON accepts a plain object from the guest realm without invoking prox
       ),
     { code: "invalid_json" },
   );
-});
-
-test("MCP selector presence rules remain exclusive", () => {
-  const valid = [
-    ["agent.open", {agentId:"agt_test",projectId:"project_one"}],
-    ["agent.open", {agentId:"agt_test",path:"/tmp/project"}],
-    ["agent.list", {agentId:"agt_test",projectsCursor:"page_two"}],
-    ["agent.list", {cursor:"page_two"}],
-    ["agent.run.get", {agentId:"agt_test",runId:"run_one"}],
-    ["agent.run.start", {contextId:"ctx_test",script:"return 1;"}],
-    ["agent.run.start", {contextId:"ctx_test",scriptName:"my-script"}],
-  ];
-  const invalid = [
-    ["agent.open", {agentId:"agt_test",projectId:"project_one",path:"/tmp/project"}],
-    ["agent.list", {cursor:"page_two",agentId:"agt_test"}],
-    ["agent.list", {cursor:"page_two",projectsCursor:"page_three"}],
-    ["agent.run.get", {agentId:"agt_test",runId:"run_one",requestId:"req_1234567890123_00000000000000000000000000000000"}],
-    ["agent.run.get", {agentId:"agt_test",requestId:"req_1234567890123_00000000000000000000000000000000"}],
-    ["agent.run.start", {contextId:"ctx_test",script:"return 1;",requestId:"req_1234567890123_00000000000000000000000000000000"}],
-    ["agent.run.start", {contextId:"ctx_test",script:"return 1;",scriptName:"my-script"}],
-  ];
-  for (const [name,input] of valid) assert.doesNotThrow(()=>validateContract(name,input), name+" valid");
-  for (const [name,input] of invalid) assert.throws(()=>validateContract(name,input), name+" invalid");
-});
-
-
-test("Wire accepts a Cloud-only requestId but the public MCP tool never does", () => {
-  const requestId = newRequestId();
-  const base = { contextId: "ctx_test", script: "return 1;", input: { requestId: "business_value" } };
-  const issuedAt = Number(requestId.split("_")[1]);
-  const submission = { issuedAt, expiresAt: issuedAt + 86_400_000 };
-  assert.throws(() => validateContract("agent.run.start", { ...base, requestId }), { code: "invalid_arguments" });
-  assert.doesNotThrow(() => validateContract("wire.input:agent.run.start", { ...base, requestId, submission }));
-  assert.throws(() => validateContract("wire.input:agent.run.start", { ...base, requestId: "invalid", submission }), { code: "invalid_arguments" });
-  assert.throws(() => validateContract("wire.input:agent.run.start", { ...base, requestId, submission, unwanted: true }), { code: "invalid_arguments" });
 });
 
 test("schema failures identify field and constraint without echoing rejected input", () => {

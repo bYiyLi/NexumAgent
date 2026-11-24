@@ -1,17 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { Ajv, type AnySchema, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formatsModule from "ajv-formats";
 import { AgentError, requireCondition } from "./errors.js";
 import { canonicalJson } from "./json.js";
-import { validateWireSemantics } from "./wire-validation.js";
-import {
-  MAX_JSON_BODY_BYTES_V2,
-  MAX_RESOURCES_READ_BODY_BYTES_V2,
-} from "./wire.js";
-
-const base = new URL("../../contracts/v2/", import.meta.url);
-const prefix = "https://schemas.nexum.local/agent/v2/";
 const options = {
   strict: true,
   coerceTypes: false,
@@ -19,70 +10,6 @@ const options = {
   removeAdditional: false,
 } as const;
 const addFormats = formatsModule.default;
-const ajv = new Ajv2020(options);
-addFormats(ajv);
-
-ajv.addSchema(
-  JSON.parse(
-    readFileSync(new URL("common.schema.json", base), "utf8"),
-  ) as AnySchema,
-);
-for (const directory of ["model", "wire"]) {
-  for (const name of readdirSync(new URL(directory + "/", base)).sort()) {
-    if (name.endsWith(".schema.json"))
-      ajv.addSchema(
-        JSON.parse(
-          readFileSync(new URL(directory + "/" + name, base), "utf8"),
-        ) as AnySchema,
-      );
-  }
-}
-
-export function validateContract(contract: string, value: unknown): void {
-  canonicalJson(
-    value,
-    contract === "wire.body:ResourcesRead"
-      ? MAX_RESOURCES_READ_BODY_BYTES_V2
-      : contract.startsWith("wire.body:")
-        ? MAX_JSON_BODY_BYTES_V2
-        : 1024 * 1024,
-  );
-  const id =
-    contract === "wire"
-      ? prefix + "wire/envelope.schema.json"
-      : contract === "wire.stream"
-        ? prefix + "wire/stream.schema.json"
-        : contract.startsWith("wire.input:")
-          ? prefix +
-            "wire/operations.schema.json#/$defs/" +
-            contract.slice(11) +
-            ".input"
-          : contract.startsWith("wire.output:")
-            ? prefix +
-              "wire/operations.schema.json#/$defs/" +
-              contract.slice(12) +
-              ".output"
-            : contract.startsWith("wire.body:")
-              ? prefix +
-                (contract.startsWith("wire.body:Maintenance")
-                  ? "wire/maintenance.schema.json#/$defs/"
-                  : "wire/bodies.schema.json#/$defs/") +
-                contract.slice(10)
-              : contract.startsWith("wire.type:")
-                ? prefix + "wire/types.schema.json#/$defs/" + contract.slice(10)
-                : contract.endsWith(".output")
-                  ? prefix + `model/${contract}.schema.json`
-                  : prefix + `model/${contract}.input.schema.json`;
-  const validate = ajv.getSchema(id);
-  requireCondition(
-    validate,
-    "unknown_contract",
-    "The requested contract is not registered.",
-  );
-  assertValid(validate, value);
-  validateWireSemantics(contract, value);
-}
-
 export function compileInputSchema(schema: unknown): (value: unknown) => void {
   canonicalJson(schema);
   requireCondition(

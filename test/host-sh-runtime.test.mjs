@@ -13,8 +13,8 @@ import { ExtensionWorkers } from "../dist/host/extension-workers.js";
 
 test("managed shell publishes the real methods and executes with its retained resource", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-host-sh-")));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "test" };
   const store = new FixtureStore(root, binding);
   const reserve = async () => ({ release() {} });
@@ -48,7 +48,7 @@ test("managed shell publishes the real methods and executes with its retained re
   shell.confirmPublished();
 
   const caller = { principalId: "user", clientId: "client", host: "test" };
-  const context = store.openWork({ callerKey: callerKey(caller), pwd: work, snapshotRef: "work/snapshot.json" });
+  const context = store.openWork({ callerKey: callerKey(caller), pwd: work, snapshotRef: "snapshot.json" });
   const loader = await ModuleLoader.create(work, store.bootId, { builtins: () => [], approvedPackages: () => new Map() });
   const engine = new ExecutionFixture(store, loader, new ScriptCatalog(work, "agent"), {
     authorize() {}, loadWork: () => ({}), resources: shell.resources,
@@ -93,7 +93,7 @@ test("managed shell publishes the real methods and executes with its retained re
 
 test("shell preparation failure disposes its Go-issued source instance", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-host-sh-failed-")));
-  mkdirSync(path.join(root, "work"));
+  mkdirSync(root, { recursive: true });
   const store = new FixtureStore(root, { agentId: "agent", profile: "development", cloudEnvironment: "test" });
   const reserve = async () => ({ release() {} });
   const retention = new MaterialRetention(root, { reserve, liveSnapshotRefs: () => new Set() });
@@ -116,10 +116,10 @@ test("shell preparation failure disposes its Go-issued source instance", async (
 
 test("platform shell Worker publishes through Go before executing a managed process", async (t) => {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-host-sh-worker-")));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   const store = new FixtureStore(root, { agentId: "agent", profile: "development", cloudEnvironment: "development" });
-  const context = store.openWork({ callerKey: "caller", pwd: work, snapshotRef: "work/snapshot.json" });
+  const context = store.openWork({ callerKey: "caller", pwd: work, snapshotRef: "snapshot.json" });
   let run = store.acceptRun({ callerKey: "caller", contextId: context.contextId,
     sourceKind: "inline", source: { codeSource: "inline" } }).run;
   run = store.transitionRun(run.runId, run.revision, "preparing_inputs");

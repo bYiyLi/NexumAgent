@@ -151,8 +151,8 @@ test("current source and caller authority are checked after an asynchronous Host
 
 test("Registry binds each public Host service to its own Run and prevents returning its control facade", async (t) => {
   const root = mkdtempSync(path.join(tmpdir(), "nexum-host-service-"));
-  const work = path.join(root, "work");
-  mkdirSync(work);
+  const work = root;
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -236,7 +236,7 @@ test("Registry binds each public Host service to its own Run and prevents return
     const context = store.openWork({
       callerKey: callerKey(caller),
       pwd: work,
-      snapshotRef: "work/snapshot.json",
+      snapshotRef: "snapshot.json",
     });
     const view = await engine.start(caller, {
       contextId: context.contextId,

@@ -164,7 +164,7 @@ export class ScriptCatalog {
     this.work = realpathSync.native(work);
     this.owner = `local:${agentId}`;
     this.local = privateDirectory(this.work, "scripts");
-    this.skills = privateDirectory(this.work, "skills");
+    this.skills = privateDirectory(this.work, "cache", "materials");
     this.#sources = sources;
   }
 

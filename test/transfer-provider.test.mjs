@@ -59,8 +59,8 @@ async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-transfer-provider-")),
   );
-  const workDir = path.join(root, "work");
-  mkdirSync(workDir);
+  const workDir = root;
+  mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, "package.json"), '{"type":"module"}');
   const store = new FixtureStore(root, {
     agentId: "agent",
@@ -90,7 +90,7 @@ async function fixture(t, options = {}) {
   const work = store.openWork({
     callerKey: callerKey(caller),
     pwd: workDir,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const engine = new ExecutionFixture(store, loader, scripts, {
     authorize(who, target) {
@@ -170,7 +170,23 @@ const callScript = (name) =>
 
 test("built-in transfer schema prepares strictly and requires exactly one download source", async (t) => {
   const calls = [];
-  const f = await fixture(t, { transfer: () => provider(calls) });
+  const now = "2026-11-24T00:00:00.000Z";
+  const expiresAt = "2026-11-24T00:05:00.000Z";
+  const offer = {
+    transferId, direction: "download", status: "pending",
+    runId: null, contextId: null, projectId: null, maxBytes: 3,
+    progress: { bytesTransferred: 0, totalBytes: 3 },
+    createdAt: now, expiresAt, startedAt: null, deadlineAt: null, finishedAt: null,
+    error: null, resource: { uri: "nexum://agents/agent/resources/example", name: "out.bin", mimeType: "application/octet-stream", size: 3 },
+    request: { method: "GET", url: "https://fixture.invalid/download", headers: {}, expiresAt },
+  };
+  const f = await fixture(t, { transfer: () => ({
+    ...provider(calls),
+    async createDownload(input) {
+      calls.push({ name: "createDownload", input });
+      return structuredClone(offer);
+    },
+  }) });
   const handle = await f.registry.prepare(source, transferExtension);
   f.registry.publish(handle);
   for (const input of [
@@ -180,7 +196,7 @@ test("built-in transfer schema prepares strictly and requires exactly one downlo
     const view = await f.start(
       `return await demo.createDownload(${JSON.stringify(input)});`,
     );
-    assert.deepEqual(result(view), { method: "createDownload" });
+    assert.deepEqual(result(view), offer);
   }
   for (const input of [
     {},
