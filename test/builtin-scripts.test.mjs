@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
+import { compileInputSchema } from "../dist/contracts/validation.js";
 import { defaultBuiltins, ModuleLoader } from "../dist/runtime/modules.js";
-import { CONTROL_OWNER, CONTROL_VERSION } from "../dist/runtime/control-scripts.js";
+import { CONTROL_OWNER, CONTROL_VERSION } from "../dist/runtime/platform-identity.js";
 
 const names = [
   "file.list.js", "file.patch.js", "file.read.js", "file.search.js",
@@ -29,7 +30,11 @@ function fixture(t) {
     const script = catalog.resolve("nexum/" + name);
     return new AsyncFunction("context", "sh", script.code)({
       project: { root: project }, pwd: project, input,
-    }, sh);
+    }, sh).then((result) => {
+      // Git's sh.exec is mocked separately; file returns are actual values.
+      if (name.startsWith("file.")) compileInputSchema(script.metadata.scriptOutputSchema)(result);
+      return result;
+    });
   };
   return { root, project, catalog, run };
 }

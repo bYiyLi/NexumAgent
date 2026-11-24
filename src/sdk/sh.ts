@@ -74,30 +74,20 @@ export interface ShSDK {
   which(input: string | { command: string; cwd?: string }): Promise<Executable>;
 }
 
-export const shSdkUsage = `## JavaScript 进程示例
-
-只有需要受管命令、PTY、进程身份或跨 Run 观察时使用 sh；普通文件读写使用 Node。
-
-~~~javascript
-const result = await sh.exec({ command: context.input.command, args: context.input.args ?? [], cwd: context.pwd });
-return result;
-~~~
-
-运行前在 agent.run.start.input 提供已确认的 command 和可选 args；CLI 路径不明确时先查 sh.which。需要跨 Run 保留进程时明确使用 sh.start({ command, args, background: true })，之后按实际 processId 调用 sh.get({ processId }) / sh.stop({ processId })。观察超时不是进程退出；停止请求返回后仍以真实关闭状态为准。
-
-## 调用参数与结果
-
-- exec(options)、start(options) 各接受一个对象或 shellCommand 字符串。对象选择 command: string + args?: string[]，或 shellCommand: string + shell?: string，不能混用；可选 cwd、env: Record<string,string|null>、tty、cols、rows、input: string | Uint8Array、timeoutMs。cols/rows 只用于 tty，timeoutMs 是 1–2147483647 毫秒；input 上限 1 MiB。
-- start 可用 background: true 交接后台；exec 可用 check: true 在非零退出/信号退出时报 process_exit_failed。background 不用于 exec，check 不用于 start。
-- get({processId, cursor?, maxBytes?, encoding?, waitMs?}) 返回同一进程快照和输出页 {output,nextCursor,hasMoreOutput,truncated,outputComplete}；encoding 为 null 时保留字节。
-- list({status?,state?,runId?,contextId?,limit?,cursor?}?) 返回 {items: 进程快照[], nextCursor}。
-- write({processId,data?: string | Uint8Array,eof?: boolean}) 返回 {processId,accepted,bytes,eof}，至少提供 data 或 eof:true。
-- resize({processId,cols,rows}) 返回 {processId,accepted,cols,rows}；只支持 PTY。
-- signal({processId,signal}) 返回投递回执；stop({processId,graceMs?,forceMs?}) 返回 accepted、confirmed 和真实 facts，不能把 accepted 当退出。
-- which(command: string | {command: string,cwd?: string}) 返回实际可执行文件解析结果，不启动命令。
-
-进程快照含 processId/status/state/lifetime、originRunId/contextId/origin、createdAt/closedAt/handedOffAt、controlAvailable、pid/exitCode/signal/outputComplete/details。exec 等待实际退出和输出收尾，返回进程快照与输出页；start 返回启动快照。exec/start 的方法 inputSchema 描述归一化后的对象（包含默认 args/env/tty/cols/rows/background/check）；调用时这些默认字段可省略。cols/rows 启动范围 1–10000，resize 范围 1–1000；文本和参数另有 UTF-8 字节预算。write.data 和启动 input 在归一化后是原生 Uint8Array；output[].data 为字符串或原生 Buffer，不是 JSON 数组。invalid_process_arguments、invalid_process_input、invalid_output_encoding 表示输入不合法；process_exit_failed、process_timeout 或 I/O 失败时保留 processId，回读原进程及输出，不盲目重启同一业务。
-`;
+export const shSdkUsage = "需要受管命令、PTY、进程身份或跨 Run 观察时使用 sh；普通文件读写使用 Node。仅使用实际 processId；观察超时不是进程退出，停止回执不等于真实关闭。";
+const launchCalling = "接受 options 对象或 shellCommand 字符串。对象选择 command: string + args?: string[]，或 shellCommand: string + shell?: string，不能混用；cwd、env、tty、cols、rows、input、timeoutMs 均可选。input 为 string | Uint8Array，上限 1 MiB；cols/rows 用于 tty。归一化默认 args/env/tty/cols/rows/background/check 可省略。CLI 路径不明确时先查 sh.which。";
+export const shSdkCalling: Readonly<Record<string,string>> = {
+ exec: "调用：sh.exec(options: ExecOptions | string)。"+launchCalling+" exec 可用 check:true；background 不用于 exec。等待实际退出与输出收尾，返回进程快照和输出页。",
+ start: "调用：sh.start(options: StartOptions | string)。"+launchCalling+" 仅 background:true 交接后台；check 不用于 start。返回启动快照，后续用 sh.get/sh.stop。",
+ get: "调用：sh.get({processId, cursor?, maxBytes?, encoding?, waitMs?})。返回进程快照及输出页 {output,nextCursor,hasMoreOutput,truncated,outputComplete}；encoding:null 保留原生 Buffer 而非 JSON 数组。",
+ list: "调用：sh.list({status?,state?,runId?,contextId?,limit?,cursor?}?)。返回 {items,nextCursor}。",
+ write: "调用：sh.write({processId,data?: string | Uint8Array,eof?: boolean})；至少提供 data 或 eof:true。返回 {processId,accepted,bytes,eof}。",
+ resize: "调用：sh.resize({processId,cols,rows})；只支持 PTY，返回 {processId,accepted,cols,rows}。",
+ signal: "调用：sh.signal({processId,signal})；返回投递回执，不代表退出。",
+ stop: "调用：sh.stop({processId,graceMs?,forceMs?})；返回 accepted、confirmed 和真实 facts，不能把 accepted 当退出。",
+ which: "调用：sh.which(command: string | {command: string,cwd?: string})；解析实际可执行文件，不启动命令。",
+};
+export const shSdkErrors = "\n- invalid_process_arguments / invalid_process_input / invalid_output_encoding：修正实际参数。process_exit_failed / process_timeout：保留 processId，回读原进程和输出；勿盲目重启。\n";
 
 const kind = "sh.process";
 const dialect = "https://json-schema.org/draft/2020-12/schema";

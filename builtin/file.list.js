@@ -7,9 +7,63 @@
   "scriptInputSchema": {
     "type": "object",
     "properties": {
-      "path": { "type": "string", "maxLength": 4096 },
-      "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+      "path": {
+        "type": "string",
+        "maxLength": 4096
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      }
     },
+    "additionalProperties": false
+  },
+  "scriptOutputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "total": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "truncated": {
+        "type": "boolean"
+      },
+      "entries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "symlink",
+                "directory",
+                "file",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "path",
+      "total",
+      "truncated",
+      "entries"
+    ],
     "additionalProperties": false
   }
 }

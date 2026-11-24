@@ -7,11 +7,63 @@
   "scriptInputSchema": {
     "type": "object",
     "properties": {
-      "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
-      "startLine": { "type": "integer", "minimum": 1 },
-      "endLine": { "type": "integer", "minimum": 1 }
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      },
+      "startLine": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "endLine": {
+        "type": "integer",
+        "minimum": 1
+      }
     },
-    "required": ["path"],
+    "required": [
+      "path"
+    ],
+    "additionalProperties": false
+  },
+  "scriptOutputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "startLine": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "endLine": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "totalLines": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "truncated": {
+        "type": "boolean"
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "startLine",
+      "endLine",
+      "totalLines",
+      "truncated",
+      "sha256",
+      "text"
+    ],
     "additionalProperties": false
   }
 }

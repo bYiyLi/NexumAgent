@@ -7,14 +7,124 @@
   "scriptInputSchema": {
     "type": "object",
     "properties": {
-      "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
-      "operation": { "type": "string", "enum": ["create", "replace", "delete"] },
-      "oldText": { "type": "string", "minLength": 1, "maxLength": 1048576 },
-      "newText": { "type": "string", "maxLength": 1048576 },
-      "expectedSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      },
+      "operation": {
+        "type": "string",
+        "enum": [
+          "create",
+          "replace",
+          "delete"
+        ]
+      },
+      "oldText": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1048576
+      },
+      "newText": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "expectedSha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      }
     },
-    "required": ["path", "operation"],
+    "required": [
+      "path",
+      "operation"
+    ],
     "additionalProperties": false
+  },
+  "scriptOutputSchema": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "const": "create"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "operation",
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "const": "replace"
+          },
+          "path": {
+            "type": "string"
+          },
+          "beforeSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "operation",
+          "path",
+          "beforeSha256",
+          "sha256",
+          "bytes"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "const": "delete"
+          },
+          "path": {
+            "type": "string"
+          },
+          "beforeSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "deleted": {
+            "const": true
+          }
+        },
+        "required": [
+          "operation",
+          "path",
+          "beforeSha256",
+          "deleted"
+        ],
+        "additionalProperties": false
+      }
+    ]
   }
 }
 */

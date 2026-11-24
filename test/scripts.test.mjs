@@ -164,6 +164,10 @@ test("enrollment persists the complete source once, rejects changes and regenera
   assert.throws(() => catalog.resolve("report.js", () => false), {
     code: "script_forbidden",
   });
+  rmSync(first.snapshot.path);
+  assert.throws(() => catalog.resolve("report.js"), {
+    code: "script_not_found",
+  });
 });
 
 test("a manual write failure reports the already-saved file and never silently undoes enrollment", (t) => {
@@ -258,7 +262,7 @@ test("open uses Agent-wide 30 default + Top 20 slots with local priority, source
     }
   }
   const selected = catalog.select(usage);
-  assert.equal(selected.total, 118); // Existing 112 plus six official platform scripts.
+  assert.equal(selected.total, 127); // Existing 112 plus fifteen official platform scripts.
   assert.equal(selected.items.length, 50);
   assert.equal(selected.complete, false);
   assert.equal(selected.items[0].scriptName, "local0.js");
@@ -297,4 +301,15 @@ test("native compilation is separate from invocation and rejects syntax before s
   assert.equal(called, 1);
   assert.throws(() => loader.compile("return {", {}), { name: "SyntaxError" });
   assert.equal(called, 1);
+});
+
+test("output contracts are optional Draft 7 metadata in both headers and the index", (t) => {
+  const { catalog } = fixture(t);
+  const schema = { type: "object", properties: { value: { type: "integer" } } };
+  assert.deepEqual(scriptHeader(code("x.js", { scriptOutputSchema: schema })).scriptOutputSchema, schema);
+  assert.equal(scriptHeader(code("x.js", { scriptOutputSchema: false })).scriptOutputSchema, false);
+  assert.equal(Object.hasOwn(scriptHeader(code("x.js")), "scriptOutputSchema"), false);
+  for (const output of [null, { type: "unknown" }, { $ref: "https://example.invalid/schema" }]) {
+    assert.throws(() => scriptHeader(code("x.js", { scriptOutputSchema: output })), { code: "invalid_output_schema" });
+  }
 });

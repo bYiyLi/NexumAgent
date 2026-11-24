@@ -7,12 +7,83 @@
   "scriptInputSchema": {
     "type": "object",
     "properties": {
-      "query": { "type": "string", "minLength": 1, "maxLength": 256 },
-      "path": { "type": "string", "maxLength": 4096 },
-      "caseSensitive": { "type": "boolean" },
-      "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "path": {
+        "type": "string",
+        "maxLength": 4096
+      },
+      "caseSensitive": {
+        "type": "boolean"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      }
     },
-    "required": ["query"],
+    "required": [
+      "query"
+    ],
+    "additionalProperties": false
+  },
+  "scriptOutputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string"
+      },
+      "matches": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "line",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "scannedFiles": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "scannedDirectories": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "omittedFiles": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "query",
+      "matches",
+      "scannedFiles",
+      "scannedDirectories",
+      "omittedFiles",
+      "truncated"
+    ],
     "additionalProperties": false
   }
 }

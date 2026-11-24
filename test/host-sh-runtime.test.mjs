@@ -40,7 +40,7 @@ test("managed shell publishes the real methods and executes with its retained re
   await assert.rejects(shell.close(), { code: "publication_unconfirmed" });
   const skill = shell.published().skills[0];
   assert.match(readFileSync(skill.skillFile, "utf8"), /sh\["exec"\]/);
-  assert.match(readFileSync(path.join(skill.path, "references", "calling.md"), "utf8"), /sh\.exec/);
+  assert.match(readFileSync(path.join(skill.path, "references", "exec.md"), "utf8"), /sh\.exec/);
   assert.ok(shell.methods.some((method) => method.operation === "exec" && method.path.join(".") === "sh.exec"));
   shell.confirmPublished();
 

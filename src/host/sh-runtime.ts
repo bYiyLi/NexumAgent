@@ -5,7 +5,7 @@ import { digest } from "../contracts/json.js";
 import type { ContributionOrigin, JsonObject } from "../contracts/types.js";
 import { ExtensionRegistry, type RegistryOptions } from "../extensions/registry.js";
 import { ResourceManager, type ResourceStore } from "../extensions/resources.js";
-import { CONTROL_OWNER, CONTROL_VERSION } from "../runtime/control-scripts.js";
+import { CONTROL_OWNER, CONTROL_VERSION } from "../runtime/platform-identity.js";
 import type { ManagedReserve } from "../runtime/current-materials.js";
 import { createShExtension } from "../sdk/sh.js";
 import { preparePlatformMaterials } from "./platform-materials.js";

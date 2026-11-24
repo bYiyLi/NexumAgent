@@ -159,7 +159,7 @@ test("generated Skill is a closed projection of actual prepared Registry metadat
   assert.equal(assertClosedSkill(entry).size, generated.files.size);
   for (const [index, expected] of handle.methods.entries()) {
     const text = readFileSync(
-      path.join(directory, `references/method-${index + 1}.md`),
+      path.join(directory, `references/${expected.path.join(".")}.md`),
       "utf8",
     );
     const actual = JSON.parse(text.match(/```json\n([\s\S]*?)\n```/)[1]);
@@ -317,7 +317,7 @@ test("Skill-private scripts stay readable but never enter independent script dis
       .map((item) => item.scriptName),
     ["registered.js"],
   );
-  assert.equal(opened.agent.scripts.total, 7); // Local script plus six official builtins.
+  assert.equal(opened.agent.scripts.total, 16); // Local script plus fifteen official builtins.
   assert.deepEqual(opened.agent.scripts.items[0].scriptInputSchema.required, [
     "value",
   ]);
@@ -346,7 +346,14 @@ test("Skill-private scripts stay readable but never enter independent script dis
       input,
       waitMs: 0,
     });
-    return engine.observe(caller, started.run.runId, 3000);
+    // Observation timeouts are not Run failures; wait on the same Run.
+    const deadline = Date.now() + 30000;
+    let observed;
+    do {
+      observed = await engine.observe(caller, started.run.runId, 3000);
+      if (["succeeded", "failed", "cancelled"].includes(observed.run.status)) break;
+    } while (Date.now() < deadline);
+    return observed;
   };
   const success = await run("registered.js", { value: 9 });
   assert.equal(success.run.status, "succeeded");

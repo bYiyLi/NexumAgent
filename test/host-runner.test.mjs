@@ -7,6 +7,7 @@ import test from "node:test";
 import { bindGoScope, HostRunner } from "../dist/host/runner.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { File } from "node:buffer";
+import { encodeHostResult } from "../dist/host/result.js";
 
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-runner-")));
@@ -49,6 +50,21 @@ test("host executes a Run using its admitted bindings and existing module policy
   assert.equal(settlements, 3);
   await assert.rejects(runner.start(run("run_2", 'return await import("node:fs");')),
     { code: "module_not_allowed" });
+});
+
+test("native URL and RegExp survive the real Worker and final result encoder", async (t) => {
+  const { runner } = await fixture(t);
+  const value = await runner.start(run("run_native_results", `
+    const url = new URL("https://example.invalid/a?q=1#part");
+    const pattern = /hello/gi;
+    return { url, pattern, nested: [new Map([["url", new URL(url.href)]]), new Set([/hello/gi])] };
+  `));
+  const encoded = await encodeHostResult(value, "run_native_results", new AbortController().signal);
+  assert.deepEqual(encoded.storedResult.data, {
+    url: "https://example.invalid/a?q=1#part",
+    pattern: { source: "hello", flags: "gi" },
+    nested: [[["url", "https://example.invalid/a?q=1#part"]], [{ source: "hello", flags: "gi" }]],
+  });
 });
 
 test("Worker SDK calls and results preserve nested Buffer, File, Blob and byte view types", async (t) => {

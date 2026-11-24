@@ -31,7 +31,7 @@ test("platform Skill uses the actual Registry methods and replaces a single stab
   assert.equal(pending.material.skillId, "nexum/managed-processes");
   assert.equal(pending.material.origin, handle.origin);
   assert.match(readFileSync(pending.material.skillFile, "utf8"), /sh\["exec"\]/);
-  const reference = readFileSync(path.join(pending.material.path, "references", "method-1.md"), "utf8");
+  const reference = readFileSync(path.join(pending.material.path, "references", "exec.md"), "utf8");
   assert.match(reference, /inputSchema/);
   pending.confirmPublished();
   assert.throws(() => pending.discard(), { code: "invalid_platform_source" });

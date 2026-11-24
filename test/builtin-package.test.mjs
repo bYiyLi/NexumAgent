@@ -7,9 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
-const scripts = ["file.read.js", "file.list.js", "file.search.js", "file.patch.js", "git.status.js", "git.diff.js"];
+const scripts = ["file.read.js", "file.list.js", "file.search.js", "file.patch.js", "git.status.js", "git.diff.js", "sh.get.js", "sh.list.js", "sh.write.js", "sh.resize.js", "sh.signal.js", "sh.stop.js", "transfer.get.js", "transfer.list.js", "transfer.cancel.js"];
 
-test("Node Host archive bundles the six versioned builtin scripts", (t) => {
+test("Node Host archive bundles the versioned builtin and recovery scripts", (t) => {
   const root = mkdtempSync(path.join(tmpdir(), "nexum-builtin-package-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const agent = path.join(root, "agent");

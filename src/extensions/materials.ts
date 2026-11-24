@@ -230,7 +230,7 @@ export class ExtensionMaterials {
     );
     const generated = methodSkill({
       name,
-      description: `编写或核对 ${origin.namespace} SDK 的调用代码、参数及返回合同，或诊断该扩展的方法错误时使用。当前操作包括：${handle.methods.slice(0, 4).map((method) => String(method.description).replace(/[\r\n]+/g, " ").slice(0, 100)).join("；")}。具体任务优先选择同来源匹配的人工 Skill。`.slice(0, 1024),
+      description: `编写或核对 ${origin.namespace} SDK 的调用代码、参数及返回合同，或诊断该扩展的方法错误时使用。按当前操作选择真实方法参考。具体任务优先选择同来源匹配的人工 Skill。`.slice(0, 1024),
       origin, bindingPath: [origin.namespace!], methods: handle.methods,
       references: {
         "types.md": "# 来源类型声明\n\n```typescript\n" +

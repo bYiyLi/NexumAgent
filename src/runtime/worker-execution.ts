@@ -110,7 +110,7 @@ function decode(
   if (types.isSet(value)) return new Set([...value].map((item) => decode(item, handles, token, depth + 1)));
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer ||
       value instanceof Blob || value instanceof Date ||
-      value instanceof Map || value instanceof Set)
+      value instanceof Map || value instanceof Set || types.isRegExp(value))
     return value;
   if (Array.isArray(value))
     return value.map((entry) => decode(entry, handles, token, depth + 1));

@@ -225,7 +225,7 @@ test("preparation keeps authored trees, fixed source hashes and complete referen
     ).revision,
   );
   assert.match(
-    readFileSync(path.join(prepared.materials.skills[1].path, "references/method-1.md"), "utf8"),
+    readFileSync(path.join(prepared.materials.skills[1].path, "references/inspect.md"), "utf8"),
     /inputSchema.*properties.*name/,
   );
   catalog.publish(prepared);
