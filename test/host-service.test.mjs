@@ -199,8 +199,8 @@ test("stdio RPC runs a Worker, handles reverse SDK calls and routes cancellation
     assert.deepEqual(await peer.call("host.configure", {
       instanceId: "host_1", profileRoot: root, profile: "development",
     }), { configured: true, executionReady: false, resultEncoding: "stored-v1" });
-    await assert.rejects(peer.call("work.prepare", { instanceId: "host_1" }),
-      { code: "invalid_work_scope" });
+    await assert.rejects(peer.call("work.prepare", { instanceId: "host_1" }));
+    await assert.rejects(peer.call("work.release", { instanceId: "host_1" }));
     const change = await peer.call("packages.begin", { instanceId: "host_1" });
     assert.equal(typeof change.transactionId, "string");
     await assert.rejects(peer.call("run.execute", {

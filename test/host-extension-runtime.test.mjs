@@ -9,7 +9,6 @@ import { MessageChannel, Worker } from "node:worker_threads";
 import { restoreExtension } from "../dist/host/extension-runtime.js";
 import { ExtensionWorkers } from "../dist/host/extension-workers.js";
 import { HostService } from "../dist/host/service.js";
-import { MaterialRetention } from "../dist/runtime/material-retention.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { serveSyncRPC } from "../dist/host/sync-rpc.js";
@@ -50,13 +49,11 @@ async function fixture(t, enabled) {
   const policy = { builtins: () => [], approvedPackages: () => new Map([[name, "1.0.0"]]) };
   const modules = await ModuleLoader.create(work, store.bootId, policy);
   const approval = enabled ? { objectId: "extension_fixture", revision: "revision_fixture", config: {} } : undefined;
-  const retention = new MaterialRetention(root, { reserve, liveSnapshotRefs: () => new Set() });
   t.after(async () => {
-    await retention.stop();
     store.close();
     rmSync(root, { recursive: true, force: true });
   });
-  return { root, packageName: name, modules, policy, store, reserve, retention, approval,
+  return { root, packageName: name, modules, policy, store, reserve, approval,
     registry: { permissions: new Set(["read"]), authorize() {}, log() {}, progress() {} },
     allocateOwner: () => `instance_${"a".repeat(32)}`, releaseOwner() {} };
 }
@@ -128,7 +125,6 @@ test("a Registry Worker restores and withdraws an approved extension through hos
     }
     if (method === "storage.reserve") return `ticket_${++ticket}`;
     if (method === "storage.release" || method === "extension.authorize" || method === "extension.log") return {};
-    if (method === "materials.liveSnapshotRefs") return [];
     throw new Error(`Unexpected method ${method}`);
   });
   const worker = new Worker(new URL("../dist/host/extension-worker.js", import.meta.url), {
@@ -170,6 +166,12 @@ test("host publishes the actual extension methods only after Go accepts them", a
   let blobMetadata;
   const call = async (method, params) => {
     seen.push(method);
+    if (method.startsWith("resource.lifetime.")) {
+      assert.equal(params.runId, undefined);
+      assert.equal(params.sourceInstanceId, resource.source.instanceId);
+      assert.equal(params.args[0], resource.resourceId);
+      method = method.replace("resource.lifetime.", "resource.");
+    }
     if (method.startsWith("blob.")) assert.equal(params.methodId, published.methods[0].methodId);
     if (method === "resource.registerInstance") return `instance_${"c".repeat(32)}`;
     if (method === "resource.getRun") return { bootId: input.store.bootId, endedAt: null, stop: null, callerKey: "caller" };
@@ -217,7 +219,6 @@ test("host publishes the actual extension methods only after Go accepts them", a
     if (method === "blob.prepare") { blobMetadata = { kind: params.kind, originalType: params.originalType }; writeFileSync(outputPath, ""); return { ticket: "output", path: outputPath }; }
     if (method === "blob.commit") return { id: "output-ref", contentType: "text/plain", ...blobMetadata };
     if (method === "blob.release") return {};
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };
@@ -295,7 +296,6 @@ test("a rejected Go publication withdraws and closes the actual extension", asyn
     if (method === "resource.registerInstance") return `instance_${"c".repeat(32)}`;
     if (method === "storage.reserve") return "ticket_one";
     if (method === "extension.publish") throw new AgentError("permission_denied", "not approved");
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };
@@ -326,7 +326,6 @@ test("activation cancellation waits for initialization and closes the created in
     if (method === "extension.authorize" && !waited) { waited = true; entered.resolve(); await finish.promise; }
     if (method === "resource.registerInstance") return `instance_${"c".repeat(32)}`;
     if (method === "storage.reserve") return "ticket_one";
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };
@@ -372,7 +371,6 @@ test("cancelling an extension input waits for the host callback to finish", asyn
       await finish.promise;
       return { accepted: true };
     }
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };
@@ -421,7 +419,6 @@ test("HostService routes a prepared extension and its real invocation", async (t
       published = params;
       return {};
     }
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };
@@ -495,7 +492,6 @@ test("stopping one Run waits for its callbacks without stopping another Run", as
       await finished.get(run).promise;
       return { accepted: true };
     }
-    if (method === "materials.liveSnapshotRefs") return [];
     if (["resource.unregisterInstance", "storage.release", "extension.authorize", "extension.log", "extension.withdraw"].includes(method)) return {};
     throw new Error(`Unexpected method ${method}`);
   };

@@ -43,10 +43,19 @@ test("managed host handshake reports actual readiness", async () => {
   const peer = new Peer(child.stdout, child.stdin, async () => null);
   peer.start();
   try {
-    assert.deepEqual(await peer.call("host.initialize", { protocolVersion: 1, instanceId: "test-instance" }), {
+    const { nodeRuntime, builtinFamilies, ...handshake } = await peer.call("host.initialize", { protocolVersion: 1, instanceId: "test-instance" });
+    assert.deepEqual(handshake, {
       protocolVersion: 1, instanceId: "test-instance", transportReady: true, executionReady: false,
       resultEncoding: "stored-v1", nodeVersion: process.version,
     });
+    assert.deepEqual(nodeRuntime, {
+      name: "node", version: process.version, nodeVersion: process.version,
+      v8Version: process.versions.v8, modulesAbi: process.versions.modules,
+      arch: process.arch, startedAt: nodeRuntime.startedAt, workerHeapLimitEnforced: true,
+    });
+    assert.ok(Number.isFinite(Date.parse(nodeRuntime.startedAt)));
+    const { defaultBuiltins } = await import("../dist/runtime/modules.js");
+    assert.deepEqual(builtinFamilies, [...defaultBuiltins]);
   } finally {
     peer.close();
     child.stdin.end();

@@ -6,20 +6,18 @@ import type { ContributionOrigin, JsonObject } from "../contracts/types.js";
 import { ExtensionRegistry, type RegistryOptions } from "../extensions/registry.js";
 import { ResourceManager, type ResourceStore } from "../extensions/resources.js";
 import { CONTROL_OWNER, CONTROL_VERSION } from "../runtime/control-scripts.js";
-import type { ManagedReserve, MaterialRetention } from "../runtime/material-retention.js";
-import { platformFactories, type PlatformNamespace } from "../sdk/platform.js";
-import { maintenanceMethods } from "../extensions/maintenance.js";
+import type { ManagedReserve } from "../runtime/current-materials.js";
+import { createShExtension } from "../sdk/sh.js";
 import { preparePlatformMaterials } from "./platform-materials.js";
 
 export interface ManagedShellOptions {
-  namespace?: PlatformNamespace;
   root: string;
   store: ResourceStore;
   registry: RegistryOptions;
   allocateOwner(origin: ContributionOrigin): string;
   releaseOwner(id: string): void;
   reserve: ManagedReserve;
-  retention: MaterialRetention;
+  reserveProcessOutput(resourceId: string, bytes: number): Promise<{release():void}>;
 }
 
 /** Prepares the existing shell SDK on a Go-backed resource store. */
@@ -27,31 +25,23 @@ export async function restoreManagedShell(options: ManagedShellOptions) {
   const root = realpathSync.native(options.root);
   const work = root;
   requireCondition(root === options.root && options.store.root === root &&
-    options.retention.root === root && realpathSync.native(work) === work,
+    realpathSync.native(work) === work,
   "invalid_process_context", "The shell SDK needs the established Agent profile.");
 
-  const namespace = options.namespace ?? "sh";
+  const namespace = "sh";
   const origin: ContributionOrigin = {
     type: "platform", owner: CONTROL_OWNER, namespace,
     version: CONTROL_VERSION, revision: CONTROL_VERSION,
   };
-  const permissions = {
-    sh: ["path", "resource", "sh.execute", "sh.read", "sh.control", "storage.reserve"],
-    runtime: ["runtime.input", "maintenance.execute"],
-    state: ["state.agent.read", "state.agent.write", "state.user.read", "state.user.write"],
-    transfer: ["createUpload", "createDownload", "get", "list", "cancel"].map((name) => `transfer.${name}`),
-    maintenance: [...maintenanceMethods, "get", "list", "cancel"].map((name) => `maintenance.${name}`),
-  }[namespace];
+  const permissions = ["path", "resource", "sh.execute", "sh.read", "sh.control", "storage.reserve"];
   const resources = new ResourceManager(options.store, {
     allocateOwner: options.allocateOwner, releaseOwner: options.releaseOwner,
   });
   const registry = new ExtensionRegistry(resources, options.registry);
-  const handle = await registry.prepare({ apiVersion: 1, origin, permissions }, platformFactories(() => {
-    throw new AgentError("restart_unavailable", "Restart is owned by the Go Agent.");
-  })[namespace]);
+  const handle = await registry.prepare({ apiVersion: 1, origin, permissions }, createShExtension(options.reserveProcessOutput));
   let prepared: Awaited<ReturnType<typeof preparePlatformMaterials>> | undefined;
   try {
-    prepared = await preparePlatformMaterials(work, namespace, handle, options.retention, options.reserve);
+    prepared = await preparePlatformMaterials(work, namespace, handle, options.reserve);
     registry.publish(handle);
     const methods = handle.methods.map((method) => {
       requireCondition(typeof method.name === "string" && Array.isArray(method.path) &&
@@ -95,7 +85,7 @@ export async function restoreManagedShell(options: ManagedShellOptions) {
         requireCondition(publication !== "pending", "publication_unconfirmed", "The shell publication has not been confirmed.");
         const report = await registry.disable(handle);
         if (report.status === "disabled") {
-          if (publication === "published") options.retention.setPublished(`platform:${namespace}`, null);
+          if (publication === "published") material.remove();
           closed = true;
         }
         return report;

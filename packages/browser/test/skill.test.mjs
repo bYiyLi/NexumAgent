@@ -150,16 +150,15 @@ test("Browser Skill JavaScript examples typecheck against the actual public Brow
     })),
   );
   assert.ok(snippets.length >= 7, "expected all executable Browser Skill examples");
+  snippets.push({ filename: "scripts/screenshot.js", source: readFileSync(path.join(root, "scripts/screenshot.js"), "utf8") });
 
   // Compile each snippet as a real asynchronous Run, without writing a file,
   // and resolve Tab/Browser declarations from the exact published SDK source.
   const virtualFile = path.join(root, "__skill_examples_contract_check__.ts");
   let source =
     'import type { Tab, Browser, BrowserClient } from "./src/client/types.js";\n' +
-    'import type { OutputAPI } from "../../src/sdk/output.js";\n' +
     'declare const context: { input: any };\n' +
     'declare const browser: Record<string, unknown>;\n' +
-    'declare const output: OutputAPI;\n' +
     'declare const tab: Tab;\n' +
     'declare const selected: Browser;\n' +
     'declare const client: BrowserClient;\n';

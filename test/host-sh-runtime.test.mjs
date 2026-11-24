@@ -5,7 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
-import { MaterialRetention } from "../dist/runtime/material-retention.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { restoreManagedShell } from "../dist/host/sh-runtime.js";
@@ -18,11 +17,10 @@ test("managed shell publishes the real methods and executes with its retained re
   const binding = { agentId: "agent", profile: "development", cloudEnvironment: "test" };
   const store = new FixtureStore(root, binding);
   const reserve = async () => ({ release() {} });
-  const retention = new MaterialRetention(root, { reserve, liveSnapshotRefs: () => new Set() });
   const permissions = new Set(["path", "resource", "sh.execute", "sh.read", "sh.control", "storage.reserve"]);
   let allocated = false;
   const policies = [];
-  const shell = await restoreManagedShell({ root, store, reserve, retention,
+  const shell = await restoreManagedShell({ root, store, reserve,
     allocateOwner(origin) {
       assert.equal(origin.namespace, "sh");
       allocated = true;
@@ -36,7 +34,6 @@ test("managed shell publishes the real methods and executes with its retained re
   t.after(async () => {
     await cleanupBackground?.();
     if (!closed) await shell.close();
-    await retention.stop();
     store.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -96,11 +93,10 @@ test("shell preparation failure disposes its Go-issued source instance", async (
   mkdirSync(root, { recursive: true });
   const store = new FixtureStore(root, { agentId: "agent", profile: "development", cloudEnvironment: "test" });
   const reserve = async () => ({ release() {} });
-  const retention = new MaterialRetention(root, { reserve, liveSnapshotRefs: () => new Set() });
-  t.after(async () => { await retention.stop(); store.close(); rmSync(root, { recursive: true, force: true }); });
+  t.after(async () => { store.close(); rmSync(root, { recursive: true, force: true }); });
   let allocated = 0;
   let released = 0;
-  await assert.rejects(restoreManagedShell({ root, store, reserve, retention,
+  await assert.rejects(restoreManagedShell({ root, store, reserve,
     allocateOwner() { allocated++; return `instance_${"a".repeat(32)}`; },
     releaseOwner() { released++; },
     registry: {
@@ -143,11 +139,24 @@ test("platform shell Worker publishes through Go before executing a managed proc
     }
     if (method === "resource.unregisterInstance" || method === "extension.authorize" ||
       method === "extension.log" || method === "extension.progress") return {};
-    if (method === "storage.reserve") return `ticket_${++reserved}`;
+    if (method === "storage.reserve") {
+      if (params.resourceId !== undefined) {
+        const row = store.getResource(params.resourceId);
+        assert.equal(row.kind, "sh.process");
+        assert.equal(row.ownerRunId, params.runId);
+        assert.equal(row.source.instanceId, params.sourceInstanceId);
+      }
+      return `ticket_${++reserved}`;
+    }
     if (method === "storage.release") { releases++; return {}; }
-    if (method === "materials.liveSnapshotRefs") return [];
     if (method.startsWith("resource.")) {
       assert.equal(params.sourceInstanceId, source);
+      if (method.startsWith("resource.lifetime.")) {
+        assert.equal(params.runId, undefined);
+        const row = store.getResource(params.args[0]);
+        assert.equal(row.source.instanceId, source);
+        method = method.replace("resource.lifetime.", "resource.");
+      }
       const name = method.slice("resource.".length);
       return store[name](...params.args);
     }

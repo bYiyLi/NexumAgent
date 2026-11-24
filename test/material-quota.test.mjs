@@ -1,3 +1,4 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -26,12 +27,10 @@ const { FixtureStore } = await load("../test/helpers/runtime-fixture.mjs");
 const { ScriptCatalog } = await load("runtime/scripts.js");
 const { ModuleLoader } = await load("runtime/modules.js");
 const { ExecutionFixture } = await load("../test/helpers/runtime-fixture.mjs");
-const { WorkService } = await load("work/service.js");
+const { WorkService } = await import("./helpers/work-reference.mjs");
 const { ExtensionMaterials } = await load("extensions/materials.js");
 const { inspectExtensionPackage } = await load("extensions/packages.js");
-const { MaterialRetention } = await load("runtime/material-retention.js");
 const caller = { principalId: "user", clientId: "client", grantId: "grant" };
-const grace = 45 * 86400000;
 const deferred = () => Promise.withResolvers();
 async function enteredWithin(promise) {
   let timer;
@@ -130,6 +129,7 @@ function workFixture(t, options = {}) {
   let allowed = true,
     reserve = options.reserve;
   const service = new WorkService(store, scripts, policy, {
+      discover: discoverMaterials,
     home: null,
     agent: { name: "资料测试 🧪", version: "0.0.1", protocolVersion: "2" },
     authorize() {
@@ -536,27 +536,17 @@ test("ExtensionMaterials failed manifest I/O releases its actual admission and c
   }
 });
 
-test("real accepted Run scope protects an old Work/catalog snapshot across refresh, close and seven-day cleanup", async (t) => {
+test("real accepted Run scope protects an old Work/catalog snapshot across refresh and close", async (t) => {
   const f = workFixture(t);
-  let now = Date.now(),
-    engine;
-  const manager = new MaterialRetention(f.root, {
-    now: () => now,
-    liveSnapshotRefs: () =>
-      new Set([
-        ...f.store.workSnapshotRefs(now),
-        ...(engine?.activeSnapshotRefs() ?? []),
-      ]),
-  });
-  f.cleanup(() => manager.stop());
+  let engine;
   const service = new WorkService(f.store, f.scripts, f.policy, {
+      discover: discoverMaterials,
     home: null,
     agent: { name: "Agent", version: "1", protocolVersion: "2" },
     authorize() {},
     resolveProject: async () => {
       throw new Error("no Project");
     },
-    materialRetention: manager,
   });
   f.cleanup(() => service.drain());
   const opened = await service.open(
@@ -595,19 +585,11 @@ test("real accepted Run scope protects an old Work/catalog snapshot across refre
       AbortSignal.timeout(5000),
     );
     service.close(caller, opened.contextId);
-    now += 10 * 86400000;
-    const protectedSweep = await manager.sweep(100);
-    assert.deepEqual(protectedSweep.errors, []);
     assert.equal(existsSync(oldDirectory), true);
     resume.resolve();
     const finished = await engine.observe(caller, started.run.runId, 3000);
     assert.equal(finished.run.status, "succeeded");
     assert.equal(engine.activeSnapshotRefs().size, 0);
-    assert.equal((await manager.sweep(100)).removed, 0);
-    now += grace;
-    const removed = await manager.sweep(100);
-    assert.deepEqual(removed.errors, []);
-    assert.equal(existsSync(oldDirectory), false);
   } finally {
     resume.resolve();
     await engine.observe(caller, started.run.runId, 3000);
@@ -643,105 +625,26 @@ test("Work failed atomic I/O releases admission and preserves its previous publi
   ]);
 });
 
-test("actual extension preparation, publication and captured Work references each protect a generation until seven days after retirement", async (t) => {
-  let now = Date.now(),
-    manager,
-    materials,
-    store;
-  const entered = deferred(),
-    resume = deferred();
-  let calls = 0,
-    releases = 0;
-  const f = await extensionFixture(t, (base) => {
-    manager = new MaterialRetention(base.root, {
-      now: () => now,
-      liveSnapshotRefs: () => store?.workSnapshotRefs(now) ?? new Set(),
-      publishedDirectories: () => materials?.activeDirectories() ?? new Set(),
-    });
-    return {
-      materialRetention: manager,
-      reserve: async () => {
-        if (++calls === 1) {
-          entered.resolve();
-          await resume.promise;
-        }
-        return {
-          release() {
-            releases++;
-          },
-        };
-      },
-    };
-  });
-  materials = f.materials;
-  f.cleanup(() => manager.stop());
-  const pending = materials.prepare(f.descriptor, f.handle);
+test("pending extension preparation remains private and withdrawal removes its current tree immediately", async (t) => {
+  const entered = deferred(), resume = deferred();
+  let calls = 0, releases = 0;
+  const f = await extensionFixture(t, { reserve: async () => {
+    if (++calls === 1) { entered.resolve(); await resume.promise; }
+    return { release() { releases++; } };
+  }});
+  const pending = f.materials.prepare(f.descriptor, f.handle);
   try {
     await enteredWithin(entered.promise);
-    assert.ok(
-      [...materials.activeDirectories()].some((directory) =>
-        path.basename(directory).startsWith(".prepare-"),
-      ),
-    );
-    now += 10 * 86400000;
-    assert.equal(
-      (await manager.sweep(100)).removed,
-      0,
-      "pending copied body is protected before publication",
-    );
+    assert.ok([...f.materials.activeDirectories()].some(dir => path.basename(dir).startsWith(".prepare-")));
+    assert.deepEqual(f.materials.published(), { instructions: [], skills: [] });
     resume.resolve();
     const prepared = await pending;
     assert.equal(releases, calls);
-    assert.equal(manager.activeDirectories().has(prepared.directory), true);
-    materials.publish(prepared);
-    now += 10 * 86400000;
-    assert.equal((await manager.sweep(100)).removed, 0);
+    f.materials.publish(prepared);
     assert.equal(existsSync(prepared.materials.skills[0].skillFile), true);
-    store = new FixtureStore(f.root, {
-      agentId: "agent",
-      profile: "development",
-      cloudEnvironment: "test",
-    });
-    f.cleanup(() => store.close());
-    const scripts = new ScriptCatalog(f.work, "agent"),
-      policy = { builtins: () => [], approvedPackages: () => new Map() };
-    const service = new WorkService(store, scripts, policy, {
-      home: null,
-      agent: { name: "Agent", version: "1", protocolVersion: "2" },
-      authorize() {},
-      resolveProject: async () => {
-        throw new Error("no Project");
-      },
-      materials: () => materials.published(),
-      materialRetention: manager,
-    });
-    f.cleanup(() => service.drain());
-    const opened = await service.open(
-      caller,
-      { agentId: "agent" },
-      AbortSignal.timeout(5000),
-    );
-    assert.equal(opened.agent.instructions[0].origin.namespace, "quota");
-    materials.withdraw(f.handle.id);
-    assert.deepEqual([...materials.activeDirectories()], []);
-    now += 10 * 86400000;
-    const held = await manager.sweep(100);
-    assert.deepEqual(held.errors, []);
-    assert.equal(
-      existsSync(prepared.materials.skills[0].skillFile),
-      true,
-      "captured Work holds SDK material after its instance withdraws",
-    );
-    service.close(caller, opened.contextId);
-    assert.equal((await manager.sweep(100)).removed, 0);
-    now += grace - 1;
-    assert.equal((await manager.sweep(100)).removed, 0);
-    assert.equal(existsSync(prepared.materials.skills[0].skillFile), true);
-    now += 1;
-    const retired = await manager.sweep(100);
-    assert.deepEqual(retired.errors, []);
+    f.materials.withdraw(f.handle.id);
     assert.equal(existsSync(prepared.directory), false);
-    assert.ok(retired.processed <= 100);
+    assert.deepEqual([...f.materials.activeDirectories()], []);
   } finally {
     resume.resolve();
     await pending.catch(() => {});

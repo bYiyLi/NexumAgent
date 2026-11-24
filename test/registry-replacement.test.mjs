@@ -408,9 +408,8 @@ test("replacement requires exact source/root and authentic handles and tokens", 
       ...source().origin,
       type: "platform",
       owner: "nexum",
-      namespace: "mcp",
+      namespace: "sh",
     },
-    bindingPath: ["mcp", "github"],
     permissions: [],
   };
   const remote = await f.registry.prepare(platform, factory("remote"));
@@ -419,11 +418,24 @@ test("replacement requires exact source/root and authentic handles and tokens", 
     () =>
       f.registry.prepareReplacement(
         remote,
-        { ...platform, bindingPath: ["mcp", "other"] },
+        { ...platform, origin: { ...platform.origin, namespace: "runtime" } },
         factory("bad"),
       ),
     { code: "extension_replacement_mismatch" },
   );
+  for (const legacy of [
+    { ...platform, origin: { ...platform.origin, namespace: "api" } },
+    { ...platform, origin: { ...platform.origin, namespace: "mcp" } },
+    { ...platform, bindingPath: ["sh", "legacy"] },
+    { ...platform, scriptName: "legacy" },
+  ])
+    assert.throws(() => f.registry.prepare(legacy, factory("bad")), {
+      code: "invalid_namespace",
+    });
+  const bindings = f.registry.bindings({});
+  assert.equal(typeof bindings.sh.ping, "function");
+  assert.equal(Object.hasOwn(bindings, "api"), false);
+  assert.equal(Object.hasOwn(bindings, "mcp"), false);
   assert.equal(await f.ping(), "old");
   await f.registry.disable(remote);
   await f.registry.disable(old);

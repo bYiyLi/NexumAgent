@@ -1,5 +1,7 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,7 +22,7 @@ import { ResourceManager } from "../dist/extensions/resources.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ExecutionFixture } from "./helpers/runtime-fixture.mjs";
-import { WorkService } from "../dist/work/service.js";
+import { WorkService } from "./helpers/work-reference.mjs";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
@@ -232,6 +234,7 @@ export default async function createExtension(host){
       throw new AgentError("forbidden", "Wrong caller.");
   };
   const workService = new WorkService(store, scripts, policy, {
+      discover: discoverMaterials,
     reserve,
     home: null,
     agent: {
@@ -513,7 +516,7 @@ test("a real named-script lease and a handed-off business resource independently
   assert.equal((await f.disable(pkg.name)).status, "disabled");
 });
 
-test("accepted disable withdraws all registered before disposal while old open and reading snapshots remain whole", async (t) => {
+test("accepted disable withdraws all contributions and removes generated files even with an old Work", async (t) => {
   const f = await fixture(t),
     pkg = f.packages.alpha,
     control = pkg.control;
@@ -522,7 +525,6 @@ test("accepted disable withdraws all registered before disposal while old open a
     skill = old.agent.skills.find(
       (item) => item.skillId === `${pkg.namespace}/audit`,
     );
-  const oldSkill = readFileSync(skill.skillFile, "utf8");
   const pause = f.pauseSnapshot(),
     opening = f.open();
   await entered(pause.entered, opening);
@@ -542,28 +544,9 @@ test("accepted disable withdraws all registered before disposal while old open a
   pause.release.resolve();
   snapshot(await opening, pkg, true);
   await visible(f, pkg, false);
-  assert.equal(readFileSync(skill.skillFile, "utf8"), oldSkill);
-  assert.equal(
-    (
-      await f.workService.readMaterial(
-        caller,
-        old.contextId,
-        skill.skillId,
-        "references/check.txt",
-      )
-    ).bytes.toString(),
-    `${pkg.namespace} retained reference`,
-  );
-  assert.match(
-    (
-      await f.workService.readMaterial(
-        caller,
-        old.contextId,
-        `${pkg.namespace}/instructions`,
-      )
-    ).bytes.toString(),
-    /extension's rules/,
-  );
+  assert.equal(existsSync(skill.skillFile), false);
+  await assert.rejects(f.workService.readMaterial(caller, old.contextId,
+    skill.skillId, "references/check.txt"));
   control.disposeGate.resolve();
   await control.disposeDone.promise;
   assert.equal((await f.disable(pkg.name)).status, "disabled");

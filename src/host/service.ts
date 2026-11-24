@@ -16,24 +16,14 @@ import { HostRunLog } from "./run-log.js";
 import { encodeHostResult, type HostResultServices } from "./result.js";
 import type { HostBrandServices } from "./brands.js";
 import { HostPackagePolicy } from "./package-policy.js";
-import {
-  inspectConsoleAgent,
-  type ConsoleSourceSnapshot,
-} from "./console-inspect.js";
-import { inspectProfileInventory } from "./profile-inspection.js";
 import type { ScriptSource } from "../runtime/scripts.js";
-import { MaterialRPC } from "./material-rpc.js";
-import { MaterialWorkers } from "./material-workers.js";
 import { RunPreparation } from "./run-preparation.js";
 import { createRunServices } from "./run-services.js";
-import { prepareSourceMaterials } from "./source-materials.js";
 import {
   ExtensionWorkers,
   type ExtensionInvocation,
 } from "./extension-workers.js";
 import { parseExtensionApproval } from "./extension-runtime.js";
-import { platformNamespaces } from "../sdk/platform.js";
-import type { WorkOptions } from "../work/service.js";
 
 type Call = (
   method: string,
@@ -62,7 +52,7 @@ export class HostService {
     runId: string,
     signal: AbortSignal,
   ) => Promise<HostRunServices>;
-  #materials: MaterialRPC | MaterialWorkers;
+  #profile?: { root: string; agentId: string };
   #runner?: HostRunner;
   #loader?: ModuleLoader;
   #packages?: HostPackagePolicy;
@@ -76,10 +66,6 @@ export class HostService {
   ) => HostRunServices;
   #packageChange?: PackageChange;
   #configuring = false;
-  #profileAgentId?: string;
-  #profileRoot?: string;
-  #profileHome: string | null = null;
-  #previousCPU?: { total: number; time: bigint };
   #closed = false;
   #closeTask?: Promise<void>;
 
@@ -96,7 +82,6 @@ export class HostService {
     this.#call = call;
     this.#lifetime = lifetime;
     this.#runServices = runServices;
-    this.#materials = new MaterialRPC(instanceId);
   }
 
   async configure(value: unknown): Promise<object> {
@@ -154,8 +139,7 @@ export class HostService {
         };
         bootId = value.bootId;
       }
-      let agent: WorkOptions["agent"] | undefined;
-      let home: string | null = null;
+      let agent: Record<string, unknown> | undefined;
       if (value.agent !== undefined || value.home !== undefined) {
         requireCondition(
           extensionBinding &&
@@ -174,8 +158,7 @@ export class HostService {
         );
         agent = JSON.parse(
           canonicalJson(value.agent, 4096),
-        ) as WorkOptions["agent"];
-        home = value.home as string | null;
+        ) as Record<string, unknown>;
       }
       const packages = await HostPackagePolicy.open(root);
       try {
@@ -201,25 +184,13 @@ export class HostService {
             this.#call,
           );
         if (extensionBinding && bootId && agent) {
-          this.#materials.close();
-          this.#materials = new MaterialWorkers(
-            root,
-            extensionBinding,
-            bootId,
-            this.#instanceId,
-            home,
-            agent,
-            this.#call,
-          );
+          this.#profile = { root, agentId: extensionBinding.agentId };
           this.#preparation = new RunPreparation(
             root,
             extensionBinding.agentId,
             this.#instanceId,
           );
           const agentId = extensionBinding.agentId;
-          this.#profileAgentId = agentId;
-          this.#profileRoot = root;
-          this.#profileHome = home;
           this.#defaultRunServices = (runId, signal, context) =>
             createRunServices(
               root,
@@ -246,73 +217,6 @@ export class HostService {
     }
   }
 
-  async inspectProfile(value: unknown, signal: AbortSignal): Promise<object> {
-    requireCondition(
-      !this.#closed &&
-        this.#packages &&
-        this.#profileRoot &&
-        this.#profileAgentId &&
-        isPlainRecord(value) &&
-        value.instanceId === this.#instanceId &&
-        value.agentId === this.#profileAgentId &&
-        Array.isArray(value.scriptSources) &&
-        value.scriptSources.length <= 100,
-      "profile_unavailable",
-      "The authenticated Agent profile is unavailable.",
-    );
-    const sources: ScriptSource[] = [];
-    for (const raw of value.scriptSources) {
-      requireCondition(
-        isPlainRecord(raw) &&
-          (raw.type === "platform" || raw.type === "extension") &&
-          typeof raw.owner === "string" &&
-          typeof raw.namespace === "string" &&
-          typeof raw.version === "string" &&
-          typeof raw.directory === "string",
-        "invalid_profile_sources",
-        "The registered script source is invalid.",
-      );
-      sources.push(raw as unknown as ScriptSource);
-    }
-    signal.throwIfAborted();
-    const inventory = await inspectProfileInventory({
-      root: this.#profileRoot,
-      agentId: this.#profileAgentId,
-      home: this.#profileHome,
-      packages: this.#packages.policy.approvedPackages(),
-      scriptSources: sources,
-      signal,
-    });
-    const now = process.hrtime.bigint();
-    const cpu = process.cpuUsage();
-    const total = cpu.user + cpu.system;
-    const previous = this.#previousCPU;
-    this.#previousCPU = { total, time: now };
-    const elapsedMicros = previous ? Number(now - previous.time) / 1000 : 0;
-    const cpuPercent =
-      previous && elapsedMicros >= 100_000
-        ? Math.max(
-            0,
-            Math.min(100, ((total - previous.total) / elapsedMicros) * 100),
-          )
-        : undefined;
-    const observedAt = new Date().toISOString();
-    return {
-      observedAt,
-      resources: inventory.resources,
-      telemetry: {
-        ...(cpuPercent === undefined
-          ? {}
-          : { cpuPercent: Math.round(cpuPercent * 10) / 10 }),
-        memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-        scope: "node_host",
-        observedAt,
-      },
-      complete: inventory.complete,
-      ...(inventory.warnings.length ? { warnings: inventory.warnings } : {}),
-    };
-  }
-
   async ready(value: unknown, signal: AbortSignal): Promise<object> {
     requireCondition(
       !this.#closed &&
@@ -322,10 +226,10 @@ export class HostService {
         this.#runner &&
         this.#loader &&
         this.#packages &&
-        this.#materials instanceof MaterialWorkers &&
+        this.#profile &&
         this.#preparation &&
         this.#defaultRunServices &&
-        this.#extensions?.platformsReady(),
+        this.#extensions?.shellReady(),
       "host_services_unavailable",
       "The required Node services are not ready.",
     );
@@ -363,50 +267,12 @@ export class HostService {
       await execute.close();
     }
     requireCondition(
-      !this.#closed && !signal.aborted && this.#extensions?.platformsReady(),
+      !this.#closed && !signal.aborted && this.#extensions?.shellReady(),
       "host_services_unavailable",
       "The required Node services stopped during preparation.",
     );
     this.#executionReady = true;
     return { executionReady: true, resultEncoding: "stored-v1" };
-  }
-
-  async inspectConsole(value: unknown, signal: AbortSignal): Promise<object> {
-    requireCondition(
-      !this.#closed &&
-        this.#executionReady &&
-        this.#materials instanceof MaterialWorkers &&
-        this.#packages &&
-        isPlainRecord(value) &&
-        value.instanceId === this.#instanceId &&
-        value.agentId === this.#materials.binding.agentId &&
-        Array.isArray(value.sourceSnapshot) &&
-        value.sourceSnapshot.length <= 200 &&
-        (value.resourceId === undefined ||
-          (typeof value.resourceId === "string" &&
-            /^res_[0-9a-f]{64}$/.test(value.resourceId))) &&
-        (value.filePath === undefined ||
-          (typeof value.filePath === "string" &&
-            value.resourceId !== undefined &&
-            value.filePath.length > 0 &&
-            value.filePath.length <= 1024)),
-      "console_inspection_unavailable",
-      "The read-only Agent snapshot is unavailable.",
-    );
-    return inspectConsoleAgent({
-      agentId: this.#materials.binding.agentId,
-      work: this.#materials.root,
-      home: this.#materials.home,
-      sources: value.sourceSnapshot as ConsoleSourceSnapshot[],
-      approvedPackages: this.#packages.policy.approvedPackages(),
-      ...(typeof value.resourceId === "string"
-        ? { requestedResourceId: value.resourceId }
-        : {}),
-      ...(typeof value.filePath === "string"
-        ? { requestedFilePath: value.filePath }
-        : {}),
-      signal,
-    });
   }
 
   prepareRun(value: unknown, signal: AbortSignal): unknown {
@@ -705,23 +571,6 @@ export class HostService {
     return await finish;
   }
 
-  async prepareMaterials(
-    value: unknown,
-    signal: AbortSignal,
-  ): Promise<unknown> {
-    return await this.#materials.prepare(value, signal);
-  }
-
-  prepareSource(value: unknown, signal: AbortSignal): unknown {
-    requireCondition(
-      !this.#closed && !this.#lifetime.aborted && this.#runner,
-      "source_materials_unavailable",
-      "Source preparation requires the configured authenticated host.",
-    );
-    signal.throwIfAborted();
-    return prepareSourceMaterials(this.#instanceId, value);
-  }
-
   async activateExtension(
     value: unknown,
     signal: AbortSignal,
@@ -805,8 +654,7 @@ export class HostService {
         this.#extensions &&
         isPlainRecord(value) &&
         value.instanceId === this.#instanceId &&
-        typeof value.namespace === "string" &&
-        platformNamespaces.some((name) => name === value.namespace) &&
+        value.namespace === "sh" &&
         typeof value.preparationId === "string" &&
         Array.isArray(value.permissions) &&
         value.permissions.every(
@@ -817,7 +665,6 @@ export class HostService {
     );
     return await this.#extensions.activatePlatform(
       {
-        namespace: value.namespace,
         preparationId: value.preparationId,
         permissions: value.permissions as string[],
       },
@@ -836,6 +683,13 @@ export class HostService {
       "The host extension is unavailable.",
     );
     return { prepared: this.#extensions.prepared(value.sourceInstanceId) };
+  }
+
+  async stopProcess(value: unknown): Promise<{accepted: boolean}> {
+    requireCondition(this.#extensions && isPlainRecord(value) &&
+      value.instanceId===this.#instanceId && typeof value.sourceInstanceId==="string" &&
+      typeof value.processId==="string", "resource_unavailable", "The process controller is unavailable.");
+    return await this.#extensions.stopProcess(value.sourceInstanceId,value.processId);
   }
 
   async invokeExtension(value: unknown, signal: AbortSignal): Promise<unknown> {
@@ -894,17 +748,11 @@ export class HostService {
     return { status: this.#extensions.runStatus(value.runId) };
   }
 
-  async releaseMaterials(value: unknown): Promise<object> {
-    await this.#materials.release(value);
-    return {};
-  }
-
   close(): Promise<void> {
     if (this.#closeTask) return this.#closeTask;
     this.#closed = true;
     this.#closeTask = (async () => {
       const outcomes = await Promise.allSettled([
-        Promise.resolve().then(() => this.#materials.close()),
         Promise.resolve().then(() => this.#runner?.close()),
         Promise.resolve().then(() => this.#packages?.close()),
         Promise.resolve().then(() => this.#extensions?.close()),

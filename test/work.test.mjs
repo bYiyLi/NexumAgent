@@ -1,3 +1,4 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
@@ -18,7 +19,7 @@ import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
-import { WorkService } from "../dist/work/service.js";
+import { WorkService } from "./helpers/work-reference.mjs";
 import { selectorKey } from "../dist/work/discovery.js";
 import { canonicalJson } from "../dist/contracts/json.js";
 
@@ -80,6 +81,7 @@ function fixture(t) {
     reserveHook = async () => {};
   let projectName = "Original";
   const service = new WorkService(store, scripts, policy, {
+      discover: discoverMaterials,
     reserve: async () => {
       await reserveHook();
       return { release() {} };

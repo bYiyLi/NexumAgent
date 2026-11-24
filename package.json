@@ -36,6 +36,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "dts-bundle-generator": "10.0.0",
+    "ignore": "7.0.14",
     "typescript": "6.0.3"
   },
   "dependencies": {
@@ -43,7 +44,6 @@
     "ajv-draft-04": "1.0.0",
     "ajv-formats": "^3.0.1",
     "file-type": "22.3.0",
-    "ignore": "7.0.14",
     "image-size": "2.1.0",
     "koffi": "3.3.8",
     "music-metadata": "12.5.0",

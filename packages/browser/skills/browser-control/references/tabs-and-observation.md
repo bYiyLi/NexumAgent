@@ -29,7 +29,7 @@
 | 获取文本 DOM 快照 | `tab.playwright.domSnapshot()` | 用于语义定位，但不是完整浏览器原生 Playwright |
 | 获取简要状态 | `tab.snapshot()`、`tab.ax.get()` | 各自数据形状和长度以真实返回为准 |
 | 获取坐标下的元素详情 | `tab.playwright.elementInfo({x,y})` | **返回数组**；可能为空，先检查 `result.length` |
-| 取得截图 | `tab.screenshot({maxEdgePx:800})` | 图片字节若需交付用户，用 `output.image` |
+| 取得截图 | `tab.screenshot({maxEdgePx:800})` | 图片字节若需交付，直接 return 原生字节 |
 
 `elementInfo` 元素可能包含 `preview`、`role`、`tagName`、`boundingBox` 和 `selector`；`selector` 可能没有可用候选，不能据此猜测 CSS 选择器。不要把空数组的 `Object.keys` 误读为格式错误。
 

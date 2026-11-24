@@ -16,6 +16,8 @@ export interface ResourceStore {
   readonly root: string;
   readonly binding: Readonly<Binding>;
   readonly bootId: string;
+  /** Trusted controller lifecycle, never exposed by ResourceService. */
+  withLifetime?<T>(task: () => T): T;
   getRun(id: string): RunRecord;
   getResource(id: string): ResourceRecord;
   resourceHistory(id: string): ResourceHistoryRecord;
@@ -275,14 +277,14 @@ export class ResourceManager extends EventEmitter {
         [...this.#entries.values()].some(
           (entry) =>
             entry.owner === owner &&
-            this.store.getResource(entry.ref.id).lifetime !== "instance",
+            this.#lifetimeGet(entry.ref.id).lifetime !== "instance",
         ),
       stop: async (reason?: unknown) => {
         requireCondition(
           ![...this.#entries.values()].some(
             (entry) =>
               entry.owner === owner &&
-              this.store.getResource(entry.ref.id).lifetime !== "instance",
+              this.#lifetimeGet(entry.ref.id).lifetime !== "instance",
           ),
           "extension_busy",
           "Run-owned or independent business resources still use this extension instance.",
@@ -332,6 +334,21 @@ export class ResourceManager extends EventEmitter {
         "This call no longer belongs to a live run.",
       );
     }
+  }
+  #lifetime<T>(task: () => T): T {
+    return this.store.withLifetime ? this.store.withLifetime(task) : task();
+  }
+  #lifetimeGet(id: string): ResourceRecord {
+    return this.#lifetime(() => this.store.getResource(id));
+  }
+  #lifetimeHistory(id: string): ResourceHistoryRecord {
+    return this.#lifetime(() => this.store.resourceHistory(id));
+  }
+  #lifetimeDiagnostic(id: string, status: string, diagnostic: JsonObject): ResourceRecord {
+    return this.#lifetime(() => this.store.resourceDiagnostic(id, status, diagnostic));
+  }
+  #lifetimeClose(id: string, revision: number, diagnostic: JsonObject): ResourceRecord {
+    return this.#lifetime(() => this.store.closeResource(id, revision, diagnostic));
   }
   #record(owner: Owner, id: string): ResourceRecord {
     const row = this.store.getResource(id);
@@ -414,14 +431,14 @@ export class ResourceManager extends EventEmitter {
     authorize: (record: ResourceHistoryRecord) => void,
   ): ResourceSnapshot {
     resourceId(id);
-    const record = this.store.resourceHistory(id);
+    const record = this.#lifetimeHistory(id);
     requireCondition(
       record.bootId === this.store.bootId,
       "resource_unavailable",
       "Only resource facts from this actual Agent boot are available here.",
     );
     authorizeCall(() => authorize(record));
-    return this.#snapshot(null, this.store.resourceHistory(id));
+    return this.#snapshot(null, this.#lifetimeHistory(id));
   }
   /** A fresh Core authority may stop a registered resource after its original call ended. */
   async disposeResource(
@@ -430,7 +447,7 @@ export class ResourceManager extends EventEmitter {
     reason?: unknown,
   ): Promise<{ accepted: boolean; snapshot: ResourceSnapshot }> {
     resourceId(id);
-    let record = this.store.resourceHistory(id);
+    let record = this.#lifetimeHistory(id);
     requireCondition(
       record.bootId === this.store.bootId,
       "resource_unavailable",
@@ -448,7 +465,7 @@ export class ResourceManager extends EventEmitter {
       "This process has no actual registered resource controller.",
     );
     await this.#dispose(entry, reason);
-    record = this.store.resourceHistory(id);
+    record = this.#lifetimeHistory(id);
     authorizeCall(() => authorize(record));
     return { accepted: true, snapshot: this.#snapshot(null, record) };
   }
@@ -637,7 +654,7 @@ export class ResourceManager extends EventEmitter {
               "invalid_resource_report",
               "Resource facts must be a bounded data object.",
             );
-            const current = this.#record(owner, row.resourceId);
+            const current = this.#lifetime(() => this.#record(owner, row.resourceId));
             requireCondition(
               this.#owners.has(owner) &&
                 this.#entries.get(row.resourceId)?.ref === ref &&
@@ -646,7 +663,7 @@ export class ResourceManager extends EventEmitter {
               "The original live resource cannot publish new facts.",
             );
             try {
-              this.store.resourceDiagnostic(row.resourceId, current.status, {
+              this.#lifetimeDiagnostic(row.resourceId, current.status, {
                 ...current.diagnostic,
                 details: data,
               });
@@ -812,8 +829,8 @@ export class ResourceManager extends EventEmitter {
     );
   }
   #diagnostic(entry: Entry, code: string): void {
-    const row = this.store.getResource(entry.ref.id);
-    this.store.resourceDiagnostic(entry.ref.id, "unconfirmed", {
+    const row = this.#lifetimeGet(entry.ref.id);
+    this.#lifetimeDiagnostic(entry.ref.id, "unconfirmed", {
       ...row.diagnostic,
       code,
       ...(code === "dispose_failed" ? { disposeError: code } : {}),
@@ -822,8 +839,8 @@ export class ResourceManager extends EventEmitter {
     this.emit("change", entry.ref.id);
   }
   #closed(entry: Entry): void {
-    const row = this.store.getResource(entry.ref.id);
-    this.store.closeResource(row.resourceId, row.revision, {
+    const row = this.#lifetimeGet(entry.ref.id);
+    this.#lifetimeClose(row.resourceId, row.revision, {
       ...row.diagnostic,
       closedConfirmed: true,
     });
@@ -838,7 +855,7 @@ export class ResourceManager extends EventEmitter {
     this.emit("change", entry.ref.id);
   }
   async #dispose(entry: Entry, reason?: unknown): Promise<void> {
-    if (this.store.getResource(entry.ref.id).closedAt !== null) return;
+    if (this.#lifetimeGet(entry.ref.id).closedAt !== null) return;
     if (entry.cleanupAttempt) return await entry.cleanupAttempt;
     const cleanup = this.#attemptCleanup(entry, reason);
     entry.cleanupAttempt = cleanup;
@@ -854,10 +871,10 @@ export class ResourceManager extends EventEmitter {
         new AgentError("resource_stopping", "Resource cleanup was requested."),
     );
     if (!entry.attempt) {
-      this.store.resourceDiagnostic(
+      this.#lifetimeDiagnostic(
         entry.ref.id,
         "stopping",
-        this.store.getResource(entry.ref.id).diagnostic,
+        this.#lifetimeGet(entry.ref.id).diagnostic,
       );
       const attempt = Promise.resolve().then(() =>
         entry.ref.value.dispose(reason),
@@ -900,7 +917,7 @@ export class ResourceManager extends EventEmitter {
     }
   }
   #report(ids: readonly string[]): CleanupReport {
-    const rows = ids.map((id) => this.store.getResource(id));
+    const rows = ids.map((id) => this.#lifetimeGet(id));
     return {
       closed: rows.filter((row) => row.closedAt !== null).length,
       unconfirmed: rows

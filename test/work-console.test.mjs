@@ -1,3 +1,4 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import assert from "node:assert/strict";
 import {
   mkdirSync,
@@ -15,7 +16,7 @@ import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { WorkService } from "../dist/work/service.js";
+import { WorkService } from "./helpers/work-reference.mjs";
 import { selectorKey } from "../dist/work/discovery.js";
 
 const sessionRef = "1".repeat(64);
@@ -58,6 +59,7 @@ function fixture(t) {
     allowed = true,
     hook = () => {};
   const service = new WorkService(store, scripts, policy, {
+      discover: discoverMaterials,
     home,
     agent: { name: "fixture", version: "1", protocolVersion: "2" },
     authorize(caller, target) {

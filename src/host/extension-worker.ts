@@ -6,7 +6,6 @@ import { isAgentError, requireCondition } from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { Binding, JsonObject } from "../contracts/types.js";
-import { MaterialRetention } from "../runtime/material-retention.js";
 import { ModuleLoader } from "../runtime/modules.js";
 import type { InputReply, RunServices } from "../runtime/invocation.js";
 import { parseExtensionApproval, restoreExtension } from "./extension-runtime.js";
@@ -35,9 +34,9 @@ async function start(): Promise<void> {
   const activeInput = new AsyncLocalStorage<{ runId: string; operationId: string; arguments: unknown[]; binaryInputs: unknown[] }>();
   const store = registryStore(port, root, binding, workerData.bootId, owner.scope);
   const packages = await HostPackagePolicy.open(root);
-  const reserve = async (bytes: number) => {
+  const reserve = async (bytes: number, resourceId?: string) => {
     const scope = owner.current();
-    const reservation = callHostSync(port, "storage.reserve", { ...scope, bytes });
+    const reservation = callHostSync(port, "storage.reserve", { ...scope, bytes, ...(resourceId ? {resourceId} : {}) });
     requireCondition(typeof reservation === "string" && reservation.length > 0,
       "storage_reservation_failed", "Go did not confirm a storage reservation.");
     let released = false;
@@ -48,16 +47,6 @@ async function start(): Promise<void> {
     } });
   };
   let runtime: Awaited<ReturnType<typeof restoreExtension>> | Awaited<ReturnType<typeof restoreManagedShell>> | undefined;
-  const retention = new MaterialRetention(root, {
-    reserve,
-    liveSnapshotRefs: () => {
-      const refs = callHostSync(port, "materials.liveSnapshotRefs", { instanceId });
-      requireCondition(Array.isArray(refs) && refs.every((ref) => typeof ref === "string"),
-        "material_retention_unavailable", "Go did not return the live work references.");
-      return new Set(refs);
-    },
-    publishedDirectories: () => runtime?.activeDirectories() ?? new Set(),
-  });
   try {
     const modules = await ModuleLoader.create(root, `registry_${randomUUID()}`, packages.policy);
     const registryOptions = {
@@ -80,10 +69,10 @@ async function start(): Promise<void> {
         storage: { reserve },
       };
     const common = { root, store, allocateOwner: owner.allocateOwner,
-      releaseOwner: owner.releaseOwner, reserve, retention,
+      releaseOwner: owner.releaseOwner, reserve,
       registry: registryOptions };
-    runtime = workerData.packageName.startsWith("platform:")
-      ? await restoreManagedShell({ ...common, namespace: workerData.packageName.slice(9) as import("../sdk/platform.js").PlatformNamespace })
+    runtime = workerData.packageName === "platform:sh"
+      ? await restoreManagedShell({...common, reserveProcessOutput: (resourceId, bytes) => reserve(bytes, resourceId)})
       : await restoreExtension({ ...common, packageName: workerData.packageName, modules, policy: packages.policy,
         approval: parseExtensionApproval(workerData.approval) });
     parent.postMessage({ type: "ready", info: runtime.info, scope: owner.current(), methods: runtime.methods,
@@ -172,6 +161,27 @@ async function start(): Promise<void> {
               code: isAgentError(cause) ? cause.code : "resource_cleanup_unconfirmed" });
           }
         });
+        return;
+      }
+      if (value.type === "process.stop") {
+        const id=value.id, processId=value.processId;
+        if (workerData.packageName !== "platform:sh" || typeof id !== "string" ||
+            typeof processId !== "string" || !/^res_[0-9a-f]{32}$/.test(processId)) {
+          parent.postMessage({type:"process.stopped",id,code:"resource_unavailable"});
+          return;
+        }
+        void (async () => {
+          try {
+            const result=await runtime!.resources.disposeResource(processId, record => {
+              requireCondition(record.resourceId===processId && record.kind==="sh.process" &&
+                record.source.instanceId===owner.scope().sourceInstanceId,
+                "resource_unavailable", "The actual controller does not own this process.");
+            });
+            parent.postMessage({type:"process.stopped",id,accepted:result.accepted});
+          } catch(cause) {
+            parent.postMessage({type:"process.stopped",id,code:isAgentError(cause)?cause.code:"process_stop_unconfirmed"});
+          }
+        })();
         return;
       }
       if (value.type === "invoke") {
@@ -268,7 +278,6 @@ async function start(): Promise<void> {
           const result = await runtime!.close();
           requireCondition(result.status === "disabled", "extension_cleanup_unconfirmed",
             "The extension instance did not confirm cleanup.");
-          await retention.stop();
           await packages.close();
           parent.postMessage({ type: "closed", result });
           parent.close();
@@ -279,7 +288,6 @@ async function start(): Promise<void> {
       })();
     });
   } catch (cause) {
-    await retention.stop().catch(() => {});
     await packages.close().catch(() => {});
     throw cause;
   }

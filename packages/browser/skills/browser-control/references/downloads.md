@@ -18,7 +18,7 @@ if (!Number.isSafeInteger(id)) return { status: "unconfirmed",
 const file = records.find((item) => item.id === id && item.state === "complete");
 if (!file) return { status: "unconfirmed",
   reason: "指定下载记录不存在或尚未完成，不能交付文件" };
-return output.file(file.filename, { name: "report.pdf" });
+return { type: "resource_link", path: file.filename };
 ```
 
 列表中路径可能位于浏览器配置的任意下载目录；实际读取仍使用当前 Agent 的路径授权和大小规则。记录由浏览器提供，文件可能已移动或删除，`exists` 也可能滞后。浏览器记录的数字 `id` 与 `tab.downloads()` 的页面下载 ID 不同，不可用于 `tab.saveDownload`。列表不返回来源 URL，避免将下载内容或凭据放进模型上下文。
@@ -27,7 +27,7 @@ return output.file(file.filename, { name: "report.pdf" });
 
 `tab.downloads()` 对 `data:` 下载省略 URL，因为 URL 本身包含文件内容；完整内容通过文件或资源交付。
 
-下载结果需要交给 AI 时，可以直接复用平台的资源包装：
+下载结果需要交给 AI 时，返回实际已确认文件的受控资源引用：
 
 ```javascript
 const pending = tab.playwright.waitForDownload();
@@ -46,10 +46,10 @@ try {
 }
 if (file === null) return { status: "unconfirmed",
   reason: "下载尚无可读取的实际文件路径，未交付文件" };
-return output.file(file, { name: "报表.pdf" });
+return { type: "resource_link", path: file };
 ```
 
-平台在返回结果时将实际文件固定并登记到当前 Agent 的 `work/resources`，提供标准 MCP 资源引用；Host 再通过 `resources/read` 获取内容。读取浏览器下载目录和保存平台资源仍受当前授权与大小限制约束。
+结果层按当前路径授权和大小限制固定实际文件并返回标准 MCP 资源引用。只有收到真实资源引用才能认定文件可供 Host 读取；需要文件正文时使用 Host 支持的资源读取，或按当前 transfer Skill 建立下载通道。通道就绪不代表传输完成。
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。
 

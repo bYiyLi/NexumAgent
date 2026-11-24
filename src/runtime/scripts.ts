@@ -214,12 +214,9 @@ export class ScriptCatalog {
         source.type === "extension" &&
         (targetNamespace === undefined || source.namespace === targetNamespace)
       ) {
-        const modules = realpathSync.native(
-          path.join(this.work, "node_modules"),
-        );
+        const modules = realpathSync.native(path.join(this.work, "node_modules"));
         requireCondition(
-          contains(this.work, modules) &&
-            contains(modules, realpathSync.native(source.directory)),
+          contains(this.work, modules) && contains(modules, realpathSync.native(source.directory)),
           "script_source_invalid",
           "Extension scripts must come from the registered Agent npm environment.",
         );

@@ -6,7 +6,7 @@ import type { Binding, ContributionOrigin } from "../contracts/types.js";
 import type { ResourceStore } from "../extensions/resources.js";
 import { callHostSync } from "./sync-rpc.js";
 
-type StoreMethod = Exclude<keyof ResourceStore, "root" | "binding" | "bootId">;
+type StoreMethod = Exclude<keyof ResourceStore, "root" | "binding" | "bootId" | "withLifetime">;
 
 /** Populated by trusted Registry lifecycle code from Go-issued identities. */
 export interface RegistryStoreScope {
@@ -67,6 +67,7 @@ export function registryStore(port: MessagePort, root: string, binding: Binding,
     typeof binding.cloudEnvironment === "string" && binding.cloudEnvironment.length > 0 && typeof scope === "function",
   "invalid_registry_binding", "The Registry Worker needs the actual profile and Agent binding.");
   const fixedBinding = Object.freeze({ ...binding });
+  let lifetime = 0;
   const request = <K extends StoreMethod>(method: K, args: Parameters<ResourceStore[K]>): ReturnType<ResourceStore[K]> => {
     const fixed = [...args];
     while (fixed.length && fixed.at(-1) === undefined) fixed.pop();
@@ -75,15 +76,21 @@ export function registryStore(port: MessagePort, root: string, binding: Binding,
       typeof current.sourceInstanceId === "string" && current.sourceInstanceId.length > 0 &&
       (current.runId === undefined || (typeof current.runId === "string" && current.runId.length > 0)),
     "invalid_registry_scope", "The Registry operation lacks its Go-issued source identity.");
-    return callHostSync(port, `resource.${method}`, {
+        if (lifetime) requireCondition(["getResource", "resourceHistory", "resourceDiagnostic", "closeResource"].includes(method),
+      "invalid_resource_scope", "Lifetime calls are restricted to an exact controller record.");
+    return callHostSync(port, lifetime ? `resource.lifetime.${method}` : `resource.${method}`, {
       instanceId: current.instanceId, sourceInstanceId: current.sourceInstanceId,
-      ...(current.runId ? { runId: current.runId } : {}), args: fixed,
+      ...(!lifetime && current.runId ? { runId: current.runId } : {}), args: fixed,
     }) as ReturnType<ResourceStore[K]>;
   };
   return Object.freeze<ResourceStore>({
     root,
     binding: fixedBinding,
     bootId,
+    withLifetime<T>(task: () => T): T {
+      lifetime++;
+      try { return task(); } finally { lifetime--; }
+    },
     getRun: (...args) => request("getRun", args),
     getResource: (...args) => request("getResource", args),
     resourceHistory: (...args) => request("resourceHistory", args),

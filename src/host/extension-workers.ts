@@ -4,8 +4,7 @@ import { AgentError, isAgentError, requireCondition } from "../contracts/errors.
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { Binding, JsonObject } from "../contracts/types.js";
 import type { ScriptSource } from "../runtime/scripts.js";
-import type { PublishedMaterials } from "../work/service.js";
-import { platformNamespaces } from "../sdk/platform.js";
+import type { PublishedMaterials } from "../work/published.js";
 import { serveSyncRPC } from "./sync-rpc.js";
 import { maxFrameBytes } from "./peer.js";
 import type { ExtensionApproval } from "./extension-runtime.js";
@@ -55,24 +54,22 @@ export class ExtensionWorkers {
   constructor(readonly root: string, readonly binding: Binding, readonly bootId: string,
     readonly instanceId: string, readonly call: Call) {}
 
-  platformsReady(): boolean {
-    return !this.#closed && platformNamespaces.every((name) => {
-      const entry = this.#entries.get(`platform:${name}`);
-      return entry?.isPublished === true && entry.worker.threadId !== -1;
-    });
+  shellReady(): boolean {
+    const entry = this.#entries.get("platform:sh");
+    return !this.#closed && entry?.isPublished === true && entry.worker.threadId !== -1;
   }
 
   async activate(input: ExtensionActivation, signal: AbortSignal): Promise<JsonObject> {
     return await this.#activate(input, signal, false);
   }
 
-  async activatePlatform(input: { namespace?: string; preparationId: string; permissions: readonly string[] }, signal: AbortSignal): Promise<JsonObject> {
-    return await this.#activate({ ...input, packageName: `platform:${input.namespace ?? "sh"}` }, signal, true);
+  async activatePlatform(input: { preparationId: string; permissions: readonly string[] }, signal: AbortSignal): Promise<JsonObject> {
+    return await this.#activate({ ...input, packageName: "platform:sh" }, signal, true);
   }
 
   async #activate(input: Omit<ExtensionActivation, "approval"> & { approval?: ExtensionApproval }, signal: AbortSignal, platform: boolean): Promise<JsonObject> {
     requireCondition(!this.#closed && !this.#packageTransaction && typeof input.packageName === "string" &&
-      (platform ? platformNamespaces.some((name) => input.packageName === `platform:${name}`) : /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(input.packageName)) &&
+      (platform ? input.packageName === "platform:sh" : /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(input.packageName)) &&
       typeof input.preparationId === "string" && /^preparation_[0-9a-f]{32}$/.test(input.preparationId) &&
       Array.isArray(input.permissions) && input.permissions.length <= 256 &&
       input.permissions.every((permission) => typeof permission === "string" && permission.length <= 256) &&
@@ -230,6 +227,21 @@ export class ExtensionWorkers {
       signal.removeEventListener("abort", cancel);
       this.#invocations.delete(id);
     }
+  }
+
+  async stopProcess(sourceInstanceId: string, processId: string): Promise<{accepted: boolean}> {
+    const entry = this.#entries.get("platform:sh");
+    requireCondition(entry && entry.scope.sourceInstanceId === sourceInstanceId &&
+      entry.worker.threadId !== -1 && /^res_[0-9a-f]{32}$/.test(processId),
+      "resource_unavailable", "The exact managed process controller is unavailable.");
+    const id = randomUUID();
+    const response = this.#message(entry.worker, AbortSignal.timeout(30_000), (message) =>
+      isPlainRecord(message) && message.type === "process.stopped" && message.id === id);
+    entry.worker.postMessage({type:"process.stop",id,processId});
+    const result = await response;
+    requireCondition(isPlainRecord(result) && typeof result.accepted === "boolean" && result.code === undefined,
+      "process_stop_unconfirmed", "The managed process stop was not confirmed.");
+    return {accepted: result.accepted};
   }
 
   async #packageRequest(worker: Worker, type: "packages.begin" | "packages.finish", transactionId: string): Promise<void> {

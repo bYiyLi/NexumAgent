@@ -298,7 +298,8 @@ function snapshot(resource: ResourceSnapshot): ProcessSnapshot {
 }
 
 /** Nine process operations registered through the same public extension contract as npm SDKs. */
-export const shExtension: ExtensionFactory = (host) => {
+export function createShExtension(reserveOutput?: (resourceId: string, bytes: number) => Promise<{release(): void}>): ExtensionFactory {
+ return (host) => {
   const paths = host.context.paths;
   requireCondition(
     isPlainRecord(paths) &&
@@ -396,13 +397,18 @@ export const shExtension: ExtensionFactory = (host) => {
     // Admission belongs to this current caller; the ticket's release remains
     // valid after explicit background handoff and the creating call settles.
     const storage = call.storage ?? host.storage;
+    let processId: string | undefined;
     const managed = new ManagedProcess(
       agentRoot,
       input,
       mode,
-      storage ? { reserve: (bytes) => storage.reserve(bytes) } : {},
+      reserveOutput ? {reserve: (bytes) => {
+        requireCondition(processId, "invalid_process_start", "A process must be registered before reserving its output.");
+        return reserveOutput(processId, bytes);
+      }} : storage ? { reserve: (bytes) => storage.reserve(bytes) } : {},
     );
     const ref = await call.resources.register({ kind, value: managed });
+    processId = ref.id;
     let handedOff = false;
     try {
       managed.bind(ref);
@@ -712,3 +718,6 @@ export const shExtension: ExtensionFactory = (host) => {
     },
   };
 };
+}
+
+export const shExtension = createShExtension();

@@ -118,6 +118,30 @@ test("native bytes automatically produce real MCP media; native File produces an
   const businessLink = await f.encoder.encode({ type: "resource_link", path: "irrelevant", subject: "business" }, f.scope());
   assert.deepEqual(savedJSON(businessLink.data), { type: "resource_link", path: "irrelevant", subject: "business" });
 });
+test("published Browser observation and download examples deliver native results without a legacy global", async (t) => {
+  const f = await fixture(t);
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const refs = new URL("../packages/browser/skills/browser-control/references/", import.meta.url);
+  const example = (name) => {
+    const text = readFileSync(new URL(name, refs), "utf8");
+    const source = text.match(/```javascript\n([\s\S]*?)\n```/);
+    assert.ok(source, "missing example " + name);
+    return source[1];
+  };
+  const image = await new AsyncFunction("tab", example("observation.md"))({
+    screenshot: async () => Uint8Array.from(png()),
+  });
+  const encoded = await f.encoder.encode(image, f.scope());
+  assert.equal(encoded.content[0].type, "image");
+  f.source("downloaded-report.pdf", Buffer.from("%PDF-1.7\nfixture document"));
+  const download = new AsyncFunction("selected", "context", example("downloads.md"));
+  const selected = { downloads: { list: async () => [{id: 7, state: "complete", filename: "downloaded-report.pdf"}] }};
+  const value = await download(selected, {input:{downloadRecordId:7}});
+  const result = await f.encoder.encode(value, f.scope());
+  assert.equal(result.content[0].type, "resource_link");
+  assert.equal(result.content[0].resource.name, "downloaded-report.pdf");
+  assert.equal((await download(selected, {input:{downloadRecordId:8}})).status, "unconfirmed");
+});
 async function fixture(t, options = {}) {
   const root = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-encoder-")),

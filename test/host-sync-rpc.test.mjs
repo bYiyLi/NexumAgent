@@ -153,6 +153,11 @@ test("the existing ResourceManager uses the Go store port for its complete insta
         lifetime: "instance", status: "registered", closedAt: null, diagnostic: {}, revision: 1 };
       return row;
     }
+    if (method.startsWith("resource.lifetime.")) {
+      assert.equal(params.runId, undefined);
+      assert.equal(params.args[0], row.resourceId);
+      method = method.replace("resource.lifetime.", "resource.");
+    }
     if (method === "resource.getResource") return row;
     if (method === "resource.resourceDiagnostic") {
       row = { ...row, status: params.args[1], diagnostic: params.args[2], revision: row.revision + 1 };
@@ -196,7 +201,7 @@ test("the existing ResourceManager uses the Go store port for its complete insta
     assert.equal(row.status, "closed");
     assert.deepEqual(row.diagnostic.details, { state: "ready" });
     assert.ok(seen.includes("resource.registerResource"));
-    assert.ok(seen.includes("resource.closeResource"));
+    assert.ok(seen.includes("resource.lifetime.closeResource"));
     assert.ok(seen.includes("resource.unregisterInstance"));
   } finally {
     stop();

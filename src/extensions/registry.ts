@@ -81,16 +81,11 @@ export interface ExtensionSource {
   origin: ContributionOrigin;
   permissions: readonly string[];
   config?: JsonObject;
-  /** Trusted platform adapters may expose e.g. mcp.github.tools without renaming the source tool. */
-  bindingPath?: readonly string[];
-  /** Optional direct script binding for an approved adapter source. */
-  scriptName?: string;
 }
 export interface ExtensionHandle {
   readonly id: string;
   readonly origin: ContributionOrigin;
   readonly methods: readonly JsonObject[];
-  readonly scriptName?: string;
 }
 /** Core-only proof of one prepared successor; never passed to an extension host. */
 export interface ExtensionReplacement {
@@ -156,7 +151,6 @@ interface Method {
 interface Entry {
   source: ExtensionSource;
   key: string;
-  root: readonly string[];
   factory: ExtensionFactory;
   handle: ExtensionHandle;
   controller: AbortController;
@@ -333,25 +327,9 @@ const segment = (value: unknown): value is string =>
 const same = (left: readonly string[], right: readonly string[]) =>
   left.length === right.length &&
   left.every((value, index) => value === right[index]);
-const prefix = (left: readonly string[], right: readonly string[]) =>
-  left.length <= right.length &&
-  left.every(
-    (value, index) => value.toLowerCase() === right[index]!.toLowerCase(),
-  );
 
 /** Core factory/method lifecycle. Package parsing and five-contribution preparation own publication readiness. */
 export class ExtensionRegistry {
-  canBindScriptName(name: string, previous?: ExtensionHandle): boolean {
-    try {
-      extensionNamespace(name);
-    } catch {
-      return false;
-    }
-    return ![...this.#entries].some((entry) =>
-      entry.handle !== previous &&
-      (entry.root[0] === name || entry.source.scriptName === name),
-    );
-  }
   readonly resources: ResourceManager;
   #options: RegistryOptions;
   #entries = new Set<Entry>();
@@ -450,8 +428,6 @@ export class ExtensionRegistry {
           "runtime",
           "state",
           "maintenance",
-          "mcp",
-          "api",
         ].includes(source.origin.namespace),
         "invalid_namespace",
         "A platform source must use its registered namespace.",
@@ -467,26 +443,12 @@ export class ExtensionRegistry {
       "invalid_extension_permissions",
       "The extension must declare known permissions explicitly.",
     );
-    const root = source.bindingPath ?? [source.origin.namespace];
     requireCondition(
-      root.length > 0 &&
-        root.length <= 8 &&
-        root.every(segment) &&
-        root[0] === source.origin.namespace &&
-        (source.origin.type === "platform" || root.length === 1),
+      !Object.hasOwn(source, "bindingPath") &&
+        !Object.hasOwn(source, "scriptName"),
       "invalid_namespace",
-      "The SDK path must stay inside its actual source namespace.",
+      "An SDK uses its registered namespace directly; alternate bindings are not supported.",
     );
-    if (source.scriptName !== undefined) {
-      requireCondition(
-        source.origin.type === "platform" &&
-          root.length === 2 &&
-          (root[0] === "mcp" || root[0] === "api"),
-        "invalid_namespace",
-        "Only approved MCP and API sources may provide a direct binding.",
-      );
-      extensionNamespace(source.scriptName);
-    }
     this.#authorize({
       origin: source.origin,
       action: "prepare",
@@ -495,9 +457,7 @@ export class ExtensionRegistry {
     const key = digest(source);
     if (replaces)
       requireCondition(
-        same(replaces.root, root) &&
-          replaces.source.scriptName === source.scriptName &&
-          replaces.source.origin.type === source.origin.type &&
+        replaces.source.origin.type === source.origin.type &&
           replaces.source.origin.owner === source.origin.owner &&
           replaces.source.origin.namespace === source.origin.namespace,
         "extension_replacement_mismatch",
@@ -506,10 +466,8 @@ export class ExtensionRegistry {
     const previous = [...this.#entries].find(
       (entry) =>
         entry !== replaces &&
-        (prefix(entry.root, root) || prefix(root, entry.root) ||
-          (source.scriptName !== undefined &&
-            (entry.source.scriptName === source.scriptName || entry.root[0] === source.scriptName)) ||
-          (entry.source.scriptName !== undefined && entry.source.scriptName === root[0])),
+        entry.source.origin.namespace!.toLowerCase() ===
+          source.origin.namespace!.toLowerCase(),
     );
     if (previous) {
       requireCondition(
@@ -519,7 +477,7 @@ export class ExtensionRegistry {
             previous.state,
           ),
         "namespace_conflict",
-        "A source already owns this namespace or a parent/child SDK path.",
+        "A source already owns this namespace.",
       );
       if (previous.state === "failed") {
         if (!previous.recovery) {
@@ -552,14 +510,12 @@ export class ExtensionRegistry {
       id: newId("extension"),
       origin: source.origin,
       methods: [] as JsonObject[],
-      ...(source.scriptName === undefined ? {} : { scriptName: source.scriptName }),
     };
     const preparation = Promise.withResolvers<ExtensionHandle>();
     void preparation.promise.catch(() => {});
     const entry: Entry = {
       source,
       key,
-      root: Object.freeze([...root]),
       factory,
       controller,
       state: "preparing",
@@ -1423,15 +1379,8 @@ export class ExtensionRegistry {
     };
     for (const entry of this.#entries)
       if (entry.state === "published")
-        for (const method of entry.methods) {
-          add([...entry.root, ...method.path], entry, method);
-          if (entry.source.scriptName) {
-            const exposed = entry.root[0] === "mcp" && method.path[0] === "tools"
-              ? [`tool_${method.path[1]}`]
-              : method.path;
-            add([entry.source.scriptName, ...exposed], entry, method);
-          }
-        }
+        for (const method of entry.methods)
+          add([entry.source.origin.namespace!, ...method.path], entry, method);
     const freeze = (node: Record<string, unknown>): void => {
       for (const value of Object.values(node))
         if (value && typeof value === "object")

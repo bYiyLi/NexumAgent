@@ -19,7 +19,6 @@ import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
-import { transferExtension } from "../dist/sdk/transfer.js";
 
 const caller = { principalId: "user", clientId: "client", host: "test-host" };
 const names = ["createUpload", "createDownload", "get", "list", "cancel"];
@@ -167,48 +166,6 @@ function result(view) {
 }
 const callScript = (name) =>
   `try{return {value:await demo.${name}({})};}catch(e){return {code:e.code};}`;
-
-test("built-in transfer schema prepares strictly and requires exactly one download source", async (t) => {
-  const calls = [];
-  const now = "2026-11-24T00:00:00.000Z";
-  const expiresAt = "2026-11-24T00:05:00.000Z";
-  const offer = {
-    transferId, direction: "download", status: "pending",
-    runId: null, contextId: null, projectId: null, maxBytes: 3,
-    progress: { bytesTransferred: 0, totalBytes: 3 },
-    createdAt: now, expiresAt, startedAt: null, deadlineAt: null, finishedAt: null,
-    error: null, resource: { uri: "nexum://agents/agent/resources/example", name: "out.bin", mimeType: "application/octet-stream", size: 3 },
-    request: { method: "GET", url: "https://fixture.invalid/download", headers: {}, expiresAt },
-  };
-  const f = await fixture(t, { transfer: () => ({
-    ...provider(calls),
-    async createDownload(input) {
-      calls.push({ name: "createDownload", input });
-      return structuredClone(offer);
-    },
-  }) });
-  const handle = await f.registry.prepare(source, transferExtension);
-  f.registry.publish(handle);
-  for (const input of [
-    { path: "/tmp/out.bin" },
-    { uri: "nexum://agents/agent/resources/example" },
-  ]) {
-    const view = await f.start(
-      `return await demo.createDownload(${JSON.stringify(input)});`,
-    );
-    assert.deepEqual(result(view), offer);
-  }
-  for (const input of [
-    {},
-    { path: "/tmp/out.bin", uri: "nexum://agents/agent/resources/example" },
-  ]) {
-    const view = await f.start(
-      `try { await demo.createDownload(${JSON.stringify(input)}); return false; } catch { return true; }`,
-    );
-    assert.equal(result(view), true);
-  }
-  assert.equal(calls.length, 2);
-});
 
 test("configured transfer provider receives all five argument lists and the current invocation binding", async (t) => {
   const calls = [],

@@ -7,7 +7,7 @@ import { ExtensionMaterials } from "../extensions/materials.js";
 import { ExtensionPackageLoader } from "../extensions/package-loader.js";
 import { ExtensionRegistry, type RegistryOptions } from "../extensions/registry.js";
 import { ResourceManager, type ResourceStore } from "../extensions/resources.js";
-import type { ManagedReserve, MaterialRetention } from "../runtime/material-retention.js";
+import type { ManagedReserve } from "../runtime/current-materials.js";
 import type { ModuleLoader, ModulePolicy } from "../runtime/modules.js";
 import { ExtensionServices } from "../services/extensions.js";
 
@@ -22,7 +22,6 @@ export interface ExtensionRuntimeOptions {
   allocateOwner: (origin: import("../contracts/types.js").ContributionOrigin) => string;
   releaseOwner: (id: string) => void;
   reserve: ManagedReserve;
-  retention: MaterialRetention;
   approval?: ExtensionApproval;
 }
 
@@ -48,7 +47,7 @@ export async function restoreExtension(options: ExtensionRuntimeOptions) {
   const work = root;
   requireCondition(root === options.root && options.store.root === root &&
     options.modules.work === work && realpathSync.native(work) === work &&
-    options.retention.root === root && typeof options.reserve === "function",
+    typeof options.reserve === "function",
   "extension_profile_mismatch", "Extension recovery requires one established Agent profile.");
   const saved = parseExtensionApproval(options.approval);
   const resources = new ResourceManager(options.store, {
@@ -58,7 +57,6 @@ export async function restoreExtension(options: ExtensionRuntimeOptions) {
   const registry = new ExtensionRegistry(resources, options.registry);
   const materials = new ExtensionMaterials(work, {
     reserve: options.reserve,
-    materialRetention: options.retention,
   });
   const packages = new ExtensionPackageLoader(registry, options.modules, {
     policy: options.policy,

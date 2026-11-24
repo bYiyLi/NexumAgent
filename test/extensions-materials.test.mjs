@@ -1,3 +1,4 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -26,7 +27,7 @@ import { ExtensionMaterials } from "../dist/extensions/materials.js";
 import { inspectExtensionPackage } from "../dist/extensions/packages.js";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { WorkService } from "../dist/work/service.js";
+import { WorkService } from "./helpers/work-reference.mjs";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 
 function write(filename, value) {
@@ -254,36 +255,30 @@ test("preparation keeps authored trees, fixed source hashes and complete referen
     skills: [],
   });
   assert.deepEqual(catalog.scriptSources(), []);
-  assert.equal(existsSync(skill.skillFile), true);
+  assert.equal(existsSync(skill.skillFile), false);
 });
 
-test("identical snapshots are reused without rewriting and same-version changes retain old coordinates", async (t) => {
-  const f = await fixture(t),
-    catalog = new ExtensionMaterials(f.work);
+test("one stable directory is replaced only with a complete current extension", async (t) => {
+  const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
   const first = await catalog.prepare(f.descriptor, f.handle());
   const timestamp = statSync(first.materials.skills[0].skillFile).mtimeMs;
   const repeat = await catalog.prepare(f.descriptor, f.handle());
   assert.equal(repeat.directory, first.directory);
   assert.equal(statSync(first.materials.skills[0].skillFile).mtimeMs, timestamp);
-  write(path.join(f.source, "skills-source/audit/references/manual/guide.md"), "# New guide\n");
-  const updated = await f.inspect(),
-    second = await catalog.prepare(updated, f.handle(updated, "handle-two"));
-  assert.notEqual(second.directory, first.directory);
-  assert.match(
-    readFileSync(path.join(first.directory, "skills/audit/references/manual/guide.md"), "utf8"),
-    /Read carefully/,
-  );
-  assert.match(
-    readFileSync(path.join(second.directory, "skills/audit/references/manual/guide.md"), "utf8"),
-    /New guide/,
-  );
   catalog.publish(first);
   const before = catalog.published();
-  assert.throws(() => catalog.publish(second), { code: "namespace_conflict" });
+  write(path.join(f.source, "skills-source/audit/references/manual/guide.md"), "# New guide\n");
+  const updated = await f.inspect();
+  await assert.rejects(catalog.prepare(updated, f.handle(updated, "handle-two")), { code: "namespace_conflict" });
   assert.equal(catalog.published(), before);
+  assert.match(readFileSync(path.join(first.directory, "skills/audit/references/manual/guide.md"), "utf8"), /Read carefully/);
   catalog.withdraw(first.handleId);
+  assert.equal(existsSync(first.directory), false);
+  const second = await catalog.prepare(updated, f.handle(updated, "handle-two"));
+  assert.equal(second.directory, first.directory);
   catalog.publish(second);
-  assert.equal(catalog.published().skills[0].skillFile, second.materials.skills[0].skillFile);
+  assert.match(readFileSync(path.join(first.directory, "skills/audit/references/manual/guide.md"), "utf8"), /New guide/);
+  assert.deepEqual(readdirSync(path.dirname(first.directory)), [path.basename(first.directory)]);
 });
 
 test("missing Skill references fail publication while the prior complete Skill and independent scripts remain readable", async (t) => {
@@ -294,7 +289,7 @@ test("missing Skill references fail publication while the prior complete Skill a
   write(path.join(f.source, "skills-source/audit/SKILL.md"),
     "---\nname: audit\ndescription: Review guidance when an audit is needed.\n---\nRead [required contract](references/missing.md) before calling the SDK.\n");
   const descriptor = await f.inspect();
-  await assert.rejects(materials.prepare(descriptor, f.handle(descriptor, "changed")), {
+  await assert.rejects(materials.prepare(descriptor, f.handle(descriptor)), {
     code: "extension_material_link_unavailable",
   });
   assert.equal(materials.published(), published);
@@ -324,10 +319,10 @@ test("source changes, symlink escapes and retained snapshot corruption fail with
   });
   rmSync(filename);
   write(filename, "changed");
-  const current = await f.inspect(),
-    another = await catalog.prepare(current, f.handle(current, "two"));
-  write(another.materials.skills[0].skillFile, "tampered retained revision");
-  await assert.rejects(catalog.prepare(current, f.handle(current, "two")), {
+  // Repairing a disposable cache is allowed on a subsequent fresh source
+  // preparation, but tampering cannot silently change an active publication.
+  write(prepared.materials.skills[0].skillFile, "tampered current material");
+  await assert.rejects(catalog.prepare(await f.inspect(), f.handle(await f.inspect())), {
     code: "extension_material_conflict",
   });
   assert.equal(catalog.published(), before);
@@ -424,7 +419,7 @@ test("safe version encoding and real Core platform descriptors use the same mate
     prepared = await catalog.prepare(platform, f.handle(platform));
   assert.match(
     path.relative(f.work, prepared.directory),
-    /extensions[/\\]sh[/\\]h-/,
+    /extensions[/\\]sh$/,
   );
   assert.equal(prepared.scripts.type, "platform");
   catalog.publish(prepared);
@@ -476,7 +471,7 @@ test("local file links map to fixed declared copies and Windows device namespace
     );
   assert.match(
     path.relative(f.work, prepared.directory),
-    /extensions[/\\]x-617578[/\\]/,
+    /extensions[/\\]x-617578$/,
   );
   assert.match(
     readFileSync(path.join(prepared.directory, "skills/audit/references/manual/README.md"), "utf8"),
@@ -493,7 +488,7 @@ test("an injected stage symlink is rejected before any nested directory is creat
   );
   const descriptor = await f.inspect(),
     catalog = new ExtensionMaterials(f.work);
-  const parent = path.join(f.work, "cache/materials/extensions/guidance/1.0.0"),
+  const parent = path.join(f.work, "cache/materials/extensions"),
     outside = path.join(f.root, "outside");
   mkdirSync(parent, { recursive: true });
   mkdirSync(outside);
@@ -546,7 +541,7 @@ test("unmatched Markdown brackets have bounded linear preparation work", async (
   );
 });
 
-test("published guidance integrates with WorkService and old work retains fixed Skill resources after withdrawal", async (t) => {
+test("published guidance is removed on withdrawal even when old Work still exists", async (t) => {
   const f = await fixture(t),
     catalog = new ExtensionMaterials(f.work),
     prepared = await catalog.prepare(f.descriptor, f.handle());
@@ -558,6 +553,7 @@ test("published guidance integrates with WorkService and old work retains fixed 
   f.cleanup(() => store.close());
   const scripts = new ScriptCatalog(f.work, "a", () => catalog.scriptSources());
   const service = new WorkService(store, scripts, f.policy, {
+      discover: discoverMaterials,
     home: null,
     agent: { name: "test", version: "1", protocolVersion: "1" },
     authorize() {},
@@ -581,13 +577,9 @@ test("published guidance integrates with WorkService and old work retains fixed 
     true,
   );
   catalog.withdraw(prepared.handleId);
-  const read = await service.readMaterial(
-    caller,
-    opened.contextId,
-    "guidance/audit",
-    "references/check.txt",
-  );
-  assert.equal(read.bytes.toString(), "real reference bytes");
+  assert.equal(existsSync(prepared.materials.skills[0].skillFile), false);
+  await assert.rejects(service.readMaterial(caller, opened.contextId,
+    "guidance/audit", "references/check.txt"));
   const fresh = await service.open(caller, { agentId: "a" });
   assert.equal(
     fresh.agent.skills.some((item) => item.skillId === "guidance/audit"),

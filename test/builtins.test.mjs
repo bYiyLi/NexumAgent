@@ -16,8 +16,6 @@ import { ExecutionFixture, callerKey } from "./helpers/runtime-fixture.mjs";
 import { ResourceManager } from "../dist/extensions/resources.js";
 import { ExtensionRegistry } from "../dist/extensions/registry.js";
 import { StateFixture } from "./helpers/runtime-fixture.mjs";
-import { runtimeExtension } from "../dist/sdk/runtime.js";
-import { stateExtension } from "../dist/sdk/state.js";
 import { AgentError } from "../dist/contracts/errors.js";
 import { canonicalJson } from "../dist/contracts/json.js";
 
@@ -57,31 +55,6 @@ async function fixture(t, user) {
     state: (scope) => states.bind(scope),
   });
   const handles = [];
-  for (const [namespace, factory, declared] of [
-    ["runtime", runtimeExtension, ["runtime.input"]],
-    [
-      "state",
-      stateExtension,
-      permissions.filter((p) => p.startsWith("state.")),
-    ],
-  ]) {
-    const handle = await registry.prepare(
-      {
-        apiVersion: 1,
-        origin: {
-          type: "platform",
-          owner: "nexum",
-          namespace,
-          version: "1",
-          revision: namespace,
-        },
-        permissions: declared,
-      },
-      factory,
-    );
-    registry.publish(handle);
-    handles.push(handle);
-  }
   const loader = await ModuleLoader.create(work, store.bootId, {
     builtins: () => [],
     approvedPackages: () => new Map(),
@@ -145,44 +118,6 @@ async function fixture(t, user) {
   };
 }
 
-test("runtime.sleep is cancelled promptly without falsely completing a long wait", async (t) => {
-  const f = await fixture(t);
-  const initial = await f.start('await runtime.sleep(45000);return "must-not-complete";', {
-    waitMs: 0,
-    timeoutMs: 60000,
-  });
-  let observed;
-  const startupDeadline = Date.now() + 7000;
-  do {
-    observed = await f.engine.observe(caller, initial.run.runId, 250);
-    if (
-      observed.run.status === "running" &&
-      f.store.operationsForRun(initial.run.runId).some(
-        (item) => item.method === "sleep" && item.status === "running",
-      )
-    ) break;
-    assert.equal(observed.run.endedAt, null,
-      "The native sleep Run must enter its operation before cancellation.");
-  } while (Date.now() < startupDeadline);
-  assert.equal(observed.run.status, "running");
-  assert.ok(
-    f.store.operationsForRun(initial.run.runId).some(
-      (item) => item.method === "sleep" && item.status === "running",
-    ),
-    "The native sleep operation must actually start before cancellation.",
-  );
-  const at = Date.now();
-  assert.equal(f.engine.cancel(caller, initial.run.runId).run.status, "cancelling");
-  observed = await f.engine.observe(caller, initial.run.runId, 2000);
-  assert.equal(observed.run.status, "cancelled");
-  assert.equal(observed.result, null);
-  assert.equal(observed.run.error.code, "run_cancelled");
-  const sleepOperation = f.store.operationsForRun(initial.run.runId)
-    .find((item) => item.method === "sleep");
-  assert.equal(sleepOperation?.error?.code, "operation_aborted");
-  assert.ok(Date.now() - at < 2000);
-});
-
 test("a native timer keeps cancelling until the JavaScript Promise really settles", async (t) => {
   const f = await fixture(t);
   const initial = await f.start(
@@ -208,100 +143,6 @@ test("a native timer keeps cancelling until the JavaScript Promise really settle
   assert.equal(finished.run.status, "cancelled");
   assert.equal(finished.result, null);
   assert.equal(finished.run.error.code, "run_cancelled");
-});
-
-test("state SDK uses the public invocation service and keeps snapshots and returned data independent", async (t) => {
-  const f = await fixture(t);
-  let result = await f.start(
-    `const first=await state.agent.set("count",{n:1},{expectedVersion:null});first.value.n=99;const current=await state.agent.get("count");return {current,snapshot:context.agent};`,
-  );
-  assert.equal(result.run.status, "succeeded");
-  assert.equal(result.result.data.current.value.n, 1);
-  assert.deepEqual(result.result.data.snapshot, { snapshot: "old" });
-  assert.equal(f.store.operationsForRun(result.run.runId).length, 2);
-  assert(
-    f.policies.some(
-      (p) =>
-        p.target?.type === "agent-state" &&
-        p.target.value === "count" &&
-        p.target.access === "write",
-    ),
-  );
-  result = await f.start(
-    `const old=await state.agent.get("count");await state.agent.delete("count",{expectedVersion:old.version});const gone=await state.agent.get("count");const current=await state.agent.set("count",null,{expectedVersion:null});let conflict;try{await state.agent.set("count",2,{expectedVersion:old.version});}catch(e){conflict=e.code;}return {gone,current,conflict};`,
-  );
-  assert.equal(result.run.status, "succeeded");
-  assert.equal(result.result.data.gone, null);
-  assert.equal(result.result.data.current.version, 3);
-  assert.equal(result.result.data.current.value, null);
-  assert.equal(result.result.data.conflict, "state_version_conflict");
-});
-
-test("shared writes require explicit versions and concurrent stale writers cannot silently overwrite", async (t) => {
-  const f = await fixture(t);
-  assert.equal(
-    (await f.start('await state.agent.set("race",0,{expectedVersion:null});'))
-      .run.status,
-    "succeeded",
-  );
-  const script =
-    'try{return await state.agent.set("race",context.input,{expectedVersion:1});}catch(e){return {error:e.code};}';
-  const results = await Promise.all([
-    f.start(script, { input: 1 }),
-    f.start(script, { input: 2 }),
-  ]);
-  assert.equal(results.filter((r) => r.result.data.version === 2).length, 1);
-  assert.equal(
-    results.filter((r) => r.result.data.error === "state_version_conflict")
-      .length,
-    1,
-  );
-  const bad = await f.start(
-    'await state.agent.delete("race",{expectedVersion:null});',
-  );
-  assert.equal(bad.run.status, "failed");
-  assert.equal(bad.run.error.code, "invalid_arguments");
-  assert.equal(f.store.getState("race").version, 2);
-});
-
-test("user state receives verified identity and never substitutes local state when Cloud is unavailable", async (t) => {
-  const calls = [];
-  const f = await fixture(t, {
-    async get(identity, key, signal) {
-      calls.push({ identity, key, signal });
-      return { value: "remote", version: 31, updatedAt: 1 };
-    },
-    async set() {
-      throw new AgentError(
-        "cloud_unavailable",
-        "The authority is unavailable.",
-      );
-    },
-    async delete() {
-      throw new Error("unexpected");
-    },
-  });
-  f.store.setState("same", "local", null);
-  let result = await f.start('return await state.user.get("same");', {
-    input: { principalId: "fake" },
-  });
-  assert.equal(result.result.data.value, "remote");
-  assert.deepEqual(calls[0].identity, {
-    principalId: caller.principalId,
-    clientId: caller.clientId,
-    agentId: "agent",
-    cloudEnvironment: "cloud-test",
-  });
-  result = await f.start(
-    'try{await state.user.set("same",3,{expectedVersion:31});}catch(e){return e.code;}',
-  );
-  assert.equal(result.result.data, "cloud_unavailable");
-  assert.equal(f.store.getState("same").value, "local");
-  const offline = await fixture(t);
-  result = await offline.start(
-    'try{return await state.user.get("same");}catch(e){return e.code;}',
-  );
-  assert.equal(result.result.data, "user_state_unavailable");
 });
 
 test("external extensions receive the same state service while settled facades and private returns remain unusable", async (t) => {
@@ -367,40 +208,11 @@ test("external extensions receive the same state service while settled facades a
   assert.equal(f.store.getState("undeclared"), null);
   f.revoke();
   const denied = await f.start(
-    'return await state.agent.set("no",1,{expectedVersion:null});',
+    'return await shared.read();',
   );
   f.restore();
   assert.equal(denied.run.status, "failed");
-  assert.equal(f.store.getState("no"), null);
-});
-
-test("a value at the configured byte budget remains writable and readable with its revision envelope", async (t) => {
-  const f = await fixture(t);
-  const result = await f.start(
-    'const value="x".repeat(65534);const saved=await state.agent.set("large",value,{expectedVersion:null});const read=await state.agent.get("large");return {length:read.value.length,version:saved.version};',
-  );
-  assert.equal(result.run.status, "succeeded");
-  assert.deepEqual(result.result.data, { length: 65534, version: 1 });
-});
-
-test("runtime input is a registered operation resuming the same execution stack", async (t) => {
-  const f = await fixture(t);
-  const waiting = await f.start(
-    'const local=7;const reply=await runtime.requestInput({message:"提供值",inputSchema:{type:"integer"}});return {sum:local+reply.input};',
-    { waitMs: 3000 },
-  );
-  assert.equal(waiting.run.status, "waiting_input");
-  assert.equal(waiting.operations.items[0].namespace, "runtime");
-  const resumed = await f.engine.input(caller, {
-    agentId: "agent",
-    runId: waiting.run.runId,
-    waitId: waiting.wait.waitId,
-    input: 5,
-    waitMs: 3000,
-  });
-  assert.equal(resumed.run.runId, waiting.run.runId);
-  assert.equal(resumed.run.status, "succeeded");
-  assert.equal(resumed.result.data.sum, 12);
+  assert.deepEqual(f.store.getState("k").value, { ok: true });
 });
 
 test("ordinary script returns work without the removed output namespace", async (t) => {

@@ -11,9 +11,9 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import {
   boundedFile,
-  discoverMaterials,
   enabledMaterials,
   parseSkillFrontmatter,
   selectorKey,

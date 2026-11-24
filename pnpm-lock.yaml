@@ -20,9 +20,6 @@ importers:
       file-type:
         specifier: 22.3.0
         version: 22.3.0
-      ignore:
-        specifier: 7.0.14
-        version: 7.0.14
       image-size:
         specifier: 2.1.0
         version: 2.1.0
@@ -45,6 +42,9 @@ importers:
       dts-bundle-generator:
         specifier: 10.0.0
         version: 10.0.0
+      ignore:
+        specifier: 7.0.14
+        version: 7.0.14
       typescript:
         specifier: 6.0.3
         version: 6.0.3

@@ -1,3 +1,4 @@
+import { discoverMaterials } from "./helpers/discovery-reference.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
@@ -15,7 +16,7 @@ import {
 import { methodSkill, writeMethodSkill } from "../dist/work/method-skills.js";
 import { FixtureStore } from "./helpers/runtime-fixture.mjs";
 import { ScriptCatalog } from "../dist/runtime/scripts.js";
-import { WorkService } from "../dist/work/service.js";
+import { WorkService } from "./helpers/work-reference.mjs";
 import { ExecutionFixture } from "./helpers/runtime-fixture.mjs";
 import { ModuleLoader } from "../dist/runtime/modules.js";
 import { ResourceManager } from "../dist/extensions/resources.js";
@@ -287,6 +288,7 @@ test("Skill-private scripts stay readable but never enter independent script dis
     ),
   );
   const service = new WorkService(store, scripts, policy, {
+      discover: discoverMaterials,
     home: f.root,
     agent: { name: "test", version: "1", protocolVersion: "2" },
     authorize() {},

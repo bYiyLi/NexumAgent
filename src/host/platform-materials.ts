@@ -1,31 +1,30 @@
 import path from "node:path";
-import { realpathSync } from "node:fs";
+import { realpathSync, mkdtempSync } from "node:fs";
 import { requireCondition } from "../contracts/errors.js";
 import type { ExtensionHandle } from "../extensions/registry.js";
-import type { ManagedReserve, MaterialRetention } from "../runtime/material-retention.js";
+import { installMaterialDirectory, removeMaterialDirectory, type ManagedReserve } from "../runtime/current-materials.js";
+import { privateDirectory } from "../runtime/paths.js";
 import { platformSkill, type PlatformNamespace } from "../sdk/platform.js";
 import { writeMethodSkill } from "../work/method-skills.js";
 
-/**
- * Prepare an immutable Skill from a real platform Registry handle. The
- * caller retains the hold until Go has atomically published the matching
- * method table and material, or has confirmed that publication did not occur.
- */
+/** Build the complete shell Skill before replacing the stable directory.
+ * Keep rollback only until Go confirms the catalog publication. */
 export async function preparePlatformMaterials(
   work: string,
   namespace: PlatformNamespace,
   handle: ExtensionHandle,
-  retention: MaterialRetention,
   reserve: ManagedReserve,
 ) {
   requireCondition(path.isAbsolute(work) && realpathSync.native(work) === work &&
-    retention.root === work && typeof reserve === "function",
+    typeof reserve === "function",
   "invalid_platform_source", "Platform materials require their established profile and storage authority.");
   const { name, generated } = platformSkill(namespace, handle);
-  const directory = path.join(work, "cache", "materials", "platform", namespace, generated.revision);
-  const hold = await retention.hold("skill", directory);
+  const parent = privateDirectory(work, "cache", "materials", "platform");
+  const directory = path.join(parent, namespace);
+  const temporary = mkdtempSync(path.join(parent, ".prepare-"));
   try {
-    await writeMethodSkill(work, directory, generated.files, reserve);
+    await writeMethodSkill(work, temporary, generated.files, reserve);
+    const replacement = installMaterialDirectory(directory, temporary);
     let settled = false;
     return {
       material: {
@@ -36,23 +35,20 @@ export async function preparePlatformMaterials(
         scope: { type: "agent" as const, root: work },
         origin: handle.origin,
       },
-      revision: generated.revision,
-      /** Once Go confirms publication, mark it live before releasing the hold. */
       confirmPublished() {
         requireCondition(!settled, "invalid_platform_source", "The platform material preparation is already settled.");
-        retention.setPublished(`platform:${namespace}`, directory);
-        hold.release();
+        replacement.commit();
         settled = true;
       },
-      /** Only use when Go confirms publication did not take place. */
       discard() {
         requireCondition(!settled, "invalid_platform_source", "The platform material preparation is already settled.");
-        hold.release();
+        replacement.rollback();
         settled = true;
       },
+      remove() { replacement.remove(); },
     };
   } catch (cause) {
-    hold.release();
+    removeMaterialDirectory(temporary);
     throw cause;
   }
 }

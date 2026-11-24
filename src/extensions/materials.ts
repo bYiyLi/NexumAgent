@@ -1,13 +1,11 @@
 import { createHash } from "node:crypto";
-import { rmSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import {
   lstat,
   mkdir,
   mkdtemp,
   opendir,
   realpath,
-  rename,
-  rm,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -18,13 +16,10 @@ import type { ContributionOrigin } from "../contracts/types.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { contains, privateDirectory } from "../runtime/paths.js";
 import type { ScriptSource } from "../runtime/scripts.js";
-import type {
-  ManagedReserve,
-  MaterialRetention,
-} from "../runtime/material-retention.js";
+import { installMaterialDirectory, removeMaterialDirectory, type ManagedReserve } from "../runtime/current-materials.js";
 import { boundedFile } from "../work/discovery.js";
 import { methodSkill } from "../work/method-skills.js";
-import type { PublishedMaterials } from "../work/service.js";
+import type { PublishedMaterials } from "../work/published.js";
 import type { ExtensionHandle } from "./registry.js";
 import type {
   ExtensionPackageDescriptor,
@@ -123,8 +118,7 @@ export class ExtensionMaterials {
   });
   #sources: readonly ScriptSource[] = Object.freeze([]);
   #reserve?: ManagedReserve;
-  #retention?: MaterialRetention;
-  #holds = new Map<string, { release(): void }>();
+  #replacements = new Map<string, ReturnType<typeof installMaterialDirectory>>();
   #directories = new Map<string, string>();
   #stages = new Set<string>();
   constructor(
@@ -133,7 +127,6 @@ export class ExtensionMaterials {
       maxFiles?: number;
       maxBytes?: number;
       reserve?: ManagedReserve;
-      materialRetention?: MaterialRetention;
     } = {},
   ) {
     // No directory creation or package evaluation during construction.
@@ -141,7 +134,6 @@ export class ExtensionMaterials {
     this.#maxFiles = limits.maxFiles ?? 10000;
     this.#maxBytes = limits.maxBytes ?? 256 * 1024 * 1024;
     this.#reserve = limits.reserve;
-    this.#retention = limits.materialRetention;
     requireCondition(
       path.isAbsolute(work) &&
         [this.#maxFiles, this.#maxBytes].every(
@@ -254,10 +246,13 @@ export class ExtensionMaterials {
       "cache",
       "materials",
       "extensions",
-      segment(origin.namespace!),
-      segment(descriptor.version),
     );
-    const directory = path.join(parent, snapshotRevision);
+    const directory = path.join(parent, segment(origin.namespace!));
+    const active = this.#active.get(portable(origin.namespace!));
+    requireCondition(!active || active.handleId === handle.id,
+      "namespace_conflict", "Withdraw the previous extension before replacing its current materials.");
+    requireCondition(![...this.#directories].some(([id, dir]) => id !== handle.id && dir === directory),
+      "namespace_conflict", "Another prepared instance owns this material directory.");
     const plan: FilePlan[] = [];
     const mappings = new Map<string, string>();
     const targets = new Set<string>();
@@ -525,17 +520,10 @@ export class ExtensionMaterials {
       "extension_path_escape",
       "A reading parent must not redirect before staging.",
     );
-    const hold = await this.#retention?.hold("skill", directory);
-    let transferred = false;
-    let temporary: string;
-    try {
-      temporary = await mkdtemp(path.join(parent, ".prepare-"));
-    } catch (cause) {
-      hold?.release();
-      throw cause;
-    }
+    const temporary = await mkdtemp(path.join(parent, ".prepare-"));
     this.#stages.add(temporary);
-    let unprotect: (() => void) | undefined;
+    let replacement: ReturnType<typeof installMaterialDirectory> | undefined;
+    let transferred = false;
     let totalBytes = 0;
     const saved: SavedFile[] = [];
     const save = async (
@@ -608,7 +596,6 @@ export class ExtensionMaterials {
       });
     };
     try {
-      unprotect = this.#retention?.protectPending(temporary);
       let instructionContent: string | undefined;
       for (const item of plan) {
         let bytes = await readSource(item.source, item.boundary);
@@ -669,10 +656,10 @@ export class ExtensionMaterials {
       } finally {
         reservation?.release();
       }
-      const verifyExisting = async () => {
+      const verifyTree = async (target: string) => {
         requireCondition(
-          (await lstat(directory)).isDirectory() &&
-            (await realpath(directory)) === directory,
+          (await lstat(target)).isDirectory() &&
+            (await realpath(target)) === target,
           "extension_material_conflict",
           "An existing reading revision cannot redirect or be replaced.",
         );
@@ -705,38 +692,38 @@ export class ExtensionMaterials {
             requireCondition(
               !info.isSymbolicLink(),
               "extension_material_conflict",
-              "A retained reading snapshot contains a symbolic link.",
+              "A generated reading tree contains a symbolic link.",
             );
             if (info.isDirectory()) {
               requireCondition(
-                expectedDirectories.has(relative(directory, filename)),
+                expectedDirectories.has(relative(target, filename)),
                 "extension_material_conflict",
-                "A retained reading revision has an unexpected directory.",
+                "A generated reading tree has an unexpected directory.",
               );
               await walk(filename);
             } else {
-              const record = expected.get(relative(directory, filename));
+              const record = expected.get(relative(target, filename));
               requireCondition(
                 info.isFile() && record,
                 "extension_material_conflict",
-                "A retained reading revision has unexpected files.",
+                "A generated reading tree has unexpected files.",
               );
               const read = await boundedFile(filename, record.size, signal);
               requireCondition(
                 read.bytes.length === record.size &&
                   read.revision === record.revision,
                 "extension_material_conflict",
-                "A retained reading revision was modified; old coordinates cannot be overwritten.",
+                "A generated reading tree has changed since preparation.",
               );
               found++;
             }
           }
         };
-        await walk(directory);
+        await walk(target);
         requireCondition(
           found === expected.size,
           "extension_material_conflict",
-          "A retained reading revision is incomplete.",
+          "A generated reading tree is incomplete.",
         );
       };
       requireCondition(
@@ -745,25 +732,20 @@ export class ExtensionMaterials {
         "extension_path_escape",
         "A reading directory redirected before its immutable publication.",
       );
-      const existing = await lstat(directory).catch(
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return null;
-          throw error;
-        },
-      );
-      if (existing) await verifyExisting();
-      else {
-        try {
-          await rename(temporary, directory);
-        } catch (error) {
-          if (
-            !["EEXIST", "ENOTEMPTY"].includes(
-              (error as NodeJS.ErrnoException).code ?? "",
-            )
-          )
-            throw error;
-          await verifyExisting();
-        }
+      await verifyTree(temporary);
+      signal?.throwIfAborted();
+      // Recheck namespace ownership after asynchronous staging.
+      const current = this.#active.get(portable(origin.namespace!));
+      requireCondition(!current || current.handleId === handle.id, "namespace_conflict",
+        "Another active extension owns this material namespace.");
+      requireCondition(![...this.#directories].some(([id, dir]) => id !== handle.id && dir === directory),
+        "namespace_conflict", "Another prepared instance owns this material directory.");
+      if (this.#directories.has(handle.id)) {
+        // Same verified preparation is idempotent; a changed handle must
+        // withdraw before replacement rather than mutate an active instance.
+        await verifyTree(directory);
+      } else {
+        replacement = installMaterialDirectory(directory, temporary);
       }
       const readingOrigin = { ...origin };
       const prepared: PreparedExtensionMaterials = freeze({
@@ -824,33 +806,16 @@ export class ExtensionMaterials {
       });
       canonicalJson(prepared.materials, 4 * 1024 * 1024);
       this.#prepared.add(prepared);
-      this.#holds.get(handle.id)?.release();
-      if (hold) this.#holds.set(handle.id, hold);
+      if (replacement) this.#replacements.set(handle.id, replacement);
       this.#directories.set(handle.id, directory);
       transferred = true;
       return prepared;
     } finally {
       try {
-        const info = await lstat(temporary).catch(
-          (cause: NodeJS.ErrnoException) => {
-            if (cause.code === "ENOENT") return null;
-            throw cause;
-          },
-        );
-        if (info) {
-          requireCondition(
-            info.isDirectory() &&
-              !info.isSymbolicLink() &&
-              (await realpath(temporary)) === temporary,
-            "extension_path_escape",
-            "A failed reading stage cannot redirect its cleanup.",
-          );
-          rmSync(temporary, { recursive: true, force: true });
-        }
+        if (!transferred && replacement) replacement.rollback();
+        if (lstatSync(temporary, { throwIfNoEntry: false })) removeMaterialDirectory(temporary);
       } finally {
-        unprotect?.();
         this.#stages.delete(temporary);
-        if (!transferred) hold?.release();
       }
     }
   }
@@ -886,11 +851,10 @@ export class ExtensionMaterials {
       .concat(prepared)
       .sort((a, b) => compare(a.origin.namespace!, b.origin.namespace!));
     const index = this.#index(items);
-    this.#retention?.setPublished(
-      `extension:${prepared.origin.namespace}`,
-      prepared.directory,
-    );
-    // All validation precedes this synchronous commit; no user callback or await follows it.
+    const replacement = this.#replacements.get(prepared.handleId);
+    requireCondition(replacement && this.#directories.get(prepared.handleId) === prepared.directory,
+      "extension_material_source_mismatch", "The current prepared material tree is unavailable.");
+    if (!previous) replacement.commit();
     this.#active.set(key, prepared);
     this.#published = index.published;
     this.#sources = index.sources;
@@ -899,26 +863,27 @@ export class ExtensionMaterials {
     const previous = [...this.#active.values()].find(
       (item) => item.handleId === handleId,
     );
+    const replacement = this.#replacements.get(handleId);
     if (!previous) {
-      this.#holds.get(handleId)?.release();
-      this.#holds.delete(handleId);
+      if (replacement) replacement.rollback();
+      this.#replacements.delete(handleId);
       this.#directories.delete(handleId);
       return;
     }
     const index = this.#index(
       [...this.#active.values()].filter((item) => item !== previous),
     );
-    this.#retention?.setPublished(
-      `extension:${previous.origin.namespace}`,
-      null,
-    );
+    // Withdraw visibility first. A cleanup failure is retryable and does not
+    // restore the withdrawn SDK. The next boot removes abandoned cache trees.
     this.#active.delete(portable(previous.origin.namespace!));
     this.#published = index.published;
     this.#sources = index.sources;
-    this.#holds.get(handleId)?.release();
-    this.#holds.delete(handleId);
+    try { replacement?.remove(); }
+    catch { console.warn("Generated material cleanup failed: material_cleanup_failed"); }
+    this.#replacements.delete(handleId);
     this.#directories.delete(handleId);
   }
+
   published(): PublishedMaterials {
     return this.#published;
   }
