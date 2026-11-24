@@ -267,6 +267,7 @@ async function fixture(
       encoder.encode(value, resultScope(services)),
     bindings: (scope) => ({
       ...registry.bindings(scope),
+      output: createOutput(scope.context.pwd, () => scope.assertCurrent()),
       nativeCommandReady: () => commandStarted.promise,
     }),
     resources,
@@ -624,7 +625,7 @@ async function fixture(
       contextId: context.contextId,
       script,
       ...options,
-      input: { ...options.input, fixtureBrowserId },
+      input: options.scriptName ? options.input ?? {} : { ...options.input, fixtureBrowserId },
     });
     runs.add(value.run.runId);
     if (options.waitMs === 0) return value;
@@ -767,6 +768,23 @@ test("the installed Browser package publishes its own Skill, instructions and sc
   assert.equal(f.counts.removed, 0);
   assert.equal(f.tabs.length, 2);
 });
+test("registered Browser scripts deliver real discovery data and the original JPEG image", async (t) => {
+  const f = await fixture(t);
+  const discovery = await f.start(undefined, { scriptName: "browser/discover.js", input: {} });
+  assert.equal(discovery.run.status, "succeeded", JSON.stringify(discovery.run.error));
+  const browserId = f.plugin.state().browserId;
+  assert.equal(discovery.result.data[0].browser.id, browserId);
+  assert.ok(discovery.result.data[0].tabs.some(tab => tab.id === "1"));
+  const screenshot = await f.start(undefined, { scriptName: "browser/screenshot.js", input: { browserId, tabId: "1" } });
+  assert.equal(screenshot.run.status, "succeeded", JSON.stringify(screenshot.run.error));
+  const rendered = await f.encoder.render(screenshot.result, f.resultScope(), screenshot.run);
+  const image = rendered.content.find(value => value.type === "image");
+  assert.ok(image);
+  assert.equal(image.mimeType, "image/jpeg");
+  assert.deepEqual(Buffer.from(image.data, "base64"), Buffer.from(jpeg, "base64"));
+  assert.equal(f.attached.size, 0);
+});
+
 test("normal return waits for actual remote detach and busy disable preserves all published contributions", async (t) => {
   const f = await fixture(t, { gateDetach: true });
   let result = await f.start(

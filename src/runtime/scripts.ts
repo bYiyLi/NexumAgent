@@ -494,7 +494,7 @@ export class ScriptCatalog {
         `## ${entry.scriptName}\n\n${entry.scriptDesc}\n\n适用：${entry.scriptWhenUse}\n\n来源：${entry.origin.owner}；版本：${entry.origin.version ?? "本地"}；修订：${entry.origin.revision}\n\n源文件：${entry.path}\n\n\`\`\`json\n${JSON.stringify(entry.scriptInputSchema, null, 2)}\n\`\`\`${entry.scriptOutputSchema !== undefined ? "\n\n输出 Schema：\n\n```json\n" + JSON.stringify(entry.scriptOutputSchema, null, 2) + "\n```" : ""}`,
     );
     const text =
-      "# 可用脚本\n\n选择任务匹配的公开 scriptName，按下方输入 Schema 构造 input 并用 agent.run.start 执行。若没有合适脚本，用内联 script；需要创建或修改可复用脚本时选择 script-authoring。\n\n" +
+      "# 可用脚本\n\n选择任务匹配的公开 scriptName，按下方输入 Schema 构造 input 并用 agent.run.start 执行。若没有合适脚本，用内联 script；需要创建或修改可复用脚本时，先核对实际 Skill 清单中的 script-authoring；若完整清单仍无该项，报告资料缺失，不猜测调用约定。\n\n" +
       blocks.join("\n\n") +
       (warnings.length
         ? "\n\n发现提示：\n" +

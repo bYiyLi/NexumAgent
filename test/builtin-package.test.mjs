@@ -20,6 +20,7 @@ test("Node Host archive bundles the versioned builtin and recovery scripts", (t)
   writeFileSync(path.join(agent, "dist", "host", "main.js"), "");
   writeFileSync(path.join(agent, "contracts", "readme.txt"), "");
   cpSync(path.join(repository, "agent", "builtin"), path.join(agent, "builtin"), { recursive: true });
+  cpSync(path.join(repository, "agent", "skills"), path.join(agent, "skills"), { recursive: true });
   for (const pkg of ["node-pty", "koffi"]) {
     const target = path.join(agent, "node_modules", pkg);
     mkdirSync(target, { recursive: true });
@@ -40,4 +41,6 @@ test("Node Host archive bundles the versioned builtin and recovery scripts", (t)
   assert.ok(existsSync(archive));
   const entries = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" });
   for (const name of scripts) assert.ok(entries.includes("/builtin/" + name), "not packaged: " + name);
+  assert.ok(entries.includes("/skills/script-authoring/SKILL.md"));
+  assert.ok(entries.includes("/skills/script-authoring/references/authoring.md"));
 });

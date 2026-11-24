@@ -180,7 +180,8 @@ test("platform shell Worker publishes through Go before executing a managed proc
   await workers.activatePlatform({ preparationId: preparation,
     permissions: ["path", "resource", "sh.execute", "sh.read", "sh.control", "storage.reserve"] },
   new AbortController().signal);
-  assert.equal(workers.published().skills.length, 1);
+  assert.equal(workers.published().skills.length, 2);
+  assert.ok(workers.published().skills.some((skill) => skill.skillId === "nexum/script-authoring"));
   const exec = proposal.methods.find((method) => method.operation === "exec");
   const result = await workers.invoke({ sourceInstanceId: source, runId: run.runId,
     methodId: exec.methodId, operationId: `operation_${"d".repeat(32)}`,

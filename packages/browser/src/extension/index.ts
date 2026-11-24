@@ -1,3 +1,4 @@
+import { browserResultContract } from "./result-contracts.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Marked } from "marked";
@@ -449,7 +450,8 @@ const createExtension: ExtensionFactory = async (host) => {
       if (!implemented && !localRoutes.has(route.path)) continue;
       const pathName = route.path;
       methods[pathName] = {
-        description: `Nexum browser: ${pathName}`,
+        ...browserResultContract(pathName),
+        callStyle: "input-object",
         path: pathName.split("."),
         permissions:
           [

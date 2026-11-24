@@ -48,7 +48,31 @@
     "contract": "agent.close",
     "valid": true,
     "value": {
+      "contextId": "ctx",
+      "scope": "context"
+    }
+  },
+  {
+    "contract": "agent.close",
+    "valid": true,
+    "value": {
+      "contextId": "ctx",
+      "scope": "project"
+    }
+  },
+  {
+    "contract": "agent.close",
+    "valid": false,
+    "value": {
       "contextId": "ctx"
+    }
+  },
+  {
+    "contract": "agent.close",
+    "valid": false,
+    "value": {
+      "contextId": "ctx",
+      "scope": "all"
     }
   },
   {

@@ -33,6 +33,9 @@ test("platform Skill uses the actual Registry methods and replaces a single stab
   assert.match(readFileSync(pending.material.skillFile, "utf8"), /sh\["exec"\]/);
   const reference = readFileSync(path.join(pending.material.path, "references", "exec.md"), "utf8");
   assert.match(reference, /inputSchema/);
+  assert.equal(pending.authored.skillId, "nexum/script-authoring");
+  assert.match(readFileSync(pending.authored.skillFile, "utf8"), /name: script-authoring/);
+  assert.ok(readFileSync(path.join(pending.authored.path, "references", "authoring.md"), "utf8").length > 0);
   pending.confirmPublished();
   assert.throws(() => pending.discard(), { code: "invalid_platform_source" });
   const abandoned = await preparePlatformMaterials(work, "sh", handle, reserve);
@@ -40,4 +43,33 @@ test("platform Skill uses the actual Registry methods and replaces a single stab
   assert.throws(() => abandoned.confirmPublished(), { code: "invalid_platform_source" });
   await assert.rejects(preparePlatformMaterials(work, "runtime", handle, reserve),
     { code: "invalid_platform_source" });
+});
+
+test("large method sets route through bounded groups and preserve named-object contracts", async () => {
+  const { methodSkill } = await import("../dist/work/method-skills.js");
+  const methods = Array.from({ length: 40 }, (_, i) => ({
+    path: [i < 20 ? "tabs" : "frames", "method" + i],
+    description: "Observed operation " + i,
+    callStyle: "input-object",
+    normalizes: true,
+    inputSchema: { type: "object" },
+    outputSchema: { type: "string" },
+  }));
+  const options = {
+    name: "browser-operations",
+    description: "Browser operations",
+    origin: { type: "extension", owner: "browser", namespace: "browser", version: "1", revision: "1" },
+    bindingPath: ["browser"],
+    methods,
+  };
+  const { files } = methodSkill(options);
+  const root = files.get("SKILL.md");
+  assert.ok(root.includes("tabs") && root.includes("frames"));
+  assert.ok(!root.includes("Observed operation 39"));
+  const groups = [...files.keys()].filter((f) => f.startsWith("references/groups/"));
+  assert.equal(groups.length, 2);
+  const reference = [...files.values()].find((value) => value.includes('Observed operation 39') && value.includes('outputSchema'));
+  assert.ok(reference.includes("显式命名字段对象"));
+  assert.ok(reference.includes('"outputSchema":{"type":"string"}'));
+  assert.ok(methodSkill({ ...options, methods: methods.slice(0, 2) }).files.get("SKILL.md").includes("Observed operation 1"));
 });

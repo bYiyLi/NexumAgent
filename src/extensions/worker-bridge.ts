@@ -53,6 +53,7 @@ interface RemoteMethod {
   readonly outputSchema?: unknown;
   readonly outputSchemaDialect?: string;
   readonly normalizes?: boolean;
+  readonly callStyle?: "input-object";
 }
 interface HostResource {
   readonly owner: "host" | "call";
@@ -579,6 +580,7 @@ export function isolatedExtensionFactory(
         isolatedHandlers.set(handle, method.normalizes === true);
         table[method.name] = {
           description: method.description,
+          ...(method.callStyle === "input-object" ? { callStyle: method.callStyle } : {}),
           permissions: method.permissions,
           path: method.path,
           inputSchema: method.inputSchema,

@@ -371,6 +371,7 @@ async function initialize(payload: Record<string, unknown>) {
     "Every extension method needs a real handler and declared permissions.");
     declarations.push({
       name, description: value.description,
+      ...(value.callStyle === "input-object" ? { callStyle: value.callStyle } : {}),
       permissions: value.permissions, path: value.path,
       inputSchema: value.inputSchema,
       ...(value.schemaDialect ? { schemaDialect: value.schemaDialect } : {}),

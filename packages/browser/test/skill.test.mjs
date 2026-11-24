@@ -12,12 +12,14 @@ const read = (relative) => readFileSync(path.join(skillRoot, relative), "utf8").
 const skill = read("SKILL.md");
 const references = path.join(skillRoot, "references");
 
-test("extension instructions handle truncated skill and script indexes before Skill selection", () => {
+test("extension instructions follow platform discovery before choosing registered Browser capabilities", () => {
   const entry = readFileSync(path.join(root, "instructions/README.md"), "utf8");
-  assert.match(entry, /skillsComplete=false/);
-  assert.match(entry, /agent.materialsIndex/);
-  assert.match(entry, /agent.scripts.index/);
-  assert.match(entry, /skillFile/);
+  // Cloud's TestProgrammableHostGuidanceUsesSkillsAndIndependentScripts checks
+  // the exact truncation fields on the initialized MCP Server Instructions.
+  assert.match(entry, /先按平台的 Skill\/Script 发现规则补读不完整的清单/);
+  assert.match(entry, /实际登记且输入匹配的 `browser\/discover\.js`、`browser\/screenshot\.js`/);
+  assert.match(entry, /其他页面交互选择 `browser\/browser-control`，按其实际入口/);
+  assert.doesNotMatch(entry, /skillsComplete=false|agent\.materialsIndex|agent\.scripts\.index/);
 });
 
 test("Browser Skill selection boundaries and progressive routes are explicit", () => {
@@ -158,6 +160,7 @@ test("Browser Skill JavaScript examples typecheck against the actual public Brow
   let source =
     'import type { Tab, Browser, BrowserClient } from "./src/client/types.js";\n' +
     'declare const context: { input: any };\n' +
+    'declare const output: import("@nexum-hub/sdk").OutputAPI;\n' +
     'declare const browser: Record<string, unknown>;\n' +
     'declare const tab: Tab;\n' +
     'declare const selected: Browser;\n' +

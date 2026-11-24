@@ -232,10 +232,13 @@ export class ExtensionMaterials {
       name,
       description: `编写或核对 ${origin.namespace} SDK 的调用代码、参数及返回合同，或诊断该扩展的方法错误时使用。按当前操作选择真实方法参考。具体任务优先选择同来源匹配的人工 Skill。`.slice(0, 1024),
       origin, bindingPath: [origin.namespace!], methods: handle.methods,
-      references: {
-        "types.md": "# 来源类型声明\n\n```typescript\n" +
-          text(await readSource(descriptor.types, descriptor.root)) + "\n```\n",
-      },
+      // An entry declaration commonly describes only the extension factory.
+      // Raw methods with an explicit call style already have the real contract.
+      references: handle.methods.every(method => method.callStyle === "input-object")
+        ? {} : {
+            "types.md": "# 来源类型声明（不保证包含方法签名）\n\n```typescript\n" +
+              text(await readSource(descriptor.types, descriptor.root)) + "\n```\n",
+          },
     });
     const methods = canonicalJson(handle.methods, 4 * 1024 * 1024);
     const snapshotRevision = digest(

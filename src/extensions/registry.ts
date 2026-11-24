@@ -1001,6 +1001,7 @@ export class ExtensionRegistry {
           name,
           path: [...target],
           description: def.description,
+          ...(def.callStyle === "input-object" ? { callStyle: def.callStyle } : {}),
           normalizes: isolatedHandlerNormalizes(def.handle) ?? typeof def.normalize === "function",
           permissions: [...def.permissions],
           inputSchema: def.inputSchema,

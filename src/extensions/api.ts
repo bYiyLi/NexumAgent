@@ -63,6 +63,8 @@ export interface Invocation {
 }
 export interface MethodDefinition {
   description: string;
+  /** The raw JavaScript method accepts exactly one named input object. */
+  callStyle?: "input-object";
   permissions: readonly string[];
   inputSchema: unknown;
   schemaDialect?: SchemaDialect;

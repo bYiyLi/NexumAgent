@@ -111,6 +111,7 @@ export function methodSkill(input: MethodSkillInput) {
     input.name,
   );
   const routes: string[] = [];
+  const groups = new Map<string, string[]>();
   const filenames = methodReferenceNames(input.methods);
   const expression = (parts: readonly string[]) =>
     parts
@@ -133,15 +134,19 @@ export function methodSkill(input: MethodSkillInput) {
     const signature = input.calling?.[(method.path as string[]).join(".")];
     const summary = Array.from(method.description.split(/\r?\n/, 1)[0]!.trim());
     const route = summary.slice(0, 160).join("") + (summary.length > 160 ? "…" : "");
-    routes.push(
-      `- 需要 ${JSON.stringify(route)} 时，读取 [${call}](${filename})。`,
-    );
+    routes.push(`- 需要 ${JSON.stringify(route)} 时，读取 [${call}](${filename})。`);
+    const group = (method.path as string[])[0]!;
+    const groupRoutes = groups.get(group) ?? [];
+    groupRoutes.push(`- 需要 ${JSON.stringify(route)} 时，读取 [${call}](../${filename.slice("references/".length)})。`);
+    groups.set(group, groupRoutes);
     files.set(
       filename,
       `# ${call}\n\n${String(method.description)}\n\n` +
-        (signature ? signature + "\n\n" : method.normalizes === false
+        (signature ? signature + "\n\n" : method.callStyle === "input-object"
+          ? `调用形式：\`${call}(input)\`，必须传一个显式命名字段对象；无字段时传 \`{}\`。按本方法的 Schema 构造参数，不猜测高级客户端的调用形式。\n\n`
+          : method.normalizes === false
           ? `调用形式：\`${call}(input)\`；无参数调用按空对象校验。\n\n`
-          : input.references?.["types.md"] ? "调用签名以 [来源类型声明](types.md) 为准；未声明的签名不可猜测。\n\n" : "调用签名未声明，不得从内部 Schema 推断 JavaScript 参数。\n\n") +
+          : input.references?.["types.md"] ? "来源另有 [类型声明](types.md)，可能只描述扩展工厂。仅在其中确实声明该方法时使用其签名；否则不要猜测位置参数。\n\n" : "调用签名未声明，不得从内部 Schema 推断 JavaScript 参数。\n\n") +
         (method.normalizes === false ? "" : "下方 inputSchema 描述归一化后的校验输入，不定义 JavaScript 参数顺序或调用时必填的默认字段。\n\n") +
         "以下元数据逐项来自本次 Registry，包含完整 inputSchema、已声明的 outputSchema、Schema 方言、依赖 schemas 和权限。\n\n```json\n" +
         canonicalJson(method, 4 * 1024 * 1024) +
@@ -171,6 +176,18 @@ export function methodSkill(input: MethodSkillInput) {
     );
     files.set(`references/${name}`, content);
   }
+  // Small SDKs stay direct. Large registered method sets are routed by
+  // actual namespaces without requiring the whole method list in SKILL.md.
+  let routeIndex = routes;
+  if (routes.length > 32 && groups.size > 1) {
+    routeIndex = [];
+    for (const [group, links] of groups) {
+      const stem = "group-" + createHash("sha256").update(group).digest("hex").slice(0, 16);
+      const file = `references/groups/${stem}.md`;
+      files.set(file, `# ${JSON.stringify(group)}\n\n${links.join("\n")}\n`);
+      routeIndex.push(`- ${JSON.stringify(group)}（${links.length} 个方法）：[查看当前操作](${file})。`);
+    }
+  }
   const body =
     `---\nname: ${JSON.stringify(metadata.name)}\ndescription: ${JSON.stringify(metadata.description)}\n---\n\n# ${metadata.name}\n\n` +
     `使用当前注册的 ${input.bindingPath.join(".")} 方法。\n\n` +
@@ -183,7 +200,7 @@ export function methodSkill(input: MethodSkillInput) {
       )
       .join("") +
     "\n## 按操作读取\n\n" +
-    routes.join("\n") +
+    routeIndex.join("\n") +
     "\n\n调用失败或结果未知时，按 [调用边界与恢复](references/errors.md) 处理。\n";
   files.set("SKILL.md", body);
   const hash = createHash("sha256");
