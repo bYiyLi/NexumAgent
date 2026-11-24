@@ -207,7 +207,8 @@ async function fixture(
       progress() {},
     });
   const policy = {
-    builtins: () => [],
+    // Native file return uses the production-supported Node buffer/fs families.
+    builtins: () => ["buffer", "fs"],
     approvedPackages: () => new Map([["@nexum-hub/browser", version]]),
   };
   let workerEntry;
@@ -267,7 +268,6 @@ async function fixture(
       encoder.encode(value, resultScope(services)),
     bindings: (scope) => ({
       ...registry.bindings(scope),
-      output: createOutput(scope.context.pwd, () => scope.assertCurrent()),
       nativeCommandReady: () => commandStarted.promise,
     }),
     resources,
@@ -783,6 +783,20 @@ test("registered Browser scripts deliver real discovery data and the original JP
   assert.equal(image.mimeType, "image/jpeg");
   assert.deepEqual(Buffer.from(image.data, "base64"), Buffer.from(jpeg, "base64"));
   assert.equal(f.attached.size, 0);
+});
+
+test("native File with structured download metadata crosses Worker and result encoder without public output", async (t) => {
+  const f = await fixture(t);
+  const result = await f.start(
+    'const {File}=await import("node:buffer"); return {state:"complete",file:new File([new Uint8Array([0,1,127,255])],"native.bin")};',
+  );
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
+  const rendered = await f.encoder.render(result.result, f.resultScope(), result.run);
+  assert.equal(rendered.structuredContent.data.state, "complete");
+  const link = rendered.content.find((item) => item.type === "resource_link");
+  assert.ok(link?.uri);
+  const resource = await f.encoder.readResource(link.uri, f.resultScope());
+  assert.deepEqual(Buffer.from(resource.contents[0].blob, "base64"), Buffer.from([0,1,127,255]));
 });
 
 test("normal return waits for actual remote detach and busy disable preserves all published contributions", async (t) => {

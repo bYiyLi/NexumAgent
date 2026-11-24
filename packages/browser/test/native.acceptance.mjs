@@ -88,7 +88,7 @@ test("native MV3 provides page interaction, MCP JPEG and an actual downloaded MC
   assert.equal(Object.hasOwn(screenshot.result.content[1], "data"), false);
   const download = await f.run(
     select +
-      'const pending=tab.playwright.waitForEvent("download");await tab.playwright.getByRole("link",{name:"Download native"}).click();const completed=await pending;return output.file(await completed.path());',
+      'const pending=tab.playwright.waitForEvent("download");await tab.playwright.getByRole("link",{name:"Download native"}).click();const completed=await pending;return {type:"resource_link",path:await completed.path()};',
     { base: f.base },
   );
   const renderedDownload = await f.encoder.render(

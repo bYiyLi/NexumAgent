@@ -2022,7 +2022,7 @@ export function createBrowserRouter(
           mark.nativeId = item.id;
           // Chrome permits a per-download relative path only below its own
           // Downloads directory. The Agent later fixes the completed file in
-          // work/resources through the existing output.file contract.
+          // work/resources through the native result resource contract.
           const filename = item.filename.split(/[\\/]/).pop();
           destination = {
             filename: `Nexum/${filename}`,

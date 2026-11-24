@@ -150,7 +150,8 @@ export async function nativeFixture(t, options = {}) {
       progress() {},
     });
   const policy = {
-    builtins: () => [],
+    // Native file return uses the production-supported Node buffer/fs families.
+    builtins: () => ["buffer", "fs"],
     approvedPackages: () => new Map([["@nexum-hub/browser", version]]),
   };
   const modules = await ModuleLoader.create(work, store.bootId, policy),

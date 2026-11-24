@@ -74,7 +74,7 @@ add("waiters.get", "等待已登记事件实际完成；返回 navigation、down
   obj({ type: { const: "download" }, target, downloadId: str, suggestedFilename: str }),
   obj({ type: { const: "filechooser" }, target, chooserId: str, pageVersion: int, multiple: bool }),
 ] });
-add("tab.screenshot playwright.elementScreenshot", "拍摄实际页面或元素的 JPEG 图像，返回 Uint8Array；需向模型展示时使用 output.image（image/jpeg），不是 JSON 对象。");
+add("tab.screenshot playwright.elementScreenshot", "拍摄实际页面或元素的 JPEG 图像，返回 Uint8Array；直接 return 原生 JPEG 字节，由平台自动识别并交付图片，不包装为 JSON。");
 add("ax.get ax.write", "按 mode 读取辅助功能状态文本、截图字节或两者；write 返回 Host 原生文本/图像结果。不要将媒体伪造成 JSON。");
 add("tab.evaluate playwright.evaluate locator.evaluate locator.evaluateAll", "在当前受控页面执行表达式，结果取决于表达式的真实序列化值；无固定业务结构。");
 add("cdp.send", "调用实际 CDP method；返回结构由该 CDP method 决定，不使用统一的伪造结果 Schema。");

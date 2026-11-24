@@ -160,7 +160,6 @@ test("Browser Skill JavaScript examples typecheck against the actual public Brow
   let source =
     'import type { Tab, Browser, BrowserClient } from "./src/client/types.js";\n' +
     'declare const context: { input: any };\n' +
-    'declare const output: import("@nexum-hub/sdk").OutputAPI;\n' +
     'declare const browser: Record<string, unknown>;\n' +
     'declare const tab: Tab;\n' +
     'declare const selected: Browser;\n' +

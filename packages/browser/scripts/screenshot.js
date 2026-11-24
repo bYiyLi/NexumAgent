@@ -5,4 +5,4 @@ const { createBrowserClient } = await import("@nexum-hub/browser");
 const client = createBrowserClient(browser);
 const selected = await client.browsers.get(context.input.browserId);
 const tab = await selected.tabs.get(context.input.tabId);
-return output.image({ data: await tab.screenshot(), mimeType: "image/jpeg" });
+return await tab.screenshot();

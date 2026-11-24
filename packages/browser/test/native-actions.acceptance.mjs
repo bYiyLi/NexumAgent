@@ -686,7 +686,7 @@ test("native browser download records expose completed file paths for MCP resour
   );
   const view = await f.run(
     select +
-      `let download;for(let i=0;i<100;i++){download=(await selected.downloads.list({limit:20})).find(value=>value.state==='complete'&&value.filename.endsWith('native.bin'));if(download)break;await new Promise(resolve=>setTimeout(resolve,100));}if(!download)throw Error('Completed browser download was not listed');return output.result({content:[output.text(JSON.stringify(download)),output.file(download.filename,{name:'native.bin'})]});`,
+      `let download;for(let i=0;i<100;i++){download=(await selected.downloads.list({limit:20})).find(value=>value.state==='complete'&&value.filename.endsWith('native.bin'));if(download)break;await new Promise(resolve=>setTimeout(resolve,100));}if(!download)throw Error('Completed browser download was not listed');const {File}=await import('node:buffer');return { ...download, file: new File([await (await import('node:fs/promises')).readFile(download.filename)], 'native.bin') };`,
     { base: f.base },
   );
   const rendered = await f.encoder.render(
@@ -694,9 +694,7 @@ test("native browser download records expose completed file paths for MCP resour
       f.resultScope(),
       view.run,
     ),
-    listed = JSON.parse(
-      rendered.content.find((item) => item.type === "text").text,
-    ),
+    listed = rendered.structuredContent.data,
     link = rendered.content.find((item) => item.type === "resource_link");
   assert.equal(
     listed.filename,
@@ -832,7 +830,7 @@ test("native Blob download keeps its identity and becomes an MCP resource", asyn
     const record=(await tab.downloads()).find(item=>item.url.startsWith('blob:'));
     let attribute=await tab.evaluate("document.querySelector('#blob').getAttribute('download')");
     for(let i=0;i<10&&attribute!=='blob.bin';i++){await tab.playwright.waitForTimeout(50);attribute=await tab.evaluate("document.querySelector('#blob').getAttribute('download')");}
-    return output.result({content:[output.text(JSON.stringify({name:record?.suggestedFilename,attribute})),output.file(file,{name:'blob.bin'})]});`,
+    const {File}=await import('node:buffer');return {name:record?.suggestedFilename,attribute,file:new File([await (await import('node:fs/promises')).readFile(file)],'blob.bin')};`,
     { base: f.base },
   );
   const rendered = await f.encoder.render(
@@ -840,9 +838,7 @@ test("native Blob download keeps its identity and becomes an MCP resource", asyn
       f.resultScope(),
       view.run,
     ),
-    details = JSON.parse(
-      rendered.content.find((item) => item.type === "text").text,
-    ),
+    details = rendered.structuredContent.data,
     link = rendered.content.find((item) => item.type === "resource_link");
   assert.match(details.name, /^blob-nexum-[0-9a-f]{32}\.bin$/);
   assert.equal(details.attribute, "blob.bin");
@@ -867,7 +863,7 @@ test("native data URL download keeps its identity and becomes an MCP resource", 
     await tab.playwright.getByRole('link',{name:'Download data'}).click();
     const download=await pending;const file=await download.path();
     const record=(await tab.downloads()).find(item=>item.suggestedFilename.startsWith('data-nexum-'));
-    return output.result({content:[output.text(JSON.stringify({name:record?.suggestedFilename,hasUrl:Object.hasOwn(record??{},'url')})),output.file(file,{name:'data.bin'})]});`,
+    const {File}=await import('node:buffer');return {name:record?.suggestedFilename,hasUrl:Object.hasOwn(record??{},'url'),file:new File([await (await import('node:fs/promises')).readFile(file)],'data.bin')};`,
     { base: f.base },
   );
   const rendered = await f.encoder.render(
@@ -875,9 +871,7 @@ test("native data URL download keeps its identity and becomes an MCP resource", 
       f.resultScope(),
       view.run,
     ),
-    details = JSON.parse(
-      rendered.content.find((item) => item.type === "text").text,
-    ),
+    details = rendered.structuredContent.data,
     link = rendered.content.find((item) => item.type === "resource_link");
   assert.match(details.name, /^data-nexum-[0-9a-f]{32}\.bin$/);
   assert.equal(details.hasUrl, false);
@@ -933,7 +927,7 @@ test("native direct HTTP links and synchronously generated Blob links retain the
   ]) {
     const view = await f.run(
       select +
-        `const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole(context.input.role,{name:context.input.label}).click();const download=await pending;return output.file(await download.path(),{name:context.input.name});`,
+        `const pending=tab.playwright.waitForDownload();await tab.playwright.getByRole(context.input.role,{name:context.input.label}).click();const download=await pending;const {File}=await import('node:buffer');return new File([await (await import('node:fs/promises')).readFile(await download.path())],context.input.name);`,
       { base: f.base, role: item.role, label: item.label, name: item.name },
     );
     const rendered = await f.encoder.render(
