@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AgentError, requireCondition } from "../contracts/errors.js";
+import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import type { ContributionOrigin } from "../contracts/types.js";
 import { extensionNamespace } from "../runtime/names.js";
@@ -103,6 +103,33 @@ function sourceSuffix(directory: string, filename: string): string {
     "An extension reading file must retain its declared relative subtree.",
   );
   return result;
+}
+
+// Here the read limit is the exact expected file size, not a general quota.
+// A file that grows or changes during this bounded read is an identity conflict.
+async function readExpectedMaterial(
+  filename: string,
+  expected: { size: number; revision: string },
+  code: "extension_package_changed" | "extension_material_conflict",
+  message: string,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  let read: Awaited<ReturnType<typeof boundedFile>>;
+  try {
+    read = await boundedFile(filename, expected.size, signal);
+  } catch (cause) {
+    signal?.throwIfAborted();
+    if (isAgentError(cause) &&
+        (cause.code === "material_too_large" || cause.code === "material_changed"))
+      throw new AgentError(code, message, undefined, { cause });
+    throw cause;
+  }
+  requireCondition(
+    read.bytes.length === expected.size && read.revision === expected.revision,
+    code,
+    message,
+  );
+  return read.bytes;
 }
 
 /** Core-owned preparation and synchronous discovery index; it never enables a package. */
@@ -206,19 +233,28 @@ export class ExtensionMaterials {
         "extension_package_changed",
         "A declared reading source redirected after static inspection.",
       );
-      const read = await boundedFile(
-        file.path,
-        Math.min(file.size, this.#maxBytes),
-        signal,
+      // A genuine configured budget violation is not a source change.
+      requireCondition(
+        file.size <= this.#maxBytes,
+        "extension_material_too_large",
+        "A declared reading source exceeds its snapshot byte budget.",
+      );
+      const info = await lstat(file.path);
+      const changed = "A declared reading source changed after static inspection.";
+      requireCondition(
+        info.isFile() && info.size === file.size,
+        "extension_package_changed",
+        changed,
+      );
+      const bytes = await readExpectedMaterial(
+        file.path, file, "extension_package_changed", changed, signal,
       );
       requireCondition(
-        read.bytes.length === file.size &&
-          read.revision === file.revision &&
-          (await realpath(lexical)) === file.path,
+        (await realpath(lexical)) === file.path,
         "extension_package_changed",
-        "A declared reading source changed after static inspection.",
+        changed,
       );
-      return read.bytes;
+      return bytes;
     };
     const baseName = origin.namespace!.toLowerCase()
       .replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/^-|-$/g, "") || "extension";
@@ -711,12 +747,14 @@ export class ExtensionMaterials {
                 "extension_material_conflict",
                 "A generated reading tree has unexpected files.",
               );
-              const read = await boundedFile(filename, record.size, signal);
+              const changed = "A generated reading tree has changed since preparation.";
               requireCondition(
-                read.bytes.length === record.size &&
-                  read.revision === record.revision,
+                info.size === record.size,
                 "extension_material_conflict",
-                "A generated reading tree has changed since preparation.",
+                changed,
+              );
+              await readExpectedMaterial(
+                filename, record, "extension_material_conflict", changed, signal,
               );
               found++;
             }

@@ -333,6 +333,157 @@ test("source changes, symlink escapes and retained snapshot corruption fail with
   );
 });
 
+// Each case uses a fresh tree with exactly one mismatched file. Directory
+// enumeration order must not determine the error classification.
+const materialMutations = [
+  ["grows", (bytes) => Buffer.concat([bytes, Buffer.from("extra")])],
+  ["shrinks", (bytes) => bytes.subarray(0, bytes.length - 1)],
+  ["changes without changing size", (bytes) => {
+    const changed = Buffer.from(bytes);
+    changed[0] ^= 1;
+    return changed;
+  }],
+];
+
+function assertPublishedUnchanged(catalog, before, prepared) {
+  assert.equal(catalog.published(), before);
+  assert.deepEqual([...catalog.activeDirectories()], [prepared.directory]);
+  assert.deepEqual(readdirSync(path.dirname(prepared.directory)), [path.basename(prepared.directory)]);
+}
+
+for (const [description, mutate] of materialMutations) {
+  test(`an inspected extension source that ${description} is a package change`, async (t) => {
+    const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
+    const prepared = await catalog.prepare(f.descriptor, f.handle());
+    catalog.publish(prepared);
+    const before = catalog.published();
+    const filename = path.join(f.source, "skills-source/audit/references/manual/guide.md");
+    const publishedFile = path.join(prepared.directory, "skills/audit/references/manual/guide.md");
+    const original = readFileSync(publishedFile);
+    write(filename, mutate(readFileSync(filename)));
+    await assert.rejects(catalog.prepare(f.descriptor, f.handle()), {
+      code: "extension_package_changed",
+    });
+    assertPublishedUnchanged(catalog, before, prepared);
+    assert.deepEqual(readFileSync(publishedFile), original);
+  });
+
+  test(`an active material that ${description} is a snapshot conflict`, async (t) => {
+    const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
+    const prepared = await catalog.prepare(f.descriptor, f.handle());
+    catalog.publish(prepared);
+    const before = catalog.published();
+    const filename = path.join(prepared.directory, "skills/audit/references/manual/guide.md");
+    const changed = mutate(readFileSync(filename));
+    write(filename, changed);
+    await assert.rejects(catalog.prepare(f.descriptor, f.handle()), {
+      code: "extension_material_conflict",
+    });
+    assertPublishedUnchanged(catalog, before, prepared);
+    // A failed preparation must not overwrite the already active directory.
+    assert.deepEqual(readFileSync(filename), changed);
+  });
+}
+
+for (const source of [true, false]) {
+  test(`a ${source ? "source" : "snapshot"} that grows between stat and open retains its business error`, async (t) => {
+    const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
+    const prepared = await catalog.prepare(f.descriptor, f.handle());
+    catalog.publish(prepared);
+    const before = catalog.published();
+    const filename = source
+      ? path.join(f.source, "skills-source/audit/references/manual/guide.md")
+      : path.join(prepared.directory, "skills/audit/references/manual/guide.md");
+    const original = filesystem.open;
+    let injected = false;
+    try {
+      filesystem.open = async (name, ...args) => {
+        if (name === filename && !injected) {
+          injected = true;
+          write(filename, Buffer.concat([readFileSync(filename), Buffer.from("extra")]));
+        }
+        return original(name, ...args);
+      };
+      syncBuiltinESMExports();
+      await assert.rejects(catalog.prepare(f.descriptor, f.handle()), (error) =>
+        error.code === (source ? "extension_package_changed" : "extension_material_conflict") &&
+        error.cause?.code === "material_too_large");
+    } finally {
+      filesystem.open = original;
+      syncBuiltinESMExports();
+    }
+    assert.equal(injected, true);
+    assertPublishedUnchanged(catalog, before, prepared);
+  });
+}
+
+test("a snapshot changing during a bounded read retains the conflict and underlying cause", async (t) => {
+  const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
+  const prepared = await catalog.prepare(f.descriptor, f.handle());
+  catalog.publish(prepared);
+  const before = catalog.published();
+  const filename = path.join(prepared.directory, "skills/audit/references/manual/guide.md");
+  const original = filesystem.open;
+  let injected = false;
+  try {
+    filesystem.open = async (name, ...args) => {
+      const handle = await original(name, ...args);
+      if (name === filename) {
+        const stat = handle.stat.bind(handle);
+        let calls = 0;
+        handle.stat = async (...options) => {
+          if (++calls === 2) {
+            injected = true;
+            write(filename, Buffer.concat([readFileSync(filename), Buffer.from("extra")]));
+          }
+          return stat(...options);
+        };
+      }
+      return handle;
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(catalog.prepare(f.descriptor, f.handle()), (error) =>
+      error.code === "extension_material_conflict" && error.cause?.code === "material_changed");
+  } finally {
+    filesystem.open = original;
+    syncBuiltinESMExports();
+  }
+  assert.equal(injected, true);
+  assertPublishedUnchanged(catalog, before, prepared);
+});
+
+test("bounded material identity checks do not relabel I/O failures or cancellation", async (t) => {
+  const f = await fixture(t), catalog = new ExtensionMaterials(f.work);
+  const prepared = await catalog.prepare(f.descriptor, f.handle());
+  catalog.publish(prepared);
+  const before = catalog.published();
+  const filename = path.join(prepared.directory, "skills/audit/references/manual/guide.md");
+  const original = filesystem.open;
+  const denied = Object.assign(new Error("read denied"), { code: "EACCES" });
+  const controller = new AbortController(), stopped = new Error("stop during read");
+  try {
+    filesystem.open = async (name, ...args) => {
+      if (name === filename) throw denied;
+      return original(name, ...args);
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(catalog.prepare(f.descriptor, f.handle()), (error) => error === denied);
+    filesystem.open = async (name, ...args) => {
+      if (name === filename) {
+        controller.abort(stopped);
+        throw stopped;
+      }
+      return original(name, ...args);
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(catalog.prepare(f.descriptor, f.handle(), controller.signal), (error) => error === stopped);
+  } finally {
+    filesystem.open = original;
+    syncBuiltinESMExports();
+  }
+  assertPublishedUnchanged(catalog, before, prepared);
+});
+
 test("reading parents reject symlinks and source/handle/profile identities cannot be mixed", async (t) => {
   const f = await fixture(t),
     catalog = new ExtensionMaterials(f.work);
@@ -376,6 +527,10 @@ test("aggregate generated files, entry instructions and cancellation remain boun
       f.descriptor,
       f.handle(),
     ),
+    { code: "extension_material_too_large" },
+  );
+  await assert.rejects(
+    new ExtensionMaterials(f.work, { maxBytes: 1 }).prepare(f.descriptor, f.handle()),
     { code: "extension_material_too_large" },
   );
   const catalog = new ExtensionMaterials(f.work),
