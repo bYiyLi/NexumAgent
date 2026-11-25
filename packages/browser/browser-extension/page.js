@@ -357,7 +357,8 @@ export async function pageCommand(input) {
       return query(root, input.locator?.query ?? input.query);
     };
     const actionGeometry = (node, pending = false) => {
-      if (pending && !(visible(node) && enabled(node))) return null;
+      if (pending && !(visible(node) && enabled(node)))
+        return input.reportPendingReason ? { pendingReason: "element_not_actionable" } : null;
       check(
         visible(node) && enabled(node),
         "INVALID_TARGET",
@@ -389,7 +390,8 @@ export async function pageCommand(input) {
       );
       const point = { x: r.x + x, y: r.y + y };
       const top = node.ownerDocument.elementFromPoint(point.x, point.y);
-      if (pending && !(top === node || node.contains(top))) return null;
+      if (pending && !(top === node || node.contains(top)))
+        return input.reportPendingReason ? { pendingReason: "element_blocked" } : null;
       check(
         top === node || node.contains(top),
         "INVALID_TARGET",
@@ -715,14 +717,16 @@ export async function pageCommand(input) {
       case "resolve": {
         const node = unique(false, true),
           geometry = node && actionGeometry(node, true);
-        value = geometry
+        value = geometry?.pendingReason
+          ? geometry
+          : geometry
           ? {
               ...describe(node),
               ...geometry,
               tagName: node.tagName,
               documentToken: state.token,
             }
-          : null;
+          : input.reportPendingReason && !node ? { pendingReason: "element_not_found" } : null;
         break;
       }
       case "fill": {

@@ -34,7 +34,8 @@ export async function encodeHostResult(value: unknown, runId: string, signal: Ab
     requireCondition(services.scope.runId === runId, "result_scope_mismatch",
       "The result services belong to a different Run.");
   const selected = services
-    ? new ResultEncoder(services.artifacts, {}, services.offers, services.mcp)
+    ? // Reserve room for the authoritative Run identity, wait state and envelope.
+      new ResultEncoder(services.artifacts, { textBytes: 48 * 1024 }, services.offers, services.mcp)
     : encoder;
   const storedResult = await selected.encode(value, services ? {
     ...services.scope, signal,

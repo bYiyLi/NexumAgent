@@ -14,6 +14,7 @@ import { outputIntent } from "../sdk/output.js";
 import { transferOffer } from "../transfer/offers.js";
 import { packWorkerBinary, unpackWorkerBinary } from "./worker-binary.js";
 import type { ModuleUse } from "./modules.js";
+import type { ScriptDiagnostic } from "./script-diagnostics.js";
 
 export interface WorkerCompile {
   work: string;
@@ -25,10 +26,7 @@ export interface WorkerCompile {
   console?: Console;
   signal?: AbortSignal;
   onModule?: (use: ModuleUse) => void;
-  onScriptError?: (value: {
-    exceptionType: string;
-    location?: { source: string; line: number; column?: number };
-  }) => void;
+  onScriptError?: (value: ScriptDiagnostic) => void;
   /** Core-owned structured diagnostics only; no script contents or arguments. */
   onDiagnostic?: (event: {
     readonly stage: string;
@@ -708,8 +706,10 @@ export async function compileWorker(
         // carry bounded script-relative coordinates, never the raw stack or
         // an absolute filename, through IPC and into retained Run errors.
         if (["Error", "SyntaxError", "TypeError", "ReferenceError", "RangeError",
-          "URIError", "EvalError", "AggregateError"].includes(diagnostic.exceptionType)) {
+          "URIError", "EvalError", "AggregateError", "AssertionError"].includes(diagnostic.exceptionType)) {
           details.exceptionType = diagnostic.exceptionType;
+          if (diagnostic.exceptionType === "AssertionError" && diagnostic.exceptionCode === "ERR_ASSERTION")
+            details.exceptionCode = diagnostic.exceptionCode;
           const location = diagnostic.location;
           if (location && Number.isSafeInteger(location.line) && location.line > 0) {
             details.location = {

@@ -98,6 +98,17 @@ export function publicError(cause, dispatched = false) {
       retryable: cause.retryable && cause.effect === "none" && !dispatched,
       ...(cause.reason === undefined ? {} : { reason: cause.reason }),
     };
+  // Recognize only bounded, well-known Chromium diagnostics. Never expose
+  // the native message itself (it may contain a URL or page content).
+  const message = cause instanceof Error ? cause.message : "";
+  const known = /^(?:No tab with id: \d+\.?|Invalid tab ID: \d+\.?|No such tab)$/i.test(message)
+    ? ["TARGET_GONE", "The original native browser tab is closed.", "tab_closed"]
+    : /^Cannot access a chrome:\/\/ URL(?:\.|$)/i.test(message)
+      ? ["PERMISSION_DENIED", "The native browser page is protected or not accessible.", "protected_page"]
+      : undefined;
+  if (known)
+    return { code: known[0], message: known[1], reason: known[2], dispatched,
+      effect: dispatched ? "unknown" : "none", retryable: false };
   // Native errors can contain page contents, URLs or input; retain a bounded diagnostic category.
   return {
     code: "NATIVE_OPERATION_FAILED",

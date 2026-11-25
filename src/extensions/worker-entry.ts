@@ -111,6 +111,10 @@ const componentReasons: Readonly<Record<string, readonly [string, string]>> = Ob
   download_interrupted: ["FILE_UNAVAILABLE", "The browser download was interrupted."],
   download_path_invalid: ["FILE_UNAVAILABLE", "The completed browser download has no valid local filename."],
   source_file_missing: ["FILE_UNAVAILABLE", "The authorized source file is no longer present."],
+  tab_closed: ["TARGET_GONE", "The original native browser tab is closed."],
+  protected_page: ["PERMISSION_DENIED", "The native browser page is protected or not accessible."],
+  dialog_already_open: ["INVALID_TARGET", "Handle the current native dialog before clicking."],
+  dialog_opened_after_input: ["INPUT_UNCONFIRMED", "Input opened a native dialog; handle it before further actions."],
 });
 // Recovery is a bounded semantic category, not arbitrary extension-supplied advice.
 function componentRecovery(code: string, reason: unknown): string | undefined {
@@ -157,7 +161,8 @@ function componentError(cause: unknown): JsonObject {
   };
   const reason = own("reason");
   if (typeof reason === "string" && Object.hasOwn(componentReasons, reason) &&
-      componentReasons[reason]![0] === code) {
+      (componentReasons[reason]![0] === code ||
+       (reason === "dialog_opened_after_input" && code === "EXPECTATION_UNCONFIRMED"))) {
     result.message = componentReasons[reason]![1];
     result.details = { reason };
   }

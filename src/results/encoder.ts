@@ -1254,6 +1254,35 @@ export class ResultEncoder {
       return { reference, snapshot };
     });
   }
+  // Count the public structured result, the full MCP JSON mirror, and the
+  // actual content together. A raw normalized value is not the wire size.
+  #modelContextBytes(result: StoredResult, runId: string): number {
+    const projection = this.#projection(result, { runId, status: "succeeded" }, false);
+    const { run, ...business } = projection.structuredContent as JsonObject;
+    const items = result.content.map((item, index) => {
+      const resource = item.resource ? record(item.resource) : undefined;
+      return {
+        type: item.type,
+        contentIndex: index + 1,
+        ...(item.type === "text" ? { text: item.text } : {}),
+        ...(resource ? { uri: resource.uri, name: resource.name,
+          mimeType: resource.mimeType, size: resource.size, sha256: resource.sha256 } : {}),
+      };
+    });
+    const structuredContent = { run, result: { ...business, items,
+      state: "ready", hasValue: Object.hasOwn(result, "data"),
+      references: result.references ?? [], resources: result.resources ?? [],
+      conversions: result.conversions ?? [],
+      delivery: { representationComplete: true, inlineComplete: true, requiresResourceRead: false },
+    } };
+    // Go's JSON encoder additionally escapes HTML and line-separator characters.
+    const wireJSON = (value: unknown) => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g,
+      (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"));
+    const control = { ...projection, structuredContent,
+      content: [{ type: "text", text: wireJSON(structuredContent) }, ...(projection.content as JsonValue[])] };
+    return Buffer.byteLength(wireJSON(control));
+  }
+
   async #fit(result: StoredResult, scope: ArtifactScope): Promise<void> {
     const hasData =
       Object.hasOwn(result, "data") || Object.hasOwn(result, "mcpResults") ||
@@ -1278,15 +1307,7 @@ export class ResultEncoder {
     obvious ||= plainBytes > this.limits.textBytes;
     let size = obvious
       ? this.limits.textBytes + 1
-      : Buffer.byteLength(
-          JSON.stringify(
-            this.#projection(
-              result,
-              { runId: scope.runId ?? "", status: "succeeded" },
-              true,
-            ),
-          ),
-        );
+      : this.#modelContextBytes(result, scope.runId ?? "");
     for (const item of result.content)
       if (item.type === "resource" && item.encoding === "text")
         size += Number(item.inlineTextBytes ?? record(item.resource).size);
@@ -1324,15 +1345,7 @@ export class ResultEncoder {
     const afterDataBytes =
       plainBytes > this.limits.textBytes
         ? this.limits.textBytes + 1
-        : Buffer.byteLength(
-            JSON.stringify(
-              this.#projection(
-                result,
-                { runId: scope.runId ?? "", status: "succeeded" },
-                true,
-              ),
-            ),
-          );
+        : this.#modelContextBytes(result, scope.runId ?? "");
     let textResource: ArtifactRecord | undefined;
     if (afterDataBytes > this.limits.textBytes && plainBytes > 0) {
       const texts = result.content
@@ -1379,12 +1392,7 @@ export class ResultEncoder {
         text: "结果超过模型上下文预算，完整内容已保存为资源；当前返回资源引用。",
       });
     }
-    const control = this.#projection(
-      result,
-      { runId: scope.runId ?? "", status: "succeeded" },
-      true,
-    );
-    let bytes = Buffer.byteLength(JSON.stringify(control));
+    let bytes = this.#modelContextBytes(result, scope.runId ?? "");
     for (const item of result.content)
       if (item.type === "resource" && item.encoding === "text")
         bytes += Number(item.inlineTextBytes ?? record(item.resource).size);

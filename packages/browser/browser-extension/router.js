@@ -1188,6 +1188,11 @@ async function click(ctx, args, double = false) {
   requireValue(Number.isInteger(count) && count >= 1 && count <= 3);
   const framePath = args.framePath ?? [];
   const originalVersion = ctx.router.version(ctx.target.tabId);
+  const originalDialog = ctx.router.dialog(ctx)?.dialogId;
+  const openedDialog = () => {
+    const dialog = ctx.router.dialog(ctx);
+    return dialog && dialog.dialogId !== originalDialog && dialog.pageVersion === originalVersion;
+  };
   let receipt;
   try {
     await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
@@ -1260,6 +1265,7 @@ async function click(ctx, args, double = false) {
       ...receiptInput,
       expectedDocumentToken: armed.documentToken,
     };
+    requireValue(!ctx.router.dialog(ctx), "INVALID_TARGET", "Handle the current native dialog before clicking.", "dialog_already_open");
     for (let i = 1; i <= count; i++) {
       await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
         type: "mousePressed",
@@ -1269,13 +1275,18 @@ async function click(ctx, args, double = false) {
         modifiers: modifierMask(args.modifiers ?? args.keypress),
       });
       if (args.duration > 0) await ctx.router.delay(ctx, args.duration * 1000);
-      await ctx.router.send(ctx, "Input.dispatchMouseEvent", {
+      await ctx.router.send({ ...ctx, observeClickDialog: true }, "Input.dispatchMouseEvent", {
         type: "mouseReleased",
         ...p,
         button,
         clickCount: i,
         modifiers: modifierMask(args.modifiers ?? args.keypress),
       });
+      if (openedDialog()) {
+        if (i < count)
+          throw new BrowserActionError("INPUT_UNCONFIRMED", "A native dialog interrupted the remaining click sequence; do not replay it.", { dispatched: true, effect: "unknown", reason: "dialog_opened_after_input" });
+        return { dialogOpened: true };
+      }
     }
     let observed = false;
     const expires = Math.min(
@@ -1283,6 +1294,7 @@ async function click(ctx, args, double = false) {
       ctx.started + ctx.budgetMs,
     );
     while (performance.now() < expires) {
+      if (openedDialog()) return { dialogOpened: true };
       if (
         !framePath.length &&
         ctx.router.version(ctx.target.tabId) !== originalVersion
@@ -1301,6 +1313,7 @@ async function click(ctx, args, double = false) {
         }
       } catch {
         ctx.signal?.throwIfAborted();
+        if (openedDialog()) return { dialogOpened: true };
         if (
           !framePath.length &&
           ctx.router.version(ctx.target.tabId) !== originalVersion
@@ -1325,7 +1338,9 @@ async function click(ctx, args, double = false) {
     const remaining = ctx.budgetMs - (performance.now() - ctx.started);
     if (remaining > 120) await ctx.router.delay(ctx, 120);
   } finally {
-    if (receipt)
+    // A modal blocks page evaluation. The page receipt has its own bounded
+    // expiry; never wait on script execution behind the modal to finish click.
+    if (receipt && !openedDialog())
       await ctx.router
         .page(ctx, { ...receipt, action: "drop" })
         .catch(() => {});
@@ -1486,7 +1501,7 @@ route(
   { needsTab: true, mutating: true },
 );
 async function resolveActionTarget(ctx, args) {
-  let found, previous;
+  let found, previous, pendingReason;
   let scrollRequested = false;
   // Chromium can change the page viewport when its native debugger attaches
   // (notably by adding a debugging infobar). Attach before measuring or
@@ -1507,29 +1522,40 @@ async function resolveActionTarget(ctx, args) {
     left.frameId === right.frameId;
   // Two matching native observations give the layout a chance to settle
   // after scrolling. Only pre-input observations may repeat, never the click.
-  await ctx.router.poll(ctx, async () => {
-    const next = await ctx.router.page(ctx, {
-      ...args,
-      ...options(args),
-      command: "resolve",
-      ...(scrollRequested ? { noScroll: true } : {}),
+  try {
+    await ctx.router.poll(ctx, async () => {
+      const next = await ctx.router.page(ctx, {
+        ...args,
+        ...options(args),
+        command: "resolve",
+        reportPendingReason: true,
+        ...(scrollRequested ? { noScroll: true } : {}),
+      });
+      if (!next || next.pendingReason) {
+        pendingReason = next?.pendingReason;
+        previous = undefined;
+        return false;
+      }
+      pendingReason = undefined;
+      // A missing target did not establish a usable scroll position. If it
+      // appears later below the viewport, its first observation must still be
+      // allowed to scroll it into view.
+      scrollRequested = true;
+      const stable = sameLayout(previous, next);
+      previous = next;
+      if (!stable) return false;
+      // Native mouse movement later re-resolves this exact ref before pressing,
+      // so another pre-move snapshot cannot prove that the final point is safe.
+      found = next;
+      return true;
     });
-    if (!next) {
-      previous = undefined;
-      return false;
+  } catch (cause) {
+    if (cause instanceof BrowserActionError && cause.code === "TIMEOUT" &&
+      ["element_not_found", "element_not_actionable", "element_blocked"].includes(pendingReason)) {
+      throw new BrowserActionError("INVALID_TARGET", "The locator did not become actionable before its deadline.", { reason: pendingReason });
     }
-    // A missing target did not establish a usable scroll position. If it
-    // appears later below the viewport, its first observation must still be
-    // allowed to scroll it into view.
-    scrollRequested = true;
-    const stable = sameLayout(previous, next);
-    previous = next;
-    if (!stable) return false;
-    // Native mouse movement later re-resolves this exact ref before pressing,
-    // so another pre-move snapshot cannot prove that the final point is safe.
-    found = next;
-    return true;
-  });
+    throw cause;
+  }
   return found;
 }
 async function locatorClick(ctx, args, double = false) {
@@ -1554,7 +1580,7 @@ async function locatorClick(ctx, args, double = false) {
         Math.min(15000, ctx.budgetMs - (performance.now() - ctx.started)),
     });
   try {
-    await click(
+    const clicked = await click(
       ctx,
       {
         ...input,
@@ -1568,6 +1594,8 @@ async function locatorClick(ctx, args, double = false) {
       double,
     );
     if (!expect) return null;
+    if (clicked?.dialogOpened)
+      throw new BrowserActionError("EXPECTATION_UNCONFIRMED", "A native dialog is awaiting handling; the requested page condition is not confirmed.", { dispatched: true, effect: "unknown", reason: "dialog_opened_after_input" });
     try {
       if (navigation) {
         await ctx.router.getWaiter(ctx, navigation.id);
@@ -1983,6 +2011,7 @@ export function createBrowserRouter(
   const eventBuffer = [],
     logs = [],
     dialogs = new Map(),
+    clickDialogWaiters = new Map(),
     children = new Map(),
     executionContexts = new Map(),
     auditEntries = [],
@@ -2015,27 +2044,38 @@ export function createBrowserRouter(
     event.addListener(fn);
     listeners.push(() => event.removeListener(fn));
   };
+  // Correlate only an exact, live, unpredictable mark generated by this Run.
+  // Chrome can report the numeric DownloadItem before or after its filename
+  // decision and CDP's GUID. A URL, timestamp or original basename is not proof.
+  const associateNativeDownload = (item) => {
+    const marker = downloadMarker(item?.filename);
+    const mark = marker && downloadMarks.get(marker);
+    if (!mark || !Number.isSafeInteger(item.id)) return undefined;
+    if (mark.nativeId !== undefined && mark.nativeId !== item.id) mark.ambiguous = true;
+    else mark.nativeId = item.id;
+    return mark.ambiguous ? undefined : mark;
+  };
+  on(chrome.downloads?.onCreated, associateNativeDownload);
+  on(chrome.downloads?.onChanged, (delta) => {
+    if (typeof delta?.filename?.current === "string")
+      associateNativeDownload({ id: delta.id, filename: delta.filename.current });
+  });
   // Register synchronously so a restarted MV3 worker always releases the
   // browser's filename decision. Lost in-memory marks never authorize a file.
   on(chrome.downloads?.onDeterminingFilename, (item, suggest) => {
     let destination;
     try {
-      const marker = downloadMarker(item?.filename),
-        mark = marker && downloadMarks.get(marker);
-      if (mark && Number.isSafeInteger(item.id)) {
-        if (mark.nativeId !== undefined && mark.nativeId !== item.id)
-          mark.ambiguous = true;
-        else {
-          mark.nativeId = item.id;
-          // Chrome permits a per-download relative path only below its own
-          // Downloads directory. The Agent later fixes the completed file in
-          // work/resources through the native result resource contract.
-          const filename = item.filename.split(/[\\/]/).pop();
-          destination = {
-            filename: `Nexum/${filename}`,
-            conflictAction: "uniquify",
-          };
-        }
+      const mark = associateNativeDownload(item);
+      if (mark) {
+        // Chrome permits a per-download relative path only below its own
+        // Downloads directory. Only our filename decision enables the
+        // single-file grant; correlation by itself does not.
+        const filename = item.filename.split(/[\\/]/).pop();
+        destination = {
+          filename: `Nexum/${filename}`,
+          conflictAction: "uniquify",
+        };
+        mark.destinationConfirmed = true;
       }
     } finally {
       suggest(destination);
@@ -3053,14 +3093,21 @@ export function createBrowserRouter(
           children.has(params.sessionId)
         )
           children.get(params.sessionId).active = false;
-        if (method === "Page.javascriptDialogOpening")
-          dialogs.set(String(source.tabId), {
+        if (method === "Page.javascriptDialogOpening") {
+          const dialog = {
             id: `dialog_${++dialogSequence}`,
             type: params.type,
             message: params.message,
             pageVersion: version(source.tabId),
             controlEpoch: lease.epochs?.get(source.tabId),
-          });
+          };
+          dialogs.set(String(source.tabId), dialog);
+          const pending = clickDialogWaiters.get(source.tabId);
+          if (pending && pending.lease === lease &&
+              pending.controlEpoch === dialog.controlEpoch &&
+              pending.pageVersion === dialog.pageVersion)
+            pending.resolve(dialog);
+        }
         if (method === "Page.javascriptDialogClosed")
           dialogs.delete(String(source.tabId));
         if (method === "Page.downloadWillBegin") {
@@ -4431,30 +4478,74 @@ export function createBrowserRouter(
       ctx.dispatched();
       if (method === "Network.loadNetworkResource")
         ctx.pendingInfo.nativeNetworkTabId = tabId;
-      let result;
+      let result, deferredRelease = false;
       try {
-        // A native Runtime.evaluate can stay suspended behind a modal dialog.
-        // A raw cdp.send Network.loadNetworkResource can also remain pending
-        // after debugger detach (notably on Windows). The lease still confirms
-        // native input release and debugger detach before reporting closure.
-        // Internal document exports must await the native response so any
-        // returned stream can be closed; IO.read and IO.close likewise retain
-        // their actual settlement.
-        result =
-          method === "Runtime.evaluate" ||
-          (method === "Network.loadNetworkResource" && ctx.method === "cdp.send")
-            ? await nativeWithStop(ctx.signal, () =>
-                chrome.debugger.sendCommand(source, method, params),
-              )
-            : await chrome.debugger.sendCommand(source, method, params);
+        if (ctx.observeClickDialog && !child &&
+            method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") {
+          // Chromium may deliver the event, open a modal, and hold the CDP
+          // acknowledgement until the modal closes. Wait on the exact live
+          // lease/document's new dialog as well as the native reply. A raw
+          // CDP command keeps its original semantics.
+          const pending = Promise.withResolvers();
+          const observer = { lease: ctx.lease, controlEpoch: ctx.target.controlEpoch,
+            pageVersion: version(tabId), resolve: pending.resolve };
+          clickDialogWaiters.set(tabId, observer);
+          const held = inputMap?.get(token);
+          const downloadClick = ctx.lease.localDownloadClicks?.get(tabId);
+          const native = Promise.resolve().then(() => {
+            ctx.signal?.throwIfAborted();
+            return chrome.debugger.sendCommand(source, method, params);
+          });
+          void native.catch(() => {});
+          try {
+            const observed = await nativeWithStop(ctx.signal, () => Promise.race([
+              native.then(value => ({ kind: "reply", value })),
+              pending.promise.then(() => ({ kind: "dialog" })),
+            ]));
+            if (observed.kind === "dialog") {
+              deferredRelease = true;
+              // Keep the original press in the durable ledger until its
+              // release really acknowledges. A late reply cannot clear a
+              // newer press, and rejection leaves cleanup responsible.
+              void native.then(async () => {
+                if (held && inputMap?.get(token) === held) {
+                  inputMap.delete(token);
+                  await persist();
+                }
+                if (watchEnd && downloadClick &&
+                    ctx.lease.localDownloadClicks?.get(tabId) === downloadClick)
+                  await stopLocalDownloadClick(ctx.lease, tabId);
+              }).catch(() => {});
+            } else result = observed.value;
+          } finally {
+            if (clickDialogWaiters.get(tabId) === observer)
+              clickDialogWaiters.delete(tabId);
+          }
+        } else {
+          // A native Runtime.evaluate can stay suspended behind a modal dialog.
+          // A raw cdp.send Network.loadNetworkResource can also remain pending
+          // after debugger detach (notably on Windows). The lease still confirms
+          // native input release and debugger detach before reporting closure.
+          // Internal document exports must await the native response so any
+          // returned stream can be closed; IO.read and IO.close likewise retain
+          // their actual settlement.
+          result =
+            method === "Runtime.evaluate" ||
+            (method === "Network.loadNetworkResource" && ctx.method === "cdp.send")
+              ? await nativeWithStop(ctx.signal, () =>
+                  chrome.debugger.sendCommand(source, method, params),
+                )
+              : await chrome.debugger.sendCommand(source, method, params);
+        }
       } catch (cause) {
         if (armedLocalDownload) await stopLocalDownloadClick(ctx.lease, tabId);
         throw cause;
       } finally {
         if (method === "Network.loadNetworkResource")
           delete ctx.pendingInfo.nativeNetworkTabId;
-        if (watchEnd) await stopLocalDownloadClick(ctx.lease, tabId);
+        if (watchEnd && !deferredRelease) await stopLocalDownloadClick(ctx.lease, tabId);
       }
+      if (deferredRelease) return { dialogOpened: true };
       if (
         !child &&
         method === "Input.dispatchMouseEvent" &&
@@ -5883,9 +5974,13 @@ export function createBrowserRouter(
     async navigate(ctx, method, url, input) {
       const id = nativeId(ctx.target.tabId),
         before = version(id);
+      const stage = input.waitUntil ?? "load";
+      const old = await chrome.tabs.get(id);
+      const needsNewDocument = stage === "networkidle" && method === "navigate" &&
+        !/^https?:/i.test(old.url ?? "");
       const info = await router.armWaiter(ctx, {
         event: "navigation",
-        waitUntil: input.waitUntil ?? "load",
+        waitUntil: needsNewDocument ? "commit" : stage,
         timeoutMs: Math.min(input.timeoutMs ?? ctx.budgetMs, ctx.budgetMs),
         // A native navigation may commit at a different URL after a legitimate
         // redirect. Explicit URL waiters still retain their exact URL filter.
@@ -5895,6 +5990,11 @@ export function createBrowserRouter(
         if (method === "navigate") await chrome.tabs.update(id, { url });
         else await chrome.tabs[method](id);
         await router.getWaiter(ctx, info.id);
+        if (needsNewDocument) {
+          const remaining = Math.min(input.timeoutMs ?? ctx.budgetMs, ctx.budgetMs) - (performance.now() - ctx.started);
+          requireValue(remaining > 0, "TIMEOUT", "Navigation exceeded its deadline.");
+          await router.waitForLoadState(ctx, { state: "networkidle", timeoutMs: remaining });
+        }
         return router.actionResult(ctx, id, before);
       } finally {
         await router.cancelWaiter(ctx, info.id);
@@ -6003,7 +6103,11 @@ export function createBrowserRouter(
         timeoutMs,
       );
       try {
-        await router.send(ctx, "Page.enable", {});
+        // webNavigation owns commit/DOMContentLoaded/load receipts. Attaching
+        // the debugger to an old protected new-tab document before a native
+        // tabs.update prevents otherwise permitted HTTP(S) navigation.
+        if (input.event !== "navigation" || waiter.waitUntil === "networkidle")
+          await router.send(ctx, "Page.enable", {});
         if (input.event === "filechooser") {
           await syncChooserIntercept(ctx.lease, tabId);
         }
@@ -6173,8 +6277,15 @@ export function createBrowserRouter(
           "PROTOCOL_MISMATCH",
           "The completed browser download has an invalid file size.",
         );
+        // Only the exact completed, correlated native file inside the
+        // Browser-owned Nexum folder may request scoped source authorization.
+        // Other paths still use the ordinary caller path policy.
+        const components = item.filename.split(/[\\/]/);
+        const ownedDownloadMarker = mark.destinationConfirmed === true && components.at(-2) === "Nexum" &&
+          downloadMarker(item.filename) === value.marker ? value.marker : undefined;
         completed = {
           path: item.filename,
+          ...(ownedDownloadMarker ? { ownedDownloadMarker } : {}),
           ...(item.fileSize >= 0 ? { expectedSize: item.fileSize } : {}),
         };
         return true;

@@ -85,10 +85,10 @@ export const shSdkCalling: Readonly<Record<string,string>> = {
  write: "调用：sh.write({processId,data?: string | Uint8Array,eof?: boolean})；至少提供 data 或 eof:true。返回 {processId,accepted,bytes,eof}。",
  resize: "调用：sh.resize({processId,cols,rows})；只支持 PTY，返回 {processId,accepted,cols,rows}。",
  signal: "调用：sh.signal({processId,signal})；返回投递回执，不代表退出。",
- stop: "调用：sh.stop({processId,graceMs?,forceMs?})；返回 accepted、confirmed 和真实 facts，不能把 accepted 当退出。",
+ stop: "调用：sh.stop({processId,graceMs?,forceMs?})；返回 accepted、confirmed 和真实 facts。只有 confirmed 及 facts.closed/treeStopped 才能确认停止；Windows PTY 强制终止后 outputComplete 可能为 false，此时回读原 processId 的保留输出及 details.failure，不重跑命令。",
  which: "调用：sh.which(command: string | {command: string,cwd?: string})；解析实际可执行文件，不启动命令。",
 };
-export const shSdkErrors = "\n- invalid_process_arguments / invalid_process_input / invalid_output_encoding：修正实际参数。process_exit_failed / process_timeout：保留 processId，回读原进程和输出；勿盲目重启。\n";
+export const shSdkErrors = "\n- invalid_process_arguments / invalid_process_input / invalid_output_encoding：修正实际参数。process_exit_failed / process_timeout：保留 processId，回读原进程和输出；勿盲目重启。process_output_failed：查询原 processId；若 closed/treeStopped=true 但 outputComplete=false，只能确认进程已结束，不能声称输出完整；failure.reason=forced_terminal_shutdown 表示强制终止未确认终端 EOF。\n";
 
 const kind = "sh.process";
 const dialect = "https://json-schema.org/draft/2020-12/schema";

@@ -25,6 +25,8 @@ return { type: "resource_link", path: file.filename };
 
 等待器返回的 `downloaded.id` 是页面下载身份；`suggestedFilename` 是实际页面事件名称，受控下载可能包含 `-nexum-<唯一编号>` 并保存到浏览器下载目录的 Nexum 子目录。不要拿原始网页文件名匹配实际保存路径。在同一 Run 内可用 `(await tab.downloads()).find(item => item.id === downloaded.id)` 找到对应页面记录；只有实际返回 `nativeRecordId` 才可按该数字 ID 精确读取原生记录。该关联可能在等待器返回后才出现，也可能无法确认；缺少它不能猜测。记录完成、文件存在、路径授权和字节固定是独立事实。
 
+对当前 Run 可靠关联、由 Browser 受管保存的完成下载，`download.path()` 和 `tab.saveDownload(id)` 只为确证的单个源文件取得专用读取权限，并将校验后的文件固定到 Run 的受管资源目录。历史下载记录、未关联下载和上传源文件仍遵循普通路径授权；不会扩大整个下载目录的访问范围。
+
 当前等待器无法确认下载身份时，`download.path()` 仍返回 `CAPABILITY_NOT_ALLOWED`；可以通过上述列表由 AI 选择文件。浏览器提供文件大小时，等待器路径的实际文件必须与之相符；大小未知时按实际读取结果处理。不会重发原请求。
 
 `tab.downloads()` 对 `data:` 下载省略 URL，因为 URL 本身包含文件内容；完整内容通过文件或资源交付。

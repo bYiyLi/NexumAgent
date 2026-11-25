@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -262,6 +262,54 @@ test("native script failures retain safe exception type and script-relative loca
     (error) => error.details?.exceptionType === "Error" &&
       error.details?.location === undefined && !error.message.includes("999"),
   );
+});
+
+test("native assertions across the VM boundary keep safe diagnostics without compared values", async (t) => {
+  const { runner, loader } = await fixture(t, ["assert", "fs"]);
+  await assert.rejects(runner.start(run("run_native_assertion", `
+const assert = require("node:assert/strict");
+const hidden = ["PRIVATE", "COMPARISON"].join("_");
+assert.equal(hidden, "different");`)), (error) => {
+    assert.equal(error.code, "script_execution_failed");
+    assert.equal(error.message, "A JavaScript assertion failed.");
+    assert.equal(error.details.exceptionType, "AssertionError");
+    assert.equal(error.details.exceptionCode, "ERR_ASSERTION");
+    assert.equal(error.details.location?.line, 4);
+    assert.ok(!JSON.stringify(error.details).includes("PRIVATE_COMPARISON"));
+    assert.equal(error.details.actual, undefined);
+    assert.equal(error.details.expected, undefined);
+    return true;
+  });
+  await assert.rejects(runner.start(run("run_forged_assertion", `
+const error = new Error("opaque failure");
+Object.defineProperty(error, "code", {get(){ throw new Error("getter must not run"); }});
+error.name = "AssertionError";
+throw error;`)), (error) => {
+    assert.equal(error.details.exceptionType, "Error");
+    assert.equal(error.details.exceptionCode, undefined);
+    assert.ok(!error.message.includes("getter must not run"));
+    return true;
+  });
+  for (const [label, define] of [
+    ["inherited-name", 'Object.defineProperty(Error.prototype, "name", { get: touch })'],
+    ["inherited-formatter", 'Object.defineProperty(Function.prototype, "prepareStackTrace", { get: touch })'],
+  ]) {
+    const marker = path.join(loader.work, label);
+    const input = run("run_" + label, `
+      const fs = require("node:fs");
+      const touch = () => { fs.writeFileSync(context.marker, "getter called"); return "untrusted"; };
+      ${define};
+      throw new Error("safe authored failure");
+    `);
+    input.context.marker = marker;
+    await assert.rejects(runner.start(input), error => {
+      assert.equal(error.code, "script_execution_failed");
+      assert.equal(error.message, "safe authored failure");
+      assert.equal(error.details?.location, undefined);
+      return true;
+    });
+    await assert.rejects(access(marker), { code: "ENOENT" });
+  }
 });
 
 test("Go scope rejects path collisions and preserves prototype keys safely", () => {

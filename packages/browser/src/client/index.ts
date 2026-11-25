@@ -121,7 +121,7 @@ class Router {
     } catch (cause) {
       // The isolated host transports bounded structured effect facts in details.
       // Expose them through the existing BrowserError contract as well.
-      if (cause && typeof cause === "object" && !types.isProxy(cause) && cause instanceof Error) {
+      if (cause && typeof cause === "object" && !types.isProxy(cause) && types.isNativeError(cause)) {
         const details = Object.getOwnPropertyDescriptor(cause, "details")?.value;
         if (plain(details)) {
           if (Object.isExtensible(cause)) {
@@ -509,11 +509,12 @@ function makeDialog(
   input: t.DialogDescriptor,
   target: TabTarget,
 ): t.Dialog {
-  const fixed = normalizeBrowserValue(
-    dataObject(input, ["target", "dialogId", "pageVersion", "type", "message"]),
-  ) as t.DialogDescriptor;
+  // Retain validated scalar identity, never a remote descriptor or guest
+  // wrapper as the input of a later managed call.
+  const fixed = dataObject(input, ["target", "dialogId", "pageVersion", "type", "message"]) as unknown as t.DialogDescriptor;
+  const dialogTarget = queryTarget(fixed.target, true);
   requireArgument(
-    targetKey(validateTarget(fixed.target, true)) === targetKey(target) &&
+    targetKey(dialogTarget) === targetKey(target) &&
       typeof fixed.dialogId === "string" &&
       Number.isSafeInteger(fixed.pageVersion) &&
       typeof fixed.message === "string",
@@ -523,23 +524,20 @@ function makeDialog(
     ["alert", "beforeunload", "confirm", "prompt"].includes(fixed.type),
     "The native dialog kind is invalid.",
   );
-  const fields = {
-    target,
-    dialogId: fixed.dialogId,
-    pageVersion: fixed.pageVersion,
-  };
+  const { dialogId, pageVersion, type, message } = fixed;
+  const fields = () => ({ target: { ...dialogTarget }, dialogId, pageVersion });
   const result = {
-    type: fixed.type,
-    message: fixed.message,
-    dismiss: () => router.call<void>("dialogs.dismiss", fields),
-    ...(["confirm", "prompt"].includes(fixed.type)
+    type,
+    message,
+    dismiss: () => router.call<void>("dialogs.dismiss", fields()),
+    ...(["confirm", "prompt"].includes(type)
       ? {
           accept: async (text?: string) => {
             requireArgument(
-              fixed.type === "prompt" || text === undefined,
+              type === "prompt" || text === undefined,
               "Only prompt dialogs accept text.",
             );
-            return router.call<void>("dialogs.accept", { ...fields, text });
+            return router.call<void>("dialogs.accept", { ...fields(), text });
           },
         }
       : {}),
@@ -1270,7 +1268,7 @@ function makeTab(
       const value = await call<t.DialogDescriptor | undefined>(
         "tab.getJsDialog",
       );
-      return value === undefined
+      return value == null
         ? undefined
         : makeDialog(router, value, target);
     },

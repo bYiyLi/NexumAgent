@@ -7,6 +7,7 @@ import { safeErrorData } from "../contracts/error-data.js";
 import { isPlainRecord } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 import { ModuleLoader } from "./modules.js";
+import type { ScriptDiagnostic } from "./script-diagnostics.js";
 import { NativePromiseAudit } from "./promises.js";
 import { types } from "node:util";
 import { packWorkerBinary, unpackWorkerBinary } from "./worker-binary.js";
@@ -42,10 +43,7 @@ const outputKinds: Readonly<Record<string, string>> = Object.freeze({
 });
 let counter = 0;
 let started = false;
-let lastScriptDiagnostic: {
-  exceptionType: string;
-  location?: { source: string; line: number; column?: number };
-} | undefined;
+let lastScriptDiagnostic: ScriptDiagnostic | undefined;
 const syncBytes = 64 * 1024;
 const syncHeaderBytes = 8;
 const send = (value: object) => port.postMessage(value);
@@ -761,7 +759,11 @@ async function prepare() {
             message: "The JavaScript execution failed.",
           });
           const authoredMessage = fileError ? null : explicitScriptErrorMessage(cause);
-          if (authoredMessage && !isAgentError(cause)) error.message = authoredMessage;
+          if (!fileError && !isAgentError(cause)) {
+            if (lastScriptDiagnostic?.exceptionCode === "ERR_ASSERTION")
+              error.message = "A JavaScript assertion failed.";
+            else if (authoredMessage) error.message = authoredMessage;
+          }
           send({
             type: "failed",
             ...error,

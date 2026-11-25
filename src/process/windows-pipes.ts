@@ -400,7 +400,8 @@ export class WindowsProcessBackend
         this.#outputFailed = true;
         this.#failure ??= new AgentError(
           "process_output_failed",
-          "The forced Windows terminal shutdown could not retain a complete output tail.",
+          "The forced Windows terminal shutdown closed the process tree without confirming terminal EOF.",
+          { reason: "forced_terminal_shutdown" },
         );
       }
       this.#job.close();

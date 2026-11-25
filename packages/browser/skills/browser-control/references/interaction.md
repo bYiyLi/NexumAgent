@@ -12,7 +12,7 @@
 
 页面操作先 `tab.observe({full:true})`，再用 `tab.playwright.getByRole/getByLabel/getByText/locator` 定位当前元素。Locator 会在操作时重新查询；固定 ref、dialog、chooser 等过期后需重新观察，不能把旧 ID 改猜成另一个元素。
 
-`locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `TIMEOUT`，不会点击覆盖层。
+`locator.click({position:{x:20,y:15}})` 和 `dblclick` 的位置相对元素当前矩形左上角，使用元素所在文档的 CSS 坐标，不填时取中心；iframe 的偏移和缩放由 SDK 转换。指定位置必须在元素矩形内，且该点未被遮挡；中心可用不能替代指定点可用。越界报 `INVALID_ARGUMENT`，持续遮挡在期限内报 `INVALID_TARGET`（`reason: element_blocked`），不会点击覆盖层。
 
 点击或输入后检查返回的实际状态。若出现 `INPUT_UNCONFIRMED` 或 `effect: unknown`，输入可能已送达：先重新观察，不自动再次点击、提交或选择文件。
 
@@ -32,5 +32,7 @@ return { before: before.url, matched: result.matched, after: await tab.observe()
 ```
 
 `click({expect})` 会等待已指定的页面条件；例如文字、导航或 URL 匹配。返回 `EXPECTATION_UNCONFIRMED` 表示业务完成尚未证实，原输入可能已经发生，不能自动重放。无 `expect` 的点击不证明异步业务结果。
+
+同步触发原生 JavaScript 弹窗时，Browser 可依据本次输入后观察到的新弹窗返回控制权；此时使用 `tab.getJsDialog()` 查看并按用户授权处理，不要重复点击。若已指定业务 `expect`，弹窗出现不代表业务条件满足，仍返回 `EXPECTATION_UNCONFIRMED`，并保留原始输入效果未知的语义。
 
 只需要 DOM 结构时，将上方完整入口的最后一行换成 `return await tab.playwright.domSnapshot();`，不必加载全部 API 声明。

@@ -881,6 +881,7 @@ const createExtension: ExtensionFactory = async (host) => {
               },
               call,
               paths.work,
+              typeof value.ownedDownloadMarker === "string" ? value.ownedDownloadMarker : undefined,
             );
             return pathName === "downloads.path" ? artifact.path : artifact;
           }

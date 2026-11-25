@@ -147,7 +147,7 @@ export function methodSkill(input: MethodSkillInput) {
           : method.normalizes === false
           ? `调用形式：\`${call}(input)\`；无参数调用按空对象校验。\n\n`
           : input.references?.["types.md"] ? "来源另有 [类型声明](types.md)，可能只描述扩展工厂。仅在其中确实声明该方法时使用其签名；否则不要猜测位置参数。\n\n" : "调用签名未声明，不得从内部 Schema 推断 JavaScript 参数。\n\n") +
-        (method.normalizes === false ? "" : "下方 inputSchema 描述归一化后的校验输入，不定义 JavaScript 参数顺序或调用时必填的默认字段。\n\n") +
+        (method.normalizes === false ? "" : "公开 JavaScript 调用以已声明的签名为准。下方 inputSchema 描述内部归一化后的校验输入；required 不改变签名中的可选项、默认值或位置参数。\n\n") +
         "以下元数据逐项来自本次 Registry，包含完整 inputSchema、已声明的 outputSchema、Schema 方言、依赖 schemas 和权限。\n\n```json\n" +
         canonicalJson(method, 4 * 1024 * 1024) +
         "\n```\n\n" +

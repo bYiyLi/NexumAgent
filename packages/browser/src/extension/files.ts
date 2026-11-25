@@ -309,6 +309,7 @@ async function copyFile(
   call: Invocation,
   work: string,
   maximum: number,
+  ownedDownloadMarker?: string,
 ): Promise<BrowserArtifact> {
   check(
     typeof input.path === "string" &&
@@ -325,7 +326,25 @@ async function copyFile(
     "Expected file size must be a nonnegative safe byte count.",
   );
   const requested = path.resolve(pwd(call), input.path);
-  authorize(call, requested, "read");
+  // This proof is internal to the native download completion response; a
+  // caller-provided path can never select this authorization scope.
+  const authorizeSource = (value: string) => {
+    if (ownedDownloadMarker === undefined) {
+      authorize(call, value, "read");
+      return;
+    }
+    check(
+      /^[0-9a-f]{32}$/.test(ownedDownloadMarker) &&
+        path.isAbsolute(input.path) && requested === input.path &&
+        value === requested && path.basename(path.dirname(value)) === "Nexum" &&
+        path.basename(value).match(/-nexum-([0-9a-f]{32})(?:\.[a-z0-9]{1,16})?$/i)?.[1] === ownedDownloadMarker,
+      "FILE_CHANGED",
+      "The owned download path no longer matches its browser identity.",
+    );
+    current(call);
+    call.authorize({ type: "path", value, access: "read-owned-browser-download" });
+  };
+  authorizeSource(requested);
   const sourceFile = async <T>(read: () => Promise<T>): Promise<T> => {
     try {
       return await read();
@@ -339,10 +358,10 @@ async function copyFile(
     }
   };
   const canonical = await sourceFile(() => realpath(requested));
-  authorize(call, canonical, "read");
+  authorizeSource(canonical);
   const observed = await sourceFile(() => lstat(canonical, { bigint: true }));
   check(
-    observed.isFile(),
+    observed.isFile() && (ownedDownloadMarker === undefined || observed.nlink === 1n),
     "INVALID_ARGUMENT",
     "A browser file source must be a regular file.",
   );
@@ -373,7 +392,7 @@ async function copyFile(
     );
     const before = await source.stat({ bigint: true });
     check(
-      before.isFile() && identity(observed, before),
+      before.isFile() && (ownedDownloadMarker === undefined || before.nlink === 1n) && identity(observed, before),
       "FILE_CHANGED",
       "The browser source changed while opening it.",
     );
@@ -388,8 +407,8 @@ async function copyFile(
       "FILE_SIZE_MISMATCH",
       "The downloaded file size does not match its completed declaration.",
     );
-    authorize(call, requested, "read");
-    authorize(call, canonical, "read");
+    authorizeSource(requested);
+    authorizeSource(canonical);
     check(
       (await realpath(requested)) === canonical &&
         identity(before, await lstat(canonical, { bigint: true })),
@@ -428,8 +447,8 @@ async function copyFile(
       hash = createHash("sha256");
     let count = 0;
     while (true) {
-      authorize(call, requested, "read");
-      authorize(call, canonical, "read");
+      authorizeSource(requested);
+      authorizeSource(canonical);
       const { bytesRead } = await source.read(buffer, 0, buffer.length, null);
       if (bytesRead === 0) break;
       count += bytesRead;
@@ -442,8 +461,8 @@ async function copyFile(
       await writeAll(output, chunk, call, temporary);
       hash.update(chunk);
     }
-    authorize(call, requested, "read");
-    authorize(call, canonical, "read");
+    authorizeSource(requested);
+    authorizeSource(canonical);
     check(
       BigInt(count) === before.size &&
         unchanged(before, await source.stat({ bigint: true })) &&
@@ -528,6 +547,7 @@ export async function materializeDownload(
   input: DownloadFileInput,
   call: Invocation,
   work: string,
+  ownedDownloadMarker?: string,
 ): Promise<BrowserArtifact> {
   plain(input);
   fields(input, ["path", "name", "expectedSize", "destination"]);
@@ -541,6 +561,7 @@ export async function materializeDownload(
     call,
     work,
     Number.MAX_SAFE_INTEGER,
+    ownedDownloadMarker,
   );
 }
 

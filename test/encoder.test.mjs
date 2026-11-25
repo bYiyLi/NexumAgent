@@ -1099,3 +1099,18 @@ test("a smaller current observation budget moves retained JSON to a readable res
   assert.equal(JSON.parse(full.data.toString()).data.value.length, 10000);
   assert.deepEqual(savedJSON(saved), before);
 });
+
+test("model mirror expansion resourceizes data and text before the final Cloud context ceiling", async (t) => {
+  const f=await fixture(t);
+  for (const [value,kind,expected] of [
+    [f.output.json({html:"<&>".repeat(4000)}),"dataResource",{html:"<&>".repeat(4000)}],
+    [f.output.text("nested text ".repeat(2500)),"textResource","nested text ".repeat(2500)],
+  ]) {
+    const saved=await f.encoder.encode(value,f.scope());
+    const resource=saved.delivery?.[kind];
+    assert.ok(resource,kind);
+    const read=await f.artifacts.read(resource.uri,f.scope(),{maxBytes:128*KiB});
+    const parsed=JSON.parse(read.data.toString("utf8"));
+    assert.deepEqual(kind==="textResource"?parsed[0].item.text:parsed.data,expected);
+  }
+});

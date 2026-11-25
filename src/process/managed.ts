@@ -164,6 +164,13 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
               : this.#preparing
                 ? "preparing"
                 : "registered";
+    const failure = this.#failure ? safeErrorData(this.#failure, {
+      code: "process_failed", message: "The managed process failed.",
+    }) : undefined;
+    const failureDetails = failure?.details;
+    const forcedTerminalTail = failure?.code === "process_output_failed" &&
+      failureDetails !== null && typeof failureDetails === "object" &&
+      !Array.isArray(failureDetails) && failureDetails.reason === "forced_terminal_shutdown";
     return {
       state,
       ...facts,
@@ -183,16 +190,11 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
         : {}),
       ...(this.#stopReason ? { stopReason: this.#stopReason } : {}),
       ...(this.#preparationUnconfirmed ? { preparationUnconfirmed: true } : {}),
-      ...(this.#failure
-        ? {
-            failure: {
-              code:
-                safeErrorData(this.#failure, {
-                  code: "process_failed",
-                  message: "The managed process failed.",
-                }).code ?? "process_failed",
-            },
-          }
+      ...(failure
+        ? { failure: {
+            code: failure.code ?? "process_failed",
+            ...(forcedTerminalTail ? { reason: "forced_terminal_shutdown" } : {}),
+          } }
         : {}),
     } as JsonObject;
   }

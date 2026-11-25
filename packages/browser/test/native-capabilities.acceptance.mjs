@@ -918,3 +918,27 @@ test(
     ]);
   },
 );
+
+test("native blank-tab navigation and synchronous prompt handles complete without input replay", {timeout:90000}, async (t) => {
+  const f=await nativeFixture(t,{html:'<!doctype html><title>Dialog regression</title><button id="prompt" onclick="window.answer=prompt(\'Synchronous prompt\',\'default\')">Prompt</button><button id="confirm" onclick="window.confirmed=confirm(\'Synchronous confirm\')">Confirm</button>'});
+  const result=await f.run(select+`
+const fresh=await selected.tabs.new();
+await fresh.navigate(context.input.base+"?blank-regression",{waitUntil:"load"});
+const title=await fresh.title();
+await fresh.playwright.getByRole("button",{name:"Prompt"}).click({timeoutMs:10000});
+const prompt=await fresh.getJsDialog();
+if(prompt?.type!=="prompt")throw Error("Native prompt missing");
+await prompt.accept("中文");
+await fresh.playwright.getByRole("button",{name:"Confirm"}).click({timeoutMs:10000});
+const confirm=await fresh.getJsDialog();
+if(confirm?.type!=="confirm")throw Error("Native confirm missing");
+await confirm.dismiss();
+const values=await fresh.playwright.evaluate("()=>({answer:window.answer,confirmed:window.confirmed})");
+const absent=(await fresh.getJsDialog())===undefined;
+await fresh.close();
+return {title,values,absent};`,{base:f.base});
+  assert.equal(result.run.status,"succeeded",JSON.stringify(result.run.error));
+  assert.equal(result.result.data.title,"Dialog regression");
+  assert.deepEqual(result.result.data.values,{answer:"中文",confirmed:false});
+  assert.equal(result.result.data.absent,true);
+});

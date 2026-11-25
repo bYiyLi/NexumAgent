@@ -2484,6 +2484,7 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
   });
   assert.deepEqual(await path, {
     path: `/downloads/Nexum/${filename}`,
+    ownedDownloadMarker: /-nexum-([0-9a-f]{32})/.exec(filename)[1],
     expectedSize: 3,
   });
   assert.deepEqual(
@@ -2507,7 +2508,7 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
   downloads[1].fileSize = -1;
   assert.deepEqual(
     await f.call("downloads.path", { downloadId: receipt.downloadId }),
-    { path: `/downloads/Nexum/${filename}` },
+    { path: `/downloads/Nexum/${filename}`, ownedDownloadMarker: /-nexum-([0-9a-f]{32})/.exec(filename)[1] },
   );
   downloads[1].fileSize = -2;
   await assert.rejects(
@@ -4512,6 +4513,9 @@ test("two run targets downloading the same URL keep distinct proven native recor
     f.chrome.debugger.onEvent.emit(source,"Page.downloadWillBegin",{guid:item.guid,url,suggestedFilename:filename});
     // A page event alone does not prove the native DownloadItem identity.
     assert.equal((await f.call("tab.downloads",{},item))[0].nativeRecordId,undefined);
+    f.chrome.downloads.onCreated.emit(native);
+    assert.equal((await f.call("tab.downloads",{},item))[0].nativeRecordId,item.nativeId);
+    f.chrome.downloads.onChanged.emit({ id:item.nativeId,filename:{current:native.filename} });
     f.chrome.downloads.onDeterminingFilename.emit(native,()=>{});
     f.chrome.debugger.onEvent.emit(source,"Page.downloadProgress",{guid:item.guid,state:"completed",receivedBytes:3,totalBytes:3});
   }
@@ -4529,4 +4533,50 @@ test("two run targets downloading the same URL keep distinct proven native recor
   }
   await f.router.endLease("run-a");
   assert.equal((await f.call("tab.downloads",{},cases[1]))[0].nativeRecordId,72);
+});
+
+test("blank new tab navigation does not attach to the protected old document", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease", null);
+  const newTab = await f.call("tabs.new", {}, { id: null });
+  const originalAttach = f.chrome.debugger.attach;
+  f.chrome.debugger.attach = async (source, version) => {
+    const tab = await f.chrome.tabs.get(source.tabId);
+    if (tab.url.startsWith("chrome:")) throw new Error("Cannot access a chrome:// URL");
+    return originalAttach(source, version);
+  };
+  await f.router.dispatch({ ...binding, actionId:crypto.randomUUID(), operationId:crypto.randomUUID(),
+    runId:"lease",leaseId:"lease",method:"tab.navigate",target:newTab.target,
+    args:{target:newTab.target,url:"https://example.com/blank-test"},budgetMs:3000 });
+  assert.equal((await f.chrome.tabs.get(Number(newTab.id))).url,"https://example.com/blank-test");
+  assert.ok(!f.calls.some(v=>v[0]==="debugger.attach" && v[1].tabId===Number(newTab.id)));
+});
+
+test("a native modal after mouse release is observed without waiting for blocked page script", async (t) => {
+  const f = fixture(t, { missingClickReceipt:true });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const send = f.chrome.debugger.sendCommand;
+  const nativeRelease = Promise.withResolvers();
+  f.chrome.debugger.sendCommand = async (source,method,params) => {
+    const result = await send(source,method,params);
+    if(method==="Input.dispatchMouseEvent" && params.type==="mouseReleased") {
+      f.chrome.debugger.onEvent.emit(source,"Page.javascriptDialogOpening",{type:"confirm",message:"Confirm",url:"https://example.com",hasBrowserHandler:true});
+      return nativeRelease.promise;
+    }
+    if(method==="Page.handleJavaScriptDialog") {
+      f.chrome.debugger.onEvent.emit(source,"Page.javascriptDialogClosed",{});
+      nativeRelease.resolve({});
+    }
+    return result;
+  };
+  await f.call("cua.click",{options:{x:40,y:70}},{budgetMs:3000});
+  const dialog=await f.call("tab.getJsDialog");
+  assert.equal(dialog.type,"confirm");
+  await f.call("dialogs.dismiss",{dialogId:dialog.dialogId,pageVersion:dialog.pageVersion});
+  assert.equal(f.calls.filter(v=>v[0]==="debugger.sendCommand" && v[2]==="Input.dispatchMouseEvent" && v[3].type==="mouseReleased").length,1);
+  assert.ok(!f.calls.some(v=>v[0]==="scripting.executeScript" && v[1].args?.[0]?.command==="inputReceipt" && v[1].args[0].action==="peek"));
 });

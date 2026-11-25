@@ -89,7 +89,7 @@ export async function nativeFixture(t, options = {}) {
   const root = realpathSync.native(
       mkdtempSync(path.join(tmpdir(), "nexum-browser-core-")),
     ),
-    work = path.join(root, "work"),
+    work = root,
     packageRoot = path.join(work, "node_modules", "@nexum-hub/browser");
   mkdirSync(packageRoot, { recursive: true });
   for (const name of [
@@ -172,7 +172,7 @@ export async function nativeFixture(t, options = {}) {
   const context = store.openWork({
     callerKey: callerKey(caller),
     pwd: work,
-    snapshotRef: "work/snapshot.json",
+    snapshotRef: "snapshot.json",
   });
   const artifacts = new ArtifactStore(root, "browser-agent"),
     encoder = new ResultEncoder(artifacts),

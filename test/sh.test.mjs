@@ -1236,6 +1236,8 @@ test(
         row.diagnostic.details.failure.code,
         "process_output_failed",
       );
+      assert.equal(row.diagnostic.details.failure.reason, "forced_terminal_shutdown");
+      assert.equal(retained.details.failure.reason, "forced_terminal_shutdown");
       assert.equal(stopped.facts.outputComplete, false);
       assert.equal(retained.outputComplete, false);
       assert.equal(existsSync(`${managed.log.path}.complete`), false);

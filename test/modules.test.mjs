@@ -104,6 +104,68 @@ test("direct imports and require use native conditions; transitive package depen
   );
 });
 
+test("approved npm and Node native types remain usable across execution realms", async (t) => {
+  const { loader, work, pkg, builtins } = await fixture(t);
+  builtins(["assert", "buffer", "crypto", "events", "fs", "path", "stream", "util"]);
+  writeFileSync(path.join(pkg, "index.cjs"), `
+    const { types } = require("node:util");
+    exports.make = () => ({ array: [1, 2], object: { answer: 42 },
+      map: new Map([["a", 7]]), set: new Set([3, 4]), date: new Date(1234),
+      buffer: Buffer.from([0, 255]), view: new Uint8Array([8, 9]),
+      error: new TypeError("fixture"), promise: Promise.resolve(17) });
+    exports.consume = (x) => ({
+      array: Array.isArray(x.array), map: types.isMap(x.map),
+      set: types.isSet(x.set), date: types.isDate(x.date),
+      view: types.isUint8Array(x.view), error: types.isNativeError(x.error),
+      data: x.array[0] + x.map.get("a") + x.view[0] });
+  `);
+  const execute = await loader.compileIsolated(`
+    const pkg = require("fixture");
+    const a = require("node:assert/strict");
+    const types = require("node:util").types;
+    const { Readable } = require("node:stream");
+    const { createHash } = require("node:crypto");
+    const fs = require("node:fs/promises");
+    const path = require("node:path");
+    const n = pkg.make();
+    a.ok(Array.isArray(n.array));
+    a.equal(n.array.join(","), "1,2");
+    a.equal(n.object.answer, 42);
+    a.equal(n.map.get("a"), 7);
+    a.equal([...n.set].join(","), "3,4");
+    a.equal(n.date.getTime(), 1234);
+    a.ok(types.isNativeError(n.error));
+    a.equal(n.error.message, "fixture");
+    a.equal(await n.promise, 17);
+    a.ok(Buffer.isBuffer(n.buffer));
+    a.ok(types.isUint8Array(n.view));
+    a.equal(n.view.join(","), "8,9");
+    const file = path.join(context.pwd, "realm-fixture.bin");
+    await fs.writeFile(file, n.buffer);
+    a.equal(Buffer.compare(await fs.readFile(file), n.buffer), 0);
+    const hash = createHash("sha256");
+    for await (const chunk of Readable.from([n.buffer, Buffer.from(n.view)])) hash.update(chunk);
+    let strictComparison;
+    try { a.deepEqual(n.array, [1, 2]); strictComparison = "equal"; }
+    catch (error) { a.equal(error.code, "ERR_ASSERTION"); strictComparison = "different-prototype"; }
+    // Strict prototype identity is not a business-value compatibility contract.
+    return { strictComparison, digest: hash.digest("hex"), guest: pkg.consume({
+      array: [1], map: new Map([["a", 2]]), set: new Set([4]),
+      date: new Date(0), view: new Uint8Array([3]), error: new Error("guest")
+    }) };
+  `, { context: { pwd: work } });
+  try {
+    const result = await execute();
+    assert.ok(["equal", "different-prototype"].includes(result.strictComparison));
+    assert.equal(result.digest.length, 64);
+    assert.deepEqual({ ...result.guest }, {
+      array: true, map: true, set: true, date: true, view: true, error: true, data: 6,
+    });
+  } finally {
+    await execute.close();
+  }
+});
+
 test("static import resolution uses current native conditions without evaluating or pinning a package version", async (t) => {
   const { loader, pkg, packages } = await fixture(t);
   writeFileSync(

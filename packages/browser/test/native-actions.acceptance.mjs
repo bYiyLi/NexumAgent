@@ -637,7 +637,17 @@ await pending.waitFor({state:'visible',timeoutMs:5000});return {before,after:{co
 });
 
 test("native direct file refs, owned download aliases and waiter cancellation keep real identities", async (t) => {
-  const f = await nativeFixture(t);
+  const downloadGrants = [];
+  const f = await nativeFixture(t, {
+    authorize(policy) {
+      const target = policy.target;
+      if (target?.type === "path" && target.value.includes(path.sep + "native-downloads" + path.sep)) {
+        assert.equal(target.access, "read-owned-browser-download");
+        assert.equal(path.basename(path.dirname(target.value)), "Nexum");
+        downloadGrants.push(target.value);
+      }
+    },
+  });
   const result = await f.run(
     select +
       `
@@ -670,6 +680,9 @@ test("native direct file refs, owned download aliases and waiter cancellation ke
     f.downloadBytes,
   );
   assert.equal(data.record.state, "complete");
+  assert.equal(typeof data.record.nativeRecordId, "number");
+  assert.ok(downloadGrants.length > 0);
+  assert.ok(downloadGrants.every((grant) => grant === path.join(browserDirectory, data.record.suggestedFilename)));
   assert.equal(data.multiple, true);
   assert.equal(data.cancelled.cancelled, true);
   assert.equal(data.error, "WAITER_GONE");

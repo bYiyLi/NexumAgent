@@ -486,6 +486,7 @@ test(
     assert.equal(facts.forceRequested, true);
     assert.equal(facts.outputComplete, false);
     assert.equal(f.backend.failure.code, "process_output_failed");
+    assert.equal(f.backend.failure.details.reason, "forced_terminal_shutdown");
   },
 );
 

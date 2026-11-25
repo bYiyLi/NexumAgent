@@ -150,6 +150,7 @@ async function fixture(
     authorize,
     visualFailure = false,
     isolatedWorker = false,
+    nativeDialog = false,
   } = {},
 ) {
   const root = realpathSync.native(
@@ -521,6 +522,16 @@ async function fixture(
           });
           return { frameId: "main" };
         }
+        if (nativeDialog && method === "Runtime.evaluate") {
+          chrome.debugger.onEvent.emit(_source, "Page.javascriptDialogOpening", {
+            type: "prompt", message: "Fixture prompt",
+          });
+          return { result: { value: true } };
+        }
+        if (nativeDialog && method === "Page.handleJavaScriptDialog") {
+          chrome.debugger.onEvent.emit(_source, "Page.javascriptDialogClosed", {});
+          return {};
+        }
         if (method === "Accessibility.getFullAXTree")
           return {
             nodes: [
@@ -709,6 +720,23 @@ test("actual isolated Browser Worker can get a tab and clean its RunScope", asyn
   assert.equal(scopes.length, 1);
   assert.ok(scopes.every((item) => item.closedAt !== null),
     "the real Worker must close its run control after native operations");
+});
+
+test("actual isolated Browser Worker handles opaque dialog objects and absent dialogs", async (t) => {
+  const f = await fixture(t, { isolatedWorker: true, nativeDialog: true });
+  const result = await f.start(select + `
+    const absent=await tab.getJsDialog();
+    await tab.cdp.send("Runtime.evaluate",{expression:"true"});
+    const first=await tab.getJsDialog();
+    if(first?.type!=="prompt") throw Error("Missing prompt");
+    await first.dismiss();
+    await tab.cdp.send("Runtime.evaluate",{expression:"true"});
+    const second=await tab.getJsDialog();
+    await second.accept("中文");
+    return {absent:absent??null,closed:(await tab.getJsDialog())??null};
+  `);
+  assert.equal(result.run.status, "succeeded", JSON.stringify(result.run.error));
+  assert.deepEqual(result.result.data, { absent: null, closed: null });
 });
 
 test("visual degradation reaches extension logs with its actual run and action while the browser action continues", async (t) => {

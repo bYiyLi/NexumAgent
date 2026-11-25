@@ -566,3 +566,25 @@ test("Blob actual stream size is verified independently of its mutable declared 
   );
   assert.deepEqual(artifacts(f.work), []);
 });
+
+test("an owned native download only grants an exact regular source, never a caller path or a redirected file", async (t) => {
+  const marker="a".repeat(32);
+  const f=fixture(t,target=>{
+    if (target.access==="read" && target.value.includes("Nexum")) throw Object.assign(new Error("denied"),{code:"path_not_allowed"});
+  });
+  const directory=path.join(f.root,"Nexum");
+  mkdirSync(directory);
+  const source=path.join(directory,"report-nexum-"+marker+".pdf");
+  writeFileSync(source,"downloaded");
+  await assert.rejects(materializeDownload({path:source},f.call,f.work),{code:"path_not_allowed"});
+  const result=await materializeDownload({path:source,expectedSize:10},f.call,f.work,marker);
+  assert.equal(readFileSync(result.path,"utf8"),"downloaded");
+  assert.ok(f.grants.some(g=>g.value===source && g.access==="read-owned-browser-download"));
+  await assert.rejects(materializeDownload({path:source},f.call,f.work,"b".repeat(32)),{code:"FILE_CHANGED"});
+  await assert.rejects(materializeDownload({path:f.pwd},f.call,f.work,marker),{code:"FILE_CHANGED"});
+  const other=path.join(f.pwd,"other.pdf");
+  writeFileSync(other,"private");
+  const alias=path.join(directory,"alias-nexum-"+marker+".pdf");
+  try {symlinkSync(other,alias);} catch {return;}
+  await assert.rejects(materializeDownload({path:alias},f.call,f.work,marker),{code:"FILE_CHANGED"});
+});
