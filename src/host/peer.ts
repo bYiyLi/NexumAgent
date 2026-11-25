@@ -1,7 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import type { Readable, Writable } from "node:stream";
 import { AgentError, isAgentError } from "../contracts/errors.js";
-import { safeErrorData } from "../contracts/error-data.js";
+import { safeErrorData, isPublicErrorCode, boundErrorMessage, boundErrorDetails } from "../contracts/error-data.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 
@@ -145,15 +145,8 @@ export class Peer {
     this.#pending.delete(message.id);
     if (message.error) {
       const data = message.error.data;
-      if (isPlainRecord(data) && typeof data.code === "string" &&
-          /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(data.code) &&
-          typeof data.message === "string" && data.message.length <= 1024) {
-        let details: JsonObject | undefined;
-        if (isPlainRecord(data.details)) {
-          try { details = JSON.parse(canonicalJson(data.details, 8 * 1024)) as JsonObject; }
-          catch { details = { omitted: true, reason: "invalid_error_details" }; }
-        }
-        const error = new AgentError(data.code, data.message, details);
+      if (isPlainRecord(data) && isPublicErrorCode(data.code)) {
+        const error = new AgentError(data.code, boundErrorMessage(data.message,"The host request failed."), boundErrorDetails(data.details,data));
         if (data.code === "api_http_error" && isPlainRecord(data.response) &&
             Number.isSafeInteger(data.response.status)) {
           try {

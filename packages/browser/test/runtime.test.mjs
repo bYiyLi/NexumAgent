@@ -17,6 +17,7 @@ import { Server as HttpServer } from "node:http";
 import { Server as NetServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import WebSocket from "ws";
 import { FixtureStore, ExecutionFixture, callerKey } from "../../../test/helpers/runtime-fixture.mjs";
@@ -151,6 +152,8 @@ async function fixture(
     visualFailure = false,
     isolatedWorker = false,
     nativeDialog = false,
+    probeStaleBuild = false,
+    screenshotFailure,
   } = {},
 ) {
   const root = realpathSync.native(
@@ -285,6 +288,7 @@ async function fixture(
     commandGate = Promise.withResolvers(),
     commandStarted = Promise.withResolvers(),
     counts = { attach: 0, detach: 0, removed: 0, commands: 0, handoff: 0 };
+  const captures = [];
   const tabs = [
     {
       id: 1,
@@ -551,8 +555,13 @@ async function fixture(
               clientWidth: 1,
               clientHeight: 1,
             },
+            cssContentSize: { x: 0, y: 0, width: 300, height: 1200 },
           };
-        if (method === "Page.captureScreenshot") return { data: jpeg };
+        if (method === "Page.captureScreenshot") {
+          captures.push(structuredClone(params));
+          if (screenshotFailure) throw screenshotFailure;
+          return { data: jpeg };
+        }
         return { enabled: true };
       },
     },
@@ -634,16 +643,16 @@ async function fixture(
     router,
     profile: "development",
     extensionVersion: release.extensionVersion,
+    assetRevision: (await import(pathToFileURL(path.join(packageRoot,"browser-extension","dist","development","profile.js")).href)).assetRevision,
   });
   plugin = connection;
-  await plugin.start();
   let fixtureBrowserId;
   const start = async (script, options = {}) => {
     let value = await engine.start(caller, {
       contextId: context.contextId,
       script,
       ...options,
-      input: options.scriptName ? options.input ?? {} : { ...options.input, fixtureBrowserId },
+      input: options.scriptName ? options.input ?? {} : { ...options.input, ...(fixtureBrowserId ? {fixtureBrowserId} : {}) },
     });
     runs.add(value.run.runId);
     if (options.waitMs === 0) return value;
@@ -658,6 +667,39 @@ async function fixture(
     }
     return value;
   };
+  let staleDiscovery, offlineDiscovery, damagedDiscovery, staleNamedDiscovery, offlineInstallation, damagedInstallation;
+  if(probeStaleBuild){
+    offlineDiscovery = await start(undefined, { scriptName: "browser/discover.js", input: {} });
+    offlineInstallation = await start(undefined, { scriptName: "browser/installation.js", input: {} });
+    const asset = path.join(work, ".nexum-browser", "extension", "router.js");
+    const originalAsset = readFileSync(asset);
+    try {
+      writeFileSync(asset, Buffer.concat([originalAsset, Buffer.from("\n// damaged fixture")]));
+      damagedDiscovery = await start(undefined, { scriptName: "browser/discover.js", input: {} });
+      damagedInstallation = await start(undefined, { scriptName: "browser/installation.js", input: {} });
+    } finally {
+      writeFileSync(asset, originalAsset);
+    }
+    await chrome.storage.local.set({nexumBrowserProfileId:"fixture-stale-profile"});
+    const old = new WebSocket(`ws://127.0.0.1:${testPort}/nexum-browser/v1`,{
+      origin:`chrome-extension://${extensionId}`,
+    });
+    try{
+      await once(old,"open");
+      const reply=once(old,"message");
+      const closed=once(old,"close");
+      old.send(JSON.stringify({
+        v:1,type:"hello",profile:"development",extensionId,extensionVersion:release.extensionVersion,
+        protocol:{min:1,max:1},browserProfileId:"fixture-stale-profile",browserSessionId:"fixture-stale-session",
+        clientInstanceId:"fixture-stale-worker",attemptSequence:1,metadata:{},
+      }));
+      assert.equal(JSON.parse((await reply)[0].toString()).code,"PLUGIN_VERSION_MISMATCH");
+      await closed;
+      staleDiscovery=await start('const {createBrowserClient}=await import("@nexum-hub/browser");try{await createBrowserClient(browser).browsers.list();return {unexpected:true}}catch(error){return {code:error.code,message:error.message}};');
+      staleNamedDiscovery = await start(undefined, { scriptName: "browser/discover.js", input: {} });
+    }finally{old.terminate()}
+  }
+  await plugin.start();
   const end = Date.now() + 3000;
   while (!plugin.state().connected) {
     assert.ok(
@@ -677,10 +719,17 @@ async function fixture(
     materials,
     registry,
     plugin,
+    staleDiscovery,
+    offlineDiscovery,
+    damagedDiscovery,
+    offlineInstallation,
+    damagedInstallation,
+    staleNamedDiscovery,
     attached,
     detachGate,
     commandGate,
     counts,
+    captures,
     tabs,
     start,
     router,
@@ -695,6 +744,39 @@ async function fixture(
   };
 }
 const select = `const {createBrowserClient}=await import("@nexum-hub/browser");const client=createBrowserClient(browser);const selected=await client.browsers.get(context.input.fixtureBrowserId);const tabs=await selected.tabs.list();const tab=await selected.tabs.get('1');`;
+
+test("stale Worker rejection is actionable through the isolated SDK and matching reload restores discovery",async t=>{
+  const f=await fixture(t,{isolatedWorker:true,probeStaleBuild:true});
+  assert.equal(f.staleDiscovery.run.status,"succeeded",JSON.stringify(f.staleDiscovery.run.error));
+  assert.equal(f.staleDiscovery.result.data.code,"PLUGIN_VERSION_MISMATCH");
+  assert.match(f.staleDiscovery.result.data.message,/Reload the Nexum browser extension/);
+  for (const observed of [f.offlineDiscovery, f.damagedDiscovery, f.staleNamedDiscovery, f.offlineInstallation, f.damagedInstallation]) {
+    assert.equal(observed.run.status, "succeeded", JSON.stringify(observed.run.error));
+    assert.equal(typeof observed.result.data, "string");
+  }
+  assert.match(f.offlineDiscovery.result.data, /no authorized online browsers found/);
+  assert.match(f.offlineDiscovery.result.data, /Installation assets: ready/);
+  assert.match(f.offlineDiscovery.result.data, /Browser extension installation: unknown/);
+  assert.match(f.damagedDiscovery.result.data, /Error: browser_assets_unavailable/);
+  assert.match(f.damagedDiscovery.result.data, /Reason: integrity_mismatch/);
+  assert.doesNotMatch(f.damagedDiscovery.result.data, /Directory:/);
+  assert.match(f.offlineInstallation.result.data, /^Installation assets: ready/);
+  assert.ok(f.offlineInstallation.result.data.includes("Directory: "+path.join(f.work,".nexum-browser","extension")));
+  assert.match(f.offlineInstallation.result.data, /## Install or reload/);
+  assert.match(f.offlineInstallation.result.data, /Browser extension installation: unknown/);
+  assert.match(f.damagedInstallation.result.data, /Reason: integrity_mismatch/);
+  assert.doesNotMatch(f.damagedInstallation.result.data, /Directory:|## Install or reload/);
+  assert.match(f.staleNamedDiscovery.result.data, /Error: PLUGIN_VERSION_MISMATCH/);
+  assert.match(f.staleNamedDiscovery.result.data, /reload the matching extension from this verified directory/);
+  const recovered = await f.start(undefined, { scriptName: "browser/discover.js", input: {} });
+  assert.equal(recovered.run.status, "succeeded", JSON.stringify(recovered.run.error));
+  assert.match(recovered.result.data, /^Browser discovery: complete/);
+  assert.ok(recovered.result.data.includes("Browser ID: " + f.plugin.state().browserId));
+  assert.doesNotMatch(recovered.result.data, /PLUGIN_VERSION_MISMATCH|Installation diagnosis/);
+  const result=await f.start(select+"return await tab.title();");
+  assert.equal(result.run.status,"succeeded",JSON.stringify(result.run.error));
+  assert.equal(result.result.data,"Actual native fixture");
+});
 
 test("actual isolated Browser Worker can get a tab and clean its RunScope", async (t) => {
   const f = await fixture(t, { isolatedWorker: true });
@@ -791,7 +873,29 @@ test("the installed Browser package publishes its own Skill, instructions and sc
     1,
   );
   assert.equal(f.materials.scriptSources().length, 1);
-  assert.equal("docs" in f.materials.published(), false);
+  const published = f.materials.published();
+  const authored = published.skills.find(item => item.skillId === "browser/browser-control");
+  assert.equal(authored.name, "browser-control");
+  assert.match(authored.description, /脚本能直接满足请求时无需加载/);
+  const packageRoot = path.join(f.work, "node_modules", "@nexum-hub/browser");
+  assert.equal(readFileSync(authored.skillFile, "utf8"),
+    readFileSync(path.join(packageRoot, "skills/browser-control/SKILL.md"), "utf8"));
+  assert.equal(published.instructions[0].content,
+    readFileSync(path.join(packageRoot, "instructions/README.md"), "utf8"));
+  assert.doesNotMatch(published.instructions[0].content, /browser\/browser-control|agent\.scripts\.(?:items|index|complete)/);
+  const catalog = new ScriptCatalog(f.work, "browser-agent", () => f.materials.scriptSources());
+  const discovered = catalog.discover();
+  assert.deepEqual(discovered.warnings, []);
+  const expected = ["discover.js", "installation.js", "observe.js", "screenshot.js"];
+  const entries = discovered.entries.filter(item => item.origin.namespace === "browser");
+  assert.deepEqual(entries.map(item => item.scriptName).sort(), expected.map(name => "browser/" + name));
+  for (const item of entries) {
+    const snapshot = catalog.resolve(item.scriptName);
+    assert.equal(snapshot.code, readFileSync(path.join(packageRoot, "scripts", snapshot.metadata.scriptName), "utf8"));
+    assert.equal(snapshot.metadata.scriptDesc, item.scriptDesc);
+    assert.equal(snapshot.metadata.scriptWhenUse, item.scriptWhenUse);
+  }
+  assert.equal("docs" in published, false);
   const disabled = await f.services.disable("@nexum-hub/browser");
   assert.equal(disabled.status, "disabled");
   assert.deepEqual(f.materials.scriptSources(), []);
@@ -804,17 +908,21 @@ test("the installed Browser package publishes its own Skill, instructions and sc
   assert.equal(f.tabs.length, 2);
 });
 test("registered Browser scripts deliver real discovery data and the original JPEG image", async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { isolatedWorker: true });
   const installation = await f.start(undefined, { scriptName: "browser/installation.js", input: {} });
   assert.equal(installation.run.status, "succeeded", JSON.stringify(installation.run.error));
-  assert.equal(installation.result.data.assetsReady, true);
-  assert.equal(installation.result.data.directory, path.join(f.work, ".nexum-browser", "extension"));
-  assert.equal(installation.result.data.profile, "development");
+  assert.match(installation.result.data, /^Installation assets: ready/);
+  assert.ok(installation.result.data.includes("Directory: "+path.join(f.work, ".nexum-browser", "extension")));
+  assert.match(installation.result.data, /Profile: development/);
+  assert.match(installation.result.data, /Extension ID: [a-p]{32}/);
+  assert.match(installation.result.data, /browser\/discover\.js/);
   const discovery = await f.start(undefined, { scriptName: "browser/discover.js", input: {} });
   assert.equal(discovery.run.status, "succeeded", JSON.stringify(discovery.run.error));
   const browserId = f.plugin.state().browserId;
-  assert.equal(discovery.result.data[0].browser.id, browserId);
-  assert.ok(discovery.result.data[0].tabs.some(tab => tab.id === "1"));
+  assert.equal(typeof discovery.result.data, "string");
+  assert.ok(discovery.result.data.includes("Browser ID: " + browserId));
+  assert.match(discovery.result.data, /Tab ID: 1(?: · |\n|$)/);
+  assert.match(discovery.result.data, /^Browser discovery: complete/);
   const screenshot = await f.start(undefined, { scriptName: "browser/screenshot.js", input: { browserId, tabId: "1" } });
   assert.equal(screenshot.run.status, "succeeded", JSON.stringify(screenshot.run.error));
   const rendered = await f.encoder.render(screenshot.result, f.resultScope(), screenshot.run);
@@ -822,6 +930,53 @@ test("registered Browser scripts deliver real discovery data and the original JP
   assert.ok(image);
   assert.equal(image.mimeType, "image/jpeg");
   assert.deepEqual(Buffer.from(image.data, "base64"), Buffer.from(jpeg, "base64"));
+  assert.equal(f.attached.size, 0);
+  assert.deepEqual(f.captures.at(-1), {
+    format: "jpeg", quality: 75, captureBeyondViewport: false,
+    clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
+  });
+  for (const [options, expected] of [
+    [{ fullPage: true, quality: 91, maxEdgePx: 600 }, {
+      format: "jpeg", quality: 91, captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: 300, height: 1200, scale: 0.5 },
+    }],
+    [{ clip: { x: 7, y: 22, width: 80, height: 60 }, quality: 0, maxEdgePx: 40 }, {
+      format: "jpeg", quality: 0, captureBeyondViewport: false,
+      clip: { x: 7, y: 22, width: 80, height: 60, scale: 0.5 },
+    }],
+  ]) {
+    const before = f.captures.length;
+    const captured = await f.start(undefined, { scriptName: "browser/screenshot.js", input: { browserId, tabId: "1", ...options } });
+    assert.equal(captured.run.status, "succeeded", JSON.stringify(captured.run.error));
+    assert.equal(f.captures.length, before + 1);
+    assert.deepEqual(f.captures.at(-1), expected);
+    const media = await f.encoder.render(captured.result, f.resultScope(), captured.run);
+    const native = media.content.find(value => value.type === "image");
+    assert.ok(native);
+    assert.equal(native.mimeType, "image/jpeg");
+    assert.deepEqual(Buffer.from(native.data, "base64"), Buffer.from(jpeg, "base64"));
+    assert.equal(f.attached.size, 0);
+  }
+  const beforeLarge = f.captures.length;
+  const large = await f.start(undefined, { scriptName: "browser/screenshot.js", input: {
+    browserId, tabId: "1", clip: {x:0,y:0,width:20000,height:20000}, maxEdgePx:24000,
+  } });
+  // The native fixture returns a small fixed JPEG; this verifies the original
+  // large capture request reaches CDP, not actual rendering of a huge image.
+  assert.equal(large.run.status, "succeeded", JSON.stringify(large.run.error));
+  assert.equal(f.captures.length, beforeLarge+1);
+  assert.deepEqual(f.captures.at(-1).clip,{x:0,y:0,width:20000,height:20000,scale:1});
+  assert.equal(f.attached.size, 0);
+});
+
+test("a real isolated Browser Run preserves a native uppercase error instead of worker_script_failed", async (t) => {
+  const f = await fixture(t, { isolatedWorker: true, screenshotFailure: Error("Cannot access a chrome:// URL.") });
+  const result = await f.start(undefined, { scriptName:"browser/screenshot.js",
+    input:{browserId:f.plugin.state().browserId,tabId:"1"} });
+  assert.equal(result.run.status,"failed");
+  assert.equal(result.run.error?.code,"PERMISSION_DENIED",JSON.stringify(result.run.error));
+  assert.match(result.run.error.message,/denied|protected|accessible/i);
+  assert.doesNotMatch(JSON.stringify(result.run.error),/chrome:\/\//);
   assert.equal(f.attached.size, 0);
 });
 

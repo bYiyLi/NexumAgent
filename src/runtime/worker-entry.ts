@@ -528,7 +528,7 @@ function buildBindings(template: Record<string, unknown>): Record<string, unknow
           );
           if (issue.exceptionType === "InputTimeoutError")
             error.name = "InputTimeoutError";
-          attachFailureFacts(error, issue);
+          attachFailureFacts(error, {...issue.details,...issue});
           if (issue.code === "api_http_error" && isPlainRecord(issue.response))
             Object.defineProperty(error, "response", {
               value: fromCore(issue.response), enumerable: false,
@@ -703,7 +703,7 @@ async function prepare() {
         );
         if (problem.exceptionType === "InputTimeoutError")
           error.name = "InputTimeoutError";
-        attachFailureFacts(error, problem);
+        attachFailureFacts(error, {...problem.details,...problem});
         if (problem.code === "api_http_error" &&
             isPlainRecord(problem.response))
           Object.defineProperty(error, "response", {
@@ -767,6 +767,7 @@ async function prepare() {
           send({
             type: "failed",
             ...error,
+            ...(isAgentError(cause) && issuedErrors.has(cause) ? {issuedErrorId:issuedErrors.get(cause)} : {}),
             ...(lastScriptDiagnostic
               ? { diagnostic: lastScriptDiagnostic } : {}),
           });

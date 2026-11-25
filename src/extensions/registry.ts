@@ -33,7 +33,7 @@ import {
 } from "./maintenance.js";
 import { extensionNamespace } from "../runtime/names.js";
 import { NativePromiseAudit } from "../runtime/promises.js";
-import { isIsolatedHandler, isolatedHandlerNormalizes } from "./worker-bridge.js";
+import { isIsolatedHandler, isolatedHandlerNormalizes, bindIsolatedHandlerInput } from "./worker-bridge.js";
 import {
   createOutput,
   outputIntent,
@@ -138,6 +138,11 @@ export interface RegistryOptions {
     value: JsonObject,
   ): void;
 }
+function retiredMethodInput(_value: unknown): void {
+  throw new AgentError("extension_unavailable",
+    "The originating extension instance has been retired.");
+}
+
 interface Method {
   name: string;
   path: readonly string[];
@@ -558,6 +563,14 @@ export class ExtensionRegistry {
   }
   #forget(entry: Entry): void {
     this.#entries.delete(entry);
+    // Forget is reached only after confirmed retirement (or before any
+    // method was registered). Old handle metadata remains inspectable, but
+    // a retained handle or stale binding must not pin compiled validators.
+    for (const method of entry.methods) {
+      method.input = retiredMethodInput;
+      method.output = undefined;
+    }
+    entry.methods = [];
     if (entry.replaces?.replacement === entry)
       entry.replaces.replacement = undefined;
     entry.replaces = undefined;
@@ -1032,6 +1045,14 @@ export class ExtensionRegistry {
                     : def.schemaDialect),
                 metadata.schemas as readonly unknown[] | undefined,
               );
+        // Remote normalization must still cross this trusted input gate.
+        // Use the same compiled immutable metadata instead of recompiling it
+        // in the bridge on every invocation.
+        bindIsolatedHandlerInput(def.handle, {
+          schema: metadata.inputSchema,
+          dialect: def.schemaDialect,
+          references: metadata.schemas as readonly unknown[] | undefined,
+        }, input);
         entry.protected.add(def.handle);
         methods.push({
           name,

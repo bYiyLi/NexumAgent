@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pressKeys, keyToken } from "../browser-extension/keyboard.js";
+import { pressKeys, keyToken, keyDescription } from "../browser-extension/keyboard.js";
 
 test("macOS ControlOrMeta+A uses one native SelectAll command and releases only acquired keys", async () => {
   const original = Object.getOwnPropertyDescriptor(
@@ -53,4 +53,11 @@ test("macOS ControlOrMeta+A uses one native SelectAll command and releases only 
       Object.defineProperty(globalThis.navigator, "platform", original);
     else delete globalThis.navigator.platform;
   }
+});
+
+test("native key names are case-sensitive and invalid names provide a bounded reason", () => {
+  assert.equal(keyDescription("Backspace").key,"Backspace");
+  assert.equal(keyDescription("F24").key,"F24");
+  assert.equal(keyDescription("中").key,"中");
+  assert.throws(()=>keyDescription("BACKSPACE"), {code:"INVALID_ARGUMENT",reason:"invalid_key",dispatched:false,effect:"none"});
 });

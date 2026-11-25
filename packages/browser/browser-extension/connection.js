@@ -13,6 +13,7 @@ import {
   browserFrames,
   transportLimits,
 } from "./transport.js";
+import { deadlineTimer, timeoutError } from "./deadline.js";
 import { routeDefinitions } from "./router.js";
 
 const encode = new TextEncoder();
@@ -33,6 +34,7 @@ export function createExtensionConnection({
   router,
   profile,
   extensionVersion,
+  assetRevision,
   url,
   random = Math.random,
   pingMs = 20000,
@@ -42,6 +44,11 @@ export function createExtensionConnection({
     ["production", "development"].includes(profile),
     "PROFILE_MISMATCH",
     "Use a dedicated production or development extension build.",
+  );
+  requireValue(
+    typeof assetRevision === "string" && /^[0-9a-f]{64}$/.test(assetRevision),
+    "PLUGIN_VERSION_MISMATCH",
+    "The plugin has no valid build revision. Reload the matching plugin.",
   );
   const firstPort = profile === "production" ? 29040 : 29030;
   const allowedUrls = Array.from(
@@ -112,7 +119,7 @@ export function createExtensionConnection({
       chrome.action?.setTitle?.({
         title: phase === "connected"
           ? `Nexum browser (${profile})`
-          : `Nexum browser (${profile}) — ${phase}${phase === "offline" && lastFailure ? ": " + lastFailure : ""}`,
+          : `Nexum browser (${profile}) — ${phase}${phase === "offline" && lastFailure ? ": " + lastFailure : ""}${phase === "offline" && lastFailure === "PLUGIN_VERSION_MISMATCH" ? " — Reload the extension" : ""}`,
       }),
     ).catch(() => {});
   };
@@ -153,7 +160,7 @@ export function createExtensionConnection({
     expected.send(frame);
     await wait(0);
   };
-  const sendPacked = async (value, action, expected, controller) => {
+  const sendPacked = async (value, action, expected, controller, checkDeadline) => {
     requireValue(
       binaryProducers < transportLimits.maxStreams,
       "QUEUE_FULL",
@@ -161,14 +168,16 @@ export function createExtensionConnection({
     );
     binaryProducers++;
     const task = binaryTail.then(async () => {
-      controller.signal.throwIfAborted();
+      checkDeadline();
       const binding = {
         actionId: action.actionId,
         operationId: action.operationId,
         generation: action.generation,
       };
       const packed = await packBrowserValue(value, binding);
+      checkDeadline();
       for (const stream of packed.streams) {
+        checkDeadline();
         send(
           {
             v: 1,
@@ -178,8 +187,11 @@ export function createExtensionConnection({
           },
           expected,
         );
-        for (const frame of browserFrames(stream.meta, stream.bytes))
+        for (const frame of browserFrames(stream.meta, stream.bytes)) {
+          checkDeadline();
           await sendBytes(frame, expected, controller);
+        }
+        checkDeadline();
         send(
           {
             v: 1,
@@ -418,6 +430,7 @@ export function createExtensionConnection({
       let reply;
       try {
         await action.fingerprint;
+        action.timer.wake();
         action.controller.signal.throwIfAborted();
         const args = unpackBrowserValue(
           message.args,
@@ -431,19 +444,31 @@ export function createExtensionConnection({
           ready && expected === socket && sameBinding(message, ready),
           "EXTENSION_OFFLINE",
         );
+        action.timer.wake();
+        action.controller.signal.throwIfAborted();
+        const remaining = action.deadlineAt - performance.now();
+        if (remaining <= 0) throw timeoutError();
         const value = await router.dispatch(
-          { ...message, args },
+          { ...message, args, budgetMs: remaining },
           action.controller.signal,
           () => {
             action.dispatched = true;
           },
         );
+        action.timer.wake();
+        action.controller.signal.throwIfAborted();
         const packed = await sendPacked(
           value,
           message,
           expected,
           action.controller,
+          () => {
+            action.timer.wake();
+            action.controller.signal.throwIfAborted();
+          },
         );
+        action.timer.wake();
+        action.controller.signal.throwIfAborted();
         reply = {
           v: 1,
           type: "action_result",
@@ -468,7 +493,7 @@ export function createExtensionConnection({
           ...publicError(cause, action.dispatched),
         };
       } finally {
-        clearTimeout(action.timer);
+        action.timer.clear();
         inbox.discard(message.actionId);
         actions.delete(message.actionId);
       }
@@ -517,6 +542,8 @@ export function createExtensionConnection({
     if (message.type === "ready") {
       requireValue(message.profile === profile, "PROFILE_MISMATCH",
         "The ready message belongs to another profile.");
+      requireValue(message.assetRevision === assetRevision, "PLUGIN_VERSION_MISMATCH",
+        "The running plugin does not match the Agent package. Reload the matching plugin.");
       requireValue(
         !ready &&
           message.browserSessionId === identity.browserSessionId &&
@@ -574,6 +601,7 @@ export function createExtensionConnection({
       "The message belongs to a stale browser connection.",
     );
     if (message.type === "ping") {
+      for (const action of [...actions.values()]) action.timer?.wake();
       router.wake?.();
       send(bound({ type: "pong" }));
       return;
@@ -663,9 +691,10 @@ export function createExtensionConnection({
           socket: expected,
           executing: false,
           dispatched: false,
+          deadlineAt: performance.now() + message.budgetMs,
           fingerprint: fingerprint(event.data),
         };
-      action.timer = setTimeout(() => {
+      action.timer = deadlineTimer(action.deadlineAt, () => {
         controller.abort(
           new BrowserActionError(
             "TIMEOUT",
@@ -677,7 +706,7 @@ export function createExtensionConnection({
           ),
         );
         execute(action);
-      }, message.budgetMs);
+      });
       actions.set(message.actionId, action);
       execute(action);
       return;
@@ -806,6 +835,7 @@ export function createExtensionConnection({
           profile,
           extensionId: chrome.runtime.id,
           extensionVersion,
+          assetRevision,
           protocol: { min: 1, max: 1 },
           ...identity,
           clientInstanceId,

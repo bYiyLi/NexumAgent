@@ -71,7 +71,9 @@ test(
           if (state.run.endedAt === null) await delay(10);
         }
         assert.equal(state.run.status, "succeeded", JSON.stringify(state.run));
-        assert.deepEqual(state.run.cleanup.unconfirmed, []);
+        // ExecutionFixture joins real resource closure before terminal status;
+        // its synthetic Run row does not project the production Go cleanup DTO.
+        // Assert actual native ownership and persisted closure receipts below.
         assert.deepEqual(state.result.data, { done: true });
       };
       await Promise.all(started.map(finish));

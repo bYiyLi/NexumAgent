@@ -1,56 +1,10 @@
 import { BrowserActionError, requireValue, text } from "./errors.js";
+import { requireBudget } from "./deadline.js";
 import { pageCommand } from "./page.js";
 
-/** Runs in a native isolated world. Returns the actual owner node, never a URL-derived guess. */
-export function findFrameOwner(selector) {
-  const nodes = document.querySelectorAll(selector);
-  if (nodes.length !== 1 || !["IFRAME", "FRAME"].includes(nodes[0].tagName))
-    throw new Error(
-      "The frame selector must resolve to exactly one current frame owner.",
-    );
-  return nodes[0];
-}
-export function frameOwnerGeometry() {
-  if (!this.isConnected) throw new Error("The frame owner was detached.");
-  for (let node = this; node; node = node.parentElement) {
-    const transform = getComputedStyle(node).transform;
-    if (transform !== "none") {
-      const matrix = new DOMMatrixReadOnly(transform);
-      if (
-        !matrix.is2D ||
-        Math.abs(matrix.b) > 0.000001 ||
-        Math.abs(matrix.c) > 0.000001 ||
-        matrix.a <= 0 ||
-        matrix.d <= 0
-      )
-        throw new Error(
-          "The frame transform is not an axis-aligned positive scale.",
-        );
-    }
-  }
-  const rect = this.getBoundingClientRect(),
-    style = getComputedStyle(this);
-  const scaleX = rect.width / this.offsetWidth,
-    scaleY = rect.height / this.offsetHeight;
-  if (![scaleX, scaleY].every(Number.isFinite) || scaleX <= 0 || scaleY <= 0)
-    throw new Error("The frame has no native visible content area.");
-  return {
-    x:
-      rect.x +
-      (this.clientLeft + parseFloat(style.paddingLeft || "0")) * scaleX,
-    y: rect.y + (this.clientTop + parseFloat(style.paddingTop || "0")) * scaleY,
-    scaleX,
-    scaleY,
-  };
-}
-export function frameHitTest(input) {
-  const node = this.ownerDocument.elementFromPoint(input.x, input.y);
-  return this.isConnected && (node === this || this.contains(node));
-}
-
 /** Let visible frame scrolls reach native input routing before reading the map. */
-export function frameOwnerReadyForInput() {
-  if (!this.isConnected) return false;
+export function frameOwnerReadyForInput(budgetMs = 250) {
+  if (!this.isConnected || !Number.isFinite(budgetMs) || budgetMs <= 0) return false;
   // Inactive documents do not run animation frames. Preserve their existing
   // native layout route instead of turning background input into a paint wait.
   if (document.visibilityState === "hidden") return true;
@@ -61,7 +15,7 @@ export function frameOwnerReadyForInput() {
       clearTimeout(timer);
       resolve(ready && this.isConnected);
     };
-    timer = setTimeout(() => finish(false), 250);
+    timer = setTimeout(() => finish(false), Math.max(1, Math.ceil(Math.min(250,budgetMs))));
     frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => finish(true));
     });
@@ -115,15 +69,16 @@ export async function framePage(ctx, payload, selectors, execute) {
       ctx.signal?.throwIfAborted();
       const result = await native("Runtime.callFunctionOn", {
         executionContextId: await world(),
-        functionDeclaration: findFrameOwner.toString(),
-        arguments: [{ value: selector }],
+        functionDeclaration: pageCommand.toString(),
+        arguments: [{ value: {command:"frameOwner",selector} }],
+        awaitPromise: true,
         returnByValue: false,
       });
       requireValue(
         !result.exceptionDetails &&
           result.result?.subtype === "node" &&
           typeof result.result.objectId === "string",
-        "INVALID_TARGET",
+        result.result?.value === "element_not_unique" ? "AMBIGUOUS_TARGET" : result.result?.value === "invalid_selector" ? "INVALID_ARGUMENT" : "INVALID_TARGET",
         "The frame selector must resolve to one current native frame owner.",
       );
       const owner = { frameId, objectId: result.result.objectId };
@@ -131,6 +86,7 @@ export async function framePage(ctx, payload, selectors, execute) {
       const node = await native("DOM.describeNode", {
         objectId: owner.objectId,
       });
+      owner.backendNodeId = node.node?.backendNodeId;
       requireValue(
         typeof node.node?.frameId === "string" && node.node.frameId !== frameId,
         "STALE_REF",
@@ -138,15 +94,17 @@ export async function framePage(ctx, payload, selectors, execute) {
       );
       const geometry = await native("Runtime.callFunctionOn", {
         objectId: owner.objectId,
-        functionDeclaration: frameOwnerGeometry.toString(),
+        functionDeclaration: pageCommand.toString(),
+        arguments: [{value:{command:"frameGeometry"}}],
+        awaitPromise: true,
         returnByValue: true,
       });
       requireValue(
-        !geometry.exceptionDetails && geometry.result?.value,
+        !geometry.exceptionDetails && geometry.result?.value?.ok,
         "INVALID_TARGET",
         "The current frame transform has no supported native coordinate mapping.",
       );
-      owner.geometry = geometry.result.value;
+      owner.geometry = geometry.result.value.value;
       ctx.router.noteFrameParent(ctx, node.node.frameId, frameId);
       frameId = node.node.frameId;
     }
@@ -169,7 +127,7 @@ export async function framePage(ctx, payload, selectors, execute) {
     };
     const executionContextId = await world();
     if (execute)
-      return await execute({ input, native, frameId, executionContextId });
+      return await execute({ input, native, frameId, executionContextId, ownerBackendNodeId: owners.at(-1)?.backendNodeId });
     const response = await native("Runtime.callFunctionOn", {
       executionContextId,
       functionDeclaration: pageCommand.toString(),
@@ -198,6 +156,7 @@ export async function framePage(ctx, payload, selectors, execute) {
           {
             objectId: owner.objectId,
             functionDeclaration: frameOwnerReadyForInput.toString(),
+            arguments: [{value:requireBudget(ctx)}],
             awaitPromise: true,
             returnByValue: true,
           },
@@ -215,16 +174,18 @@ export async function framePage(ctx, payload, selectors, execute) {
           "Runtime.callFunctionOn",
           {
             objectId: owner.objectId,
-            functionDeclaration: frameOwnerGeometry.toString(),
+            functionDeclaration: pageCommand.toString(),
+            arguments: [{value:{command:"frameGeometry"}}],
+            awaitPromise: true,
             returnByValue: true,
           },
         );
         requireValue(
-          !geometry.exceptionDetails && geometry.result?.value,
+          !geometry.exceptionDetails && geometry.result?.value?.ok,
           "STALE_REF",
           "An ancestor frame moved or detached before native input.",
         );
-        owner.geometry = geometry.result.value;
+        owner.geometry = geometry.result.value.value;
       }
       let point = result.value.point;
       for (const owner of [...owners].reverse()) {
@@ -238,23 +199,35 @@ export async function framePage(ctx, payload, selectors, execute) {
           "Runtime.callFunctionOn",
           {
             objectId: owner.objectId,
-            functionDeclaration: frameHitTest.toString(),
-            arguments: [{ value: point }],
+            functionDeclaration: pageCommand.toString(),
+            arguments: [{value:{command:"frameHit",...point}}],
+            awaitPromise: true,
             returnByValue: true,
           },
         );
         requireValue(
-          !hit.exceptionDetails && typeof hit.result?.value === "boolean",
+          !hit.exceptionDetails && hit.result?.value?.ok && typeof hit.result.value.value === "boolean",
           "STALE_REF",
           "The ancestor frame's native hit test is no longer available.",
         );
-        if (!hit.result.value) return null;
+        if (!hit.result.value.value) return null;
       }
       result.value.point = point;
       result.value.rect = mappedRect(result.value.rect, owners);
       result.value.framePoint = framePoint;
       result.value.frameId = frameId;
     }
+    if (["focus","assertFocus"].includes(input.command)) {
+      for (const owner of owners) {
+        const focus = await ctx.router.frameSend(ctx,owner.frameId,"Runtime.callFunctionOn",{
+          objectId:owner.objectId,functionDeclaration:pageCommand.toString(),arguments:[{value:{command:"frameFocus"}}],awaitPromise:true,returnByValue:true,
+        });
+        requireValue(!focus.exceptionDetails && focus.result?.value?.ok && focus.result.value.value === true,
+          "STALE_REF","The original ancestor frame no longer has keyboard focus.");
+      }
+      if (input.command === "focus") result.value.frameId = frameId;
+    }
+    if (input.command === "checked" && input.captureRef) result.value.frameId = frameId;
     if (input.command === "elementInfo" && Array.isArray(result.value))
       for (const entry of result.value)
         if (entry.boundingBox)

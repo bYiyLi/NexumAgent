@@ -5,7 +5,7 @@ import { MessageChannel, Worker } from "node:worker_threads";
 import { isDeepStrictEqual, types } from "node:util";
 import { serialize } from "node:v8";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
-import { safeErrorData } from "../contracts/error-data.js";
+import { safeErrorData, isPublicErrorCode, boundErrorMessage, boundErrorDetails, failureFacts } from "../contracts/error-data.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 import { mcpResult } from "../results/mcp.js";
@@ -185,7 +185,7 @@ export async function compileWorker(
   void ready.promise.catch(() => {});
   void result.promise.catch(() => {});
   const handles = new Map<string, { value: unknown; snapshot?: unknown }>();
-  const issuedErrors = new Map<string, { code: string; message: string }>();
+  const issuedErrors = new Map<string, JsonObject>();
   const callbackReplies = new Map<string, ReturnType<typeof Promise.withResolvers<unknown>>>();
   const callbackTasks = new Set<Promise<unknown>>();
   let callbackFailure: AgentError | undefined;
@@ -197,7 +197,15 @@ export async function compileWorker(
     if (stopping) return stopping;
     settled = true;
     auditResponse?.reject(new AgentError("worker_closed",
-      "The Worker exited before its asynchronous audit was acknowledged."));
+      "The Worker closed before its asynchronous audit was acknowledged."));
+    // These promises observe replies from this guest, not the underlying
+    // Core operation or its native resources. Once guest admission is closed,
+    // no callback result can arrive. Settle their original owners so Core can
+    // drain them; actual Worker exit and resource closure still need proof.
+    const closed = new AgentError("worker_closed",
+      "The Worker closed before its accepted callback returned.");
+    for (const pending of callbackReplies.values()) pending.reject(closed);
+    callbackReplies.clear();
     clearTimeout(prepareTimer);
     options.signal?.removeEventListener("abort", abort);
     stopping = (async () => {
@@ -208,6 +216,12 @@ export async function compileWorker(
       await worker.terminate();
       syncReplyChannel.port1.close();
       observe("shutdown", "worker_terminated");
+      // Core-issued handles are scoped to this Worker. Retained execute or
+      // callback facades must not pin its entire data/binding graph.
+      handles.clear();
+      bindingHandles.clear();
+      issuedErrors.clear();
+      handlers.clear();
     })().finally(async () => {
       await rm(path.join(options.work, "tmp", "runtime", bootId),
         { recursive: true, force: true }).catch(() => {});
@@ -250,6 +264,8 @@ export async function compileWorker(
       observe("prepared", "worker_ready");
       clearTimeout(prepareTimer);
       const run = (() => {
+        requireCondition(!settled, "worker_closed",
+          "The prepared script Worker has already closed.");
         requireCondition(!started, "worker_already_started",
           "A prepared script Worker can execute only once.");
         started = true;
@@ -257,7 +273,11 @@ export async function compileWorker(
         worker.postMessage({ type: "start" });
         return result.promise;
       }) as IsolatedExecution;
-      run.close = finalize;
+      run.close = async () => {
+        await finalize();
+        if (!rootComplete) result.reject(new AgentError("worker_closed",
+          "The script Worker closed without a returned result."));
+      };
       run.flushCallbacks = async () => {
         await Promise.allSettled([...callbackTasks]);
         if (callbackFailure) throw callbackFailure;
@@ -388,39 +408,33 @@ export async function compileWorker(
           code: "sdk_call_failed",
           message: "The SDK invocation did not complete.",
         });
+        // Native SDK errors are inspected only as real native errors or
+        // privately branded Core errors. No arbitrary guest Proxy hooks.
+        const inspectable = isAgentError(cause) ||
+          (!!cause && typeof cause === "object" && !types.isProxy(cause) && types.isNativeError(cause));
         const own = (name: string): unknown => {
-          if (!cause || typeof cause !== "object") return undefined;
+          if (!inspectable || !cause || typeof cause !== "object") return undefined;
           const descriptor = Object.getOwnPropertyDescriptor(cause, name);
-          return descriptor && "value" in descriptor
-            ? descriptor.value : undefined;
+          return descriptor && "value" in descriptor ? descriptor.value : undefined;
         };
         const nativeCode = own("code");
-        const stableCode = typeof nativeCode === "string" &&
-          /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(nativeCode)
-          ? nativeCode : undefined;
-        const dispatched = own("dispatched");
-        const effect = own("effect");
-        const retryable = own("retryable");
-        const errorId = isAgentError(cause) && issuedErrors.size < maxRpc
-          ? randomUUID() : null;
-        if (errorId)
-          issuedErrors.set(errorId, {
-            code: String(error.code), message: String(error.message),
-          });
-        const name = cause && typeof cause === "object"
-          ? Object.getOwnPropertyDescriptor(cause, "name") : null;
-        const causeValue = cause && typeof cause === "object"
-          ? Object.getOwnPropertyDescriptor(cause, "cause") : null;
-        const safeNativeCause = !isAgentError(cause) &&
-          causeValue && "value" in causeValue &&
-          Buffer.isBuffer(causeValue.value)
-          ? { __nexumBufferBytes: new Uint8Array(causeValue.value) }
+        const stableCode = isPublicErrorCode(nativeCode) ? nativeCode : undefined;
+        if (error.code === "sdk_call_failed" && stableCode) error.code = stableCode;
+        const details = boundErrorDetails(error.details,inspectable ? cause : undefined);
+        if (details !== undefined) error.details = details;
+        const facts = failureFacts(details);
+        const errorId = inspectable && issuedErrors.size < maxRpc ? randomUUID() : null;
+        if (errorId) issuedErrors.set(errorId,JSON.parse(canonicalJson(error,12*1024)) as JsonObject);
+        const name = own("name");
+        const causeValue = own("cause");
+        const safeNativeCause = !isAgentError(cause) && Buffer.isBuffer(causeValue)
+          ? { __nexumBufferBytes: new Uint8Array(causeValue) }
           : undefined;
         // OpenAPI exposes an already redacted public HTTP response on a
         // failed operation. Preserve that documented script-facing shape,
         // but never transport arbitrary exception properties or raw headers.
         let publicResponse: object | undefined;
-        if (error.code === "api_http_error" && cause &&
+        if (error.code === "api_http_error" && inspectable && cause &&
             typeof cause === "object") {
           const descriptor = Object.getOwnPropertyDescriptor(cause, "response");
           if (descriptor && "value" in descriptor &&
@@ -454,15 +468,9 @@ export async function compileWorker(
         }
         return {
           ...error,
-          ...(error.code === "sdk_call_failed" && stableCode
-            ? { code: stableCode } : {}),
-          ...(typeof dispatched === "boolean" ? { dispatched } : {}),
-          ...(["none", "unknown", "confirmed"].includes(String(effect))
-            ? { effect } : {}),
-          ...(typeof retryable === "boolean" ? { retryable } : {}),
+          ...facts,
           ...(errorId ? { issuedErrorId: errorId } : {}),
-          ...(name && "value" in name &&
-            name.value === "InputTimeoutError"
+          ...(name === "InputTimeoutError"
             ? { exceptionType: "InputTimeoutError" } : {}),
           ...(publicResponse ? { response: publicResponse } : {}),
           ...(safeNativeCause ? { nativeCause: safeNativeCause } : {}),
@@ -611,6 +619,7 @@ export async function compileWorker(
                   type: "invoke-callback", callbackId, requestId, args: args.map(encode),
                 });
               } catch {
+                callbackReplies.delete(requestId);
                 pending.reject(new AgentError("worker_callback_invalid",
                   "The callback arguments cannot cross the Worker boundary."));
               }
@@ -625,11 +634,8 @@ export async function compileWorker(
               issuedErrors.has(value.__nexumIssuedError),
             "worker_message_invalid", "Unknown SDK exception provenance.");
             const issued = issuedErrors.get(value.__nexumIssuedError)!;
-            const details = value.details;
-            requireCondition(details === undefined || isPlainRecord(details),
-              "worker_message_invalid", "Invalid SDK exception details.");
-            return new AgentError(issued.code, issued.message,
-              details as JsonObject | undefined);
+            return new AgentError(String(issued.code),String(issued.message),
+              issued.details as JsonObject | undefined);
           }
           if (Array.isArray(value)) return value.map(reconstruct);
           if (isPlainRecord(value)) {
@@ -657,8 +663,11 @@ export async function compileWorker(
         if (types.isPromise(returned)) {
           signalSync(3);
           const pending = Promise.resolve(returned)
-            .then((value) => postReply({ value: reply(value) }),
-              (cause: unknown) => postReply({ error: safe(cause) }))
+            .then((value) => {
+              if (!settled) postReply({ value: reply(value) });
+            }, (cause: unknown) => {
+              if (!settled) postReply({ error: safe(cause) });
+            })
             .catch(() => {})
             .finally(() => { outstanding--; });
           void pending;
@@ -696,8 +705,11 @@ export async function compileWorker(
       return;
     }
     if (entry.type === "failed") {
-      const details: JsonObject = entry.details && typeof entry.details === "object" &&
-        !Array.isArray(entry.details) ? { ...entry.details as JsonObject } : {};
+      const issued = typeof entry.issuedErrorId === "string" ? issuedErrors.get(entry.issuedErrorId) : undefined;
+      // Rethrowing an SDK-issued error preserves the original Core facts,
+      // even if the guest changes its exposed Error object's fields.
+      const publicFailure = issued ?? entry;
+      const details: JsonObject = boundErrorDetails(publicFailure.details) ?? {};
       if (entry.diagnostic && typeof entry.diagnostic === "object") {
         const diagnostic = entry.diagnostic as Parameters<NonNullable<
           WorkerCompile["onScriptError"]>>[0];
@@ -720,12 +732,9 @@ export async function compileWorker(
           }
         }
       }
-      fail(typeof entry.code === "string" &&
-        /^[a-z][a-z0-9_]{0,127}$/.test(entry.code)
-        ? entry.code : "worker_script_failed",
-      typeof entry.message === "string" && entry.message.length <= 1024
-        ? entry.message : "The script Worker reported an execution failure.",
-      Object.keys(details).length ? details : undefined);
+      fail(isPublicErrorCode(publicFailure.code) ? publicFailure.code : "worker_script_failed",
+        boundErrorMessage(publicFailure.message,"The script Worker reported an execution failure."),
+        boundErrorDetails(Object.keys(details).length ? details : undefined));
     }
   });
   return ready.promise;

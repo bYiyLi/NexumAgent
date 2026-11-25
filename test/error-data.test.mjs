@@ -9,7 +9,7 @@ test("safe error data reads only branded own data, bounds messages and omits inv
   const error = new AgentError("known", "m".repeat(5000), { kept: 1 });
   const normal = safeErrorData(error, fallback);
   assert.equal(normal.code, "known");
-  assert.equal(normal.message.length, 1024);
+  assert.equal(Buffer.byteLength(normal.message), 1024);
   assert.match(normal.message, /\[truncated\]$/);
   error.details.kept = 2;
   assert.deepEqual(normal.details, { kept: 1 });
@@ -36,4 +36,27 @@ test("safe error data reads only branded own data, bounds messages and omits inv
   assert.deepEqual(safeErrorData(new AgentError("known", "Failure.", cyclic), fallback).details,
     { omitted: true, reason: "invalid_error_details" });
   assert.equal(calls, 0);
+});
+
+test("public error projection preserves case, UTF8, recovery identity and irreversible facts", async () => {
+  const { boundErrorDetails,isPublicErrorCode } = await import("../dist/contracts/error-data.js");
+  const code = "BROWSER_"+"X".repeat(200);
+  const details = { operationId:"op_original", effect:"unknown", dispatched:true, retryable:true,
+    nested:[{token:"PRIVATE_TOKEN",stack_trace:"PRIVATE_STACK",field:"name"}] };
+  const e = new AgentError(code,"故障🙂".repeat(1024),details);
+  const data = safeErrorData(e,{code:"fallback",message:"fallback"});
+  assert.equal(data.code,code);
+  assert.ok(Buffer.byteLength(data.message)<=1024);
+  assert.ok(!data.message.includes("�"));
+  assert.deepEqual(data.details.nested,[{field:"name"}]);
+  assert.equal(data.details.retryable,false);
+  assert.equal(details.retryable,true);
+  assert.equal(isPublicErrorCode("bad\n"),false);
+  const big = boundErrorDetails({...details,reason:"original_reason",debug:"x".repeat(128*1024)}, {dispatched:false,effect:"none",retryable:true});
+  assert.equal(big.operationId,"op_original");
+  assert.equal(big.effect,"unknown");
+  assert.equal(big.retryable,false);
+  assert.equal(big.reason,"original_reason");
+  assert.equal(big.omitted,true);
+  assert.equal(boundErrorDetails({effect:"unknown"}).retryable,false);
 });

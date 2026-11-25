@@ -1,68 +1,27 @@
 /**
-{"scriptName":"installation.js","scriptDesc":"获取 Browser 已准备的稳定插件加载目录和版本","scriptWhenUse":"用户要安装、重新加载或核对 Chrome/Edge 插件路径时；不需要已连接浏览器","scriptInputSchema":{"type":"object","additionalProperties":false},"scriptOpenDefault":true,"scriptOutputSchema":{"oneOf":[{"type":"object","properties":{"assetsReady":{"const":true},"profile":{"enum":["production","development"]},"directory":{"type":"string"},"name":{"type":"string"},"extensionVersion":{"type":"string"},"extensionId":{"type":"string","pattern":"^[a-p]{32}$"}},"required":["assetsReady","profile","directory","name","extensionVersion","extensionId"],"additionalProperties":false},{"type":"object","properties":{"assetsReady":{"const":false},"code":{"const":"browser_assets_unavailable"}},"required":["assetsReady","code"],"additionalProperties":false}]}}
-*/
-const fs = await import("node:fs/promises");
-const path = await import("node:path");
-const { createHash } = await import("node:crypto");
-const unavailable = { assetsReady: false, code: "browser_assets_unavailable" };
-try {
-  const work = context.paths?.work;
-  if (typeof work !== "string" || !path.isAbsolute(work)) return unavailable;
-  const root = await fs.realpath(work);
-  if (path.relative(root, work) !== "") return unavailable;
-  const parent = path.join(root, ".nexum-browser");
-  const directory = path.join(parent, "extension");
-  for (const target of [parent, directory]) {
-    const info = await fs.lstat(target);
-    if (!info.isDirectory() || info.isSymbolicLink() ||
-        path.relative(target, await fs.realpath(target)) !== "") return unavailable;
+{
+  "scriptName": "installation.js",
+  "scriptDesc": "查询当前 Agent 的 Chrome/Edge 插件安装准备状态。输入 {}，无需在线浏览器。Installation assets: ready 返回已校验 Directory、Profile、Extension、版本、完整 Extension ID 及安装/重载步骤；资产就绪不证明插件已安装、启用或在线，用户操作后用 browser/discover.js 确认。unavailable 时报告实际错误及有证据的 Reason，不猜 npm 路径。脚本未登记时核对 Open 警告及包安装/启用状态；不自动安装或重载。",
+  "scriptWhenUse": "安装、重载或核对插件加载目录时；discover 已提供有效安装诊断则无需重复查询。",
+  "scriptInputSchema": {
+    "type": "object",
+    "additionalProperties": false
+  },
+  "scriptOpenDefault": true,
+  "scriptOutputSchema": {
+    "type": "string",
+    "description": "面向 AI 的安装准备检查与安装指引文本，成功提供已校验的当前资产目录、身份及版本，失败保留安全错误码、原因及恢复方向；不证明浏览器已安装插件。"
   }
-  async function readOwnedJSON(name) {
-    const file = path.join(directory, name);
-    const before = await fs.lstat(file);
-    if (!before.isFile() || before.isSymbolicLink() || before.size > 65536 ||
-        path.relative(file, await fs.realpath(file)) !== "") throw Error("invalid asset");
-    const handle = await fs.open(file, "r");
-    try {
-      const stat = await handle.stat();
-      if (stat.dev !== before.dev || stat.ino !== before.ino || stat.size !== before.size)
-        throw Error("changed asset");
-      const bytes = Buffer.alloc(65537);
-      let size = 0;
-      while (size < bytes.length) {
-        const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
-        if (!bytesRead) break;
-        size += bytesRead;
-      }
-      const after = await fs.lstat(file);
-      if (size !== before.size || after.dev !== before.dev || after.ino !== before.ino ||
-          after.size !== before.size || after.mtimeMs !== before.mtimeMs)
-        throw Error("changed asset");
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
-    } finally { await handle.close(); }
-  }
-  const installation = await readOwnedJSON("nexum-installation.json");
-  const manifest = await readOwnedJSON("manifest.json");
-  if (!["production","development"].includes(installation.profile) ||
-      !/^[a-p]{32}$/.test(installation.extensionId) ||
-      typeof manifest.key !== "string" || typeof manifest.name !== "string" ||
-      typeof manifest.version !== "string" || manifest.version !== installation.extensionVersion ||
-      !Array.isArray(installation.files) || installation.files.length > 512 ||
-      !installation.files.includes("manifest.json")) return unavailable;
-  const extensionId = [...createHash("sha256").update(Buffer.from(manifest.key,"base64")).digest().subarray(0,16)]
-    .map(value => String.fromCharCode(97+(value>>4),97+(value&15))).join("");
-  if (extensionId !== installation.extensionId) return unavailable;
-  for (const name of installation.files) {
-    if (typeof name !== "string" || !name || name === "." || name === ".." ||
-        /[\\/:\u0000]/.test(name)) return unavailable;
-    const file = path.join(directory,name);
-    const info = await fs.lstat(file);
-    if (!info.isFile() || info.isSymbolicLink() ||
-        path.relative(file,await fs.realpath(file)) !== "") return unavailable;
-  }
-  // Assets ready is not evidence that a browser has installed or loaded them.
-  return { assetsReady:true, profile:installation.profile, directory, name:manifest.name,
-    extensionVersion:manifest.version, extensionId };
-} catch {
-  return unavailable;
 }
+*/
+const { inspectInstallation, formatInstallationInspection } = await import("@nexum-hub/browser/installation");
+const result = await inspectInstallation(context.paths?.work, context.profile);
+const lines = [formatInstallationInspection(result)];
+if (result.assetsReady) {
+  lines.push("", "## Install or reload",
+    "1. On this Agent, open chrome://extensions in Chrome or edge://extensions in Edge.",
+    "2. Enable Developer mode. If the matching extension is absent, choose Load unpacked and select the verified Directory above.",
+    "3. If it is already loaded from that directory, reload it when needed. Confirm any native browser prompts.",
+    "4. Run the registered browser/discover.js with {} to verify the actual connection. Assets ready is not evidence of a connected browser.");
+}
+return lines.join("\n");

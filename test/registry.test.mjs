@@ -1272,3 +1272,94 @@ test("10 MiB image and 32 MiB audio SDK buffers complete in a heap that cannot h
   assert.equal(child.status, 0, `${child.error ?? ""}\n${child.stderr}`);
   assert.match(child.stdout, /bounded-byte-snapshots-ok/);
 });
+
+test("registered remote methods reuse their exact schema in Registry and Worker, across calls and replacement", {timeout:30000}, async (t) => {
+  const f=await fixture(t);
+  const {Ajv}=await import("ajv");
+  const {createRequire}=await import("node:module");
+  const {pathToFileURL}=await import("node:url");
+  const {isolatedExtensionFactory}=await import("../dist/extensions/worker-bridge.js");
+  const ajvUrl=pathToFileURL(createRequire(import.meta.url).resolve("ajv")).href;
+  const id="urn:nexum:test:registered-validator", refId="urn:nexum:test:registered-value";
+  const descriptor=Object.getOwnPropertyDescriptor(Ajv.prototype,"compile"), nativeCompile=Ajv.prototype.compile;
+  let compiles=0;
+  Ajv.prototype.compile=function(schema,...args){
+    if(schema?.$id===id)compiles++;
+    return Reflect.apply(nativeCompile,this,[schema,...args]);
+  };
+  let active;
+  const install=async(type,revision)=>{
+    const entry=path.join(f.root,"schema-"+revision+".mjs");
+    writeFileSync(entry,`
+      import {Ajv} from ${JSON.stringify(ajvUrl)};
+      let compiles=0;
+      const compile=Ajv.prototype.compile;
+      Ajv.prototype.compile=function(schema,...args){
+        if(schema?.$id===${JSON.stringify(id)})compiles++;
+        return Reflect.apply(compile,this,[schema,...args]);
+      };
+      export default function(){
+        const method={description:"Validated remote call",permissions:["read"],schemaDialect:"draft7",
+          inputSchema:{$id:${JSON.stringify(id)},$ref:${JSON.stringify(refId)}},
+          schemas:[{$id:${JSON.stringify(refId)},type:"object",properties:{value:{type:${JSON.stringify(type)}}},required:["value"],additionalProperties:false}],
+          calls:0,
+          normalize(args){
+            // Mutating the factory's declaration after publication must not
+            // change the Worker or trusted Registry's registered contract.
+            this.schemas[0].properties.value.type="boolean";
+            return args[0];
+          },
+          handle(input){return {value:input.value,compiles,calls:++this.calls}},
+        };
+        return {methods:{inspect:method}};
+      }`);
+    const prepared=await f.registry.prepare({...source,origin:{...origin,revision}},isolatedExtensionFactory(pathToFileURL(entry).href));
+    f.registry.publish(prepared);
+    active=prepared;
+  };
+  const call=async value=>{
+    const initial=await f.start({script:`try{return await demo.inspect(${JSON.stringify(value)});}catch(e){return {error:e.code};}`});
+    const settled=await observeRunTerminal(f.engine,caller,initial);
+    assert.equal(settled.run.status,"succeeded");
+    return settled.result.data;
+  };
+  try {
+    await install("integer","reuse-int");
+    assert.equal(compiles,1,"Registry compiled the registered input once");
+    assert.deepEqual(await call({value:7}),{value:7,compiles:1,calls:1});
+    assert.equal((await call({value:true})).error,"invalid_arguments");
+    assert.deepEqual(await call({value:8}),{value:8,compiles:1,calls:2});
+    assert.equal(compiles,1,"trusted bridge reused Registry validator");
+    assert.equal((await f.registry.disable(active)).status,"disabled");
+    active=undefined;
+    await install("string","reuse-string");
+    assert.equal(compiles,2,"new version has a new validator, even with same schema IDs");
+    assert.equal((await call({value:7})).error,"invalid_arguments");
+    assert.deepEqual(await call({value:"new"}),{value:"new",compiles:1,calls:1});
+    assert.equal(compiles,2);
+  } finally {
+    if(active)await f.registry.disable(active);
+    if(descriptor)Object.defineProperty(Ajv.prototype,"compile",descriptor);
+    else delete Ajv.prototype.compile;
+  }
+});
+
+test("an invalid isolated method contract is rejected before publication and its real factory is disposed", {timeout:15000}, async (t) => {
+  const f=await fixture(t);
+  const {pathToFileURL}=await import("node:url");
+  const {isolatedExtensionFactory}=await import("../dist/extensions/worker-bridge.js");
+  const entry=path.join(f.root,"invalid-schema.mjs");
+  const marker=path.join(f.root,"disposed-invalid-schema.txt");
+  writeFileSync(entry,`
+    import {writeFileSync} from "node:fs";
+    export default function(){
+      return {methods:{inspect:{
+        description:"Invalid method",permissions:["read"],schemaDialect:"draft7",
+        inputSchema:{type:"not-a-type"},handle(){throw Error("must not execute")}
+      }},dispose(){writeFileSync(${JSON.stringify(marker)},"disposed")}};
+    }
+  `);
+  await assert.rejects(f.registry.prepare(source,isolatedExtensionFactory(pathToFileURL(entry).href)),
+    {code:"extension_initialization_failed"});
+  assert.equal(readFileSync(marker,"utf8"),"disposed");
+});

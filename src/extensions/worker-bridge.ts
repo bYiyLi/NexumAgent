@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { AsyncResource } from "node:async_hooks";
-import { Worker } from "node:worker_threads";
+import { Worker, MessageChannel } from "node:worker_threads";
 import { serialize } from "node:v8";
 import { types } from "node:util";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
-import { safeErrorData } from "../contracts/error-data.js";
-import { isPlainRecord } from "../contracts/json.js";
+import { safeErrorData, isPublicErrorCode, boundErrorDetails, boundErrorMessage } from "../contracts/error-data.js";
+import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import { mcpResult } from "../results/mcp.js";
 import { outputIntent } from "../sdk/output.js";
@@ -34,13 +34,43 @@ const callMethods = new Set([
 const sdkRoots = new Set([
   "output", "state", "transfer", "maintenance", "hostRequests",
 ]);
-const isolatedHandlers = new WeakMap<Function, boolean>();
+interface InputContract {
+  readonly schema: unknown;
+  readonly dialect?: MethodDefinition["schemaDialect"];
+  readonly references?: readonly unknown[];
+}
+interface IsolatedHandler {
+  readonly normalizes: boolean;
+  readonly contract: InputContract;
+  closed?: boolean;
+  validateInput?: (value: unknown) => void;
+}
+const isolatedHandlers = new WeakMap<Function, IsolatedHandler>();
 /** Only Core-created remote methods can select the worker normalization path. */
 export const isIsolatedHandler = (value: Function): boolean =>
   isolatedHandlers.has(value);
 /** Calling convention reported by the actual Worker method descriptor. */
 export const isolatedHandlerNormalizes = (value: Function): boolean | undefined =>
-  isolatedHandlers.get(value);
+  isolatedHandlers.get(value)?.normalizes;
+/** Reuse the trusted Registry's compiled, registered input contract after
+ * remote normalization. A new extension instance has new handler identities. */
+export function bindIsolatedHandlerInput(
+  value: Function, contract: InputContract, validate: (input: unknown) => void,
+): void {
+  const handler = isolatedHandlers.get(value);
+  if (!handler) return;
+  requireCondition(!handler.closed, "extension_worker_unavailable",
+    "The original extension Worker has exited.");
+  // Never attach a validator compiled from a different declaration, even if
+  // trusted registration accidentally reuses a remote handler identity.
+  const identity = (input: InputContract) => canonicalJson({
+    schema: input.schema, references: input.references ?? [],
+  });
+  requireCondition(handler.contract.dialect === contract.dialect &&
+    identity(handler.contract) === identity(contract),
+  "invalid_sdk_schema", "The remote handler's registered input declaration changed.");
+  handler.validateInput = validate;
+}
 
 interface RemoteMethod {
   readonly name: string;
@@ -93,8 +123,10 @@ export function isolatedExtensionFactory(
         );
       } catch { /* Logging must not break the extension's lifecycle. */ }
     };
+    const syncReply = new MessageChannel();
     const worker = new Worker(new URL("./worker-entry.js", import.meta.url), {
-      workerData: { entryUrl },
+      workerData: { entryUrl, syncReplyPort: syncReply.port2 },
+      transferList: [syncReply.port2],
       execArgv: process.execArgv.includes("--experimental-vm-modules")
         ? ["--experimental-vm-modules"] : process.execArgv,
       resourceLimits: { maxOldGenerationSizeMb: 256 },
@@ -107,6 +139,7 @@ export function isolatedExtensionFactory(
     const resources = new Map<string, HostResource>();
     const tickets = new Map<string, { release(): void }>();
     const issued = new Map<string, { value: unknown; snapshot?: unknown }>();
+    const handlerOwners = new Set<IsolatedHandler>();
     let ready = false, ended = false, ending = false;
     let exited = false;
     let terminating: Promise<void> | undefined;
@@ -401,21 +434,36 @@ export function isolatedExtensionFactory(
           }
         } catch { /* Send via ordinary async Worker reply. */ }
         if (!notified) {
-          Atomics.store(header, 0, 3);
+          try {
+            syncReply.port1.postMessage({ id: entry.id, payload });
+            Atomics.store(header, 0, 4);
+          } catch {
+            // A non-transferable result is an explicit error; do not pretend
+            // a synchronous service was asynchronous.
+            Atomics.store(header, 0, 5);
+          }
           Atomics.notify(header, 0);
+          notified = true;
         }
       }
       if (!notified)
         worker.postMessage({ type: "reply", id: entry.id, ...payload });
     };
     worker.on("error", (cause: Error & { code?: string }) => fail(
-      typeof cause.code === "string" &&
-        /^[A-Za-z_][A-Za-z_0-9-]{0,95}$/.test(cause.code)
+      isPublicErrorCode(cause.code)
         ? cause.code : "extension_worker_failed",
     ));
     worker.once("online", () => emit("online", "extension_worker_online"));
     worker.on("exit", () => {
+      syncReply.port1.close();
       exited = true;
+      // A stale returned method can outlive the Worker. Retire its validator
+      // on confirmed exit instead of waiting for every stale facade's GC.
+      for (const owner of handlerOwners) {
+        owner.closed = true;
+        owner.validateInput = undefined;
+      }
+      handlerOwners.clear();
       if (!ending) fail("extension_worker_exited");
     });
     worker.on("message", (message: unknown) => {
@@ -470,11 +518,10 @@ export function isolatedExtensionFactory(
         requests.delete(message.id);
         if (isPlainRecord(message.error))
           pending.reject(new AgentError(
-            typeof message.error.code === "string"
+            isPublicErrorCode(message.error.code)
               ? message.error.code : "extension_worker_failed",
-            typeof message.error.message === "string"
-              ? message.error.message : "The Worker rejected the request.",
-            isPlainRecord(message.error.details) ? message.error.details as JsonObject : undefined,
+            boundErrorMessage(message.error.message,"The Worker rejected the request."),
+            boundErrorDetails(message.error.details,message.error),
           ));
         else pending.resolve(decode(message.value));
         return;
@@ -537,7 +584,21 @@ export function isolatedExtensionFactory(
           namePattern.test(method.name) && !Object.hasOwn(table, method.name),
         "extension_worker_contract_invalid",
         "An Extension Worker must return a unique method contract.");
+        // Keep the original declaration independent of the returned method
+        // table. Direct internal consumers without a Registry still validate
+        // against this exact snapshot; the normal path binds its validator.
+        const contract = structuredClone({
+          schema: method.inputSchema,
+          dialect: method.schemaDialect as MethodDefinition["schemaDialect"],
+          references: method.schemas,
+        });
+        const owner: IsolatedHandler = { normalizes: method.normalizes === true, contract };
+        requireCondition(!ended && !exited, "extension_worker_unavailable",
+          "The original extension Worker has exited.");
+        handlerOwners.add(owner);
         const handle: MethodDefinition["handle"] = async (input, call) => {
+          requireCondition(!owner.closed && !ended && !exited,
+            "extension_worker_unavailable", "The original extension Worker has exited.");
           const id = randomUUID();
           const onAbort = () => {
             if (!ended) worker.postMessage({ type: "call-abort", id });
@@ -554,11 +615,12 @@ export function isolatedExtensionFactory(
               method: method.name, input,
             });
             call.signal.throwIfAborted();
-            compileMethodSchema(
-              method.inputSchema,
-              method.schemaDialect as MethodDefinition["schemaDialect"],
-              method.schemas,
-            )(normalized);
+            requireCondition(!owner.closed && !ended && !exited,
+              "extension_worker_unavailable", "The original extension Worker has exited.");
+            const validate = owner.validateInput ??= compileMethodSchema(
+              contract.schema, contract.dialect, contract.references,
+            );
+            validate(normalized);
             // The Run deadline aborts the invocation independently. Leave
             // time for the original native cancellation and lease cleanup to
             // settle; killing its Worker at that same instant loses evidence.
@@ -578,7 +640,7 @@ export function isolatedExtensionFactory(
             call.signal.removeEventListener("abort", onAbort);
           }
         };
-        isolatedHandlers.set(handle, method.normalizes === true);
+        isolatedHandlers.set(handle, owner);
         table[method.name] = {
           description: method.description,
           ...(method.callStyle === "input-object" ? { callStyle: method.callStyle } : {}),

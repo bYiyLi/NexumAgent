@@ -1,3 +1,4 @@
+import { isPublicErrorCode, boundErrorMessage, boundErrorDetails } from "../contracts/error-data.js";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
@@ -110,7 +111,7 @@ export class ExtensionWorkers {
         const codes: JsonObject = {};
         for (const field of ["code", "causeCode"] as const) {
           const code = value[field];
-          if (typeof code === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(code)) codes[field] = code;
+          if (isPublicErrorCode(code)) codes[field] = code;
         }
         throw new AgentError("extension_initialization_failed", "The extension could not initialize.", codes);
       }
@@ -213,11 +214,10 @@ export class ExtensionWorkers {
       const message = await result;
       requireCondition(isPlainRecord(message), "extension_invocation_failed", "The extension response is invalid.");
       if (isPlainRecord(message.error)) {
-        const code = typeof message.error.code === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(message.error.code)
+        const code = isPublicErrorCode(message.error.code)
           ? message.error.code : "extension_invocation_failed";
-        const text = typeof message.error.message === "string" && message.error.message.length <= 1024
-          ? message.error.message : "The extension operation failed.";
-        throw new AgentError(code, text, isPlainRecord(message.error.details) ? message.error.details as JsonObject : undefined);
+        const text = boundErrorMessage(message.error.message,"The extension operation failed.");
+        throw new AgentError(code, text, boundErrorDetails(message.error.details));
       }
       if (typeof message.code === "string")
         throw new AgentError(message.code, "The extension operation failed.");

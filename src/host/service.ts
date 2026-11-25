@@ -15,6 +15,7 @@ import { bindGoScope, HostRunner, type GoMethod } from "./runner.js";
 import { HostRunLog } from "./run-log.js";
 import { encodeHostResult, type HostResultServices } from "./result.js";
 import type { HostBrandServices } from "./brands.js";
+import type { ResourceReadResolver } from "./resource-read.js";
 import { HostPackagePolicy } from "./package-policy.js";
 import type { ScriptSource } from "../runtime/scripts.js";
 import { RunPreparation } from "./run-preparation.js";
@@ -33,6 +34,7 @@ type Call = (
 export interface HostRunServices {
   readonly bindings?: Readonly<Record<string, unknown>>;
   readonly brands: HostBrandServices;
+  readonly readResource?: ResourceReadResolver;
   readonly result: HostResultServices;
 }
 interface PackageChange {
@@ -343,6 +345,7 @@ export class HostService {
       this.#call,
       signal,
       services?.brands,
+      services?.readResource,
     );
     let rootReturned: Promise<unknown> | undefined;
     let abandonedInput = false;

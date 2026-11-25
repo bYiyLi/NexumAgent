@@ -32,7 +32,7 @@ return view;
 - Locator I/O 默认等待目标唯一且满足动作可用条件；多目标报 `AMBIGUOUS_TARGET`，不得悄悄选首个。`first/last/nth` 为显式选择，`all` 返回当前快照集合；`filter/and/or` 只组合当前同目标的定位描述。
 - 页面求值接受字符串与显式可序列化参数；Node 函数、DOM 节点、CDP session 和捕获局部变量的闭包不跨越连接。`expectNavigation(action)` 的回调在本地 Node 执行，先注册等待、再调用 action，失败/取消时清理等待器。
 - 方法默认期限 30 秒；下载/媒体方法默认 120 秒；有效截止为方法期限、`call.deadline` 和取消信号共同约束。总运行期限、容量、输入等待与终态由 Nexum 负责，不沿用 QuickJS 的 60/300 秒运行上限、32 次桥接或 8/1 全局执行队列。
-- 结果使用原生文本、结构化数据、bytes 和本机文件；大内容遵守 [结果交付](results.md)，不默认 base64，不强行套用旧 64 KiB 图片/上传限制。截图默认 JPEG quality=80、最长边 1920px；显式请求仍受平台媒体/像素预算。
+- 结果使用原生文本、结构化数据、bytes 和本机文件；大内容遵守 [结果交付](results.md)，不默认 base64，不强行套用旧 64 KiB 图片/上传限制。截图默认 JPEG quality=75、原始像素密度；仅在显式请求 maxEdgePx 时缩小，不另设 Browser 固定尺寸、像素或字节预算；Core 不设置图片像素数量限制，仍检查格式、尺寸合法性、元数据与统一传输/编码预算。
 - 快照默认正文预算 64 KiB；结构化快照截断明确标志并可返回完整本机 artifact，最后经 output 固定为资源；纯字符串接口超限明确报错。`tabs.content` 每批 1–8 个 HTTP(S) URL、默认/最大 30 秒、每页 4096 UTF-16 代码单元、批次普通 JSON 最多 60000 UTF-8 字节；临时标签在成功/失败后清理。
 - 历史默认 limit=20、范围 1–20、queries 最多 4 个，按 URL 去重并按访问时间倒序；未知浏览器权限不能伪装为空结果。不同浏览器配置的历史不合并。
 - 操作发出后断连/取消/超时，若无法确认效果，错误记录 `effect: "unknown"`。先重新观察，不自动重发点击、提交、文件选择、下载、移动或关闭。
@@ -151,10 +151,21 @@ interface Tab {
     reason?: "authentication" | "captcha" | "user_requested" | "other",
   ): Promise<void>;
   screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;
+  observe(options?: { timeoutMs?: number; full?: boolean }): Promise<PageObservation>;
+  semanticSnapshot(options?: SemanticObservationOptions): Promise<SemanticPageObservation>;
+  writeObservation(options?: SemanticObservationOptions): Promise<OutputIntent>;
   title(): Promise<undefined | string>;
   url(): Promise<undefined | string>;
 }
 ```
+
+### Semantic DOM 综合观察
+
+`tab.semanticSnapshot()` 在当前受管 Tab 通过原生 DOMSnapshot 与 Accessibility 树按真实 backendDOMNodeId 关联；返回单份结构化 preorder `nodes`（depth 表示精简后祖先层级，不是 CSS 直接父子路径）、当前 target、标题、安全 URL、readyState、coverage/warnings。只交付支持范围内的已挂载、渲染节点、实际状态与可用于 Locator 的真实属性；保留可见 select 下的实际 option，即使未展开。已知样式类精简，业务 data-*-id 受白名单与敏感名称校验；密码、已识别敏感控件值、隐藏 input 及闭合 Shadow 内容不交付，href/src 的凭据、参数及片段隐去并标记。Native AX 角色/名称不是 Locator 的全量等价实现，应按实际 SDK 重新匹配并验证唯一。未挂载数据、原生 UA 内部结构和像素内容不属于语义树。
+
+Frame 通过现有 framePage 重新核对实际 owner backendNodeId 与 frameId，保留作用域、frame-selector；无法确认的 Frame 明确标记。Open Shadow DOM 内容可观察且现有 Locator 默认进入开放根（包括嵌套根）及当前作用域实际生效的 Slot 分配，closed/UA Shadow 不主动穿透，封闭边界仅作观察标记。CSS 使用原生匹配且限制在当前作用域，不制造跨根或 Slot 父子关系；跨根祖先关系用链式 Locator，Frame 仍须显式 frameLocator。导航、控制 epoch 或 URL 变化拒绝旧结果；DOM、AX 及可选截图为顺序观察，不承诺同一原子时刻。当前已存在原生弹窗时返回 partial 与弹窗信息；组合截图无法取得完整证据则明确失败。无额外脚本固定节点/文本预算，保留平台通用数据图、传输、媒体预算与方法期限。
+
+`tab.writeObservation()` 将同一结构渲染为紧凑树文本 `OutputIntent`；`{screenshot:true}` 同时交付原生 JPEG（沿用截图默认 quality=75、原始像素密度），无重复 JSON 或 Base64 文本。`formatSemanticObservation(observation)` 可用于已有结构化结果的文本投影；`tab.semanticSnapshot({screenshot:true})` 返回结构化结果与 JPEG 字节供程序处理。旧 `tab.observe`、`tab.ax`、`domSnapshot` 等保持各自兼容合同。已登记 `browser/observe.js` 只选择实际目标并调用 `writeObservation`，参数 `{browserId,tabId,screenshot?}`，不等待 load、导航、展开或滚动，不替换目标或重试。
 
 ## AXAPI
 
@@ -563,7 +574,7 @@ capabilities.get 的受管结果只返回能力 ID/版本/支持状态及已声�
 | 来源事实                                                                        | Nexum browser 合同                                                                                                                                                                                                                                        | 验收归属                        |
 | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | Avru Tab/Frame/Playwright 的便捷方法和默认可省略 options                        | 全部保留为当前客户端入口或同语义别名；Frame 11 个成员逐项计账。`Tabs["new"]` 是可调用方法，不是 TypeScript 构造签名                                                                                                                                       | X 清单、SDK 类型用法检查、D1    |
-| Avru `ScreenshotOptions.quality/maxEdgePx`、Locator `clickCount/position`       | 保留；quality 为 0–100 整数，maxEdgePx 为正整数并限制实际图片的最长像素边；默认 JPEG/80/1920。clip 使用 CSS 坐标，缩放和 4000 万解码像素预算计入原生像素密度，不放大小图。fullPage 与 clip 同时指定拒绝，clip/position 需有限合法坐标；媒体字节预算仍检查 | 截图/Locator 点击入口、E5       |
+| Avru `ScreenshotOptions.quality/maxEdgePx`、Locator `clickCount/position`       | 保留；quality 为 0–100 整数，maxEdgePx 为可选正整数并限制实际图片的最长像素边；默认 JPEG/75/原始像素密度，不自动缩放。clip 使用 CSS 坐标，显式缩放计入原生像素密度，不放大小图。fullPage:true 与 clip 同时指定拒绝，clip/position 需有限合法坐标；Browser 与 Core 不设置图片像素数量限制，平台通用格式、尺寸合法性、元数据及传输/编码预算仍检查 | 截图/Locator 点击入口、E5       |
 | 原始 Locator options 有 force；Avru M0 明确不开放                               | 本包不提供 force，未知字段校验拒绝；按可操作性与用户真实目标执行                                                                                                                                                                                          | D1、非法输入                    |
 | 原始 AXPoint 为未约束 tuple；Avru 使用具名坐标                                  | 当前固定 `{x:number,y:number}`，有限坐标，不新建旧 tuple 兼容层                                                                                                                                                                                           | AX 点击/拖拽入口、类型与 Schema |
 | Avru 导航/等待返回实际版本和快照，PageSnapshot 有 dialog                        | 导航返回 ActionResult，版本在 target；waitFor 返回 matched=true 与新快照，超时抛错；保留 dialog；BrowserError 用 target 代替旧扁平身份字段                                                                                                                | 导航入口、X009、D1              |

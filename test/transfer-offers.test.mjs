@@ -478,7 +478,6 @@ test("read-only result descriptions never sign retained Offers or allocate fallb
   );
   const result = await f.encoder.describe(saved, f.scope(), {
     readOnly: true,
-    textBytes: 1024,
   });
   assert.equal(result.result.data.value.length, 8000);
   assert.deepEqual(result.transfers, [
@@ -559,19 +558,18 @@ test("download Offers use registered MCP resource links and never follow a suspi
   );
 });
 
-test("context fallback keeps safe references and current delivery merges without overwriting context-budget facts", async (t) => {
+test("large inline data retains safe transfer references and current delivery", async (t) => {
   const f = await fixture(t),
     offer = f.issue();
   const saved = await f.encoder.encode(
     { text: "large".repeat(20000), offer },
     f.scope(),
   );
-  assert.equal(saved.delivery.complete, false);
-  assert.equal(saved.delivery.reason, "context_budget");
+  assert.equal(saved.data.text.length, 100000);
+  assert.equal(saved.delivery, undefined);
   assertSafe(saved);
   const response = await f.encoder.render(saved, f.scope(), run);
-  assert.equal(response.structuredContent.delivery.complete, false);
-  assert.equal(response.structuredContent.delivery.reason, "context_budget");
+  assert.equal(response.structuredContent.data.text.length, 100000);
   assert.equal(delivered(response)[0].available, true);
   const unconfigured = new ResultEncoder(f.artifacts);
   assert.equal(
@@ -587,11 +585,6 @@ test("context fallback keeps safe references and current delivery merges without
 test("reference and final-response budgets reject clearly without echoing credentials or mutating safe history", async (t) => {
   const f = await fixture(t),
     offer = f.issue();
-  const tiny = new ResultEncoder(f.artifacts, { textBytes: 128 }, f.delivery);
-  await assert.rejects(tiny.encode(offer, f.scope()), (error) => {
-    assertSafe(error);
-    return error.code === "result_transfer_too_large";
-  });
   const saved = await f.encoder.encode(offer, f.scope());
   const response = await f.encoder.render(saved, f.scope(), run);
   const maximum = Buffer.byteLength(JSON.stringify(response));

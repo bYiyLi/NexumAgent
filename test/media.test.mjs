@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { crc32, deflateSync } from "node:zlib";
 import { validateMedia } from "../dist/results/media.js";
+import { monochromePng, iconWithManyImages } from "./helpers/media-fixtures.mjs";
 
 function png(width = 1, height = 1) {
   const chunk = (type, data) => {
@@ -255,20 +256,36 @@ test("native byte views preserve subranges and do not execute shadow accessors o
   );
 });
 
-test("byte and dimension checks reject expensive input before decoding or returning a fake preview", async () => {
-  await assert.rejects(() => validateMedia(png(100000, 100000), "image"), {
-    code: "media_dimensions_exceeded",
+test("large images and combined dimension entries have no pixel quota", async () => {
+  const image = monochromePng(8000, 6000); // Real 48 megapixel image.
+  assert.deepEqual(await validateMedia(image, "image"), {
+    mimeType: "image/png", width: 8000, height: 6000,
+  });
+  const icons = iconWithManyImages(640); // 41,943,040 combined pixels.
+  assert.deepEqual(await validateMedia(icons, "image"), {
+    mimeType: "image/x-icon", width: 256, height: 256,
+  });
+});
+
+test("byte, metadata and dimension validity checks still reject invalid input", async () => {
+  for (const [width, height] of [[0, 1], [1, 0]]) {
+    await assert.rejects(() => validateMedia(png(width, height), "image"), {
+      code: "invalid_media_data",
+    });
+  }
+  await assert.rejects(() => validateMedia(iconWithManyImages(4097), "image"), {
+    code: "media_metadata_too_large",
   });
   await assert.rejects(
     () => validateMedia(png(), "image", undefined, { maxBytes: 10 }),
     { code: "media_too_large" },
   );
   await assert.rejects(
-    () => validateMedia(Buffer.alloc(10 * 1024 * 1024 + 1), "image"),
+    () => validateMedia(Buffer.alloc(10 * 1024 * 1024 + 1), "image", undefined, { maxBytes: 10 * 1024 * 1024 }),
     { code: "media_too_large" },
   );
   await assert.rejects(
-    () => validateMedia(png(), "image", undefined, { maxPixels: 0 }),
+    () => validateMedia(png(), "image", undefined, { maxMetadataBytes: 0 }),
     { code: "invalid_media_options" },
   );
   await assert.rejects(() => validateMedia(png().subarray(0, 20), "image"), {

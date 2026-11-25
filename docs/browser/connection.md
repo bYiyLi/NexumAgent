@@ -16,11 +16,12 @@ MV3 manifest 仅声明实现所需的 debugger、tabs、scripting、storage、al
 
 ## 协商与身份
 
-初次建立后插件发送 `hello`：`{v:1,type:"hello",profile,extensionId,extensionVersion,protocol:{min,max},browserProfileId,browserSessionId,clientInstanceId,attemptSequence,metadata}`。
+初次建立后插件发送 `hello`：`{v:1,type:"hello",profile,extensionId,extensionVersion,assetRevision,protocol:{min,max},browserProfileId,browserSessionId,clientInstanceId,attemptSequence,metadata}`。
 
 - browserProfileId 首次随机生成并保存在本插件 storage.local，禁止 storage.sync；它只标识浏览器配置，不作认证。browserSessionId 放在插件私有 storage.session，区分完整浏览器重启与 MV3 worker 重启；clientInstanceId 在每次 worker 启动随机生成，attemptSequence 在该实例内单调递增。
 - 同一 profile 身份下，仅同一 clientInstanceId 的更高 attemptSequence 可替换自己的旧连接。另一实例占用且健康时拒绝 PROFILE_CONFLICT，不把克隆的 profileId 或晚到 hello 当作“最后连接胜出”。worker 重启等原连接实际断开/租约到期后才能替换；复制配置导致冲突时显式重置该插件本地身份，不能偷偷抢占。
-- 服务校验后分配/恢复本 profile 的不透明 browserId，回复 `ready`：`{v:1,type:"ready",profile,bootId,connectionId,browserId,browserSessionId,generation,protocolVersion:1,limits}`。每次成功接纳的新连接增加 generation；服务重启产生新 bootId。旧 close/event 和迟到握手不能撤下新连接。
+- 服务校验后分配/恢复本 profile 的不透明 browserId，回复 `ready`：`{v:1,type:"ready",profile,bootId,connectionId,browserId,browserSessionId,generation,protocolVersion:1,assetRevision,limits}`。每次成功接纳的新连接增加 generation；服务重启产生新 bootId。旧 close/event 和迟到握手不能撤下新连接。
+- 配套插件实际构建的 `assetRevision` 必须在 hello 和 ready 中一致，即使 manifest 版本号相同也不接受缺失或错误的摘要；拒绝码沿用 `PLUGIN_VERSION_MISMATCH`，不建立业务连接。摘要是版本一致性条件，不替代现有 Origin、profile、权限及身份校验。
 - ready 前不发送标签、能力、动作或二进制；两边不能用客户端自报 agentId/profile 改绑 host 真实身份。metadata 含有界名称/版本及其来源，不按 UA 推断确定版本。
 
 随后插件发送 capabilities/tabs 完整快照，后续变化发送有界增量或重做快照。快照需带 snapshotId、分片序号/总数，服务组齐且校验预算后原子发布，不能把前一代和后一代片段混合或将被截断的数组伪装成全部标签。tabId 是该配置内原生 ID 的字符串形式，目标由 bootId/browserId/browserSessionId/generation/tabId 共同解释。导航更新 pageVersion；元素、AX/DOM 索引、dialog、WebMCP、inventory 绑定相应文档修订；下载绑定原始下载事件/连接且可跨导航等待完成；CDP child target 按真实 session/target 生命周期失效，不互相代作凭据。
@@ -45,11 +46,11 @@ MV3 manifest 仅声明实现所需的 debugger、tabs、scripting、storage、al
 
 动作 method 是已登记 SDK/插件路由名；CDP method 是经过结构校验的真实命令名，两者不可混淆。CDP 所有该浏览器后端可达的域与事件均可调用，不按业务类别、origin、Cookie/JS 增加白名单；浏览器 debugger 原生域限制、target 限制、扩展权限和企业策略错误原样映射。
 
-动作在插件调度实际浏览器调用前再次核对目标、连接代次、租约、取消/期限与内部锁。budgetMs 是扩展依据方法期限、call.deadline 和本机已消耗时间计算的剩余预算；插件按自己的单调时钟消费，不信任两端 wall clock 恰好相同。timeout/取消不能证明已运行的网页同步代码可被强制抢占。同一 actionId 仅在本连接内去重：保留在途和有界完成回执 5 分钟/最多 1024 条，活跃项不可为新请求淘汰；容量不足返回忙碌。回执只帮助核对，Nexum 仍不自动重发结果未知动作；不能把它宣称为外部网站副作用 exactly-once。
+动作在插件调度实际浏览器调用前再次核对目标、连接代次、租约、取消/期限与内部锁。budgetMs 是扩展依据方法期限、call.deadline 和本机已消耗时间计算的剩余预算；本机参数打包消耗同一方法预算，插件接收 action 时固定本地单调截止，附件接收/校验、排队及子操作不得重新取得完整 budgetMs。两个进程不信任彼此 wall clock 恰好相同；各自验证单调剩余时间，子等待只能缩小父期限。原生探测返回后重新检查期限，过期不再创建业务等待或派发新输入。timeout/取消不能证明已运行的网页同步代码可被强制抢占。同一 actionId 仅在本连接内去重：保留在途和有界完成回执 5 分钟/最多 1024 条，活跃项不可为新请求淘汰；容量不足返回忙碌。回执只帮助核对，Nexum 仍不自动重发结果未知动作；不能把它宣称为外部网站副作用 exactly-once。
 
 ## 断连、重连、故障与事件
 
-- 握手完成后每 20 秒发送带当前 connectionId/generation 的 ping，pong 同样绑定当前连接；心跳不豁免连接身份检查。有动作待完成时，本包使用 Node 定时器为该浏览器额外发送 100ms 间隔的现有心跳，唤醒可能被浏览器延迟的插件等待；本机写入队列满或连接关闭时不绕过既有背压和断连规则。插件按自己的单调时钟确认等待期限，心跳不缩短等待、不重放动作，动作完成、取消或断连后停止额外心跳。连续 60 秒无有效消息判离线，立即清空旧实时标签/能力；旧 socket 后续 close/event 不能覆盖新代次。
+- 握手完成后每 20 秒发送带当前 connectionId/generation 的 ping，pong 同样绑定当前连接；心跳不豁免连接身份检查。有动作待完成时，本包使用 Node 定时器为该浏览器额外发送 100ms 间隔的现有心跳，唤醒可能被浏览器延迟的插件等待；本机写入队列满或连接关闭时不绕过既有背压和断连规则。插件按自己的单调时钟确认 action、延时、轮询与事件等待期限；即使 Worker timer 迟到，心跳与实际结果/事件处理仍核对同一截止。心跳不缩短等待、不重放动作，动作完成、取消或断连后停止额外心跳。连续 60 秒无有效消息判离线，立即清空旧实时标签/能力；旧 socket 后续 close/event 不能覆盖新代次。
 - 插件按 1、2、4、8、16、30 秒上限并带抖动退避，结合 startup/alarms/browser 事件恢复；只重连和重新同步，不重放网页动作。初始化期间的多个恢复通知共享同一次初始化；旧连接关闭前不得被新连接覆盖，关闭后先开始取消和收尾，真实关闭回执可能在重连后才到达，不能提前记为完成。
 - 服务停止时主动关闭所有 WS；浏览器保持打开。Agent 重启后重新握手，不从磁盘恢复旧 CDP session、输入等待或 action。
 - 浏览器侧遵守原生 WebSocket `close()` 的参数约束：正常关闭使用 1000，失联使用私有码 4001，协议或快照失败使用 4002。不能从浏览器 API 主动传入 1001/1002 等只允许协议层使用的状态码，导致关闭本身抛异常。关闭码只作诊断，不替代租约关闭或实际资源释放的证据。
@@ -66,18 +67,26 @@ CDP 原始参数和返回值保留浏览器协议类型，包括某些命令原�
 
 高层截图/文件 SDK 返回原生 bytes/产物，不携带 base64。脚本需要将 raw CDP 媒体交给 Host 时，先将原生编码字段解码为 bytes，直接 return 真实媒体 bytes，或显式返回标准 resource_link 文件描述；SDK 不自动把 raw CDP payload 塞入日志、审计或 structuredContent。普通 Node 代码能自行编码数据不构成本协议的隔离保证。
 
+具名 `browser/screenshot.js` 在必填 browserId/tabId 基础上开放原截图参数 fullPage、clip、quality、maxEdgePx：默认当前视口、质量 75、原始像素密度，不自动缩放；质量 0–100 整数，maxEdgePx 仅在显式传入正整数时限制实际图片最长边，clip 是非负文档 CSS 坐标及正宽高，与 fullPage:true 互斥。脚本 Schema 在选择目标前校验输入，只选择原浏览器/标签并调用一次 tab.screenshot，直接 return 原 Uint8Array JPEG；不声明伪造的 JSON 输出 Schema，不自动重试、切换、导航、拼接或额外编码。删除 Browser 层默认 1920、最长边 16384、4000 万像素和 10 MiB JPEG 固定限制；保留显式缩放、浏览器原生限制、平台通用媒体格式/尺寸合法性校验及传输/结果预算；Core 不另设像素数量限制。合法 SDK 错误码大小写原样传递，目标失效先重新发现，不绕过授权。
+
 ## 用户加载插件与版本核对
 
 包启用后先准备当前 profile 的稳定插件目录，再向用户给出实际路径、预期插件版本和环境。由 Browser 生命周期发布稳定插件资产与版本描述；AI 从本次实际登记的 `browser/installation.js` 获取经过验证的路径、环境和版本，不推导 npm 布局，不新增 SDK 方法。脚本只验证该包自己的固定资产；失败不返回猜测路径。Chrome 使用 chrome://extensions、Edge 使用 edge://extensions 的浏览器原生“加载已解压的扩展程序”流程选择该目录；安装权限和企业策略由浏览器处理，文档不承诺已获市场发布或静默安装。
 
-插件显示 Nexum browser/对应开发环境名称；用户加载后自动握手，上线事实来自 ready/metadata/tabs，而不是文件夹已存在。包更新后插件仍运行旧版本时明确需要重新加载，核对实际 extensionVersion/protocol/ID，不能只看磁盘文件就宣称已生效。维护卸载按通用授权处理本包目录与连接，不静默移除浏览器插件或用户配置。
+插件显示 Nexum browser/对应开发环境名称；用户加载后自动握手，上线事实来自 ready/metadata/tabs，而不是文件夹已存在。包更新后插件仍运行旧版本时明确需要重新加载；握手核对实际 extensionVersion/assetRevision/protocol/ID。没有兼容在线实例且存在最近 120 秒内的明确版本拒绝时，原有浏览器发现方法返回 PLUGIN_VERSION_MISMATCH，而非空列表；已知被拒绝的 browserId 查询同样返回该码。拒绝记录按 profile 有界保存，正确握手清除对应记录，不能阻断其他兼容在线实例，也不把过期拒绝冒充当前状态。维护卸载按通用授权处理本包目录与连接，不静默移除浏览器插件或用户配置。
+
+具名 `browser/discover.js` 输入保持空对象，返回按授权可见浏览器组织的紧凑文本；保留浏览器、profile、实际版本和标签身份/已观察标题 URL，不展示内部连接代次、boot/session/provider 标识。不获取控制权，不选择/修改标签；每个已分类的标签查询失败独立呈现，成功结果保留，未知运行错误及取消不伪装成正常报告。无可见在线连接或已确认连接异常时，复用 installation 的只读资产检查；正常发现不扫描资产。两个脚本通过包内明确导出的 `@nexum-hub/browser/installation` 共享校验，校验稳定目录、文件及与当前包生成的 profile/build revision 一致性，不新增注册 SDK 方法。资产校验失败不提供路径，在线列表为空不推断未安装或禁用；真实安装状态由浏览器原生扩展管理界面确认。包未初始化或未登记时从平台维护状态诊断，不假设 discover 可运行；握手错误只在真实方法返回时分类，不扩展底层协议或泄漏未授权连接。
+
+具名 `browser/installation.js` 保持空对象输入，直接返回与 discover 共用的安装诊断文本。共享校验保留内部结构化资产事实和固定失败原因：缺稳定目录、必要资产缺失、无效描述、路径不安全、profile 不符、完整性不符、当前包构建不符、检查期间变化、读取失败或无法确认。两脚本保留 `browser_assets_unavailable` 主错误码及安全 Reason，不回显私有异常或失败路径。只在当前稳定资产与包构建验证通过时返回实际目录、插件身份和版本；installation 同时提供 Chrome/Edge 安装、按需重载和 discover 连接确认步骤。不读取浏览器用户配置，不修改资产、安装插件或绕过浏览器策略。资产校验与运行中插件握手是不同事实。
 
 ## 租约与等待消息的约束
 
 lease_open 只有当前已登记 RunScope 能发出；插件 ack 前动作不派发。lease_end/closed 遵守 lifecycle.md 的真实收尾：断线后停止新派发、清理本包附着/等待/视觉，重连只核对关闭回执，不重续已停止 run。并发完成的关闭回执按顺序写入 session，避免较早的存储结果覆盖较新的记录；写入失败不能冒充回执已保存。旧代次的清理回执有显式 originalGeneration，只匹配原 lease，绝不能使旧 action_result 成为新 run 的结果。插件 worker 恢复时以实际 debugger/target 状态核对本插件的最小 session 记录，不能借新实例连接身份接管其他工具。
 
-SDK 的 waiters.arm 在插件安装真实事件监听并确认 ready 后才返回；浏览器事件先缓冲后交付，目标命令队列不能等待一个尚需后续命令触发的事件。waiters.get 主要等待本包缓冲，不在插件上占住唯一调度槽；cancel 撤监听与缓冲，不把原生下载开始误记为下载完成。每个浏览器事件除 sequence 还带 leaseId/waiterId 或明确的订阅身份，错误关联事件不能进入其他 run。
+SDK 的 waiters.arm 在插件安装真实事件监听并确认 ready 后才返回；浏览器事件先缓冲后交付，目标命令队列不能等待一个尚需后续命令触发的事件。独立 arm 的等待器有效期与读取回执的单次 I/O 期限区分；组合导航或点击的内部等待受父操作剩余期限约束。waiters.get 主要等待本包缓冲，不在插件上占住唯一调度槽；单次观察超时不撤销仍有效的独立 waiter；超出原 waiter 单调期限才到达的事件不能让它重新成功。cancel 撤监听与缓冲，不把原生下载开始误记为下载完成。每个浏览器事件除 sequence 还带 leaseId/waiterId 或明确的订阅身份，错误关联事件不能进入其他 run。
 
 正常候选端口探测和握手期间工具栏显示 connecting（…），单个候选连接被拒绝不是最终离线；仅全轮失败、初始化失败或已在线连接断开时显示 offline（OFF）。浏览器自身 DevTools 的 WebSocket 网络诊断可能仍显示候选拒绝，不关闭这些原生诊断。
 
 整轮连接失败在插件内部状态与工具栏保留已确证的 profile/扩展身份、插件版本、协议不匹配或 profile 争用分类；普通候选拒绝不覆盖该分类，成功握手清除旧提示。startup/alarms 遵守已有退避窗口，不因唤醒事件额外发起扫描。不将未知原生网络失败编造为具体权限原因。
+
+具名 `browser/observe.js` 输入必填 browserId/tabId，可选 screenshot（默认 false）；通过同一已授权目标的 `tab.writeObservation` 直接交付语义 DOM 树文本与可选原生 JPEG。与 discover、installation、screenshot 分工，观察依据与边界见 [SDK 综合观察](sdk.md#semantic-dom-综合观察)。

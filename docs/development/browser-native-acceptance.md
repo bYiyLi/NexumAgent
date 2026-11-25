@@ -1,5 +1,12 @@
 # Nexum browser 原生验收记录
 
+## 2026-11-25：插件构建资产一致性（本地候选，未发布）
+
+- 原 Dev Chrome 同版本号下仍出现下载精确授权失败；新加载的隔离插件交付正常，移除受管下载凭证的负对照复现拒绝，原 Chrome 重新加载后 HTTP、Data URL 下载及字节校验通过。由此优化实际构建身份校验，而非放宽下载授权。
+- 构建从实际资产字节生成确定性 SHA-256 assetRevision，固化于 Worker 静态导入的 profile.js；安装时核验暂存资产，hello/ready 双向校验。旧插件缺少摘要或摘要不同均不建立业务连接，发现接口报告现有 PLUGIN_VERSION_MISMATCH 并提示重新加载，匹配实例正常恢复；不新增 SDK 方法或改变权限规则。
+- Development、Production 各 21 个资产的构建摘要均经实际文件回读重新计算并匹配。Browser `pnpm check` 270/270 通过，0 失败/跳过；包括旧 Worker、错误/缺失摘要、正确重连、隔离 Worker 到 SDK 的诊断透传及损坏资产不得覆盖已发布目录的回归。隔离 Chrome for Testing 原生 `native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource` 1/1 通过；Go `go test ./internal/agentapp -count=1` 通过。
+- Agent 首次整包测试出现 dist 模块临时缺失，检查后串行重建复验 `pnpm check` 退出 0：597 通过、28 跳过、0 失败（共 625）。未修改对应无关源码；尚未确定其他构建进程是否为原始原因。未发布或更新 Dev/Production 实际插件，原生负向版本拒绝采用真实 WebSocket 与 Worker 集成夹具验证；Blob 下载身份关联仍是独立待排查事项。
+
 ## 2026-11-18：Chromium 原生点击结果与 Run 分组复验（本地候选，未发布）
 
 - 使用本机已有 Chrome for Testing（Chromium 1254 Playwright 缓存）和隔离临时 Profile、真实 MV3 插件、真实 Worker、Core/Registry，在不碰用户现有浏览器和 Dev Agent 端口的条件下，`native MV3 provides page interaction, MCP JPEG and an actual downloaded MCP resource` 正向用例通过：实际 DOM、填表、点击、业务状态、MCP JPEG 和文件资源字节均有证据；不等同于截图已到达 ChatGPT 对话。
@@ -618,3 +625,31 @@ Edge 的失败再次出现在 metadata/21 秒心跳后的第二次 Run：6 个�
 候选 `a3ee46f7481e2b92a30fd57f66a2f76c9f65b49f` 的[隔离专项](https://github.com/bYiyLi/NexumAgent/actions/runs/43732482878)在 Linux、Windows 和 macOS Intel 均通过 3 项组件检查及 1 项真实 Chrome 场景。场景在一次运行中触发延迟下载，在下一次运行从浏览器历史取得原始路径，使用实际 Agent 结果编码和资源读取验证完整字节；组件检查确认跨目录记录不因文件读取授权被筛除，而实际 `output.file` 读取拒绝未授权路径。该测试没有使用用户浏览器，也没有经过真实用户 Host。此前的[首次专项](https://github.com/bYiyLi/NexumAgent/actions/runs/43732195077)因测试脚本重复声明变量在编译阶段失败；已修正测试脚本，不能把失败算作浏览器功能的通过或失败证据。
 
 随后检查正式 Agent 时发现其默认已知权限未包含浏览器扩展所声明的 `connection`、`path`、`resource` 和 `url`，会阻止扩展启用。已将这四类登记为通用扩展权限，保留当前调用者的实际路径授权；应用级回归在修复前以 `invalid_extension_permissions` 失败，修复后能加载扩展并拒绝未授权路径。本机 macOS/arm64 的 Agent `pnpm check` 复验共 1394 项，1367 项通过、27 项按平台跳过。首次全量有一项独立 MCP stdio 夹具未及时启动，该项单独复验和后续全量复验通过；不能据此判断首次原因。尚未将浏览器下载链路经过真实用户 Host 的交付记为通过。
+
+### 页面综合语义观察（2026-11-25，本地候选）
+
+本机使用隔离 Chrome for Testing（独立临时 Profile、自有 HTTP 夹具）执行 `test/native-semantic-observation.acceptance.mjs`，1/1 通过。真实原生 DOM/AX 节点关联、动态 input/select/checkbox、重复表格行内 Locator、同源及跨源 Frame、开放/闭合 Shadow DOM 边界、隐藏和敏感值均有断言；具名 `browser/observe.js` 通过真实隔离 Core Run 执行默认文本及文本与 JPEG 的组合交付，并从实际 encoder 回读原生图片。首次复验发现折叠 details 被误纳入，按实际 open/summary 语义修正后重新通过。Browser 全量组件/Worker 292/292 通过，生成 API 索引、typecheck/build 通过。已接入 browser CI 的主要原生场景命令；本次不涉及真实用户浏览器，尚未执行其它 OS/Edge 或外部 Host 全链路，X103/X104 完整矩阵状态保持 not_run。
+
+### 平台取消图片像素配额（2026-11-25，本地候选）
+
+新增 `native-capabilities.acceptance.mjs` 的 `native full-page JPEG above 40 megapixels survives original Core image delivery`，使用独立 Chrome for Testing Profile、8000×6000 自有页面、DPR 1，直接返回原始全页 JPEG。通过实际 Core 编码、历史 render 及 JPEG 头部尺寸读取，确认 8000×6000（4800 万像素）、308,564 字节，历史图块完全相同，原生控制清理确认，1/1 通过。初次夹具 h1 默认外边距使实际高 6021；下一次原尺寸及历史结果已通过但测试仍读旧 cleanup 字段；修正夹具及改查实际 MV3 受管控制清单后复验通过。此用例随现有原生场景命令进入三平台 CI，本次仅本机 Chrome 实测。
+
+### Locator 开放 Shadow DOM 与原生输入增强（2026-11-25，本地候选）
+
+统一普通 DOM 和开放根的查询、角色/名称/标签匹配、Slot 分配、组合筛选与去重顺序；CSS 在各实际根内执行，跨根使用宿主链式查询，Frame 保持显式进入。复用同一原生查询和命中规则，校验内外层遮挡、真实 Frame owner/坐标、实际焦点及固定节点身份；焦点丢失不再发送后续键盘输入，check/uncheck/setChecked 不重新选中替代节点。开放根在综合语义观察中不再标记无法定位，闭合根及其内部嵌套开放根不被主动导出。现有公开方法签名保持不变。
+
+macOS 隔离 Chrome for Testing：`node --experimental-vm-modules --test --test-concurrency=1 test/native-shadow-locator.acceptance.mjs test/native-semantic-observation.acceptance.mjs`（设置实际原生浏览器路径）最终 5/5 通过。新增四项真实浏览器用例验证各定位方式、根内 CSS/IDREF、嵌套开放根、Slot、歧义拒绝、可信点击与双击、文本和表单操作、内外遮挡、动态查询与旧引用失效、焦点丢失、实际元素信息/截图、Shadow 内的同源及跨源 Frame 与其中开放根的点击输入、重复 Frame owner 拒绝，以及顶层 Shadow 内直接上传/真实文件选择器/原始媒体文件字节。综合语义观察原生用例继续通过；校验实际 MV3 受管控制清理。首次两项测试对持续禁用/遮挡的预期错误码不符：外层调用期限可以先返回 TIMEOUT，保持既有合同，检查未发送点击，并以组件回归验证底层 pending reason。模拟回执夹具补足真实 DOM 的 ownerDocument。
+
+Browser `pnpm check` typecheck/build/全量组件与 Worker 294/294 通过（无失败或跳过）；保留既有帧定时器 TimeoutNegativeWarning，未改变独立定时器合同。新增原生专项接入现有三平台 CI 命令，本次未运行 Windows/Linux/Edge 或真实外部 Host；跨源 Frame 中的上传/下载组合未作本机专项验证，不宣称完整跨平台矩阵验收。未提交、推送、发布或部署。
+
+### Shadow DOM 查询专项 Review（2026-11-25，本地候选）
+
+真实 Chrome 新增反例先失败后通过：限定组件范围内的 Slot 分配节点原先无法由 role/text/testId/CSS/has/fixed ref 查到；失活 fallback、未分配 light child 仍被 label/placeholder 命中；块状文本、引用节点显式 aria-label、自引用 IDREF 与恢复 visibility 的后代名称不符原生 AX。另在真实同源 Frame 中将输入节点 adopt 到新文档，旧引用原先仍可写入（实际值为 `must not write`）。修复后 Slot 分配、转发、重分配、去重和根内真实 CSS 关系得到一致 scope；失活分支不引入外部投影；名称按根内 IDREF 与可见内容处理，不宣称完整 ARIA 算法；固定引用验证原文档归属、直接文件上传复用同一解析器，真实反例返回 STALE_REF 且新文档输入值保持空。每次命令重新查询，命令内复用查询/曝光/名称/正则缓存；label 查询不计算无标签候选的名称，单一固定引用不枚举全页。
+
+最终隔离 Chrome 专项 `native-shadow-locator.acceptance.mjs` + `native-semantic-observation.acceptance.mjs` 8/8 通过；额外普通 DOM 与嵌套/跨源 Frame 的 Locator/组合查询、键盘/表单、固定引用动态变化原生回归 4/4 通过。12,000 个挂载节点、49 层开放根的合成页面中六次实际 SDK 查询合计 412 ms（单次本机观察，非普遍性能承诺），动态替换后旧 CSS 为 0、新 testId 指向替换节点；组件检查 5,000 无标签候选不读取名称且固定引用不扫描文档。Browser pnpm check 295/295 通过；Agent Core pnpm check 676 项、648 通过、28 条件跳过、0 失败/取消。此前 npm pack/Shell/Work 回归失败本轮未复现；不据此认定其原始原因。设计与 Skill、验收条目同步；Diff 检查通过。仍保留独立帧定时器 TimeoutNegativeWarning，未执行其它平台/Edge、完整 ARIA 覆盖或外部 Host 验收，未提交、推送、发布、部署。
+
+### Browser 超时、等待与取消（2026-11-25，本地候选）
+
+以 `--trace-warnings` 实测复现 Frame 渲染探测耗尽预算后 router.poll 仍按负数创建定时器（TimeoutNegativeWarning -176.022 ms）。统一插件单调截止计算，接收/校验附件、排队、原生探测及子等待均消耗原预算，探测后重新核对期限；事件迟到不能令已过期 waiter 成功。独立 arm 的有效期和 get 的单次观察期限分别保留，取消读取不撤销其他所有者的等待。Node 发送层独立停止已超时 action 的字节流及结果观察，未派发不补发 cancel；共享队列及租约仍按实际收尾确认。持久化附着意图期间过期则撤销未派发意图，已发起附着而取消则保留 UNKNOWN_RESULT 并等待实际释放。新增 7 项反例回归；公开接口、默认期限、既有授权边界不变。
+
+最终冻结源码后重新构建，Browser pnpm check（含 typecheck/build）302/302 通过，0 失败/取消/跳过，无 TimeoutNegativeWarning。Core pnpm check 678 项、650 通过、28 条件跳过、0 失败/取消；Core 验证后最后收尾仅改 MV3 源码与其专项测试，最终 Browser gate 已覆盖。macOS 隔离 Chrome for Testing 六项原生验收 6/6：真实等待/滚动/键盘、跨站嵌套 Frame 缩放输入、HTTP 重定向三种加载阶段、持续遮挡超时与取消后无迟到输入、文件/下载身份与 waiter 取消、并发 Run 的真实关闭回执（1→3，实际受管控制清单为空）。首轮最后一项读取旧 synthetic Run cleanup 字段，改查真实 MV3 受管清单及持久回执；复验期间修改源码导致旧构建字节不一致被拒绝，最终冻结后重建复验。最后附着 guard 的错误优先级回归已修复，Router 单独 100/100 通过并纳入最终全量检查。未执行 Windows/Linux/Edge、外部 Host 或部署验收；已派发网页效果仍可能未知，不承诺硬抢占或自动回滚。未提交、推送、发布、部署。

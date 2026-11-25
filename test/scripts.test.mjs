@@ -229,8 +229,10 @@ test("namespace lookup, source disabling, path containment and portable collisio
   });
 });
 
-test("open uses Agent-wide 30 default + Top 20 slots with local priority, source fairness and complete schemas", (t) => {
+test("open catalog returns every authorized script independent of defaults and usage", (t) => {
   const { catalog, extension } = fixture(t);
+  const builtinCount = catalog.discover().entries.length;
+  const expected = builtinCount + 112;
   for (let n = 0; n < 2; n++)
     writeFileSync(
       path.join(catalog.local, `local${n}.js`),
@@ -262,30 +264,14 @@ test("open uses Agent-wide 30 default + Top 20 slots with local priority, source
     }
   }
   const selected = catalog.select(usage);
-  assert.equal(selected.total, 127); // Existing 112 plus fifteen official platform scripts.
-  assert.equal(selected.items.length, 50);
-  assert.equal(selected.complete, false);
-  assert.equal(selected.items[0].scriptName, "local0.js");
-  assert.equal(
-    selected.items.filter(
-      (item) => item.reason === "default" && item.origin.owner === a.owner,
-    ).length,
-    11,
-  );
-  assert.equal(
-    selected.items.filter(
-      (item) => item.reason === "default" && item.origin.owner === b.owner,
-    ).length,
-    11,
-  );
-  assert.equal(selected.items[30].executions, 15);
-  assert.equal(selected.items[30].scriptName, "alpha/top14.js");
-  assert.equal(selected.items[30].scriptInputSchema.required[0], "title");
-  assert.equal(catalog.select([]).items.length, 30); // Never fill frequency slots with invented history.
-  const bounded = catalog.select(usage, () => true, 1);
-  assert.equal(bounded.items.length, 0);
-  assert.equal(bounded.omitted.length, 50);
-  assert.equal(bounded.complete, false);
+  assert.equal(selected.total, expected);
+  assert.equal(selected.items.length, expected);
+  assert.equal(selected.complete, true);
+  assert.equal(selected.items.filter((item) => item.origin.owner === a.owner).length, 55);
+  assert.equal(selected.items.filter((item) => item.origin.owner === b.owner).length, 55);
+  assert.ok(selected.items.find((item) => item.scriptName === "alpha/top14.js").scriptInputSchema.required.includes("title"));
+  assert.equal(catalog.select([]).items.length, expected);
+  assert.equal(catalog.select(usage, () => true, 1).items.length, expected);
 });
 
 test("native compilation is separate from invocation and rejects syntax before side effects or actual-start counting", async (t) => {
@@ -311,5 +297,54 @@ test("output contracts are optional Draft 7 metadata in both headers and the ind
   assert.equal(Object.hasOwn(scriptHeader(code("x.js")), "scriptOutputSchema"), false);
   for (const output of [null, { type: "unknown" }, { $ref: "https://example.invalid/schema" }]) {
     assert.throws(() => scriptHeader(code("x.js", { scriptOutputSchema: output })), { code: "invalid_output_schema" });
+  }
+});
+
+test("Run preparation compiles an exact script header once per preparation and rechecks changed sources", async (t) => {
+  const {work,catalog}=fixture(t);
+  const {Ajv}=await import("ajv");
+  const {RunPreparation}=await import("../dist/host/run-preparation.js");
+  const {createHash}=await import("node:crypto");
+  const inputId="urn:nexum:test:prepare-input", outputId="urn:nexum:test:prepare-output";
+  const schema=(type)=>({$id:inputId,type:"object",properties:{value:{type}},required:["value"],additionalProperties:false});
+  const original=code("reuse.js",{scriptInputSchema:schema("integer"),scriptOutputSchema:{$id:outputId,type:"integer"}});
+  const revised=code("reuse.js",{scriptInputSchema:schema("string")});
+  const originalCompile=Ajv.prototype.compile;
+  const descriptor=Object.getOwnPropertyDescriptor(Ajv.prototype,"compile");
+  const counts=new Map();
+  Ajv.prototype.compile=function(input,...args){
+    if(input?.$id===inputId||input?.$id===outputId) counts.set(input.$id,(counts.get(input.$id)??0)+1);
+    return Reflect.apply(originalCompile,this,[input,...args]);
+  };
+  const prepare=new RunPreparation(work,"agent_test","host_test");
+  const request={instanceId:"host_test",runId:"run_test",sources:[],input:{value:7}};
+  const run=(value)=>prepare.prepare({...request,...value},new AbortController().signal);
+  const count=(id)=>counts.get(id)??0;
+  try {
+    const first=run({code:original});
+    assert.equal(count(inputId),1,"enroll, readback, index and input use the same parsed header");
+    assert.equal(count(outputId),1);
+    assert.equal(first.code,original);
+    assert.equal(first.metadata.scriptInputSchema.properties.value.type,"integer");
+    assert.equal(run({scriptName:"reuse.js"}).code,original);
+    assert.equal(count(inputId),2);
+    assert.equal(count(outputId),2);
+    assert.throws(()=>run({scriptName:"reuse.js",input:{value:"wrong"}}),{code:"invalid_arguments"});
+    assert.equal(count(inputId),3);
+    writeFileSync(path.join(catalog.local,"reuse.js"),revised);
+    assert.equal(run({scriptName:"reuse.js",input:{value:"new"}}).metadata.scriptInputSchema.properties.value.type,"string");
+    assert.equal(count(inputId),4,"same name and schema ID must not reuse an older revision");
+    assert.throws(()=>run({scriptName:"reuse.js"}),{code:"invalid_arguments"});
+    assert.equal(count(inputId),5);
+    const replay={name:first.name,code:original,origin:{...first.origin,revision:createHash("sha256").update(original).digest("hex")}};
+    assert.equal(run({replay}).code,original);
+    assert.equal(count(inputId),6);
+    assert.equal(count(outputId),4);
+    assert.throws(()=>run({replay:{...replay,code:revised}}),{code:"snapshot_changed"});
+    assert.equal(count(inputId),6);
+    assert.ok(!JSON.stringify(first).includes("validateInput"));
+  } finally {
+    if(descriptor)Object.defineProperty(Ajv.prototype,"compile",descriptor);
+    else delete Ajv.prototype.compile;
   }
 });

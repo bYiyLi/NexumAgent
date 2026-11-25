@@ -15,5 +15,5 @@ const selected = await client.browsers.get(context.input.browserId);
 const tabs = await selected.tabs.list();
 if (!context.input?.tabId) return { tabs };
 const tab = await selected.tabs.get(context.input.tabId);
-return await tab.observe({ full: true });
+return await tab.writeObservation();
 ```

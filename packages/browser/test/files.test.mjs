@@ -588,3 +588,23 @@ test("an owned native download only grants an exact regular source, never a call
   try {symlinkSync(other,alias);} catch {return;}
   await assert.rejects(materializeDownload({path:alias},f.call,f.work,marker),{code:"FILE_CHANGED"});
 });
+
+test("owned download source denial is diagnosed without falling back to ordinary read or staging writes", async (t) => {
+  const marker = "a".repeat(32);
+  const f = fixture(t, (target) => {
+    if (target.access === "read-owned-browser-download")
+      throw Object.assign(new Error("private source denied"), { code: "path_not_allowed" });
+  });
+  const directory = path.join(f.root, "Nexum");
+  mkdirSync(directory);
+  const source = path.join(directory, `report-nexum-${marker}.txt`);
+  writeFileSync(source, "downloaded");
+  await assert.rejects(materializeDownload({ path: source }, f.call, f.work, marker), {
+    code: "permission_denied", reason: "download_source_authorization_denied",
+    dispatched: false, effect: "none", retryable: false,
+  });
+  assert.deepEqual(f.grants.map(({ access, value }) => ({ access, value })), [
+    { access: "read-owned-browser-download", value: source },
+  ]);
+  assert.deepEqual(artifacts(f.work), []);
+});

@@ -1,7 +1,8 @@
-import { readFile, mkdir, copyFile, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assetRevision, profileSource, revisionSource } from "./asset-revision.mjs";
 
 export function extensionId(key) {
   const der = createPublicKey({
@@ -40,9 +41,11 @@ export async function buildExtensions(
     "worker.js",
     "router.js",
     "page.js",
+    "semantic-observation.js",
     "connection.js",
     "transport.js",
     "errors.js",
+    "deadline.js",
     "keyboard.js",
     "native-node.js",
     "clipboard.js",
@@ -57,6 +60,9 @@ export async function buildExtensions(
     "icon-48.png",
     "icon-128.png",
   ];
+  const sharedAssets = new Map(await Promise.all(files.map(async (name) =>
+    [name, await readFile(path.join(source, name))],
+  )));
   for (const [profile, info] of Object.entries(release.profiles)) {
     if (extensionId(info.key) !== info.extensionId || info.profile !== profile)
       throw new Error("Invalid fixed plugin identity.");
@@ -65,15 +71,10 @@ export async function buildExtensions(
       throw new Error("Invalid fixed plugin port range.");
     const target = path.join(destination, profile);
     await mkdir(target, { recursive: true });
-    for (const name of files)
-      await copyFile(path.join(source, name), path.join(target, name));
-    await writeFile(
-      path.join(target, "profile.js"),
-      `export const profile=${JSON.stringify(profile)};\nexport const extensionVersion=${JSON.stringify(release.extensionVersion)};\n`,
-    );
-    await writeFile(
-      path.join(target, "manifest.json"),
-      JSON.stringify(
+    const assets = new Map(sharedAssets);
+    const profileCode = profileSource(profile, release.extensionVersion);
+    assets.set("profile.js", profileCode);
+    assets.set("manifest.json", JSON.stringify(
         {
           manifest_version: 3,
           name:
@@ -110,8 +111,11 @@ export async function buildExtensions(
         },
         null,
         2,
-      ) + "\n",
-    );
+      ) + "\n");
+    const revision = assetRevision(assets);
+    assets.set("profile.js", profileCode + revisionSource(revision));
+    for (const [name, bytes] of assets)
+      await writeFile(path.join(target, name), bytes);
   }
   return release;
 }

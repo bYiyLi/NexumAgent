@@ -24,7 +24,7 @@ function temporary(t) {
   return root;
 }
 
-test("both public package entries and external declarations are usable without invoking a factory or exposing internal subpaths", (t) => {
+test("the client, factory and read-only installation helper entries are usable without invoking a factory or exposing internal subpaths", (t) => {
   const root = temporary(t);
   mkdirSync(path.join(root, "node_modules", "@nexum-hub"), { recursive: true });
   symlinkSync(
@@ -68,7 +68,7 @@ void extension;void example;`,
     { cwd: root, env, encoding: "utf8" },
   );
   assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
-  const script = `import assert from "node:assert/strict";import {readdirSync} from "node:fs";const before=process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length;const {createBrowserClient}=await import("@nexum-hub/browser");const extension=await import("@nexum-hub/browser/nexum");assert.equal(typeof extension.default,"function");assert.equal(typeof createBrowserClient({}).browsers.list,"function");assert.equal(process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length,before);await assert.rejects(import("@nexum-hub/browser/dist/extension/service.js"),{code:"ERR_PACKAGE_PATH_NOT_EXPORTED"});assert.deepEqual(readdirSync(process.env.HOME),[]);`;
+  const script = `import assert from "node:assert/strict";import {readdirSync} from "node:fs";const before=process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length;const {createBrowserClient}=await import("@nexum-hub/browser");const extension=await import("@nexum-hub/browser/nexum");const {inspectInstallation}=await import("@nexum-hub/browser/installation");assert.equal(typeof extension.default,"function");assert.equal(typeof createBrowserClient({}).browsers.list,"function");assert.equal((await inspectInstallation(process.env.HOME)).assetsReady,false);assert.equal(process._getActiveHandles().filter(value=>value.constructor?.name==="Server").length,before);await assert.rejects(import("@nexum-hub/browser/dist/extension/service.js"),{code:"ERR_PACKAGE_PATH_NOT_EXPORTED"});assert.deepEqual(readdirSync(process.env.HOME),[]);`;
   const home = path.join(root, "home");
   mkdirSync(home);
   const runtime = spawnSync(
@@ -114,6 +114,8 @@ test("the actual private candidate tarball contains its own registered contribut
   for (const expected of [
     "dist/client/index.js",
     "dist/client/index.d.ts",
+    "dist/client/installation.js",
+    "dist/client/installation.d.ts",
     "dist/extension/index.js",
     "dist/extension/index.d.ts",
     "instructions/README.md",
@@ -129,10 +131,16 @@ test("the actual private candidate tarball contains its own registered contribut
     "scripts/installation.js",
     "skills/browser-control/references/installation.md",
     "scripts/screenshot.js",
+    "scripts/observe.js",
+    "browser-extension/dist/development/semantic-observation.js",
+    "browser-extension/dist/production/semantic-observation.js",
     "skills/browser-control/SKILL.md",
     "implementation.json",
     "browser-extension/dist/development/manifest.json",
     "browser-extension/dist/production/manifest.json",
+    "browser-extension/dist/development/profile.js",
+    "browser-extension/dist/production/profile.js",
+    "browser-extension/asset-revision.mjs",
   ]) {
     assert.ok(names.has(expected), `candidate lacks ${expected}`);
   }
@@ -151,8 +159,8 @@ test("the actual private candidate tarball contains its own registered contribut
   const ledger = JSON.parse(
     readFileSync(path.join(source, "implementation.json"), "utf8"),
   );
-  assert.equal(ledger.publicMembers.length, 247);
-  assert.equal(new Set(ledger.publicMembers.map((item) => item.id)).size, 247);
+  assert.equal(ledger.publicMembers.length, 249);
+  assert.equal(new Set(ledger.publicMembers.map((item) => item.id)).size, 249);
   assert.ok(
     ledger.publicMembers.every((item) => item.nativeAcceptance === "not_run"),
   );

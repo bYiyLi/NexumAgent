@@ -461,35 +461,20 @@ test("explicit pure data preserves media-looking objects and refuses embedded bi
 });
 
 
-test("large JSON, primitive text and explicit text become readable bounded resources", async (t) => {
+test("large JSON, primitive text and explicit text remain complete without fallback resources", async (t) => {
   const f = await fixture(t), large = "正文".repeat(16000);
   assert.ok(Buffer.byteLength(large) > 64 * KiB);
-  const data = { title: "full", body: large, count: 3n };
-  for (const [value, kind] of [
-    [f.output.json(data), "dataResource"],
-    [large, "dataResource"],
-    [f.output.text(large), "textResource"]
+  for (const [value, expected, text] of [
+    [f.output.json({title:"full",body:large,count:3n}), {title:"full",body:large,count:"3"}, false],
+    [large,large,false], [f.output.text(large),large,true]
   ]) {
     const saved = await f.encoder.encode(value, f.scope());
-    assert.equal(saved.delivery.complete, false);
-    assert.equal(saved.delivery.reason, "context_budget");
-    const resource = saved.delivery[kind];
-    assert.ok(resource.uri);
-    const full = JSON.parse((await f.artifacts.read(resource.uri, f.scope(), { maxBytes: 1 * MiB })).data.toString("utf8"));
-    if (kind === "textResource") {
-      assert.equal(full[0].item.text, large);
-    } else if (value === large) {
-      assert.equal(full.data, large);
-    } else {
-      assert.equal(Object.hasOwn(saved, "data"), false);
-      assert.deepEqual(full.data, { title: "full", body: large, count: "3" });
-      assert.ok(full.conversions.some((item) => item.from === "BigInt"));
-    }
+    assert.equal(saved.delivery, undefined);
+    assert.deepEqual(text ? saved.content[0].text : savedJSON(saved.data), expected);
     const rendered = await f.encoder.render(savedJSON(saved), f.scope(), run);
-    assert.equal(rendered.structuredContent.delivery.complete, false);
-    assert.ok(rendered.content.some((item) => item.type === "resource_link" && item.uri === resource.uri));
-    assert.ok(Buffer.byteLength(JSON.stringify(rendered)) <= 64 * KiB);
-    assert.equal(JSON.stringify(rendered).includes(large), false);
+    assert.ok(Buffer.byteLength(JSON.stringify(rendered)) > 64 * KiB);
+    assert.ok(JSON.stringify(rendered).includes(large));
+    assert.ok(!rendered.content.some(item => item.type === "resource_link"));
   }
 });
 
@@ -687,45 +672,15 @@ test("expired historical media fails explicitly without recreating it from a sti
 });
 
 
-test("inline media limits automatically promote to verifiable links while retained inline responses respect Host budgets", async (t) => {
-  const f = await fixture(t), image = png(), audio = wav();
-  assert.equal(f.encoder.limits.imageBytes, 10 * MiB);
-  assert.equal(f.encoder.limits.audioBytes, 32 * MiB);
-  assert.equal(f.encoder.limits.inlineBytes, 64 * MiB);
-  for (const [type, bytes, limit] of [
-    ["image", image, "imageBytes"],
-    ["audio", audio, "audioBytes"]
-  ]) {
-    const exact = new ResultEncoder(f.artifacts, { [limit]: bytes.length });
-    const saved = await exact.encode(f.output[type]({ data: bytes }), f.scope());
-    assert.equal(saved.content[0].resource.size, bytes.length);
-    const small = new ResultEncoder(f.artifacts, { [limit]: bytes.length - 1 });
-    const downgraded = await small.encode(f.output[type]({ data: bytes }), f.scope());
-    assert.equal(downgraded.content[0].type, "resource_link");
-    assert.equal(downgraded.content[0].resource.size, bytes.length);
-    const savedBytes = await f.artifacts.read(downgraded.content[0].resource.uri, f.scope(), { maxBytes: bytes.length });
-    assert.deepEqual(Buffer.from(savedBytes.data), bytes);
-    await assert.rejects(() => small.render(saved, f.scope(), run), {
-      code: "resource_read_too_large"
-    });
-  }
-  const values = f.output.result({
-    content: [f.output.image({ data: image }), f.output.audio({ data: audio })]
-  });
-  const exact = new ResultEncoder(f.artifacts, {
-    inlineBytes: image.length + audio.length
-  });
-  const saved = await exact.encode(values, f.scope());
-  assert.equal((await exact.render(saved, f.scope(), run)).content[1].type, "audio");
-  const small = new ResultEncoder(f.artifacts, {
-    inlineBytes: image.length + audio.length - 1
-  });
-  const promoted = await small.encode(values, f.scope());
-  assert.equal(promoted.content[0].type, "image");
-  assert.equal(promoted.content[1].type, "resource_link");
-  await assert.rejects(() => small.render(saved, f.scope(), run), {
-    code: "inline_content_too_large"
-  });
+test("native media retain their content type and respect one encoded response ceiling", async (t) => {
+ const f=await fixture(t), image=png(), audio=wav();
+ assert.equal(f.encoder.limits.responseBytes,128*MiB);
+ const saved=await f.encoder.encode(f.output.result({content:[f.output.image({data:image}), f.output.audio({data:audio})]}),f.scope());
+ assert.deepEqual(saved.content.map(item=>item.type),["image","audio"]);
+ const rendered=await f.encoder.render(saved,f.scope(),run);
+ assert.deepEqual(rendered.content.slice(0,2).map(item=>item.type),["image","audio"]);
+ const size=Buffer.byteLength(JSON.stringify(rendered));
+ await assert.rejects(f.encoder.render(saved,f.scope(),run,{maxResponseBytes:size-1}),{code:"mcp_response_too_large"});
 });
 
 test("final MCP encoding and actual Host capabilities fail explicitly rather than returning a false preview", async (t) => {
@@ -939,7 +894,7 @@ test("Resources directory over the text budget fails clearly and a smaller real 
   const oneBytes = Buffer.byteLength(JSON.stringify(one)),
     allBytes = Buffer.byteLength(JSON.stringify(all));
   assert.ok(oneBytes < allBytes);
-  const bounded = new ResultEncoder(f.artifacts, { textBytes: oneBytes });
+  const bounded = new ResultEncoder(f.artifacts, { responseBytes: oneBytes });
   await assert.rejects(() => bounded.listResources(f.scope(), { limit: 3 }), {
     code: "resource_list_too_large",
   });
@@ -947,57 +902,26 @@ test("Resources directory over the text budget fails clearly and a smaller real 
 });
 
 
-test("ordinary resource-shaped data stays JSON while explicit oversized embedded text becomes a real link", async (t) => {
-  const f = await fixture(t), text = "中".repeat(1000);
-  const value = {
-    type: "resource",
-    resource: { uri: "remote://original-text", text, mimeType: "text/plain" }
-  };
-  const plain = await f.encoder.encode(value, f.scope());
-  assert.deepEqual(savedJSON(plain.data), value);
-  assert.equal(plain.content.length, 0);
-  const explicit = f.output.result({ content: [value] });
-  const normal = await f.encoder.encode(explicit, f.scope());
-  assert.equal(normal.content[0].type, "resource");
-  const bounded = new ResultEncoder(f.artifacts, {
-    textBytes: Buffer.byteLength(text) - 1
-  });
-  const saved = await bounded.encode(explicit, f.scope());
-  assert.equal(saved.content[0].type, "resource_link");
-  const resource = saved.content[0].resource;
-  const bytes = await f.artifacts.read(resource.uri, f.scope(), { maxBytes: Buffer.byteLength(text) });
-  assert.equal(bytes.data.toString("utf8"), text);
-  assert.equal(saved.content[0].resource.sha256, createHash("sha256").update(text).digest("hex"));
+test("ordinary resource-shaped data stays JSON while explicit embedded text stays inline", async (t) => {
+ const f=await fixture(t), text="中".repeat(30000);
+ const value={type:"resource",resource:{uri:"remote://original-text",text,mimeType:"text/plain"}};
+ const plain=await f.encoder.encode(value,f.scope());
+ assert.deepEqual(savedJSON(plain.data),value);
+ assert.equal(plain.content.length,0);
+ const saved=await f.encoder.encode(f.output.result({content:[value]}),f.scope());
+ assert.equal(saved.content[0].type,"resource");
+ const response=await f.encoder.render(saved,f.scope(),run);
+ assert.equal(response.content[0].resource.text,text);
 });
 
-
-test("native bytes and Blob exceeding inline budgets still produce bounded, readable file resources", async (t) => {
-  const f = await fixture(t), image = png(), binary = Buffer.alloc(256, 65);
-  const imageBlob = new Blob([image], { type: "image/png" });
-  const binaryBlob = new Blob([binary]);
-  for (const source of [image, imageBlob]) {
-    const bounded = new ResultEncoder(f.artifacts, {
-      imageBytes: image.length - 1
-    });
-    const saved = await bounded.encode(f.output.image({ data: source }), f.scope());
-    assert.equal(saved.content[0].type, "resource_link");
-    const identity = saved.content[0].resource;
-    assert.equal(identity.mimeType, "image/png");
-    const bytes = await f.artifacts.read(identity.uri, f.scope(), { maxBytes: image.length });
-    assert.deepEqual(Buffer.from(bytes.data), image);
-  }
-  for (const source of [binary, binaryBlob]) {
-    const bounded = new ResultEncoder(f.artifacts, {
-      inlineBytes: binary.length - 1
-    });
-    const saved = await bounded.encode(f.output.resource({
-      data: source, mimeType: "application/octet-stream"
-    }), f.scope());
-    assert.equal(saved.content[0].type, "resource_link");
-    const identity = saved.content[0].resource;
-    const bytes = await f.artifacts.read(identity.uri, f.scope(), { maxBytes: binary.length });
-    assert.deepEqual(Buffer.from(bytes.data), binary);
-  }
+test("explicit media and embedded binary fail rather than silently changing type at the response ceiling", async (t) => {
+ const f=await fixture(t), image=png(), binary=Buffer.alloc(256,65);
+ for (const value of [f.output.image({data:image}), f.output.image({data:new Blob([image],{type:"image/png"})}), f.output.resource({data:binary,mimeType:"application/octet-stream"})]) {
+  const saved=await f.encoder.encode(value,f.scope());
+  assert.notEqual(saved.content[0].type,"resource_link");
+  const response=await f.encoder.render(saved,f.scope(),run);
+  await assert.rejects(f.encoder.render(saved,f.scope(),run,{maxResponseBytes:Buffer.byteLength(JSON.stringify(response))-1}),{code:"mcp_response_too_large"});
+ }
 });
 
 test("result descriptions retain five content kinds and actual resource coordinates without reading media bytes", async (t) => {
@@ -1056,61 +980,29 @@ test("result descriptions retain five content kinds and actual resource coordina
   });
 });
 
-test("result descriptions keep a complete large-data fallback and fail closed for asynchronous authority", async (t) => {
-  const f = await fixture(t, { limits: { textBytes: 2048 } });
-  const saved = await f.encoder.encode(
-    f.output.json({ full: "x".repeat(10000) }),
-    f.scope(),
-  );
-  const described = await f.encoder.describe(saved, f.scope());
-  assert.equal(described.result.delivery.complete, false);
-  assert.equal(described.result.delivery.reason, "context_budget");
-  assert(described.result.delivery.dataResource.size > 10000);
-  const original = await f.artifacts.read(
-    described.result.delivery.dataResource.uri,
-    f.scope(),
-    { maxBytes: 20000 },
-  );
-  assert.equal(JSON.parse(original.data.toString()).data.full.length, 10000);
-  await assert.rejects(
-    f.encoder.describe(saved, { ...f.scope(), assertCurrent: async () => {} }),
-    { code: "authorization_configuration" },
-  );
+test("result descriptions retain large data and fail closed for asynchronous authority", async (t) => {
+ const f=await fixture(t);
+ const saved=await f.encoder.encode(f.output.json({full:"x".repeat(100000)}),f.scope());
+ const described=await f.encoder.describe(saved,f.scope());
+ assert.equal(described.result.data.full.length,100000);
+ assert.equal(described.result.delivery,undefined);
+ await assert.rejects(f.encoder.describe(saved,{...f.scope(),assertCurrent:async()=>{}}),{code:"authorization_configuration"});
 });
 
-test("a smaller current observation budget moves retained JSON to a readable resource without changing history", async (t) => {
-  const f = await fixture(t);
-  const saved = await f.encoder.encode(
-    f.output.json({ value: "x".repeat(10000) }),
-    f.scope(),
-  );
-  assert.equal(saved.data.value.length, 10000);
-  const before = savedJSON(saved);
-  const projected = await f.encoder.describe(saved, f.scope(), {
-    textBytes: 2048,
-  });
-  assert.equal(projected.result.delivery.complete, false);
-  assert.equal(projected.result.delivery.reason, "context_budget");
-  const full = await f.artifacts.read(
-    projected.result.delivery.dataResource.uri,
-    f.scope(),
-    { maxBytes: 20000 },
-  );
-  assert.equal(JSON.parse(full.data.toString()).data.value.length, 10000);
-  assert.deepEqual(savedJSON(saved), before);
+test("a lower response ceiling fails without changing retained JSON", async (t) => {
+ const f=await fixture(t);
+ const saved=await f.encoder.encode(f.output.json({value:"x".repeat(10000)}),f.scope());
+ const before=savedJSON(saved);
+ await assert.rejects(f.encoder.render(saved,f.scope(),run,{maxResponseBytes:2048}),{code:"mcp_response_too_large"});
+ assert.deepEqual(savedJSON(saved),before);
 });
 
-test("model mirror expansion resourceizes data and text before the final Cloud context ceiling", async (t) => {
-  const f=await fixture(t);
-  for (const [value,kind,expected] of [
-    [f.output.json({html:"<&>".repeat(4000)}),"dataResource",{html:"<&>".repeat(4000)}],
-    [f.output.text("nested text ".repeat(2500)),"textResource","nested text ".repeat(2500)],
-  ]) {
-    const saved=await f.encoder.encode(value,f.scope());
-    const resource=saved.delivery?.[kind];
-    assert.ok(resource,kind);
-    const read=await f.artifacts.read(resource.uri,f.scope(),{maxBytes:128*KiB});
-    const parsed=JSON.parse(read.data.toString("utf8"));
-    assert.deepEqual(kind==="textResource"?parsed[0].item.text:parsed.data,expected);
-  }
+test("escaped JSON and large explicit text keep complete data", async (t) => {
+ const f=await fixture(t);
+ const html="<&>".repeat(40000);
+ const saved=await f.encoder.encode(f.output.json({html}),f.scope());
+ assert.equal(saved.data.html,html);
+ assert.equal(saved.delivery,undefined);
+ const response=await f.encoder.render(saved,f.scope(),run);
+ assert.equal(response.structuredContent.data.html,html);
 });

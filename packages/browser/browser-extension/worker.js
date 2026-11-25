@@ -1,4 +1,4 @@
-import { profile, extensionVersion } from "./profile.js";
+import { profile, extensionVersion, assetRevision } from "./profile.js";
 import { createBrowserRouter } from "./router.js";
 import { createExtensionConnection } from "./connection.js";
 import { createVisualController } from "./visual.js";
@@ -20,6 +20,7 @@ connection = createExtensionConnection({
   router,
   profile,
   extensionVersion,
+  assetRevision,
 });
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: "https://nexum.y2l.top/" });

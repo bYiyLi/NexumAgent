@@ -10,7 +10,7 @@
     "members": 148,
     "extraMembers": 102
   },
-  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前247项仍未逐项完成该矩阵，局部原生通过不将其标为通过。nativeCases 只关联仓库中按 coverage 标明范围的用例定义，不代表该成员的权限、失效、取消或支持平台矩阵已全部验收；实际执行版本与结果由开发记录维护。",
+  "interpretation": "公开签名、受管路由、组件与原生证据分开记录。实际记录见 docs/development/browser-native-acceptance.md；publicMembers.nativeAcceptance 表示完整逐项原生验收矩阵，当前249项仍未逐项完成该矩阵，局部原生通过不将其标为通过。nativeCases 只关联仓库中按 coverage 标明范围的用例定义，不代表该成员的权限、失效、取消或支持平台矩阵已全部验收；实际执行版本与结果由开发记录维护。",
   "registeredNativeRoutes": [
     "tabs.list",
     "tabs.get",
@@ -64,6 +64,7 @@
     "locator.fill",
     "locator.selectOption",
     "playwright.domSnapshot",
+    "tab.semanticSnapshot",
     "dom.getVisibleTree",
     "tab.snapshot",
     "frame.snapshot",
@@ -144,6 +145,20 @@
     "fileChoosers.setFiles"
   ],
   "publicMembers": [
+    {
+      "id": "X103",
+      "target": "tab.semanticSnapshot",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-semantic-observation"]
+    },
+    {
+      "id": "X104",
+      "target": "tab.writeObservation",
+      "clientSurface": "declared",
+      "nativeAcceptance": "not_run",
+      "nativeCases": ["native-semantic-observation"]
+    },
     {
       "id": "B001",
       "target": "client.browsers",
@@ -2268,6 +2283,11 @@
       "file": "test/native.acceptance.mjs",
       "test": "native declined, cancelled, expired and revoked continuations never renew browser control",
       "coverage": ["declined", "cancelled", "expired", "revoked"]
+    },
+    "native-semantic-observation": {
+      "file": "test/native-semantic-observation.acceptance.mjs",
+      "test": "native semantic observation fuses DOM and AX, current state, frame/shadow boundaries and native image",
+      "coverage": ["actual_dom_ax_identity", "current_form_state", "frame_scope", "shadow_boundary", "locator", "native_image"]
     },
     "native-page-and-download-resource": {
       "file": "test/native.acceptance.mjs",

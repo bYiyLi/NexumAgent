@@ -317,8 +317,8 @@ test("Skill-private scripts stay readable but never enter independent script dis
       .map((item) => item.scriptName),
     ["registered.js"],
   );
-  assert.equal(opened.agent.scripts.total, 16); // Local script plus fifteen official builtins.
-  assert.deepEqual(opened.agent.scripts.items[0].scriptInputSchema.required, [
+  assert.equal(opened.agent.scripts.total, scripts.discover().entries.length); // All authorized catalog entries.
+  assert.deepEqual(opened.agent.scripts.items.find((item) => item.scriptName === "registered.js").scriptInputSchema.required, [
     "value",
   ]);
   assert.doesNotMatch(

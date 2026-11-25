@@ -239,7 +239,7 @@ function fixture(t, config = {}) {
             },
           };
         if (method === "Page.captureScreenshot")
-          return { data: Buffer.from([3, 7, 9]).toString("base64") };
+          return { data: config.screenshotData ?? Buffer.from([3, 7, 9]).toString("base64") };
         return { nativeMethod: method };
       },
     },
@@ -1586,8 +1586,8 @@ test("native screenshot defaults produce byte results, locator collections prese
     (v) => v[0] === "debugger.sendCommand" && v[2] === "Page.captureScreenshot",
   )[3];
   assert.equal(capture.format, "jpeg");
-  assert.equal(capture.quality, 80);
-  assert.equal(capture.clip.scale, 0.5);
+  assert.equal(capture.quality, 75);
+  assert.equal(capture.clip.scale, 1);
   const locator = {
     target: f.target(),
     framePath: [],
@@ -1750,6 +1750,56 @@ test("locator unions retain document order and remove duplicates", async () => {
   });
 });
 
+test("open-shadow locator preflight uses the outer and inner real hit and preserves the pending reason", async () => {
+  const document = {};
+  const make = (tagName,id,root) => ({tagName,id,nodeType:1,isConnected:true,
+    ownerDocument:document,children:[],parentElement:null,
+    closest:()=>null,getRootNode:()=>root,getAttribute:()=>null,hasAttribute:()=>false,
+    contains(node){return node===this;},scrollIntoView(){},
+    getBoundingClientRect(){return {x:0,y:0,width:80,height:30};}});
+  const host=make("DIV","host",document), outer=make("DIV","outer",document);
+  const shadow={mode:"open",host};host.shadowRoot=shadow;
+  const button=make("BUTTON","button",shadow), inner=make("DIV","inner",shadow);
+  shadow.querySelectorAll=selector=>selector==="*"?[button,inner]:selector==="#button"?[button]:[];
+  document.querySelectorAll=selector=>selector==="*"?[host,outer]:[];
+  let outerHit=host, innerHit=button;
+  document.elementFromPoint=()=>outerHit;shadow.elementFromPoint=()=>innerHit;
+  const scope=vm.createContext({document,crypto,TextEncoder,Uint8Array,Element:class {},getComputedStyle:()=>({display:"block",visibility:"visible"})});
+  const execute=vm.runInContext(`(${pageCommand.toString()})`,scope);
+  const args={command:"resolve",pageVersion:1,leaseId:"shadow",query:{kind:"selector",selector:"#button"},reportPendingReason:true};
+  const read=async()=>JSON.parse(JSON.stringify(await execute(args)));
+  let found=await read();assert.equal(found.ok,true);assert.equal(found.value.tagName,"BUTTON");assert.ok(found.value.ref);
+  outerHit=outer;assert.deepEqual(await read(),{ok:true,value:{pendingReason:"element_blocked"}});
+  outerHit=host;innerHit=inner;assert.deepEqual(await read(),{ok:true,value:{pendingReason:"element_blocked"}});
+  innerHit=button;host.inert=true;assert.deepEqual(await read(),{ok:true,value:{pendingReason:"element_not_actionable"}});
+  host.inert=false;host.shadowRoot=null;shadow.mode="closed";
+  assert.deepEqual(await read(),{ok:true,value:{pendingReason:"element_not_found"}});
+  const stale=await execute({...args,ref:found.value.ref});assert.equal(stale.error.code,"STALE_REF");
+});
+
+test("label queries inspect only label-bearing candidates and fixed refs do not enumerate a document", async () => {
+  let unrelatedReads=0, scans=0;
+  const document={};
+  const make=(label)=>({nodeType:1,tagName:"INPUT",ownerDocument:document,isConnected:true,
+    getRootNode:()=>document,closest:()=>null,getAttribute:name=>name==="aria-label"?label:null,
+    hasAttribute:name=>name==="aria-label"&&!!label,
+    get innerText(){unrelatedReads++;return "irrelevant";}});
+  const target=make("Actual field"),all=Array.from({length:5000},()=>make(null));all.push(target);
+  document.querySelectorAll=selector=>{scans++;return selector==="*"?all:[];};
+  const scope=vm.createContext({document,crypto,TextEncoder,Uint8Array});
+  const execute=vm.runInContext(`(${pageCommand.toString()})`,scope);
+  const base={pageVersion:1,leaseId:"label-review"};
+  const query={kind:"label",matcher:{kind:"text",value:"Actual field",exact:true}};
+  const found=await execute({...base,command:"all",query});
+  assert.equal(found.ok,true);assert.equal(found.value.length,1);assert.equal(unrelatedReads,0);
+  const before=scans;
+  const fixed=await execute({...base,command:"count",query:found.value[0]});
+  assert.equal(fixed.value,1);assert.equal(scans,before);
+  target.ownerDocument={};
+  const stale=await execute({...base,command:"count",query:found.value[0]});
+  assert.equal(stale.error.code,"STALE_REF");
+});
+
 test("locator enabled state includes native and inherited aria disabled state", async () => {
   const element = ({
     nativeDisabled = false,
@@ -1903,9 +1953,9 @@ test("screenshot limits use physical pixels at native and fractional device scal
   }
 });
 
-test("screenshot pixel preflight accounts for density before native capture", async (t) => {
+test("screenshot has no Browser-specific pixel or longest-edge ceiling and preserves explicit scale validation", async (t) => {
   for (const [pixelRatio, width, expected] of [
-    [2, 6000, "OUTPUT_TOO_LARGE"],
+    [2, 12000, null],
     [0.5, 12000, null],
     [0, 80, "INVALID_TARGET"],
     [NaN, 80, "INVALID_TARGET"],
@@ -1917,7 +1967,7 @@ test("screenshot pixel preflight accounts for density before native capture", as
     const capture = f.call("tab.screenshot", {
       options: {
         clip: { x: 0, y: 0, width, height: width },
-        maxEdgePx: 16384,
+        maxEdgePx: 24000,
       },
     });
     if (expected) await assert.rejects(capture, { code: expected });
@@ -1930,6 +1980,17 @@ test("screenshot pixel preflight accounts for density before native capture", as
       expected === null,
     );
   }
+});
+
+test("screenshot returns native bytes above the old JPEG byte ceiling without Browser-side truncation", async (t) => {
+  const original = Buffer.alloc(10 * 1024 * 1024 + 1, 37);
+  const f = fixture(t, { screenshotData: original.toString("base64") });
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const bytes = await f.call("tab.screenshot");
+  assert.equal(bytes.byteLength, original.byteLength);
+  assert.ok(Buffer.from(bytes).equals(original));
 });
 
 test("binary data crosses exact subviews with bounded chunks, validates hash and rejects out-of-order or unrelated streams", async () => {
@@ -3158,6 +3219,8 @@ test("a locator receipt rejects trusted clicks on another element at the same po
       if (listeners.get(type) === callback) listeners.delete(type);
     },
   };
+  expected.ownerDocument = document;
+  other.ownerDocument = document;
   const scope = vm.createContext({document, crypto: globalThis.crypto,
     setTimeout, clearTimeout});
   const execute = vm.runInContext(`(${pageCommand.toString()})`, scope);
@@ -3557,9 +3620,8 @@ test("native AX indices retain the exact backend node and document and never reb
       "inputReceipt",
       "inputReceipt",
       "readyState",
-      "devicePixelRatio",
     ],
-    "AX node identity stays native; only input readiness/receipt and screenshot state use the isolated page.",
+    "AX node identity stays native; default screenshots need no additional pixel-ratio probe.",
   );
 });
 
@@ -4579,4 +4641,163 @@ test("a native modal after mouse release is observed without waiting for blocked
   await f.call("dialogs.dismiss",{dialogId:dialog.dialogId,pageVersion:dialog.pageVersion});
   assert.equal(f.calls.filter(v=>v[0]==="debugger.sendCommand" && v[2]==="Input.dispatchMouseEvent" && v[3].type==="mouseReleased").length,1);
   assert.ok(!f.calls.some(v=>v[0]==="scripting.executeScript" && v[1].args?.[0]?.command==="inputReceipt" && v[1].args[0].action==="peek"));
+});
+
+test("click receipt observation returns promptly when a dialog opens after native release acknowledgement", async (t) => {
+  const f = fixture(t, { missingClickReceipt:true });
+  f.router.start(); f.router.bind(binding); f.open("lease");
+  const execute = f.chrome.scripting.executeScript;
+  const send = f.chrome.debugger.sendCommand;
+  const paused = Promise.withResolvers();
+  let emitted = false;
+  f.chrome.scripting.executeScript = async (input) => {
+    if (input.args?.[0]?.command === "inputReceipt" && input.args[0].action === "peek" && !emitted) {
+      emitted = true;
+      f.chrome.debugger.onEvent.emit({ tabId: input.target.tabId }, "Page.javascriptDialogOpening", { type:"confirm", message:"Late confirm", url:"https://example.com", hasBrowserHandler:true });
+      return paused.promise;
+    }
+    return execute(input);
+  };
+  f.chrome.debugger.sendCommand = async (source,method,params) => {
+    const result=await send(source,method,params);
+    if (method === "Page.handleJavaScriptDialog") {
+      f.chrome.debugger.onEvent.emit(source,"Page.javascriptDialogClosed",{});
+      paused.resolve([{result:{ok:true,value:{observed:1}}}]);
+    }
+    return result;
+  };
+  await Promise.race([f.call("cua.click",{options:{x:40,y:70}},{budgetMs:3000}),delay(1500).then(()=>{throw Error("Click waited behind a modal during receipt observation");})]);
+  assert.equal(emitted,true);
+  const dialog=await f.call("tab.getJsDialog");
+  assert.equal(dialog.message,"Late confirm");
+  await f.call("dialogs.dismiss",{dialogId:dialog.dialogId,pageVersion:dialog.pageVersion});
+  assert.equal(f.calls.filter(v=>v[0]==="debugger.sendCommand" && v[2]==="Input.dispatchMouseEvent" && v[3].type==="mouseReleased").length,1);
+});
+
+test("native navigation from a new tab does not prepare visuals on the protected document", async (t) => {
+  const observed=[];
+  const f=fixture(t,{visual:{beforeAction:async(ctx)=>{observed.push(["before",ctx.target.tabId]);},trackTab:async(ctx)=>{observed.push(["track",ctx.target.tabId,(await f.chrome.tabs.get(Number(ctx.target.tabId))).url]);}}});
+  f.router.start();f.router.bind(binding);f.open("lease",null);
+  const tab=await f.call("tabs.new",{},{id:null});
+  observed.length=0;
+  await f.router.dispatch({...binding,actionId:crypto.randomUUID(),operationId:crypto.randomUUID(),runId:"lease",leaseId:"lease",method:"tab.navigate",target:tab.target,args:{target:tab.target,url:"https://example.com/after"},budgetMs:3000});
+  assert.equal((await f.chrome.tabs.get(Number(tab.id))).url,"https://example.com/after");
+  assert.ok(!observed.some(v=>v[0]==="before"));
+  assert.ok(observed.some(v=>v[0]==="track"&&v[2]==="https://example.com/after"));
+});
+test("aborted native pointer movement releases the mutation queue without replaying old input", async (t) => {
+  const f=fixture(t);f.router.start();f.router.bind(binding);f.open("lease");
+  const entered=Promise.withResolvers(),blocked=Promise.withResolvers();
+  const send=f.chrome.debugger.sendCommand;
+  let held=false;
+  f.chrome.debugger.sendCommand=async(source,method,params)=>{
+    if(!held&&source.tabId===1&&method==="Input.dispatchMouseEvent"&&params.type==="mouseMoved"){held=true;entered.resolve();return blocked.promise;}
+    return send(source,method,params);
+  };
+  const stop=new AbortController();
+  const pending=f.call("cua.click",{options:{x:40,y:70}},{signal:stop.signal,budgetMs:3000});
+  const rejected=assert.rejects(pending);
+  try {
+    await Promise.race([entered.promise,delay(1000).then(()=>{throw Error("pointer command not entered")})]);
+    stop.abort(Error("cancel old native pointer"));await rejected;
+    const next=await Promise.race([f.call("tabs.new",{},{id:null,budgetMs:3000}),delay(1000).then(()=>{throw Error("old pointer held the native mutation queue")})]);
+    assert.ok(next.id);
+    assert.ok(!f.calls.some(v=>v[0]==="debugger.sendCommand"&&v[2]==="Input.dispatchMouseEvent"&&v[3].type==="mousePressed"));
+  } finally {blocked.resolve({});await rejected.catch(()=>{});}
+});
+
+test("deadline checks reject expired probes before scheduling timers or accepting late success", async t => {
+  const f=fixture(t);
+  const native=globalThis.setTimeout;
+  const invalid=[];
+  globalThis.setTimeout=(callback,ms,...args)=>{
+    if (!Number.isFinite(ms)||ms<0||ms>2147483647) invalid.push(ms);
+    return native(callback,ms,...args);
+  };
+  try {
+    for (const matched of [false,true]) {
+      let probes=0;
+      await assert.rejects(f.router.poll({started:performance.now(),budgetMs:12},
+        async()=>{probes++;await delay(28);return matched;}),{code:"TIMEOUT"});
+      assert.equal(probes,1);
+    }
+    await assert.rejects(f.router.delay({started:performance.now()-30,budgetMs:5},0),{code:"TIMEOUT"});
+    f.router.start();f.router.bind(binding);f.open("lease");
+    await assert.rejects(f.call("playwright.waitForTimeout",{timeoutMs:100},{budgetMs:15}),{code:"TIMEOUT"});
+    assert.deepEqual(invalid,[]);
+  } finally {globalThis.setTimeout=native;}
+});
+
+test("late navigation events cannot win a stalled event timer; observing a live waiter can time out independently", async t=>{
+  const f=fixture(t);f.router.start();f.router.bind(binding);f.open("lease");
+  const waiter=await f.call("waiters.arm",{event:"navigation",timeoutMs:1000,waitUntil:"load"});
+  await assert.rejects(f.call("waiters.get",{id:waiter.id},{budgetMs:15}),{code:"TIMEOUT"});
+  f.chrome.webNavigation.onCompleted.emit({tabId:1,frameId:0,url:"https://example.com/next",documentId:"next"});
+  assert.equal((await f.call("waiters.get",{id:waiter.id})).url,"https://example.com/next");
+  const native=globalThis.setTimeout;
+  // Hold only the native timer corresponding to this short event wait.
+  let held=0;
+  globalThis.setTimeout=(callback,ms,...args)=>{
+    if (ms>=25 && ms<=35) {held++;return native(callback,10000,...args);}
+    return native(callback,ms,...args);
+  };
+  try {
+    const stale=await f.call("waiters.arm",{event:"navigation",timeoutMs:30,waitUntil:"load"});
+    await delay(55);
+    f.chrome.webNavigation.onCompleted.emit({tabId:1,frameId:0,url:"https://example.com/late",documentId:"late"});
+    await assert.rejects(f.call("waiters.get",{id:stale.id}),{code:"TIMEOUT"});
+    assert.ok(held>=1);
+    await f.call("waiters.cancel",{id:stale.id});
+  } finally {globalThis.setTimeout=native;}
+});
+
+test("an expired native queue item returns without overtaking its unfinished predecessor", async t=>{
+  const f=fixture(t);f.router.start();f.router.bind(binding);f.open("lease");
+  const original=f.chrome.tabs.update;
+  const entered=Promise.withResolvers(),release=Promise.withResolvers();
+  let mutations=0;
+  f.chrome.tabs.update=async(id,input)=>{
+    if (Object.hasOwn(input,"pinned")) {
+      mutations++;
+      if (mutations===1) {entered.resolve();await release.promise;}
+    }
+    return original(id,input);
+  };
+  const first=f.call("management.tabs.update",{id:"1",options:{pinned:true}},{budgetMs:3000});
+  const firstObserved=first.catch(()=>{});
+  try {
+    await entered.promise;
+    const late=f.call("management.tabs.update",{id:"1",options:{pinned:false}},{budgetMs:30});
+    await assert.rejects(Promise.race([late,delay(500).then(()=>{throw Error("expired queued action did not settle");})]),{code:"TIMEOUT"});
+    assert.equal(mutations,1);
+    release.resolve();await first;
+    await f.call("management.tabs.update",{id:"1",options:{pinned:false}});
+    assert.equal(mutations,2);
+  } finally {release.resolve();await firstObserved;f.chrome.tabs.update=original;}
+});
+
+test("expiry while persisting native attachment intent removes the unissued intent", async (t) => {
+  const snapshots = [], entered = Promise.withResolvers(), gate = Promise.withResolvers();
+  const f = fixture(t, { persistOwned: async (items) => {
+    snapshots.push(structuredClone(items));
+    if (items.length && !snapshots.some((entry, i) => i < snapshots.length - 1 && entry.length)) {
+      entered.resolve();
+      await gate.promise;
+    }
+  }});
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const action = f.call("cdp.send", { method: "Runtime.enable" }, { budgetMs: 50 });
+  const failed = assert.rejects(action, { code: "TIMEOUT" });
+  try {
+    await entered.promise;
+    await delay(70);
+  } finally {
+    gate.resolve();
+  }
+  await failed;
+  assert.equal(f.calls.some(call => call[0] === "debugger.attach"), false);
+  assert.deepEqual(snapshots.at(-1), []);
+  assert.deepEqual([...f.attached], []);
 });

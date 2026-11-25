@@ -343,7 +343,35 @@ return {facts};`,
       if (fact.options.clip)
         assert.equal(fact.dimensions.width, Math.min(120, 80 * fact.dpr));
     }
-    assert.deepEqual(result.run.cleanup.unconfirmed, []);
+    const cleanup = await f.cleanupFacts();
+    assert.deepEqual(cleanup.owned, [], JSON.stringify(cleanup));
+  },
+);
+
+test(
+  "native full-page JPEG above 40 megapixels survives original Core image delivery",
+  { timeout: 90000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: '<!doctype html><title>High resolution screenshot</title><style>html,body{margin:0}body{width:8000px;height:6000px;background:linear-gradient(#acf,#fa9)}h1{margin:0}</style><h1>Owned high resolution fixture</h1>',
+    });
+    const view = await f.run(select + `
+      await tab.cdp.send('Emulation.setDeviceMetricsOverride',{width:800,height:600,deviceScaleFactor:1,mobile:false});
+      return await tab.screenshot({fullPage:true});
+    `, {base:f.base});
+    const rendered = await f.encoder.render(view.result, f.resultScope(), view.run);
+    const image = rendered.content.find(item => item.type === "image");
+    assert.equal(image?.mimeType, "image/jpeg");
+    const bytes = Buffer.from(image.data, "base64");
+    const { imageSize } = await import("image-size");
+    const dimensions = imageSize(bytes);
+    assert.equal(dimensions.width, 8000);
+    assert.equal(dimensions.height, 6000);
+    const historical = await f.encoder.render(view.result, f.resultScope(), view.run);
+    assert.deepEqual(historical.content.find(item => item.type === "image"), image);
+    const cleanup = await f.cleanupFacts();
+    assert.deepEqual(cleanup.owned, [], JSON.stringify(cleanup));
+    t.diagnostic(JSON.stringify({ width: dimensions.width, height: dimensions.height, bytes: bytes.length }));
   },
 );
 

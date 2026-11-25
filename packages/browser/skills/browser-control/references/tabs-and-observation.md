@@ -25,7 +25,8 @@
 
 | 目标 | 建议调用 | 使用说明 |
 | --- | --- | --- |
-| 了解整页可访问内容 | `tab.observe({full:true})` | 返回实际观察结构；长度依页面与请求而异 |
+| 理解页面结构和编写定位脚本 | `browser/observe.js` / `tab.semanticSnapshot()` | 融合当前 DOM/AX、层级、定位属性和状态；查看 Coverage/Warnings |
+| 同一 Run 的 AX 文字及增量 | `tab.observe({full:true})` | 首次完整 AX；后续 `tab.observe()` 可返回差异 |
 | 获取文本 DOM 快照 | `tab.playwright.domSnapshot()` | 用于语义定位，但不是完整浏览器原生 Playwright |
 | 获取简要状态 | `tab.snapshot()`、`tab.ax.get()` | 各自数据形状和长度以真实返回为准 |
 | 获取坐标下的元素详情 | `tab.playwright.elementInfo({x,y})` | **返回数组**；可能为空，先检查 `result.length` |

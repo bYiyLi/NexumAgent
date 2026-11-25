@@ -1,7 +1,7 @@
 import { MessagePort } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { AgentError, requireCondition } from "../contracts/errors.js";
-import { safeErrorData } from "../contracts/error-data.js";
+import { safeErrorData, isPublicErrorCode, boundErrorMessage, boundErrorDetails } from "../contracts/error-data.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import type { JsonObject } from "../contracts/types.js";
 
@@ -55,10 +55,10 @@ export function callHostSync(port: MessagePort, method: string, params: unknown,
     "host_rpc_invalid_response", "The host response is invalid.");
   if (!response.ok) {
     const error = isPlainRecord(response.error) ? response.error : {};
-    const code = typeof error.code === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(error.code)
+    const code = isPublicErrorCode(error.code)
       ? error.code : "host_rpc_failed";
-    const message = typeof error.message === "string" && error.message.length <= 1024 ? error.message : "The host request failed.";
-    throw new AgentError(code, message, isPlainRecord(error.details) ? error.details as JsonObject : undefined);
+    const message = boundErrorMessage(error.message,"The host request failed.");
+    throw new AgentError(code, message, boundErrorDetails(error.details));
   }
   return response.value;
 }
@@ -102,10 +102,10 @@ export class HostAsyncRPC {
     if (value.ok === true) entry.resolve(value.value);
     else {
       const error = isPlainRecord(value.error) ? value.error : {};
-      const code = typeof error.code === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,95}$/.test(error.code)
+      const code = isPublicErrorCode(error.code)
         ? error.code : "host_rpc_failed";
-      const message = typeof error.message === "string" && error.message.length <= 1024 ? error.message : "The host request failed.";
-      entry.reject(new AgentError(code, message, isPlainRecord(error.details) ? error.details as JsonObject : undefined));
+      const message = boundErrorMessage(error.message,"The host request failed.");
+      entry.reject(new AgentError(code, message, boundErrorDetails(error.details)));
     }
   };
 

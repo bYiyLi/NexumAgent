@@ -75,12 +75,12 @@ export interface ShSDK {
   which(input: string | { command: string; cwd?: string }): Promise<Executable>;
 }
 
-export const shSdkUsage = "需要受管命令、PTY、进程身份或跨 Run 观察时使用 sh；普通文件读写使用 Node。仅使用实际 processId；观察超时不是进程退出，停止回执不等于真实关闭。 Windows 进程 details.windowsCodePages（存在时）仅是系统 ANSI/OEM 和 Host 控制台观察；windowsFallbackCodePage 为启动时选定的备用代码页，不代表子进程已验证的实际编码。";
+export const shSdkUsage = "需要受管命令、PTY、进程身份或跨 Run 观察时使用 sh；普通文件读写使用 Node。仅使用实际 processId；观察超时不是进程退出，停止回执不等于真实关闭。";
 const launchCalling = "接受 options 对象或 shellCommand 字符串。对象选择 command: string + args?: string[]，或 shellCommand: string + shell?: string，不能混用；cwd、env、tty、cols、rows、input、timeoutMs 均可选。input 为 string | Uint8Array，上限 1 MiB；cols/rows 用于 tty。归一化默认 args/env/tty/cols/rows/background/check 可省略。CLI 路径不明确时先查 sh.which。";
 export const shSdkCalling: Readonly<Record<string,string>> = {
  exec: "调用：sh.exec(options: ExecOptions | string)。"+launchCalling+" exec 可用 check:true；background 不用于 exec。等待实际退出与输出收尾，返回进程快照和输出页。 默认按 BOM、UTF-8 优先、Windows 原进程代码页回退解码；遇到 outputEncodingUncertain，使用原 processId 和 sh.get 的 encoding 参数重读，勿重跑命令。",
  start: "调用：sh.start(options: StartOptions | string)。"+launchCalling+" 仅 background:true 交接后台；check 不用于 start。返回启动快照，后续用 sh.get/sh.stop。",
- get: "调用：sh.get({processId, cursor?, maxBytes?, encoding?, waitMs?})。返回进程快照及输出页 {output,nextCursor,hasMoreOutput,truncated,outputComplete}；默认 auto 分别识别 stdout/stderr 的 BOM、UTF-8，Windows 遇到首个非法 UTF-8 字符按原进程 Console/OEM/ANSI 代码页回退；PTY 固定 UTF-8。明确来源时可指定 gbk/cp936、gb18030、shift_jis/cp932、big5/cp950、euc-kr/cp949、windows-1250 至 windows-1258 等编码；改变编码须省略旧 cursor 从原进程头部重读。encoding:null 返回原始 Buffer；不能可靠解码时保留原始字节，系统代码页回退是启发式，不能保证识别混合输出；不要重跑命令。",
+ get: "调用：sh.get({processId, cursor?, maxBytes?, encoding?, waitMs?})。返回进程快照及输出页 {output,nextCursor,hasMoreOutput,truncated,outputComplete}；默认 auto 分别识别 stdout/stderr 的 BOM、UTF-8，Windows 遇到首个非法 UTF-8 字符按原进程 Console/OEM/ANSI 代码页回退；PTY 固定 UTF-8。明确来源时可指定 gbk/cp936、gb18030、shift_jis/cp932、big5/cp950、euc-kr/cp949、windows-1250 至 windows-1258 等编码；改变编码须省略旧 cursor 从原进程头部重读。encoding:null 返回原始 Buffer；不能可靠解码时保留原始字节，系统代码页回退是启发式，不能保证识别混合输出；details.windowsCodePages 和 windowsFallbackCodePage（若有）不是实际子进程编码证明。不要重跑命令。",
  list: "调用：sh.list({status?,state?,runId?,contextId?,limit?,cursor?}?)。返回 {items,nextCursor}。",
  write: "调用：sh.write({processId,data?: string | Uint8Array,eof?: boolean})；至少提供 data 或 eof:true。返回 {processId,accepted,bytes,eof}。",
  resize: "调用：sh.resize({processId,cols,rows})；只支持 PTY，返回 {processId,accepted,cols,rows}。",

@@ -78,13 +78,8 @@ interface StoredTransfer {
 }
 
 export interface ResultLimits {
-  readonly textBytes?: number;
-  readonly imageBytes?: number;
-  readonly audioBytes?: number;
-  readonly inlineBytes?: number;
   readonly responseBytes?: number;
   readonly maxDataBytes?: number;
-  readonly metaBytes?: number;
 }
 export interface RenderOptions {
   readonly textFallback?: boolean;
@@ -244,33 +239,15 @@ export class ResultEncoder {
       "Remote result routing must belong to this actual Agent/profile.",
     );
     this.limits = Object.freeze({
-      textBytes: limits.textBytes ?? 64 * KiB,
-      imageBytes: limits.imageBytes ?? 10 * MiB,
-      audioBytes: limits.audioBytes ?? 32 * MiB,
-      inlineBytes: limits.inlineBytes ?? 64 * MiB,
       responseBytes: limits.responseBytes ?? 128 * MiB,
-      maxDataBytes:
-        limits.maxDataBytes ?? Math.min(artifacts.maxFileBytes, 256 * MiB),
-      metaBytes: limits.metaBytes ?? 16 * MiB,
+      maxDataBytes: limits.maxDataBytes ?? Math.min(artifacts.maxFileBytes, 128 * MiB),
     });
     requireCondition(
-      Object.values(this.limits).every(
-        (value) => Number.isSafeInteger(value) && value > 0,
-      ) &&
-        this.limits.textBytes <= 16 * MiB &&
-        this.limits.imageBytes <= artifacts.maxReadBytes &&
-        this.limits.audioBytes <= artifacts.maxReadBytes &&
-        this.limits.inlineBytes <= 128 * MiB &&
-        this.limits.responseBytes <= 512 * MiB &&
-        this.limits.maxDataBytes <= artifacts.maxFileBytes &&
-        this.limits.maxDataBytes <= 256 * MiB,
+      Object.values(this.limits).every((value) => Number.isSafeInteger(value) && value > 0) &&
+        this.limits.responseBytes <= 128 * MiB &&
+        this.limits.maxDataBytes <= Math.min(artifacts.maxFileBytes, 128 * MiB),
       "invalid_result_options",
-      "Result budgets must fit the actual Agent resource and response policy.",
-    );
-    requireCondition(
-      this.limits.metaBytes <= 128 * MiB,
-      "invalid_result_options",
-      "Host-only metadata requires a bounded encoded budget.",
+      "Result storage and delivery must fit the platform safety boundary.",
     );
   }
 
@@ -291,11 +268,11 @@ export class ResultEncoder {
     const paths = new Map<string, Promise<ArtifactRecord>>(),
       identities = new WeakMap<object, Promise<ArtifactRecord>>();
     const reserve = (size: number) => {
-      inlineBytes += size;
+      inlineBytes += Math.ceil(size / 3) * 4;
       requireCondition(
-        inlineBytes <= this.limits.inlineBytes,
-        "inline_content_too_large",
-        "The result exceeds its aggregate inline byte budget.",
+        inlineBytes <= this.limits.responseBytes,
+        "mcp_response_too_large",
+        "The encoded result exceeds the response safety boundary.",
       );
     };
     const fixed = async (
@@ -307,27 +284,12 @@ export class ResultEncoder {
         ((typeof source.mimeType === "string" && textMime(source.mimeType)) ||
           (typeof source.path === "string" &&
             !!textTypes[path.extname(source.path).toLowerCase()]));
-      const individual =
-        kind === "image"
-          ? this.limits.imageBytes
-          : kind === "audio"
-            ? this.limits.audioBytes
-            : kind === "resource"
-              ? textual
-                ? this.limits.textBytes
-                : this.limits.inlineBytes
-              : this.artifacts.maxFileBytes;
-      const aggregate =
-        kind === "image" ||
-        kind === "audio" ||
-        (kind === "resource" && !textual);
-      const cap = Math.min(
-        individual,
-        aggregate
-          ? Math.max(1, this.limits.inlineBytes - inlineBytes)
-          : individual,
-        this.artifacts.maxFileBytes,
-      );
+      const aggregate = kind === "image" || kind === "audio" || (kind === "resource" && !textual);
+      // Base64 expansion is a transport fact, not a media-type quota.
+      const individual = kind === "resource_link" ? this.artifacts.maxFileBytes :
+        Math.min(this.artifacts.maxReadBytes, this.limits.responseBytes);
+      const cap = aggregate ? Math.min(individual,
+        Math.max(1, Math.floor((this.limits.responseBytes - inlineBytes) / 4) * 3)) : individual;
       if (typeof source.uri === "string") {
         const resource = await this.artifacts.metadata(source.uri, scope);
         if (kind === "image" || kind === "audio") {
@@ -474,7 +436,7 @@ export class ResultEncoder {
         transferBytes += Buffer.byteLength(canonicalJson(saved, 32768)) + 1;
         requireCondition(
           transfers.size < 1024 &&
-            transferBytes <= Math.min(this.limits.textBytes, 65536),
+            transferBytes <= 65536,
           "result_transfer_too_large",
           "The result exceeds its safe transfer-reference budget.",
         );
@@ -630,78 +592,12 @@ export class ResultEncoder {
               ? { mimeType: "text/plain; charset=utf-8" }
               : {}),
         };
-        if (encoding === "text" && textSize > this.limits.textBytes) {
-          resource = await fixed(bodySource, "resource_link");
-          kind = "resource_link";
-        } else {
-          try {
-            resource = await fixed(bodySource, kind);
-          } catch (cause) {
-            if (
-              !(cause instanceof AgentError) ||
-              !["inline_content_too_large", "resource_read_too_large"].includes(cause.code)
-            ) throw cause;
-            resource = await fixed(bodySource, "resource_link");
-            kind = "resource_link";
-          }
-        }
-      } else if (kind === "image" || kind === "audio") {
-        const originalKind = kind;
-        try {
-          resource = await fixed(source, originalKind);
-        } catch (cause) {
-          if (
-            !(cause instanceof AgentError) ||
-            !["inline_media_too_large", "inline_content_too_large"].includes(cause.code)
-          ) throw cause;
-          // The inline ceiling does not invalidate the original media bytes.
-          // Save a resource link without treating a caller MIME hint as proof.
-          const genericSource = { ...source };
-          delete (genericSource as Record<string, unknown>).mimeType;
-          resource = await fixed(genericSource, "resource_link");
-          if (resource.size <= this.artifacts.maxReadBytes) {
-            // A file extension or declared MIME is not proof of actual media.
-            // For bounded media also verify the real saved bytes and any hint.
-            const bytes = await this.artifacts.read(resource.uri, scope, {
-              maxBytes: this.artifacts.maxReadBytes,
-            });
-            const detected = await validateMedia(
-              bytes.data,
-              originalKind,
-              typeof source.mimeType === "string" ? source.mimeType : undefined,
-              { signal: scope.signal, maxBytes: this.artifacts.maxReadBytes },
-            );
-            requireCondition(
-              resource.mimeType === "application/octet-stream" ||
-                resource.mimeType === detected.mimeType,
-              "media_type_mismatch",
-              "Registered media metadata differs from verified saved bytes.",
-            );
-          } else {
-            requireCondition(
-              resource.mimeType.startsWith(originalKind + "/"),
-              "unsupported_media_format",
-              "Large media source has no verified format; use a generic file.",
-            );
-          }
-          kind = "resource_link";
-        }
-      } else if (kind === "resource") {
-        try {
-          resource = await fixed(source, kind);
-        } catch (cause) {
-          if (
-            !(cause instanceof AgentError) ||
-            !["inline_content_too_large", "resource_read_too_large"].includes(cause.code)
-          ) throw cause;
-          resource = await fixed(source, "resource_link");
-          kind = "resource_link";
-        }
+        resource = await fixed(bodySource, kind);
       } else resource = await fixed(source, kind);
       let mimeType = resource.mimeType;
       if (kind === "image" || kind === "audio") {
         const cap =
-          kind === "image" ? this.limits.imageBytes : this.limits.audioBytes;
+          Math.min(this.artifacts.maxReadBytes, this.limits.responseBytes);
         requireCondition(
           resource.size <= cap,
           "inline_media_too_large",
@@ -740,7 +636,7 @@ export class ResultEncoder {
         else {
           const data = await this.artifacts.read(resource.uri, scope, {
             maxBytes: Math.min(
-              this.limits.textBytes,
+              this.limits.responseBytes,
               this.artifacts.maxReadBytes,
             ),
           });
@@ -796,12 +692,12 @@ export class ResultEncoder {
       remoteMetaBytes +=
         mcpMetaSize(
           { source: known.source, meta: known.meta },
-          this.limits.metaBytes,
+          this.limits.responseBytes,
         ) + 1;
       requireCondition(
-        remoteMetaBytes <= this.limits.metaBytes,
+        remoteMetaBytes <= this.limits.responseBytes,
         "mcp_meta_too_large",
-        "Remote Host-only metadata exceeds its separate budget.",
+        "Remote Host-only metadata exceeds the response safety boundary.",
       );
       remoteSeen.set(input as object, slot);
       remoteResults.push({
@@ -979,7 +875,7 @@ export class ResultEncoder {
     if (transfers.size)
       result.transferOffers = [...transfers.values()] as unknown as JsonValue;
     if (remoteResults.length) result.mcpSources = remoteResults;
-    await this.#fit(result, scope);
+    canonicalJson(result, this.limits.maxDataBytes);
     await this.#authorizeMcp(result, scope);
     scope.assertCurrent();
     scope.signal?.throwIfAborted();
@@ -1127,11 +1023,11 @@ export class ResultEncoder {
       const source = mcpSource(value.source),
         meta = copyMcpJSON(
           value.meta,
-          this.limits.metaBytes,
+          this.limits.responseBytes,
         ) as unknown as McpProtocolMeta[];
-      bytes += mcpMetaSize({ source, meta }, this.limits.metaBytes) + 1;
+      bytes += mcpMetaSize({ source, meta }, this.limits.responseBytes) + 1;
       requireCondition(
-        bytes <= this.limits.metaBytes &&
+        bytes <= this.limits.responseBytes &&
           meta.every(
             (item) =>
               item &&
@@ -1208,7 +1104,7 @@ export class ResultEncoder {
     while (Object.hasOwn(hostMeta, key)) key = `io.nexum/mcp/${++suffix}`;
     hostMeta[key] = { results: slots };
     response._meta = hostMeta;
-    mcpMetaSize(response._meta, this.limits.metaBytes);
+    mcpMetaSize(response._meta, this.limits.responseBytes);
   }
   #transfers(result: StoredResult): StoredTransfer[] {
     if (result.transferOffers === undefined) return [];
@@ -1221,7 +1117,7 @@ export class ResultEncoder {
     try {
       canonicalJson(
         result.transferOffers,
-        Math.min(this.limits.textBytes, 65536),
+        65536,
       );
     } catch {
       throw new AgentError(
@@ -1254,159 +1150,10 @@ export class ResultEncoder {
       return { reference, snapshot };
     });
   }
-  // Count the public structured result, the full MCP JSON mirror, and the
-  // actual content together. A raw normalized value is not the wire size.
-  #modelContextBytes(result: StoredResult, runId: string): number {
-    const projection = this.#projection(result, { runId, status: "succeeded" }, false);
-    const { run, ...business } = projection.structuredContent as JsonObject;
-    const items = result.content.map((item, index) => {
-      const resource = item.resource ? record(item.resource) : undefined;
-      return {
-        type: item.type,
-        contentIndex: index + 1,
-        ...(item.type === "text" ? { text: item.text } : {}),
-        ...(resource ? { uri: resource.uri, name: resource.name,
-          mimeType: resource.mimeType, size: resource.size, sha256: resource.sha256 } : {}),
-      };
-    });
-    const structuredContent = { run, result: { ...business, items,
-      state: "ready", hasValue: Object.hasOwn(result, "data"),
-      references: result.references ?? [], resources: result.resources ?? [],
-      conversions: result.conversions ?? [],
-      delivery: { representationComplete: true, inlineComplete: true, requiresResourceRead: false },
-    } };
-    // Go's JSON encoder additionally escapes HTML and line-separator characters.
-    const wireJSON = (value: unknown) => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g,
-      (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"));
-    const control = { ...projection, structuredContent,
-      content: [{ type: "text", text: wireJSON(structuredContent) }, ...(projection.content as JsonValue[])] };
-    return Buffer.byteLength(wireJSON(control));
-  }
-
-  async #fit(result: StoredResult, scope: ArtifactScope): Promise<void> {
-    const hasData =
-      Object.hasOwn(result, "data") || Object.hasOwn(result, "mcpResults") ||
-      Object.hasOwn(result, "references") || Object.hasOwn(result, "resources") || Object.hasOwn(result, "contentAssociations");
-    const dataText = hasData
-      ? JSON.stringify({
-          ...(Object.hasOwn(result, "data") ? { data: result.data } : {}),
-          ...(result.mcpResults ? { mcpResults: result.mcpResults } : {}),
-          ...(result.conversions ? { conversions: result.conversions } : {}),
-          ...(result.references ? { references: result.references } : {}),
-          ...(result.resources ? { resources: result.resources } : {}),
-          ...(result.contentAssociations ? { contentAssociations: result.contentAssociations } : {}),
-        })
-      : undefined;
-    let obvious =
-      dataText !== undefined &&
-      Buffer.byteLength(dataText) > this.limits.textBytes;
-    let plainBytes = 0;
-    for (const item of result.content)
-      if (item.type === "text" && typeof item.text === "string")
-        plainBytes += Buffer.byteLength(item.text);
-    obvious ||= plainBytes > this.limits.textBytes;
-    let size = obvious
-      ? this.limits.textBytes + 1
-      : this.#modelContextBytes(result, scope.runId ?? "");
-    for (const item of result.content)
-      if (item.type === "resource" && item.encoding === "text")
-        size += Number(item.inlineTextBytes ?? record(item.resource).size);
-    if (size <= this.limits.textBytes) return;
-    // Keep the whole normalized JSON or text in an actual resource and make the incomplete model view explicit.
-    const summary: JsonObject[] = [];
-    let changed = false;
-    if (hasData) {
-      const resource = await this.artifacts.register(
-        {
-          data: Buffer.from(dataText!),
-          name: "result.json",
-          mimeType: "application/json",
-        },
-        scope,
-      );
-      delete result.data;
-      delete result.conversions;
-      delete result.mcpResults;
-      delete result.references;
-      delete result.resources;
-      delete result.contentAssociations;
-      changed = true;
-      summary.push({
-        type: "resource_link",
-        resource: recordJson(resource),
-        mimeType: resource.mimeType,
-      });
-      result.delivery = {
-        complete: false,
-        reason: "context_budget",
-        dataResource: recordJson(resource),
-      };
-    }
-    const afterDataBytes =
-      plainBytes > this.limits.textBytes
-        ? this.limits.textBytes + 1
-        : this.#modelContextBytes(result, scope.runId ?? "");
-    let textResource: ArtifactRecord | undefined;
-    if (afterDataBytes > this.limits.textBytes && plainBytes > 0) {
-      const texts = result.content
-        .map((item, index) => ({ item, index }))
-        .filter(({ item }) => item.type === "text");
-      const normalized = await normalizeData(texts, {
-        mode: "data",
-        maxBytes: this.limits.maxDataBytes,
-        assertCurrent: () => scope.assertCurrent(),
-      });
-      const bytes = Buffer.from(JSON.stringify(normalized.data));
-      textResource = await this.artifacts.register(
-        {
-          data: bytes,
-          name: "result-content.json",
-          mimeType: "application/json",
-        },
-        scope,
-      );
-      changed = true;
-      result.delivery = {
-        ...((result.delivery as JsonObject) ?? {}),
-        complete: false,
-        reason: "context_budget",
-        textResource: recordJson(textResource),
-      };
-    }
-    let linked = false;
-    for (const item of result.content) {
-      if (textResource && item.type === "text") {
-        if (!linked)
-          summary.push({
-            type: "resource_link",
-            resource: recordJson(textResource),
-            mimeType: textResource.mimeType,
-          });
-        linked = true;
-      } else summary.push(item);
-    }
-    if (changed) {
-      result.content = summary;
-      result.content.unshift({
-        type: "text",
-        text: "结果超过模型上下文预算，完整内容已保存为资源；当前返回资源引用。",
-      });
-    }
-    let bytes = this.#modelContextBytes(result, scope.runId ?? "");
-    for (const item of result.content)
-      if (item.type === "resource" && item.encoding === "text")
-        bytes += Number(item.inlineTextBytes ?? record(item.resource).size);
-    requireCondition(
-      bytes <= this.limits.textBytes,
-      "result_context_too_large",
-      "The result metadata or explicitly embedded text exceeds its context budget; choose resource links.",
-    );
-  }
-
   async describe(
     result: StoredResult,
     scope: ResultScope,
-    options: { readonly textBytes?: number; readonly readOnly?: boolean } = {},
+    options: { readonly readOnly?: boolean } = {},
   ): Promise<ResultDescription> {
     authorizeCall(() => scope.assertCurrent());
     scope.signal?.throwIfAborted();
@@ -1414,30 +1161,10 @@ export class ResultEncoder {
       JSON.stringify(
         copyMcpJSON(
           result,
-          Math.min(
-            128 * MiB,
-            Math.max(this.limits.textBytes * 4, MiB) + this.limits.metaBytes,
-          ),
+          this.limits.maxDataBytes,
         ),
       ),
     ) as StoredResult;
-    if (options.textBytes !== undefined) {
-      requireCondition(
-        Number.isSafeInteger(options.textBytes) && options.textBytes > 0,
-        "invalid_result_options",
-        "The current result text budget must be a positive integer.",
-      );
-      if (!options.readOnly && options.textBytes < this.limits.textBytes) {
-        const encoder = new ResultEncoder(
-          this.artifacts,
-          { ...this.limits, textBytes: options.textBytes },
-          this.offers,
-          this.mcp,
-        );
-        await encoder.#fit(result, scope);
-        return encoder.describe(result, scope);
-      }
-    }
     if (!options.readOnly) await this.#authorizeMcp(result, scope);
     const projected = this.#projection(result, {}, false);
     const visible = projected.content as JsonObject[];
@@ -1484,10 +1211,7 @@ export class ResultEncoder {
       else {
         requireCondition(
           (item.type === "image" || item.type === "audio") &&
-            fixed.size <=
-              (item.type === "image"
-                ? this.limits.imageBytes
-                : this.limits.audioBytes),
+            fixed.size <= Math.min(this.artifacts.maxReadBytes, this.limits.responseBytes),
           "inline_media_too_large",
           "The retained media exceeds the current delivery budget.",
         );
@@ -1576,10 +1300,7 @@ export class ResultEncoder {
       JSON.stringify(
         copyMcpJSON(
           result,
-          Math.min(
-            128 * MiB,
-            Math.max(this.limits.textBytes * 4, MiB) + this.limits.metaBytes,
-          ),
+          this.limits.maxDataBytes,
         ),
       ),
     ) as StoredResult;
@@ -1631,9 +1352,8 @@ export class ResultEncoder {
     const hostMetaBytes =
       response._meta === undefined
         ? 0
-        : mcpMetaSize(response._meta, this.limits.metaBytes) + 10;
-    let inlineBytes = 0,
-      encodedBinaryBytes = 0;
+        : mcpMetaSize(response._meta, this.limits.responseBytes) + 10;
+    let encodedBinaryBytes = 0;
     for (let i = 0; i < result.content.length; i++) {
       const item = result.content[i]!;
       requireCondition(
@@ -1668,14 +1388,7 @@ export class ResultEncoder {
           { uri: source.uri, mimeType },
         );
       }
-      const cap =
-        kind === "image"
-          ? this.limits.imageBytes
-          : kind === "audio"
-            ? this.limits.audioBytes
-            : item.encoding === "text"
-              ? this.limits.textBytes
-              : this.limits.inlineBytes;
+      const cap = Math.min(this.artifacts.maxReadBytes, maximum);
       if (!(kind === "resource" && item.encoding === "text")) {
         encodedBinaryBytes += Math.ceil(source.size / 3) * 4;
         requireCondition(
@@ -1712,12 +1425,6 @@ export class ResultEncoder {
         ((control.content as JsonObject[])[i]!.resource as JsonObject).text =
           text;
       } else {
-        inlineBytes += bytes.data.length;
-        requireCondition(
-          inlineBytes <= this.limits.inlineBytes,
-          "inline_content_too_large",
-          "Saved content exceeds its aggregate inline budget.",
-        );
         if (kind === "image" || kind === "audio")
           await validateMedia(bytes.data, kind, item.mimeType as string, {
             signal: scope.signal,
@@ -1733,11 +1440,6 @@ export class ResultEncoder {
     // lose authority. Re-project current delivery immediately before returning.
     applyTransfers();
     await this.#authorizeMcp(result, scope);
-    requireCondition(
-      Buffer.byteLength(JSON.stringify(control)) <= this.limits.textBytes,
-      "result_context_too_large",
-      "The final text/structured response exceeds the model context budget.",
-    );
     requireCondition(
       Number.isSafeInteger(maximum) &&
         maximum > 0 &&
@@ -1766,7 +1468,7 @@ export class ResultEncoder {
     };
     requireCondition(
       Buffer.byteLength(JSON.stringify(response)) <=
-        Math.min(this.limits.textBytes, this.limits.responseBytes),
+        this.limits.responseBytes,
       "resource_list_too_large",
       "The resource directory exceeds this response budget; request a smaller page.",
     );
@@ -1784,15 +1486,8 @@ export class ResultEncoder {
       return await this.mcp.readResource(uri, scope, this.limits);
     }
     const resource = await this.artifacts.metadata(uri, scope);
-    const text = textMime(resource.mimeType),
-      essence = new MIMEType(resource.mimeType).essence;
-    const cap = text
-      ? this.limits.textBytes
-      : essence.startsWith("image/")
-        ? this.limits.imageBytes
-        : essence.startsWith("audio/")
-          ? this.limits.audioBytes
-          : this.limits.inlineBytes;
+    const text = textMime(resource.mimeType);
+    const cap = Math.min(this.artifacts.maxReadBytes, this.limits.responseBytes);
     const empty = {
       contents: [
         {
@@ -1828,13 +1523,6 @@ export class ResultEncoder {
       }
     } else body.blob = fixed.data.toString("base64");
     const response: JsonObject = { contents: [body] };
-    if (text)
-      requireCondition(
-        Buffer.byteLength(JSON.stringify(response)) <= this.limits.textBytes,
-        "resource_read_too_large",
-        "The encoded text resource exceeds the context budget; use transfer.createDownload({ uri }) for a file stream.",
-        { uri },
-      );
     requireCondition(
       Buffer.byteLength(JSON.stringify(response)) <= this.limits.responseBytes,
       "mcp_response_too_large",

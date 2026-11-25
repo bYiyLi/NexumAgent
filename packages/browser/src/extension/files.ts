@@ -18,7 +18,7 @@ import type {
   BrowserFileSource,
   FileChooserFiles,
 } from "../client/types.js";
-import { check, failure, limits } from "./protocol.js";
+import { check, failure, limits, permissionDenied } from "./protocol.js";
 
 export interface PreparedBrowserFile {
   path: string;
@@ -342,7 +342,16 @@ async function copyFile(
       "The owned download path no longer matches its browser identity.",
     );
     current(call);
-    call.authorize({ type: "path", value, access: "read-owned-browser-download" });
+    try {
+      call.authorize({ type: "path", value, access: "read-owned-browser-download" });
+    } catch (cause) {
+      // An exact download identity is not itself a grant. Preserve a bounded
+      // source-stage diagnosis without trying the ordinary path policy.
+      if (!permissionDenied(cause)) throw cause;
+      throw failure("permission_denied", "The owned browser download source was denied by the Agent. Check its current authorization before delivery.", {
+        reason: "download_source_authorization_denied",
+      });
+    }
   };
   authorizeSource(requested);
   const sourceFile = async <T>(read: () => Promise<T>): Promise<T> => {

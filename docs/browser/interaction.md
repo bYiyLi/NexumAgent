@@ -6,15 +6,17 @@
 
 查询式 Locator/Frame/FrameLocator 绑定 boot/browser/session/generation/tab 和不可变 selector/framePath，每次 I/O 在当前文档重解；它们不因同一标签导航一律作废。frame 选择器重新匹配且唯一才执行，不能缓存已消失的 frame 控制器。
 
+普通 DOM 与可访问的 open Shadow DOM 共享现有 Locator 查询与操作引擎。CSS 选择器分别按各原生树的真实语义匹配，不能用 CSS 后代组合符跨越 shadow 边界；用 `locator("#host").getByRole(...)` 等链式定位限定组件。`getByRole/getByLabel/getByText/getByPlaceholder/getByTestId` 与 filter/and/or/位置选择在当前 scope 中遍历开放根和实际生效的 Slot 分配子树，按 host、开放 shadow 子树（含 Slot 位置的实际分配节点）、其余尚未访问的 light DOM 顺序去重，不自动进入 iframe。组件内限定范围也能查询实际分配进来的节点；CSS 在实际原生树/查询 scope 内匹配，并限制到本次作用域中的节点，不能制造 Slot 与分配节点之间不存在的 CSS 父子关系。未分配 light child、失活 fallback 不作为渲染语义目标；显式 CSS 与 testId 仍可查询真实存在的树内节点。每次 I/O 重新解析当前分配关系，不缓存上一次查询的节点集合。`aria-labelledby` 在所在 DOM/ShadowRoot 内解析，不能借用其他根的同名 ID。闭合/UA 根不作为 Locator 可穿透范围。
+
 `getByRole` 排除自身 `visibility:hidden/collapse`、自身或祖先 `display:none`、`aria-hidden=true` 和 `inert` 子树；显式 CSS 查询仍可观察这些节点。无布局盒的角色不因尺寸为零被删去，子节点显式恢复可见性时按其实际计算样式判断。名称存在非空的 `aria-labelledby` 引用文本时优先使用该文本，再回退至 `aria-label` 等来源。这些规则不表示完整实现了所有 ARIA 角色及名称算法。
 
-点击、双击和按引用悬停在方法剩余期限内观察当前目标是否唯一、可见、启用且未被遮挡；滚动后尚未稳定的命中结果可以继续观察，包括 iframe 祖先的真实命中检查。这里只重复输入前的目标观察，原生输入发送后不自动重放动作。持续未就绪以 `TIMEOUT` 结束；歧义、失效的固定引用或 frame 身份直接报错，取消或交还后停止观察并禁止迟到输入。
+点击、双击和按引用悬停在方法剩余期限内观察当前目标是否唯一、可见、启用且未被遮挡；滚动后尚未稳定的命中结果可以继续观察，包括 iframe 祖先的真实命中检查。命中检查从实际外层命中逐层进入可访问的 ShadowRoot，不能越过覆盖层；Frame owner 也使用同一查询、祖先变换和命中规则。输入前核实实际原生目标的深层焦点，逐字符输入期间若原节点或所属 Frame 失去焦点/替换即停止剩余输入；check/uncheck 在同一固定节点上验证 checked。这里只重复输入前的目标观察，原生输入发送后不自动重放动作。持续未就绪以 `TIMEOUT` 结束；歧义、失效的固定引用或 frame 身份直接报错，取消或交还后停止观察并禁止迟到输入。
 
 Locator `click/dblclick` 的 `position` 是元素所在文档中、相对当前元素矩形左上角的 CSS 坐标；不填时取中心，合法范围为 `0 <= x < width`、`0 <= y < height`。元素内命中检查、每层祖先 frame 命中检查与原生输入必须使用同一个实际点；缩放及坐标映射完成后不能再以顶层像素重新叠加相对偏移。指定点被遮挡时继续等待，即使中心未被遮挡也不点击；指定点可用时不因中心被遮挡而拒绝。已观察到坐标越界时返回 `INVALID_ARGUMENT`，不向边缘外元素发送输入。
 
-快照 ref、固定 NodeId/AX index、元素集合 all() 的快照成员、dialog/chooser、inventory、WebMCP 注册对象另外绑定 pageVersion/document/registration revision。来源文档被替换、节点删除或对应修订失效就报 STALE_REF/STALE_REGISTRATION，不能自动换成同名其他元素。仅有无关 DOM 变化不必使所有查询描述失效；节点引用是否有效由实际归属和版本核对，不能凭 title/文本相似猜测。iframe 和 CDP child target 由实际 attach/frame 事实发现；子 session 的失效按其生命周期处理，不由客户端拼接 session。
+快照 ref、固定 NodeId/AX index、元素集合 all() 的快照成员、dialog/chooser、inventory、WebMCP 注册对象另外绑定 pageVersion/document/registration revision。来源文档被替换、节点删除、节点被 adopt 到其他文档或对应修订失效就报 STALE_REF/STALE_REGISTRATION，不能自动换成同名其他元素。固定节点进入另一文档后，即使仍 isConnected 也不能继续使用旧引用；实际上传节点复用原引用解析，不采用独立的弱校验。仅有无关 DOM 变化不必使所有查询描述失效；节点引用是否有效由实际归属和版本核对，不能凭 title/文本相似猜测。iframe 和 CDP child target 由实际 attach/frame 事实发现；子 session 的失效按其生命周期处理，不由客户端拼接 session。
 
-点击无效果先观察遮挡、加载、dialog 和页面状态，再选择合适操作；不立即盲重试或降级坐标。已有目标 URL 复用标签，不重复打开导致刷新丢失表单；显式 reload 才刷新。超时/取消后确认副作用未知时先重观察，不自动从脚本第一步重跑。
+方法 timeoutMs 和 Run 剩余时间共同约束整个 I/O（含排队、传输、原生观察及结果确认）；内部等待不重新取得完整期限。页面条件满足后立即进入必要结果观察，迟到结果不作成功；显式 waitForTimeout 超出当前剩余时间时返回 TIMEOUT，而不是把合法输入误判为 INVALID_ARGUMENT。点击无效果先观察遮挡、加载、dialog 和页面状态，再选择合适操作；不立即盲重试或降级坐标。已有目标 URL 复用标签，不重复打开导致刷新丢失表单；显式 reload 才刷新。超时/取消后确认副作用未知时先重观察，不自动从脚本第一步重跑。
 
 `tab.navigate` 的原生导航允许正常 HTTP/站点重定向，等待该标签的顶层 `commit/domcontentloaded/load/networkidle` 阶段，不强求最终地址等于最初输入；最终地址由实际标签状态读取。独立 `waitForURL` 和显式 `url` 导航等待继续精确匹配，未观察到指定地址就不成功。
 

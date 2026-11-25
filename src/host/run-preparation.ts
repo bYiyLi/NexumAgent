@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import path from "node:path";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import { requireCondition } from "../contracts/errors.js";
 import { compileInputSchema } from "../contracts/validation.js";
@@ -20,9 +19,13 @@ export class RunPreparation {
     signal.throwIfAborted();
     const catalog = new ScriptCatalog(this.root, this.agentId,
       () => value.sources as unknown as ScriptSource[]);
+    let validateInput: ((input: unknown) => void) | undefined;
+    const onInputValidator = (validate: (input: unknown) => void) => {
+      validateInput = validate;
+    };
     let snapshot: ScriptSnapshot;
-    if (typeof value.code === "string") snapshot = catalog.enroll(value.code).snapshot;
-    else if (typeof value.scriptName === "string") snapshot = catalog.resolve(value.scriptName);
+    if (typeof value.code === "string") snapshot = catalog.enroll(value.code, onInputValidator).snapshot;
+    else if (typeof value.scriptName === "string") snapshot = catalog.resolve(value.scriptName, undefined, onInputValidator);
     else {
       requireCondition(isPlainRecord(value.replay) && typeof value.replay.code === "string" &&
         isPlainRecord(value.replay.origin) &&
@@ -30,9 +33,12 @@ export class RunPreparation {
         (value.replay.name === null || typeof value.replay.name === "string"),
       "snapshot_changed", "The retained script does not match its recorded source.");
       snapshot = { name: value.replay.name, code: value.replay.code,
-        metadata: scriptHeader(value.replay.code), origin: value.replay.origin as unknown as ScriptSnapshot["origin"], path: null };
+        metadata: scriptHeader(value.replay.code, onInputValidator), origin: value.replay.origin as unknown as ScriptSnapshot["origin"], path: null };
     }
-    if (snapshot.metadata) compileInputSchema(snapshot.metadata.scriptInputSchema)(value.input ?? null);
+    if (snapshot.metadata) {
+      requireCondition(validateInput, "invalid_input_schema", "The script input validator was not prepared.");
+      validateInput(value.input ?? null);
+    }
     signal.throwIfAborted();
     return JSON.parse(canonicalJson(snapshot, 2 * 1024 * 1024)) as ScriptSnapshot;
   }

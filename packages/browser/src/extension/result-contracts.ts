@@ -75,6 +75,7 @@ add("waiters.get", "等待已登记事件实际完成；返回 navigation、down
   obj({ type: { const: "filechooser" }, target, chooserId: str, pageVersion: int, multiple: bool }),
 ] });
 add("tab.screenshot playwright.elementScreenshot", "拍摄实际页面或元素的 JPEG 图像，返回 Uint8Array；直接 return 原生 JPEG 字节，由平台自动识别并交付图片，不包装为 JSON。");
+add("tab.semanticSnapshot tab.writeObservation", "读取当前已授权页面的原生 DOM/AX 融合语义树及可选 JPEG；semanticSnapshot 返回结构化观察，writeObservation 直接交付紧凑树形文本及请求的原生截图。观察范围和不可用边界见 coverage/warnings；无需等待页面完全加载。");
 add("ax.get ax.write", "按 mode 读取辅助功能状态文本、截图字节或两者；write 返回 Host 原生文本/图像结果。不要将媒体伪造成 JSON。");
 add("tab.evaluate playwright.evaluate locator.evaluate locator.evaluateAll", "在当前受控页面执行表达式，结果取决于表达式的真实序列化值；无固定业务结构。");
 add("cdp.send", "调用实际 CDP method；返回结构由该 CDP method 决定，不使用统一的伪造结果 Schema。");

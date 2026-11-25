@@ -37,6 +37,12 @@ return await tab.evaluate(
 
 代码是示例，选择器只在真实页面存在相应元素时使用，不能当作所有网页的固定结构。提交表单、付款或发送前应具备用户当前授权及实际完成判据。
 
+## 键盘输入与快捷键
+
+- `tab.cua.keypress({keys:["Backspace"]})`、`tab.dom.keypress({keys:["Backspace"]})` 使用区分大小写的原生键名。Enter、Tab、Escape、Delete、ArrowLeft、ArrowRight、ArrowUp、ArrowDown、Home、End、PageUp、PageDown、Space、F1–F24 或单个字符均按当前键盘合同解析；不得将键名全部转成大写。
+- 组合键按键名数组提供，例如 `{keys:["ControlOrMeta","a"]}`；ControlOrMeta 在 macOS 表示 Meta，在其他系统表示 Control。长文本用 fill、type 或 pressSequentially，不要把长文本当作单个键名。
+- INVALID_ARGUMENT 且 reason: invalid_key 时先修正键名，不重复执行原来的输入。其他入口的参数形状以实际 SDK 方法签名为准。
+
 ## 不可猜测的公开方法
 
 - `tab.playwright.elementInfo({x, y})` 返回**数组**，可为空；单元素也用 `result[0].boundingBox`。

@@ -15,6 +15,7 @@ import WebSocket from "ws";
 import { BrowserService } from "../dist/extension/service.js";
 import { pack, frames } from "../dist/extension/protocol.js";
 const extensionId = "a".repeat(32);
+const assetRevision = "b".repeat(64);
 async function fixture(t) {
   const work = realpathSync.native(
     mkdtempSync(path.join(tmpdir(), "nexum-browser-service-")),
@@ -25,6 +26,7 @@ async function fixture(t) {
     profile: "development",
     extensionId,
     extensionVersion: "0.1.0",
+    assetRevision,
   });
   const sockets = [];
   t.after(async () => {
@@ -44,6 +46,7 @@ async function connect(
     session = "browser-session",
     profile = "development",
     pluginVersion = "0.1.0",
+    pluginRevision = assetRevision,
     protocol = { min: 1, max: 1 },
   } = {},
 ) {
@@ -89,6 +92,7 @@ async function connect(
       profile,
       extensionId,
       extensionVersion: pluginVersion,
+      ...(pluginRevision === null ? {} : { assetRevision: pluginRevision }),
       protocol,
       browserProfileId: profileId,
       browserSessionId: session,
@@ -602,14 +606,131 @@ test("hello rejects mismatched profile, plugin version and protocol with distinc
   for(const [options,code] of [
     [{profile:"production"},"PROFILE_MISMATCH"],
     [{pluginVersion:"9.9.9"},"PLUGIN_VERSION_MISMATCH"],
+    [{pluginRevision:"c".repeat(64)},"PLUGIN_VERSION_MISMATCH"],
+    [{pluginRevision:null},"PLUGIN_VERSION_MISMATCH"],
+    [{pluginRevision:"bad"},"PLUGIN_VERSION_MISMATCH"],
     [{protocol:{min:2,max:2}},"PROTOCOL_MISMATCH"],
   ]){
     const peer=await connect(f,options);
     const error=await peer.next("error");
     assert.equal(error.code,code);
     assert.deepEqual(f.service.list(),[]);
+    if(code==="PLUGIN_VERSION_MISMATCH") {
+      assert.match(error.message,/Reload/);
+      assert.throws(()=>f.service.requireCurrentAssets(),{code:"PLUGIN_VERSION_MISMATCH"});
+    }
   }
   const peer=await connect(f);
   const ready=await peer.ready();
   assert.equal(ready.profile,"development");
+  assert.equal(ready.assetRevision,assetRevision);
+  assert.doesNotThrow(()=>f.service.requireCurrentAssets());
+});
+
+test("a rejected stale build cannot replace a compatible online peer or poison another profile", async(t)=>{
+  const f=await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const current=await connect(f);
+  const ready=await current.ready();
+  const stale=await connect(f,{client:"old-worker",pluginRevision:"c".repeat(64)});
+  assert.equal((await stale.next("error")).code,"PLUGIN_VERSION_MISMATCH");
+  assert.equal(f.service.get(ready.browserId).generation,ready.generation);
+  const unrelated=await connect(f,{profileId:"other-profile",pluginRevision:null});
+  assert.equal((await unrelated.next("error")).code,"PLUGIN_VERSION_MISMATCH");
+  assert.doesNotThrow(()=>f.service.requireCurrentAssets());
+  assert.equal(f.service.list().length,1);
+  current.socket.close();
+  await until(()=>f.service.list().length===0);
+  assert.throws(()=>f.service.get(ready.browserId),{code:"EXTENSION_OFFLINE"});
+  assert.throws(()=>f.service.requireCurrentAssets(),{code:"PLUGIN_VERSION_MISMATCH"});
+  const replacement=await connect(f,{profileId:"other-profile",client:"reloaded-worker"});
+  assert.equal((await replacement.ready()).assetRevision,assetRevision);
+  assert.doesNotThrow(()=>f.service.requireCurrentAssets());
+});
+
+test("a rejected known profile recovers its browser identity only on matching reload",async t=>{
+  const f=await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const current=await connect(f);
+  const ready=await current.ready();
+  current.socket.close();
+  await until(()=>f.service.list().length===0);
+  const old=await connect(f,{client:"old-worker",pluginRevision:null});
+  assert.equal((await old.next("error")).code,"PLUGIN_VERSION_MISMATCH");
+  assert.throws(()=>f.service.get(ready.browserId),{code:"PLUGIN_VERSION_MISMATCH"});
+  const fresh=await connect(f,{client:"reloaded-worker"});
+  const accepted=await fresh.ready();
+  assert.equal(accepted.browserId,ready.browserId);
+  assert.equal(accepted.generation,ready.generation+1);
+  assert.doesNotThrow(()=>f.service.requireCurrentAssets());
+  fresh.socket.close();
+  await until(()=>f.service.list().length===0);
+  assert.doesNotThrow(()=>f.service.requireCurrentAssets());
+  assert.throws(()=>f.service.get(ready.browserId),{code:"EXTENSION_OFFLINE"});
+});
+
+test("a timed out outbound action stops its own byte stream after a delayed send callback", async t=>{
+  const f=await fixture(t);await f.service.start(new AbortController().signal);
+  const peer=await connect(f),ready=await peer.ready();
+  snapshot(peer,ready);await until(()=>f.service.get(ready.browserId).tabsReady);
+  const actual=f.service.get(ready.browserId),socket=actual.socket,send=socket.send;
+  let release,framesSent=0,starts=0,ends=0,cancels=0;
+  socket.send=function(value,...args) {
+    if (typeof value==="string") {
+      const message=JSON.parse(value);
+      if(message.type==="binary_start") starts++;
+      if(message.type==="binary_end") ends++;
+      if(message.type==="cancel_action") cancels++;
+      if(message.type==="action" && !release) {
+        const callback=args.at(-1);
+        release=()=>callback();
+        // Deliver the action to the real peer, but hold the WS send callback.
+        return send.call(this,value,()=>{});
+      }
+    } else if (Buffer.isBuffer(value)) framesSent++;
+    return send.call(this,value,...args);
+  };
+  try {
+    const original=action(f.service,ready,{budgetMs:50,args:{data:Buffer.alloc(128*1024,7)}});
+    const request=await peer.next("action");
+    assert.ok(request.budgetMs>0&&request.budgetMs<=50);
+    await assert.rejects(original,{code:"TIMEOUT",effect:"unknown"});
+    await peer.next("cancel_action");
+    release();
+    await delay(30);
+    assert.equal(starts,0);assert.equal(ends,0);assert.equal(framesSent,0);assert.equal(cancels,1);
+    const later=action(f.service,ready),next=await peer.next("action");
+    ready.send({type:"action_result",actionId:next.actionId,operationId:next.operationId,ok:true,value:"current"});
+    assert.equal(await later,"current");
+  } finally {release?.();socket.send=send;}
+});
+
+test("cancelled lease readiness does not wait for a stalled send or fabricate native closure", async t=>{
+  const f=await fixture(t);await f.service.start(new AbortController().signal);
+  const peer=await connect(f),ready=await peer.ready();snapshot(peer,ready);
+  await until(()=>f.service.get(ready.browserId).tabsReady);
+  const actual=f.service.get(ready.browserId),socket=actual.socket,send=socket.send;
+  let release,closed=0;
+  socket.send=function(value,...args){
+    if(typeof value==="string"&&JSON.parse(value).type==="lease_open"){
+      const callback=args.at(-1);release=()=>callback();
+      return send.call(this,value,()=>{});
+    }
+    return send.call(this,value,...args);
+  };
+  const abort=new AbortController(),reason=Error("cancel original lease observation");
+  try{
+    const lease=f.service.openLease(actual,{id:"lease-delayed",runId:"run-one",operationId:"op-open",target:ready.target,signal:abort.signal,onClosed:()=>{closed++;}});
+    const request=await peer.next("lease_open");
+    abort.abort(reason);
+    await assert.rejects(Promise.race([lease,delay(500).then(()=>{throw Error("lease readiness stalled");})]),e=>e===reason);
+    assert.equal(closed,0);
+    release();
+    ready.send({type:"lease_opened",leaseId:request.leaseId,runId:request.runId,operationId:request.operationId});
+    await f.service.endLease(request.leaseId);
+    await peer.next("lease_end");
+    assert.equal(closed,0);
+    ready.send({type:"lease_closed",leaseId:request.leaseId,runId:request.runId,operationId:request.operationId,originalGeneration:ready.generation});
+    await until(()=>closed===1);
+  } finally {release?.();socket.send=send;}
 });

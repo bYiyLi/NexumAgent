@@ -25,7 +25,7 @@ export function nativeNodeCommand(input) {
       );
     }
     const EventClass = this.ownerDocument.defaultView.Event;
-    this.dispatchEvent(new EventClass("input", { bubbles: true }));
+    this.dispatchEvent(new EventClass("input", { bubbles: true, composed: true }));
     this.dispatchEvent(new EventClass("change", { bubbles: true }));
     return true;
   }

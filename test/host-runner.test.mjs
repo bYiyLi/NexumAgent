@@ -409,3 +409,83 @@ test("concurrent native file operations resolve explicitly from each Run directo
   });
   assert.deepEqual(await Promise.all(inputs.map(input => runner.start(input))), ["0","1"]);
 });
+
+test("cancelling a Run settles its already accepted guest callbacks and preserves another Run", async (t) => {
+  const { loader, runner } = await fixture(t);
+  const entered = Promise.withResolvers(), emergency = Promise.withResolvers();
+  let callbackResult;
+  const input = run("run_callback_cancel", `
+    return await sdk.invoke(async () => new Promise(() => {}));
+  `, { sdk: { invoke: (callback) => {
+    const pending = callback();
+    callbackResult = pending.then(
+      () => ({ success: true }),
+      error => ({ code: error.code }),
+    );
+    entered.resolve();
+    return pending;
+  } } });
+  // This models the Core operation that owns the original guest callback.
+  // Emergency is only a test-harness escape on regression, not a Run timeout.
+  input.settleOperations = async () => {
+    if (callbackResult) await Promise.race([callbackResult, emergency.promise]);
+  };
+  const active = runner.start(input);
+  const outcome = active.then(() => ({ success: true }), error => ({ code: error.code }));
+  let timer;
+  try {
+    await entered.promise;
+    assert.equal(await runner.start(run("run_callback_neighbour", "return 42;")), 42);
+    assert.equal(runner.cancel(input.runId), true);
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("terminated guest callback never settled")), 3000);
+    });
+    assert.deepEqual(await Promise.race([callbackResult, timeout]), { code: "worker_closed" });
+    assert.deepEqual(await Promise.race([outcome, timeout]), { code: "run_cancelled" });
+    assert.equal(await loader.withPackageChanges(async () => "idle"), "idle");
+  } finally {
+    clearTimeout(timer);
+    emergency.resolve();
+    await outcome;
+  }
+});
+
+test("closing an unused or executing Worker cannot leave a live execution facade", async (t) => {
+  const { loader } = await fixture(t);
+  const prepared = await loader.compileIsolated("return 1;", { context: {} });
+  await prepared.close();
+  assert.throws(() => prepared(), { code: "worker_closed" });
+  const ready = Promise.withResolvers();
+  const running = await loader.compileIsolated(
+    "await sdk.enter(); return await new Promise(() => {});",
+    {context:{},sdk:{enter:()=>ready.resolve()}},
+  );
+  const result = running();
+  const rejected = assert.rejects(result, {code:"worker_closed"});
+  await ready.promise;
+  await running.close();
+  await rejected;
+  assert.equal(await loader.withPackageChanges(async () => "idle"), "idle");
+});
+
+test("late SDK completion does not marshal an abandoned result into a terminated Worker", async (t) => {
+  const { loader } = await fixture(t);
+  const entered=Promise.withResolvers(), deferred=Promise.withResolvers();
+  const controller=new AbortController();
+  const execute=await loader.compileIsolated("return await sdk.late();",{
+    context:{},sdk:{late:()=>{entered.resolve();return deferred.promise;}},
+  },{signal:controller.signal});
+  const running=execute(), failed=assert.rejects(running,{code:"run_cancelled"});
+  let reads=0;
+  try {
+    await entered.promise;
+    controller.abort();
+    await failed;
+    deferred.resolve({get payload(){reads++;return 1;}});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(reads,0,"closed Worker must not encode late operation output");
+  } finally {
+    deferred.resolve(null);
+    await execute.close();
+  }
+});

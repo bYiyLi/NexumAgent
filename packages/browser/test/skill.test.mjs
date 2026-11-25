@@ -16,21 +16,32 @@ test("extension instructions follow platform discovery before choosing registere
   const entry = readFileSync(path.join(root, "instructions/README.md"), "utf8");
   // Cloud's TestProgrammableHostGuidanceUsesSkillsAndIndependentScripts checks
   // the exact truncation fields on the initialized MCP Server Instructions.
-  assert.match(entry, /先按平台的 Skill\/Script 发现规则补读不完整的清单/);
-  assert.match(entry, /实际登记且输入匹配的 `browser\/discover\.js`、`browser\/screenshot\.js`/);
-  assert.match(entry, /其他页面交互选择 `browser\/browser-control`，按其实际入口/);
-  assert.doesNotMatch(entry, /skillsComplete=false|agent\.materialsIndex|agent\.scripts\.index/);
+  assert.match(entry, /agent\.scripts/);
+  for (const name of ["discover", "installation", "observe", "screenshot"])
+    assert.ok(entry.includes(`browser/${name}.js`));
+  assert.match(entry, /描述足够时直接调用，不必加载 Skill/);
+  assert.match(entry, /agent\.skills.*browser-control.*实际 path/);
+  assert.doesNotMatch(entry, /browser\/browser-control|skillsComplete=false|agent\.materialsIndex|agent\.scripts\.index/);
 });
 
 test("Browser Skill selection boundaries and progressive routes are explicit", () => {
   assert.match(skill, /^---\nname: browser-control\ndescription: .+\n---\n/m);
   assert.match(skill.split("\n")[2], /浏览器/);
+  assert.match(skill.split("\n")[2], /脚本能直接满足请求时无需加载/);
   const routes = skill.split("\n").filter((line) => line.startsWith("- **"));
-  const find = (term) => routes.find((line) => line.includes(term)) ?? "";
+  const find = (term) => routes.find((line) => line.split("**")[1]?.includes(term)) ?? "";
   assert.match(find("发现浏览器"), /references\/bootstrap\.md/);
+  assert.match(find("发现浏览器"), /input=\{\}/);
+  assert.match(find("发现浏览器"), /安装资产诊断/);
+  assert.match(find("安装、重新加载"), /input=\{\}/);
+  assert.match(find("安装、重新加载"), /Reason/);
   assert.doesNotMatch(find("发现浏览器"), /api\.md|advanced\.md|downloads\.md/);
   assert.match(find("checkbox"), /references\/forms\.md/);
   assert.match(find("上传"), /references\/downloads\.md/);
+  assert.match(find("截图与视觉观察"), /browser\/screenshot\.js/);
+  assert.match(find("截图与视觉观察"), /references\/observation\.md/);
+  assert.match(find("页面结构与定位"), /browser\/observe\.js/);
+  assert.match(find("页面结构与定位"), /references\/observation\.md/);
   assert.match(find("连接失败"), /references\/errors\.md/);
   assert.match(find("精确参数"), /references\/api-index\.md/);
   assert.match(find("资产"), /references\/advanced\.md/);
@@ -71,8 +82,11 @@ test("Browser scripts and Skill auxiliaries have distinct invocation contracts",
   assert.ok(!pkg.files.includes("docs"));
   assert.equal("docs" in pkg.nexum, false);
   assert.match(skill, /agent\.scripts/);
-  assert.match(skill, /complete=false/);
-  assert.match(read("references/scripts.md"), /agent\.scripts\.index/);
+  assert.match(skill, /agent_scripts_incomplete/);
+  assert.doesNotMatch(skill, /complete=false|agent\.scripts\.index/);
+  assert.match(read("references/scripts.md"), /nexum\/script\.metadata\.js/);
+  assert.match(read("references/scripts.md"), /agent_scripts_incomplete/);
+  assert.doesNotMatch(read("references/scripts.md"), /agent\.scripts\.(?:complete|index|items)/);
   assert.match(read("references/scripts.md"), /scriptName/);
 });
 
@@ -152,7 +166,7 @@ test("Browser Skill JavaScript examples typecheck against the actual public Brow
     })),
   );
   assert.ok(snippets.length >= 7, "expected all executable Browser Skill examples");
-  snippets.push({ filename: "scripts/screenshot.js", source: readFileSync(path.join(root, "scripts/screenshot.js"), "utf8") });
+  for (const name of ["screenshot", "observe"]) snippets.push({ filename: `scripts/${name}.js`, source: readFileSync(path.join(root, `scripts/${name}.js`), "utf8") });
 
   // Compile each snippet as a real asynchronous Run, without writing a file,
   // and resolve Tab/Browser declarations from the exact published SDK source.

@@ -46,6 +46,21 @@ const stableKey = (target: Target) =>
     target.browserSessionId,
     target.tabId ?? "*",
   ]);
+// Stop observing a shared operation without cancelling its original
+// owner or releasing native resources before their actual closure.
+async function observe<T>(task: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return task;
+  signal.throwIfAborted();
+  let abort: () => void = () => {};
+  const cancelled = new Promise<never>((_,reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort",abort,{once:true});
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([task,cancelled]); }
+  finally { signal.removeEventListener("abort",abort); }
+}
+
 /** One actual Core run resource; no settled Invocation is retained. */
 export class RunScope implements ManagedResource {
   readonly closed: Promise<void>;
@@ -104,6 +119,7 @@ export class RunScope implements ManagedResource {
     signal: AbortSignal = call.signal,
   ): Promise<Lease> {
     this.current();
+    signal.throwIfAborted();
     const unique = [
       ...new Map(targets.map((target) => [key(target), target])).entries(),
     ].sort(([a], [b]) => a.localeCompare(b));
@@ -165,7 +181,7 @@ export class RunScope implements ManagedResource {
         });
         void lease.ready.catch(() => {});
       }
-      await lease.ready;
+      await observe(lease.ready,signal);
       this.current();
       signal.throwIfAborted();
     }
@@ -354,27 +370,9 @@ export class RunScope implements ManagedResource {
         this.#maybeClosed();
       })
       .catch(() => {});
-    if (!signal) return task;
-    signal.throwIfAborted();
-    return new Promise<T>((resolve, reject) => {
-      const abort = () => {
-        signal.removeEventListener("abort", abort);
-        reject(signal.reason);
-      };
-      signal.addEventListener("abort", abort, { once: true });
-      void task.then(
-        (value) => {
-          signal.removeEventListener("abort", abort);
-          resolve(value);
-        },
-        (cause) => {
-          signal.removeEventListener("abort", abort);
-          reject(cause);
-        },
-      );
-      if (signal.aborted) abort();
-    });
+    return observe(task,signal);
   }
+
   revoke(target?: Target): void {
     this.runtime.rememberRevocation(this.runId, this.deadline);
     if (target) this.#sealed.add(stableKey(target));

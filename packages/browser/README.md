@@ -13,8 +13,10 @@ const choices = await client.browsers.list();
 const selected = await client.browsers.get(choices[0].id);
 const tabs = await selected.tabs.list();
 const tab = await selected.tabs.get(tabs[0].id);
-return await tab.playwright.domSnapshot();
+return await tab.writeObservation();
 ```
+
+需要结构化数据时使用 `tab.semanticSnapshot()`；需要文本加原生 JPEG 时使用 `tab.writeObservation({screenshot:true})`。已登记的具名 `browser/observe.js` 可直接从发现结果传 browserId/tabId。观察树覆盖当前支持的已挂载/渲染语义结构，不是全部 HTML 或业务数据；开放 Shadow DOM 可直接使用现有 Locator；Frame 必须显式定位，closed Shadow 不穿透，不可用范围通过 coverage/warnings 表达。旧 AX 与 DOM 快照接口仍可独立调用。
 
 `browser` 来自当前运行注入的受管方法表。普通 Node 客户端只构造公开门面；实际 I/O 逐项调用已经注册的公共扩展方法。未实现或未注册的方法明确失败。
 

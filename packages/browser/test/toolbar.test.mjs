@@ -36,14 +36,18 @@ for (const profile of ["development", "production"]) {
     const stub = (names, values) => new SyntheticModule(names, function () {
       for (const name of names) this.setExport(name, values[name]);
     }, { context });
+    const actualProfile = await import(new URL("../browser-extension/dist/" + profile + "/profile.js", import.meta.url));
+    let connectedRevision;
     const dependencies = {
-      "./profile.js": stub(["profile", "extensionVersion"], { profile, extensionVersion: "test" }),
+      "./profile.js": stub(["profile", "extensionVersion", "assetRevision"], actualProfile),
       "./router.js": stub(["createBrowserRouter"], { createBrowserRouter: () => ({}) }),
-      "./connection.js": stub(["createExtensionConnection"], { createExtensionConnection: () => ({ start: async () => {} }) }),
+      "./connection.js": stub(["createExtensionConnection"], { createExtensionConnection: (options) => { connectedRevision=options.assetRevision; return { start: async () => {} }; } }),
       "./visual.js": stub(["createVisualController"], { createVisualController: () => ({}) }),
     };
     await worker.link((specifier) => dependencies[specifier]);
     await worker.evaluate();
+    assert.match(connectedRevision,/^[0-9a-f]{64}$/);
+    assert.equal(connectedRevision,actualProfile.assetRevision);
     assert.equal(typeof onClick, "function");
     onClick();
     assert.equal(opened.length, 1);

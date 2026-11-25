@@ -260,6 +260,11 @@
     "mutating": false
   },
   {
+    "method": "tab.semanticSnapshot",
+    "needsTab": true,
+    "mutating": false
+  },
+  {
     "method": "dom.getVisibleTree",
     "needsTab": true,
     "mutating": false

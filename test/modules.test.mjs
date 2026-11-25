@@ -446,3 +446,42 @@ test("an actual Run Worker calls an approved hyphenated MCP binding", async (t) 
     await run.close();
   }
 });
+
+test("rethrowing an SDK-issued failure cannot change the recorded public diagnosis", async (t) => {
+  const { loader } = await fixture(t);
+  const { AgentError } = await import("../dist/contracts/errors.js");
+  const code = "BROWSER_"+"X".repeat(200);
+  const run = await loader.compileIsolated(`try { await globalThis["fixture-error"].fail(); } catch (error) {
+    if (error.code !== context.code || error.details.effect !== "unknown" || error.details.retryable !== false) throw new Error("unexpected SDK diagnostic");
+    error.code = "forged_code";
+    error.message = "FORGED_MESSAGE";
+    error.details.operationId = "forged_operation";
+    error.details.effect = "none";
+    error.details.retryable = true;
+    throw error;
+  }`,{context:{code},"fixture-error":{fail:async()=>{throw new AgentError(code,"故障🙂".repeat(1024),{operationId:"op_original",effect:"unknown",dispatched:true,retryable:true,nested:{token:"PRIVATE_TOKEN"}});}}});
+  try {
+    await assert.rejects(run(), error=>{assert.equal(error.code,code);assert.equal(error.details.operationId,"op_original");assert.equal(error.details.effect,"unknown");assert.equal(error.details.retryable,false);assert.ok(Buffer.byteLength(error.message)<=1024);assert.doesNotMatch(JSON.stringify(error),/PRIVATE_TOKEN|FORGED_MESSAGE/);return true;});
+  } finally {await run.close();}
+});
+
+test("ordinary Run Workers do not initialize the Host's Ajv dependency graph", async (t) => {
+  const { loader, modules } = await fixture(t);
+  // This is a trusted native test module, not a public guest cache API.
+  // Ajv and its format plug-in are CJS and would appear in this actual
+  // Worker's native cache if ModuleLoader imported the Host creator.
+  writeFileSync(path.join(modules,"dependency-probe.cjs"),
+    "module.exports=()=>Object.keys(require.cache).filter(p=>p.split(require('node:path').sep).some(n=>n==='ajv'||n==='ajv-formats'));");
+  const execute = await loader.compileIsolated(`
+    const inspect = require("./dependency-probe.cjs");
+    const before = inspect();
+    const value = await sdk.echo(42);
+    return {before, after:inspect(), value};
+  `, {context:{},sdk:{echo:async value=>value}});
+  try {
+    const result=await execute();
+    assert.deepEqual(result.before,[]);
+    assert.deepEqual(result.after,[]);
+    assert.equal(result.value,42);
+  } finally {await execute.close();}
+});

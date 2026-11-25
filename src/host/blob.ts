@@ -199,7 +199,12 @@ export async function encodeGoArguments(args: readonly unknown[], scope: Scope,
   return { arguments: output, binaryInputs };
 }
 
-async function download(ref: BinaryRef, scope: Scope, call: Call, signal: AbortSignal, budget: { remaining: number }): Promise<unknown> {
+// Both ordinary SDK binary outputs and text resource reads use the same
+// verified private staging file. A range read consumes chunks, not a whole-file
+// Buffer, and never gives the guest a private filesystem path.
+async function visitBinary(ref: BinaryRef, scope: Scope, call: Call, signal: AbortSignal,
+  budget: { remaining: number }, visit: (chunk: Buffer) => void,
+  expected?: { size: number; sha256: string; mimeType: string }): Promise<OpenTicket> {
   const value = await call("blob.open", { ...scope, ref }, signal);
   const opened = ticket(value);
   try {
@@ -210,12 +215,13 @@ async function download(ref: BinaryRef, scope: Scope, call: Call, signal: AbortS
       (value.kind ?? "blob") === (ref.kind ?? "blob") && value.lastModified === ref.lastModified &&
       value.originalName === ref.originalName && value.originalType === ref.originalType, "invalid_resource", "The binary resource metadata is invalid.");
     const metadata = value as unknown as OpenTicket;
+    requireCondition(!expected || (metadata.size === expected.size && metadata.sha256 === expected.sha256 && metadata.contentType === expected.mimeType),
+      "resource_changed", "The fixed resource no longer matches its original identity.");
     budget.remaining -= metadata.size;
     const file = await open(opened.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const info = await file.stat();
       requireCondition(info.isFile() && info.nlink === 1 && info.size === metadata.size, "invalid_resource", "The binary resource file is invalid.");
-      const chunks: Buffer[] = [];
       const hash = createHash("sha256");
       let size = 0;
       while (size < metadata.size) {
@@ -224,41 +230,54 @@ async function download(ref: BinaryRef, scope: Scope, call: Call, signal: AbortS
         const read = await file.read(chunk, 0, chunk.length, null);
         requireCondition(read.bytesRead > 0, "invalid_resource", "The binary resource was truncated.");
         const actual = chunk.subarray(0, read.bytesRead);
-        chunks.push(actual);
         hash.update(actual);
+        visit(actual);
         size += actual.length;
       }
       const final = await file.stat();
       requireCondition(final.size === metadata.size && hash.digest("hex") === metadata.sha256,
         "invalid_resource", "The binary resource did not match its committed contents.");
-      const bytes = Buffer.concat(chunks, metadata.size);
-      switch (metadata.kind ?? "blob") {
-        case "blob": return new Blob([bytes], { type: metadata.originalType ?? metadata.contentType });
-        case "file": return new File([bytes], metadata.originalName ?? ref.name ?? "blob", { type: metadata.originalType ?? metadata.contentType, lastModified: metadata.lastModified });
-        case "buffer": return bytes;
-        default: {
-          const exact = Uint8Array.from(bytes).buffer;
-          switch (metadata.kind) {
-            case "arraybuffer": return exact;
-            case "dataview": return new DataView(exact);
-            case "int8array": return new Int8Array(exact);
-            case "uint8array": return new Uint8Array(exact);
-            case "uint8clampedarray": return new Uint8ClampedArray(exact);
-            case "int16array": return new Int16Array(exact);
-            case "uint16array": return new Uint16Array(exact);
-            case "int32array": return new Int32Array(exact);
-            case "uint32array": return new Uint32Array(exact);
-            case "float16array": return new (globalThis as unknown as { Float16Array: new (buffer: ArrayBuffer) => unknown }).Float16Array(exact);
-            case "float32array": return new Float32Array(exact);
-            case "float64array": return new Float64Array(exact);
-            case "bigint64array": return new BigInt64Array(exact);
-            case "biguint64array": return new BigUint64Array(exact);
-            default: throw new Error("invalid binary resource type");
-          }
-        }
-      }
+      signal.throwIfAborted();
+      return metadata;
     } finally { await file.close(); }
   } finally { await release(call, scope, opened.ticket).catch(() => {}); }
+}
+
+/** Consume a method-bound fixed resource without allocating its full body. */
+export async function visitGoResourceBytes(rawRef: unknown, scope: Scope, call: Call, signal: AbortSignal,
+  expected: { size: number; sha256: string; mimeType: string }, visit: (chunk: Buffer) => void): Promise<void> {
+  await visitBinary(reference(rawRef), scope, call, signal, { remaining: expected.size }, visit, expected);
+}
+
+async function download(ref: BinaryRef, scope: Scope, call: Call, signal: AbortSignal, budget: { remaining: number }): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  const metadata = await visitBinary(ref, scope, call, signal, budget, chunk => chunks.push(chunk));
+  const bytes = Buffer.concat(chunks, metadata.size);
+  switch (metadata.kind ?? "blob") {
+    case "blob": return new Blob([bytes], { type: metadata.originalType ?? metadata.contentType });
+    case "file": return new File([bytes], metadata.originalName ?? ref.name ?? "blob", { type: metadata.originalType ?? metadata.contentType, lastModified: metadata.lastModified });
+    case "buffer": return bytes;
+    default: {
+      const exact = Uint8Array.from(bytes).buffer;
+      switch (metadata.kind) {
+        case "arraybuffer": return exact;
+        case "dataview": return new DataView(exact);
+        case "int8array": return new Int8Array(exact);
+        case "uint8array": return new Uint8Array(exact);
+        case "uint8clampedarray": return new Uint8ClampedArray(exact);
+        case "int16array": return new Int16Array(exact);
+        case "uint16array": return new Uint16Array(exact);
+        case "int32array": return new Int32Array(exact);
+        case "uint32array": return new Uint32Array(exact);
+        case "float16array": return new (globalThis as unknown as { Float16Array: new (buffer: ArrayBuffer) => unknown }).Float16Array(exact);
+        case "float32array": return new Float32Array(exact);
+        case "float64array": return new Float64Array(exact);
+        case "bigint64array": return new BigInt64Array(exact);
+        case "biguint64array": return new BigUint64Array(exact);
+        default: throw new Error("invalid binary resource type");
+      }
+    }
+  }
 }
 
 export async function decodeGoResult(result: unknown, scope: Scope, call: Call, signal: AbortSignal): Promise<unknown> {

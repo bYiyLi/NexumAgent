@@ -43,6 +43,7 @@ export interface BrowserServiceOptions {
   work: string;
   extensionId: string;
   extensionVersion: string;
+  assetRevision: string;
   defaultBrowserId?: string;
 }
 export interface BrowserConnectionDiagnostic {
@@ -71,6 +72,7 @@ interface Pending {
   resolve(value: unknown): void;
   reject(cause: unknown): void;
   cleanup(): void;
+  expire(): boolean;
   dispatched: boolean;
 }
 export interface BrowserPeer {
@@ -116,6 +118,8 @@ interface LeaseWait {
   opened: boolean;
   onClosed?: (evidence?: LeaseEvidence) => void;
 }
+const versionMismatchMessage = "The running browser plugin does not match the installed Browser package. Reload the Nexum browser extension and discover it again.";
+const versionMismatchTTL = 120000;
 /** Cold, package-owned native listener. Only explicit start performs filesystem/network I/O. */
 export class BrowserService extends EventEmitter {
   readonly bootId = randomUUID();
@@ -137,6 +141,7 @@ export class BrowserService extends EventEmitter {
   #generations = new Map<string, number>();
   #identities = new Map<string, string>();
   #claims = new Map<string, object>();
+  #versionMismatches = new Map<string, number>();
   #leases = new Map<string, LeaseWait>();
   #tasks = new Set<Promise<unknown>>();
   #persist = Promise.resolve();
@@ -155,7 +160,8 @@ export class BrowserService extends EventEmitter {
         (options.portEnd ?? options.port) <= 65535 &&
         path.isAbsolute(options.work) &&
         /^[a-p]{32}$/.test(options.extensionId) &&
-        identifier(options.extensionVersion),
+        identifier(options.extensionVersion) &&
+        /^[0-9a-f]{64}$/.test(options.assetRevision),
       "INVALID_ARGUMENT",
       "Browser service requires one explicit profile, port and matching extension identity.",
     );
@@ -405,7 +411,9 @@ export class BrowserService extends EventEmitter {
               code: identifier((cause as { code?: unknown })?.code)
                 ? (cause as { code: string }).code
                 : "PROTOCOL_MISMATCH",
-              message: "The browser connection could not accept this message.",
+              message: (cause as { code?: unknown })?.code === "PLUGIN_VERSION_MISMATCH"
+                ? versionMismatchMessage
+                : "The browser connection could not accept this message.",
             }),
             () => socket.close(1008, "Invalid browser protocol"),
           );
@@ -443,8 +451,6 @@ export class BrowserService extends EventEmitter {
   ): Promise<BrowserPeer> {
     check(value.profile === this.options.profile && value.extensionId === this.options.extensionId,
       "PROFILE_MISMATCH", "The browser hello does not match this profile and extension identity.");
-    check(value.extensionVersion === this.options.extensionVersion,
-      "PLUGIN_VERSION_MISMATCH", "The browser plugin version does not match the installed package.");
     check(record(value.protocol) && value.protocol.min === 1 && value.protocol.max === 1,
       "PROTOCOL_MISMATCH", "The browser hello uses an incompatible protocol version.");
     check(identifier(value.browserProfileId) && identifier(value.browserSessionId) &&
@@ -453,6 +459,18 @@ export class BrowserService extends EventEmitter {
       "PROTOCOL_MISMATCH", "The browser hello has no valid connection identity.");
     const profileId = value.browserProfileId,
       claim = {};
+    if (value.extensionVersion !== this.options.extensionVersion ||
+        value.assetRevision !== this.options.assetRevision) {
+      // Record only a bounded, recent rejection for a validated profile
+      // identity. A stale claimant cannot downgrade an already online peer.
+      if (!this.#profiles.has(profileId)) {
+        this.#versionMismatches.delete(profileId);
+        if (this.#versionMismatches.size >= 1000)
+          this.#versionMismatches.delete(this.#versionMismatches.keys().next().value!);
+        this.#versionMismatches.set(profileId, Date.now());
+      }
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
+    }
     let old = this.#profiles.get(profileId);
     if (old && Date.now() - old.lastSeen > 60000) {
       this.#offline(old);
@@ -593,8 +611,10 @@ export class BrowserService extends EventEmitter {
         browserSessionId: peer.browserSessionId,
         generation,
         protocolVersion: 1,
+        assetRevision: this.options.assetRevision,
         limits,
       });
+      this.#versionMismatches.delete(profileId);
       this.emit("online", info);
       return peer;
     } finally {
@@ -727,17 +747,18 @@ export class BrowserService extends EventEmitter {
         "PROTOCOL_MISMATCH",
         "Browser result belongs to an unknown action.",
       );
+      if (pending.expire()) return;
       try {
-        if (message.ok === true)
-          pending.resolve(
-            unpack(
-              message.value,
-              message.attachments,
-              message.valueStream,
-              peer.inbox,
-              pending,
-            ),
+        if (message.ok === true) {
+          const value = unpack(
+            message.value,
+            message.attachments,
+            message.valueStream,
+            peer.inbox,
+            pending,
           );
+          if (!pending.expire()) pending.resolve(value);
+        }
         else
           pending.reject(
             failure(
@@ -926,8 +947,24 @@ export class BrowserService extends EventEmitter {
       .sort((a, b) => a.id.localeCompare(b.id))
       .map((peer) => JSON.parse(JSON.stringify(peer.info)) as BrowserInfo);
   }
+  #hasVersionMismatch(id?: string): boolean {
+    const now = Date.now();
+    let found = false;
+    for (const [profile, at] of this.#versionMismatches) {
+      if (now - at > versionMismatchTTL) this.#versionMismatches.delete(profile);
+      else if (!this.#profiles.has(profile) &&
+          (id === undefined || this.#identities.get(profile) === id)) found = true;
+    }
+    return found;
+  }
+  requireCurrentAssets(): void {
+    if (!this.#peers.size && this.#hasVersionMismatch())
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
+  }
   get(id: string): BrowserPeer {
     const peer = this.#peers.get(id);
+    if (!peer && this.#hasVersionMismatch(id))
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
     check(
       peer && !this.#stopping,
       "EXTENSION_OFFLINE",
@@ -1051,16 +1088,17 @@ export class BrowserService extends EventEmitter {
     peer: BrowserPeer,
     prepared: ReturnType<typeof pack>,
     signal: AbortSignal,
+    checkSending: () => void,
   ): Promise<void> {
     for (const stream of prepared.streams) {
-      signal.throwIfAborted();
+      checkSending();
       await this.#send(peer, { v: 1, type: "binary_start", ...stream.meta });
       for (const frame of frames(stream.meta, stream.bytes)) {
         while (peer.socket.bufferedAmount > 1024 * 1024) {
-          signal.throwIfAborted();
+          checkSending();
           await delay(4, undefined, { signal });
         }
-        signal.throwIfAborted();
+        checkSending();
         await new Promise<void>((resolve, reject) =>
           peer.socket.send(frame, { binary: true }, (cause) =>
             cause ? reject(cause) : resolve(),
@@ -1068,6 +1106,7 @@ export class BrowserService extends EventEmitter {
         );
         await yieldTurn(undefined, { signal });
       }
+      checkSending();
       await this.#send(peer, { v: 1, type: "binary_end", ...stream.meta });
     }
   }
@@ -1093,108 +1132,89 @@ export class BrowserService extends EventEmitter {
       "INVALID_ARGUMENT",
       "The browser action deadline is invalid.",
     );
+    const deadlineAt = performance.now()+input.budgetMs;
     this.target(input.target);
-    check(
-      peer.pending.size < limits.inFlight,
-      "QUEUE_FULL",
-      "This browser has too many in-flight actions.",
-    );
+    check(peer.pending.size < limits.inFlight,"QUEUE_FULL","This browser has too many in-flight actions.");
     const actionId = randomUUID(),
-      binding = {
-        actionId,
-        operationId: input.operationId,
-        generation: peer.generation,
-      },
-      packed = pack(input.args, binding),
-      result = Promise.withResolvers<unknown>();
+      binding = {actionId,operationId:input.operationId,generation:peer.generation},
+      packed = pack(input.args,binding);
+    input.signal.throwIfAborted();
+    check(performance.now()<deadlineAt,"TIMEOUT","The browser action expired before dispatch.");
+    const result = Promise.withResolvers<unknown>();
     void result.promise.catch(() => {});
-    const timer = setTimeout(
-      () =>
-        stop(
-          failure(
-            "TIMEOUT",
-            "The browser action exceeded its remaining deadline.",
-            {
-              dispatched: pending.dispatched,
-              effect: pending.dispatched ? "unknown" : "none",
-              operationId: input.operationId,
-            },
-          ),
-        ),
-      input.budgetMs,
-    );
+    const sender = new AbortController();
+    const signal = AbortSignal.any([input.signal,sender.signal]);
+    let timer: ReturnType<typeof setTimeout>;
     const stop = (cause: unknown) => {
-      void this.#send(peer, {
-        v: 1,
-        type: "cancel_action",
-        actionId,
-        operationId: input.operationId,
-        leaseId: input.leaseId,
-        reason: "cancelled",
-      }).catch(() => {});
+      if (peer.pending.get(actionId)!==pending) return;
+      const dispatched = pending.dispatched;
       result.reject(cause);
       pending.cleanup();
       peer.inbox.discard(actionId);
+      if (dispatched) {
+        // Cancelling observation does not establish rollback. Stop only this
+        // original byte stream/action; keep the lease's cleanup ownership.
+        try {
+          void this.#send(peer,{v:1,type:"cancel_action",actionId,
+            operationId:input.operationId,leaseId:input.leaseId,reason:"cancelled"}).catch(()=>{});
+        } catch { /* The connection may already be gone. */ }
+      }
     };
-    const aborted = () =>
-      stop(
-        failure(
-          "UNKNOWN_RESULT",
-          "The browser action was cancelled before its effect was confirmed.",
-          {
-            dispatched: pending.dispatched,
-            effect: pending.dispatched ? "unknown" : "none",
-            operationId: input.operationId,
-          },
-        ),
-      );
+    const error = (code: string,message: string) => failure(code,message,{
+      dispatched:pending.dispatched,effect:pending.dispatched?"unknown":"none",operationId:input.operationId,
+    });
+    const expire = () => {
+      if (performance.now()<deadlineAt) return false;
+      stop(error("TIMEOUT","The browser action exceeded its remaining deadline."));
+      return true;
+    };
+    const tick = () => {
+      if (peer.pending.get(actionId)!==pending || expire()) return;
+      timer = setTimeout(tick,Math.max(1,Math.ceil(deadlineAt-performance.now())));
+    };
+    const aborted = () => stop(error("UNKNOWN_RESULT","The browser action was cancelled before its effect was confirmed."));
     const pending: Pending = {
-      ...binding,
-      runId: input.runId,
-      leaseId: input.leaseId,
-      target: { ...input.target },
-      resolve: result.resolve,
-      reject: result.reject,
-      dispatched: false,
+      ...binding,runId:input.runId,leaseId:input.leaseId,target:{...input.target},
+      resolve:result.resolve,reject:result.reject,dispatched:false,expire,
       cleanup: () => {
+        if (peer.pending.get(actionId)!==pending) return;
         clearTimeout(timer);
-        input.signal.removeEventListener("abort", aborted);
+        input.signal.removeEventListener("abort",aborted);
         peer.pending.delete(actionId);
+        sender.abort();
         this.#stopWakeIfIdle();
-        peer.completed.set(actionId, {
-          operationId: input.operationId,
-          at: Date.now(),
-        });
-        for (const [id, item] of peer.completed)
-          if (Date.now() - item.at > 300000 || peer.completed.size > 1024)
-            peer.completed.delete(id);
+        peer.completed.set(actionId,{operationId:input.operationId,at:Date.now()});
+        for (const [id,item] of peer.completed)
+          if (Date.now()-item.at>300000 || peer.completed.size>1024) peer.completed.delete(id);
       },
     };
-    peer.pending.set(actionId, pending);
-    this.#wakeActiveActions();
-    input.signal.addEventListener("abort", aborted, { once: true });
+    peer.pending.set(actionId,pending);
+    input.signal.addEventListener("abort",aborted,{once:true});
+    if (input.signal.aborted) aborted();
+    else {
+      tick();
+      if (peer.pending.get(actionId)===pending) this.#wakeActiveActions();
+    }
+    const checkSending = () => {
+      signal.throwIfAborted();
+      if (expire()) signal.throwIfAborted();
+    };
     const send = (async () => {
-      input.signal.throwIfAborted();
-      const dispatched = this.#send(peer, {
-        v: 1,
-        type: "action",
-        actionId,
-        runId: input.runId,
-        operationId: input.operationId,
-        leaseId: input.leaseId,
-        target: input.target,
-        method: input.method,
-        args: packed.value,
-        ...(packed.valueStream ? { argsStream: packed.valueStream } : {}),
-        attachments: packed.attachments,
-        budgetMs: input.budgetMs,
+      checkSending();
+      const remaining = deadlineAt-performance.now();
+      if (remaining<=0) {expire();signal.throwIfAborted();}
+      const dispatched = this.#send(peer,{
+        v:1,type:"action",actionId,runId:input.runId,operationId:input.operationId,
+        leaseId:input.leaseId,target:input.target,method:input.method,args:packed.value,
+        ...(packed.valueStream ? {argsStream:packed.valueStream} : {}),
+        attachments:packed.attachments,budgetMs:remaining,
       });
-      pending.dispatched = true;
+      pending.dispatched=true;
       input.onDispatched?.();
       await dispatched;
-      await this.#binary(peer, packed, input.signal);
+      await this.#binary(peer,packed,signal,checkSending);
     })();
-    void this.#track(send).catch((cause) => stop(cause));
+    void this.#track(send).catch((cause)=>stop(cause));
     return result.promise;
   }
   async openLease(
@@ -1228,39 +1248,32 @@ export class BrowserService extends EventEmitter {
     this.#leases.set(input.id, lease);
     let dispatched: Promise<void>;
     try {
-      dispatched = this.#send(peer, {
-        v: 1,
-        type: "lease_open",
-        leaseId: input.id,
-        runId: input.runId,
-        operationId: input.operationId,
-        target: input.target,
+      input.signal.throwIfAborted();
+      dispatched = this.#send(peer,{
+        v:1,type:"lease_open",leaseId:input.id,runId:input.runId,
+        operationId:input.operationId,target:input.target,
       });
     } catch (cause) {
       this.#leases.delete(input.id);
       input.onClosed();
       throw cause;
     }
-    // A native send failure can be ambiguous. Only a synchronous admission
-    // rejection above proves that the remote lease was never sent.
-    await dispatched;
-    const timer = setTimeout(
-      () =>
-        ready.reject(
-          failure("TIMEOUT", "The browser did not confirm control readiness."),
-        ),
-      30000,
-    );
+    // A native send failure can be ambiguous. Only a synchronous
+    // pre-dispatch rejection proves that the remote lease never existed.
+    const timer = setTimeout(() => ready.reject(
+      failure("TIMEOUT","The browser did not confirm control readiness.")),30000);
     const aborted = () => ready.reject(input.signal.reason);
-    input.signal.addEventListener("abort", aborted, { once: true });
+    input.signal.addEventListener("abort",aborted,{once:true});
+    void dispatched.catch(ready.reject);
     try {
-      input.signal.throwIfAborted();
+      if (input.signal.aborted) aborted();
       await ready.promise;
     } finally {
       clearTimeout(timer);
-      input.signal.removeEventListener("abort", aborted);
+      input.signal.removeEventListener("abort",aborted);
     }
   }
+
   async endLease(id: string): Promise<void> {
     const lease = this.#leases.get(id);
     if (!lease) return;

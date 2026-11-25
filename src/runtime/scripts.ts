@@ -76,7 +76,11 @@ const maxCodeBytes = 1024 * 1024;
 const sha = (code: string) => createHash("sha256").update(code).digest("hex");
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-export function scriptHeader(code: string): ScriptMetadata | null {
+type ScriptHeaderReader = (code: string) => ScriptMetadata | null;
+type InputValidatorObserver = (validate: (value: unknown) => void) => void;
+export function scriptHeader(
+  code: string, onInputValidator?: InputValidatorObserver,
+): ScriptMetadata | null {
   requireCondition(
     Buffer.byteLength(code) <= maxCodeBytes,
     "script_too_large",
@@ -140,13 +144,15 @@ export function scriptHeader(code: string): ScriptMetadata | null {
     "invalid_script_header",
     "scriptOpenDefault must be a JSON boolean.",
   );
-  compileInputSchema(parsed.scriptInputSchema);
+  const validateInput = compileInputSchema(parsed.scriptInputSchema);
   if (Object.hasOwn(parsed, "scriptOutputSchema")) {
     try { compileInputSchema(parsed.scriptOutputSchema); }
     catch (cause) {
       throw new AgentError("invalid_output_schema", "The script output schema must be a valid local Draft 7 schema.", undefined, { cause });
     }
   }
+  // Only publish the compiler after the complete header has been checked.
+  onInputValidator?.(validateInput);
   return {
     scriptName: parsed.scriptName,
     scriptDesc: parsed.scriptDesc as string,
@@ -238,6 +244,7 @@ export class ScriptCatalog {
     directory: string,
     filename: string,
     origin: ScriptOriginBase,
+    readHeader: ScriptHeaderReader = scriptHeader,
   ): ScriptSnapshot {
     scriptFilename(filename);
     if (directory === this.local) privateDirectory(this.work, "scripts");
@@ -266,7 +273,7 @@ export class ScriptCatalog {
       "The script source is not a bounded regular file.",
     );
     const code = readFileSync(actual, "utf8");
-    const metadata = scriptHeader(code);
+    const metadata = readHeader(code);
     requireCondition(
       metadata && metadata.scriptName === filename,
       "script_header_mismatch",
@@ -288,6 +295,7 @@ export class ScriptCatalog {
   resolve(
     name: string,
     canUse: (origin: ScriptOrigin) => boolean = () => true,
+    onInputValidator?: InputValidatorObserver,
   ): ScriptSnapshot {
     const parts = name.split("/");
     requireCondition(
@@ -298,9 +306,10 @@ export class ScriptCatalog {
     const filename = parts.at(-1)!;
     scriptFilename(filename);
     const sources = this.#registered(parts.length === 2 ? parts[0] : "");
+    const readHeader = (code: string) => scriptHeader(code, onInputValidator);
     let snapshot: ScriptSnapshot;
     if (parts.length === 1)
-      snapshot = this.#read(this.local, filename, this.#localOrigin());
+      snapshot = this.#read(this.local, filename, this.#localOrigin(), readHeader);
     else {
       const source = sources.find((item) => item.namespace === parts[0]);
       requireCondition(
@@ -313,7 +322,7 @@ export class ScriptCatalog {
         owner: source.owner,
         namespace: source.namespace,
         version: source.version,
-      });
+      }, readHeader);
     }
     requireCondition(
       canUse(snapshot.origin),
@@ -323,9 +332,12 @@ export class ScriptCatalog {
     return snapshot;
   }
 
-  enroll(code: string): { snapshot: ScriptSnapshot; saved: boolean } {
+  enroll(code: string, onInputValidator?: InputValidatorObserver): { snapshot: ScriptSnapshot; saved: boolean } {
+    return this.#enroll(code, scriptHeader(code, onInputValidator));
+  }
+
+  #enroll(code: string, metadata: ScriptMetadata | null): { snapshot: ScriptSnapshot; saved: boolean } {
     privateDirectory(this.work, "scripts");
-    const metadata = scriptHeader(code);
     if (!metadata)
       return {
         snapshot: {
@@ -340,6 +352,11 @@ export class ScriptCatalog {
         },
         saved: false,
       };
+    // Reuse the already validated header only for identical source bytes.
+    // Readback still checks the real path, filename and actual file contents.
+    // Other scripts found while refreshing the index are checked independently.
+    const sameHeader: ScriptHeaderReader = (actual) =>
+      actual === code ? metadata : scriptHeader(actual);
     // A hard link publishes a completed file without ever replacing an existing name.
     const temporary = path.join(this.local, "." + newId("script"));
     const destination = path.join(this.local, metadata.scriptName);
@@ -365,6 +382,7 @@ export class ScriptCatalog {
         this.local,
         metadata.scriptName,
         this.#localOrigin(),
+        sameHeader,
       );
       requireCondition(
         snapshot.code === code,
@@ -372,7 +390,7 @@ export class ScriptCatalog {
         "A different script already uses this name; choose another name or explicitly update the file.",
       );
       try {
-        this.refreshIndex();
+        this.refreshIndex(this.#discover(() => true, sameHeader));
       } catch (error) {
         throw new AgentError(
           "script_index_failed",
@@ -398,7 +416,7 @@ export class ScriptCatalog {
     const metadata = scriptHeader(code);
     if (!metadata || !options.reserve) {
       options.assertCurrent?.();
-      return this.enroll(code);
+      return this.#enroll(code, metadata);
     }
     // refreshIndex already enforces this exact eight-MiB ceiling. Reserving its
     // complete rewrite also covers the old file coexisting with its atomic temp.
@@ -407,7 +425,7 @@ export class ScriptCatalog {
     );
     try {
       options.assertCurrent?.();
-      return this.enroll(code);
+      return this.#enroll(code, metadata);
     } finally {
       ticket.release();
     }
@@ -415,6 +433,13 @@ export class ScriptCatalog {
 
   discover(
     canUse: (origin: ScriptOrigin) => boolean = () => true,
+  ): ScriptDiscovery {
+    return this.#discover(canUse, scriptHeader);
+  }
+
+  #discover(
+    canUse: (origin: ScriptOrigin) => boolean,
+    readHeader: ScriptHeaderReader,
   ): ScriptDiscovery {
     const sources = [
       { directory: this.local, ...this.#localOrigin() },
@@ -462,7 +487,7 @@ export class ScriptCatalog {
             owner: source.owner as string,
             namespace: source.namespace as string | null,
             version: source.version as string | null,
-          });
+          }, readHeader);
           if (canUse(snapshot.origin))
             entries.push({
               ...snapshot.metadata!,
@@ -520,108 +545,21 @@ export class ScriptCatalog {
     atomicText(path.join(this.local, "index.md"), this.indexText(discovery));
   }
 
+  // Compatibility for the test/reference Work service: all authorized
+  // catalog entries, independent of previous executions or display budgets.
   select(
-    usage: readonly ScriptUsage[],
+    _usage: readonly ScriptUsage[],
     canUse: (origin: ScriptOrigin) => boolean = () => true,
-    maxBytes = 256 * 1024,
+    _maxBytes = 256 * 1024,
     discovery?: ScriptDiscovery,
   ) {
-    const { entries, warnings: discoveredWarnings } =
-      discovery ?? this.discover(canUse);
-    const warnings = [...discoveredWarnings];
-    const defaults = entries.filter((entry) => entry.scriptOpenDefault);
-    const selected: (ScriptEntry & {
-      reason: "default" | "frequency";
-      executions: number;
-      lastStartedAt: number | null;
-    })[] = [];
-    const usageFor = (entry: ScriptEntry) =>
-      usage.find(
-        (item) =>
-          item.owner === entry.origin.owner &&
-          item.scriptName === entry.scriptName,
-      );
-    const add = (entry: ScriptEntry, reason: "default" | "frequency") => {
-      const count = usageFor(entry);
-      selected.push({
-        ...entry,
-        reason,
-        executions: count?.count ?? 0,
-        lastStartedAt: count?.lastStartedAt ?? null,
-      });
-    };
-    defaults
-      .filter((entry) => entry.origin.type === "local")
-      .sort((a, b) => compare(a.scriptName, b.scriptName))
-      .slice(0, 30)
-      .forEach((entry) => add(entry, "default"));
-    const owners = new Map<string, ScriptEntry[]>();
-    for (const entry of defaults
-      .filter((entry) => entry.origin.type !== "local")
-      .sort((a, b) => compare(a.scriptName, b.scriptName))) {
-      const group = owners.get(entry.origin.owner) ?? [];
-      group.push(entry);
-      owners.set(entry.origin.owner, group);
-    }
-    while (
-      selected.length < 30 &&
-      [...owners.values()].some((group) => group.length)
-    ) {
-      for (const group of owners.values()) {
-        if (selected.length === 30) break;
-        const entry = group.shift();
-        if (entry) add(entry, "default");
-      }
-    }
-    if (defaults.length > 30)
-      warnings.push({
-        source: "catalog",
-        path: null,
-        code: "script_defaults_overflow",
-        message: "Default candidates exceed the Agent-wide 30-item allowance.",
-      });
-    entries
-      .filter(
-        (entry) =>
-          !entry.scriptOpenDefault && (usageFor(entry)?.count ?? 0) > 0,
-      )
-      .sort((a, b) => {
-        const x = usageFor(a)!,
-          y = usageFor(b)!;
-        return (
-          y.count - x.count ||
-          y.lastStartedAt - x.lastStartedAt ||
-          compare(a.scriptName, b.scriptName)
-        );
-      })
-      .slice(0, 20)
-      .forEach((entry) => add(entry, "frequency"));
-    const items: typeof selected = [],
-      omitted: { scriptName: string; path: string }[] = [];
-    let bytes = 0;
-    for (const entry of selected) {
-      const size = Buffer.byteLength(canonicalJson(entry));
-      if (bytes + size > maxBytes)
-        omitted.push({ scriptName: entry.scriptName, path: entry.path });
-      else {
-        items.push(entry);
-        bytes += size;
-      }
-    }
-    if (omitted.length)
-      warnings.push({
-        source: "catalog",
-        path: null,
-        code: "script_display_budget",
-        message:
-          "Some complete script definitions were omitted from the initial display; read their .js headers.",
-      });
+    const { entries, warnings } = discovery ?? this.discover(canUse);
     return {
       total: entries.length,
-      items,
-      complete: warnings.length === 0 && items.length === entries.length,
-      omitted,
-      warnings,
+      items: [...entries].sort((a, b) => compare(a.scriptName, b.scriptName)),
+      complete: warnings.length === 0,
+      omitted: [],
+      warnings: [...warnings],
     };
   }
 }

@@ -512,6 +512,8 @@ for (const name of ["get", "write"])
     options: axState,
   });
 tab("ax.snapshot", { options: axState });
+tab("tab.semanticSnapshot", { screenshot: bool });
+tab("tab.writeObservation", { screenshot: bool });
 tab(
   "ax.paste",
   {

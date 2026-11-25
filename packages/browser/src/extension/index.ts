@@ -11,6 +11,8 @@ import type {
   MethodDefinition,
 } from "@nexum-hub/sdk";
 import { browserRoutes } from "../client/routes.js";
+import { formatSemanticObservation } from "../client/semantic-observation.js";
+import type { SemanticPageObservation } from "../client/types.js";
 import {
   normalizeBrowserValue,
   validateLocatorDescription,
@@ -291,6 +293,7 @@ async function local(
   runtime: BrowserRuntime,
 ): Promise<unknown> {
   if (pathName === "browsers.list") {
+    service.requireCurrentAssets();
     const allowed = [];
     for (const info of service.list()) {
       try {
@@ -434,7 +437,9 @@ const createExtension: ExtensionFactory = async (host) => {
     const methods: Record<string, MethodDefinition> = {};
     for (const route of browserRoutes) {
       const implemented = remote.get(
-        route.path === "ax.write"
+        route.path === "tab.writeObservation"
+          ? "tab.semanticSnapshot"
+          : route.path === "ax.write"
           ? "ax.get"
           : route.path === "tabs.content" &&
               remote.has("tabs.createTemporary") &&
@@ -776,7 +781,9 @@ const createExtension: ExtensionFactory = async (host) => {
           }
 
           const remoteMethod =
-            pathName === "ax.write"
+            pathName === "tab.writeObservation"
+              ? "tab.semanticSnapshot"
+              : pathName === "ax.write"
               ? "ax.get"
               : pathName === "tab.saveDownload"
                 ? "downloads.path"
@@ -885,6 +892,17 @@ const createExtension: ExtensionFactory = async (host) => {
             );
             return pathName === "downloads.path" ? artifact.path : artifact;
           }
+          if (pathName === "tab.writeObservation" || pathName === "tab.semanticSnapshot") {
+            check(record(value) && record(value.target) && Array.isArray(value.nodes) &&
+              Array.isArray(value.warnings) && typeof value.title === "string" && typeof value.url === "string" &&
+              (input.screenshot === true ? value.screenshot instanceof Uint8Array : value.screenshot === undefined),
+              "PROTOCOL_MISMATCH", "The semantic observation is missing its actual page data or requested screenshot.");
+            if (pathName === "tab.semanticSnapshot") return value;
+            const state = formatSemanticObservation(value as unknown as SemanticPageObservation);
+            if (value.screenshot instanceof Uint8Array)
+              return call.output.result({content:[call.output.text(state),call.output.image({data:value.screenshot,mimeType:"image/jpeg"})]});
+            return call.output.text(state);
+          }
           if (pathName === "ax.write") {
             const mode = input.mode ?? "state";
             if (mode === "state") {
@@ -938,6 +956,7 @@ const createExtension: ExtensionFactory = async (host) => {
       pluginDirectory: installation.build!.directory,
       extensionId: installation.build!.extensionId,
       extensionVersion: installation.build!.extensionVersion,
+      assetRevision: installation.build!.assetRevision,
       methodCount: Object.keys(methods).length,
     });
     return { methods, dispose: () => installation.dispose() };

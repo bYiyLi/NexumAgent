@@ -14,10 +14,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { ExtensionHost } from "@nexum-hub/sdk";
 import { check, identifier, record } from "./protocol.js";
+import { assetRevision, profileSource, revisionSource } from "../../browser-extension/asset-revision.mjs";
 
 export interface PluginBuild {
   extensionId: string;
   extensionVersion: string;
+  assetRevision: string;
   port: number;
   portEnd: number;
   profile: "production" | "development";
@@ -114,6 +116,21 @@ export async function preparePlugin(
       );
       files.push(entry.name);
     }
+    // The expected revision comes from this package's generated profile,
+    // not the browser's stable directory or a dynamically read Worker file.
+    // Verify the exact staged generation before publishing it.
+    const assets = new Map<string, Uint8Array | string>();
+    for (const name of files) {
+      signal.throwIfAborted();
+      assets.set(name, await readFile(path.join(temporary, name)));
+    }
+    const profileCode = profileSource(profile, release.extensionVersion);
+    const generated = assets.get("profile.js");
+    assets.set("profile.js", profileCode);
+    const revision = assetRevision(assets);
+    check(generated && Buffer.from(generated).equals(Buffer.from(profileCode + revisionSource(revision))),
+      "PROTOCOL_MISMATCH",
+      "The generated browser plugin assets do not match their build revision.");
     // Installation information belongs to the same atomically published
     // asset generation. It contains no paths, credentials or browser data.
     await writeFile(
@@ -122,6 +139,7 @@ export async function preparePlugin(
         profile,
         extensionId: build.extensionId,
         extensionVersion: release.extensionVersion,
+        assetRevision: revision,
         files: files.sort(),
       }) + "\n",
       { encoding: "utf8", flag: "wx", mode: 0o600 },
@@ -156,6 +174,7 @@ export async function preparePlugin(
       portEnd: build.portEnd,
       extensionId: build.extensionId,
       extensionVersion: release.extensionVersion,
+      assetRevision: revision,
       directory: destination,
     };
   } finally {

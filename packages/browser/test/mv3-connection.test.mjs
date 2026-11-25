@@ -14,6 +14,7 @@ import {
   packBrowserValue,
   browserFrames,
 } from "../browser-extension/transport.js";
+const assetRevision = "a".repeat(64);
 
 function event() {
   const values = new Set();
@@ -149,6 +150,7 @@ function fixture(
     router,
     profile,
     extensionVersion: "0.1.0",
+    assetRevision,
     pingMs,
     offlineMs,
   });
@@ -163,6 +165,7 @@ function fixture(
     browserSessionId: values.session.nexumBrowserSessionId,
     generation: 1,
     protocolVersion: 1,
+    assetRevision,
     limits: transportLimits,
   });
   const binding = () => ({ v: 1, connectionId: "connection", generation: 1 });
@@ -490,6 +493,7 @@ test("construction stays cold and the exact profile handshake precedes any atomi
   const hello = socket.sent[0];
   assert.equal(hello.type, "hello");
   assert.equal(hello.profile, "development");
+  assert.equal(hello.assetRevision, assetRevision);
   assert.equal(hello.browserProfileId, f.values.local.nexumBrowserProfileId);
   assert.equal(hello.browserSessionId, f.values.session.nexumBrowserSessionId);
   assert.equal(f.snapshots(), 0);
@@ -578,6 +582,7 @@ test("unavailable development ports never trigger production probing", async (t)
         router: f.router,
         profile: "development",
         extensionVersion: "0.1.0",
+        assetRevision,
         url: "ws://127.0.0.1:29040/nexum-browser/v1",
       }),
     { code: "PROFILE_MISMATCH" },
@@ -600,6 +605,7 @@ test("server skips an occupied profile port and rejects an exhausted range", asy
     work,
     extensionId: "a".repeat(32),
     extensionVersion: "0.1.0",
+    assetRevision,
     authorizePort(port) {
       attempted.push(port);
     },
@@ -615,6 +621,7 @@ test("server skips an occupied profile port and rejects an exhausted range", asy
     work,
     extensionId: "a".repeat(32),
     extensionVersion: "0.1.0",
+    assetRevision,
   });
   await assert.rejects(exhausted.start(new AbortController().signal), {
     code: "PORT_IN_USE",
@@ -637,6 +644,22 @@ test("mismatching ready profile closes the channel without dispatching snapshots
   await until(() => socket.readyState === 3);
   assert.equal(socket.code, 4002);
   assert.equal(f.snapshots(), 0);
+});
+
+test("a ready from an old or mismatched Agent cannot publish plugin snapshots",async t=>{
+  for(const revision of [undefined,"c".repeat(64)]){
+    const f=fixture(t);
+    await f.connection.start();
+    await until(()=>f.sockets.length===1);
+    const socket=f.sockets[0];
+    socket.open();
+    socket.message({...f.ready(),assetRevision:revision});
+    await until(()=>socket.readyState===3);
+    assert.equal(f.snapshots(),0);
+    assert.equal(f.connection.state().connected,false);
+    assert.equal(socket.sent.filter(value=>value.type==="tabs"||value.type==="capabilities").length,0);
+    await f.connection.dispose();
+  }
 });
 
 test("duplicate actions reuse their receipt and a same-ID different argument cannot be dispatched", async (t) => {
@@ -716,6 +739,7 @@ test("actual service and MV3 heartbeats retain their connection binding and a la
       profile: "development",
       extensionId,
       extensionVersion: "0.1.0",
+      assetRevision,
     }),
     incoming = [],
     outgoing = [];
@@ -1064,6 +1088,7 @@ test("the entire candidate scan retains a real handshake rejection and obeys bac
   assert.equal(f.connection.state().connected,false);
   assert.equal(f.connection.state().lastFailure,"PLUGIN_VERSION_MISMATCH");
   assert.match(titles.at(-1),/PLUGIN_VERSION_MISMATCH/);
+  assert.match(titles.at(-1),/Reload the extension/);
   assert.doesNotMatch(titles.join(" "),/untrusted endpoint payload/);
   assert.deepEqual(f.sockets.map(s=>Number(new URL(s.url).port)),
     Array.from({length:10},(_,i)=>29030+i));
@@ -1076,4 +1101,34 @@ test("the entire candidate scan retains a real handshake rejection and obeys bac
   await until(()=>f.connection.state().connected);
   assert.equal(f.connection.state().phase,"connected");
   assert.equal(f.connection.state().lastFailure,undefined);
+});
+
+test("attachment reception consumes the original action budget and late streams cannot restart it", async t=>{
+  const f=fixture(t),socket=await online(f);
+  const declare=async(id,budgetMs)=>{
+    const action={...f.action(id,{data:null}),budgetMs};
+    const packed=await packBrowserValue(new Uint8Array([1,2,3]),{
+      actionId:action.actionId,operationId:action.operationId,generation:action.generation});
+    const stream=packed.streams[0];
+    action.attachments=[{streamId:stream.meta.streamId,path:["data"]}];
+    socket.message(action);
+    return {action,stream};
+  };
+  const finish=({stream})=>{
+    socket.message({v:1,type:"binary_start",connectionId:"connection",...stream.meta});
+    for(const frame of browserFrames(stream.meta,stream.bytes)) socket.message(frame.buffer);
+    socket.message({v:1,type:"binary_end",connectionId:"connection",...stream.meta});
+  };
+  const first=await declare("remaining-budget",500);
+  await delay(70);finish(first);
+  await until(()=>socket.sent.some(v=>v.type==="action_result"&&v.actionId===first.action.actionId));
+  const dispatched=f.calls.find(v=>v[0]==="dispatch"&&v[1].actionId===first.action.actionId)[1];
+  assert.ok(dispatched.budgetMs>0&&dispatched.budgetMs<460,JSON.stringify(dispatched));
+  const late=await declare("expired-stream",30);
+  await delay(65);finish(late);
+  await until(()=>socket.sent.some(v=>v.type==="action_result"&&v.actionId===late.action.actionId));
+  const response=socket.sent.find(v=>v.type==="action_result"&&v.actionId===late.action.actionId);
+  assert.equal(response.code,"TIMEOUT");assert.equal(response.dispatched,false);
+  assert.ok(!f.calls.some(v=>v[0]==="dispatch"&&v[1].actionId===late.action.actionId));
+  assert.equal(socket.readyState,1);
 });

@@ -11,7 +11,199 @@ export async function pageCommand(input) {
   ) => {
     if (!value) failure(code, message, reason);
   };
+  // The same serialized resolver is used in the main document and native
+  // child-frame worlds. Open roots extend query scope, never frame scope.
+  const openRoot = (node) => node?.shadowRoot?.mode === "open" ? node.shadowRoot : null;
+  const treeParent = (node) => {
+    if (node?.parentElement) return node.parentElement;
+    const root = node?.getRootNode?.();
+    return root?.mode === "open" && openRoot(root.host) === root ? root.host : null;
+  };
+  const composedParent = (node) => node?.assignedSlot ?? treeParent(node);
+  // Cache only for the duration of this synchronous page command. Slot
+  // redistribution and DOM edits are observed again by the very next command.
+  const renderedCache = new WeakMap();
+  const renderedInTree = (node) => {
+    const pending = [];
+    let result = true;
+    for (let current = node; current; current = composedParent(current)) {
+      if (renderedCache.has(current)) { result = renderedCache.get(current); break; }
+      pending.push(current);
+      if (current.assignedSlot) continue;
+      const parent = current.parentElement;
+      if (openRoot(parent) || (parent?.tagName === "SLOT" && parent.assignedNodes?.().length)) {
+        result = false;
+        break;
+      }
+    }
+    for (const current of pending) renderedCache.set(current, result);
+    return result;
+  };
+  const contains = (ancestor, node) => {
+    for (let current = node; current; current = composedParent(current))
+      if (current === ancestor) return true;
+    return false;
+  };
+  const privateLayer = '[data-nexum-visual-layer="v1"],[data-nexum-visual-icon="v1"]';
+  const ownedCache = new WeakMap();
+  const owned = (node) => {
+    const pending = [];
+    let result = false;
+    for (let current = node; current; current = composedParent(current)) {
+      if (ownedCache.has(current)) { result = ownedCache.get(current); break; }
+      pending.push(current);
+      if (current.closest?.(privateLayer)) { result = true; break; }
+    }
+    for (const current of pending) ownedCache.set(current,result);
+    return result;
+  };
+  const rootAccess = new WeakMap();
+  const accessibleRoot = (node) => {
+    const pending = [];
+    let result = true;
+    for (let current = node; current;) {
+      const root = current.getRootNode?.();
+      if (!root?.host) break;
+      if (rootAccess.has(root)) { result = rootAccess.get(root); break; }
+      pending.push(root);
+      if (root.mode !== "open" || openRoot(root.host) !== root) { result = false; break; }
+      current = root.host;
+    }
+    for (const root of pending) rootAccess.set(root,result);
+    return result;
+  };
+  // One command, one deterministic shadow-including preorder. A SLOT adds
+  // its actual assigned subtree to the current scope. Keep inactive light
+  // and fallback elements available to explicit CSS, but visit each node
+  // only once. No cross-document traversal, fabricated CSS relationships,
+  // DOM mutation or persistent tree index.
+  const treeCache = new WeakMap(), hasOpenBelow = new WeakSet();
+  const tree = (scope) => {
+    const cached = treeCache.get(scope);
+    if (cached) return cached;
+    const roots = [], nodes = [], seen = new Set(), nativeCovered = new Set();
+    const stack = [];
+    const enter = (root) => {
+      roots.push(root);
+      stack.push({native:true,iterator:(root.querySelectorAll?.("*") ?? [])[Symbol.iterator]()});
+    };
+    function* branch(node) {
+      yield node;
+      yield* node.querySelectorAll?.("*") ?? [];
+    }
+    const enterAssignments = (slot) => {
+      if (slot?.tagName !== "SLOT" || !accessibleRoot(slot) || !renderedInTree(slot)) return;
+      const assigned = slot.assignedElements?.() ?? [];
+      for (let i = assigned.length - 1; i >= 0; i--)
+        if (!seen.has(assigned[i])) stack.push({native:false,iterator:branch(assigned[i])});
+    };
+    const noteShadow = (host) => {
+      for (let node = host; node && !hasOpenBelow.has(node); node = treeParent(node)) hasOpenBelow.add(node);
+    };
+    enter(scope);
+    const ownRoot = openRoot(scope);
+    if (ownRoot) { noteShadow(scope); enter(ownRoot); }
+    enterAssignments(scope);
+    while (stack.length) {
+      const entry = stack.at(-1), next = entry.iterator.next();
+      if (next.done) { stack.pop(); continue; }
+      const node = next.value;
+      if (entry.native) nativeCovered.add(node);
+      if (seen.has(node) || owned(node) || !accessibleRoot(node)) continue;
+      seen.add(node);
+      nodes.push(node);
+      const shadow = openRoot(node);
+      if (shadow) { noteShadow(node); enter(shadow); }
+      enterAssignments(node);
+    }
+    // A projected light subtree may live outside the ordinary native CSS
+    // query scope. Query its own actual DOM root, then intersect ONLY those
+    // projected identities. Never let that broader native query escape scope.
+    const projected = new Map();
+    for (const node of nodes) {
+      if (nativeCovered.has(node)) continue;
+      const root = node.getRootNode?.();
+      if (!root?.querySelectorAll) continue;
+      if (!projected.has(root)) projected.set(root,new Set());
+      projected.get(root).add(node);
+    }
+    const value = { roots, projected, nodes, order: new Map(nodes.map((node, index) => [node, index])) };
+    treeCache.set(scope, value);
+    return value;
+  };
+  const elements = (scope) => tree(scope).nodes;
+  const ordered = (scope, values) => {
+    const unique = [...new Set(values)];
+    if (unique.length <= 1) return unique;
+    const order = tree(scope).order;
+    return unique.sort((a,b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity));
+  };
+  const cssCache = new WeakMap();
+  const cssMatches = (root, selector) => {
+    let cache = cssCache.get(root);
+    if (!cache) cssCache.set(root,cache = new Map());
+    if (!cache.has(selector)) cache.set(selector,[...(root.querySelectorAll?.(selector) ?? [])]);
+    return cache.get(selector);
+  };
+  const selectCSS = (scope, selector) => {
+    const {roots,projected} = tree(scope);
+    const matches = roots.flatMap(root => cssMatches(root,selector));
+    for (const [root, allowed] of projected)
+      for (const node of cssMatches(root,selector))
+        if (allowed.has(node)) matches.push(node);
+    return ordered(scope,matches).filter(node => !owned(node) && accessibleRoot(node));
+  };
+  const deepestHit = (root, x, y) => {
+    let node = root.elementFromPoint(x,y);
+    // Never start a shadow-root hit test independently of the actual outer
+    // hit: doing that could see through an overlay covering the whole host.
+    while (openRoot(node)) {
+      const next = openRoot(node).elementFromPoint?.(x,y);
+      if (!next || next === node || !contains(node,next)) break;
+      node = next;
+    }
+    return node;
+  };
+  const hits = (node,x,y) => {
+    const hit = deepestHit(node.ownerDocument,x,y);
+    return hit === node || contains(node,hit) || node.contains?.(hit);
+  };
+  const deepActive = (doc) => {
+    let node = doc.activeElement;
+    while (openRoot(node)?.activeElement) node = openRoot(node).activeElement;
+    return node;
+  };
+  const frameGeometry = (node) => {
+    check(node?.isConnected && accessibleRoot(node), "STALE_REF", "The frame owner was detached.");
+    for (let current = node; current; current = composedParent(current)) {
+      const transform = getComputedStyle(current).transform;
+      if (transform !== "none") {
+        const matrix = new DOMMatrixReadOnly(transform);
+        check(matrix.is2D && Math.abs(matrix.b) <= 0.000001 && Math.abs(matrix.c) <= 0.000001 && matrix.a > 0 && matrix.d > 0,
+          "INVALID_TARGET", "The frame transform is not an axis-aligned positive scale.");
+      }
+    }
+    const r = node.getBoundingClientRect(), style = getComputedStyle(node);
+    const scaleX = r.width / node.offsetWidth, scaleY = r.height / node.offsetHeight;
+    check([scaleX,scaleY].every(Number.isFinite) && scaleX > 0 && scaleY > 0,
+      "INVALID_TARGET", "The frame has no native visible content area.");
+    return {x:r.x+(node.clientLeft+parseFloat(style.paddingLeft || "0"))*scaleX,
+      y:r.y+(node.clientTop+parseFloat(style.paddingTop || "0"))*scaleY,scaleX,scaleY};
+  };
   try {
+    // Native frame traversal calls this exact resolver in the parent's
+    // isolated world. These commands do not initialize or replace refs.
+    if (input.command === "frameOwner") {
+      let found;
+      try { found = selectCSS(document,input.selector); }
+      catch { return "invalid_selector"; }
+      if (found.length !== 1) return found.length ? "element_not_unique" : "element_not_found";
+      if (!["IFRAME","FRAME"].includes(found[0].tagName)) return "frame_wrong_type";
+      return found[0];
+    }
+    if (input.command === "frameGeometry") return {ok:true,value:frameGeometry(this)};
+    if (input.command === "frameHit") return {ok:true,value:!!(this?.isConnected && hits(this,input.x,input.y))};
+    if (input.command === "frameFocus") return {ok:true,value:!!(this?.isConnected && deepActive(this.ownerDocument) === this)};
     const slot = Symbol.for("nexum.browser.document.v1");
     let state = globalThis[slot];
     if (
@@ -52,14 +244,8 @@ export async function pageCommand(input) {
       );
       return value;
     };
-    const owned = (node) =>
-      !!node.closest?.(
-        '[data-nexum-visual-layer="v1"],[data-nexum-visual-icon="v1"]',
-      );
-    const elements = (root) =>
-      [...root.querySelectorAll("*")].filter((node) => !owned(node));
     const visible = (node) => {
-      if (!(node instanceof Element) || !node.isConnected) return false;
+      if (!(node?.nodeType === 1 || node instanceof Element) || !node.isConnected || !accessibleRoot(node) || !renderedInTree(node)) return false;
       const style = getComputedStyle(node),
         rect = node.getBoundingClientRect();
       return (
@@ -71,79 +257,89 @@ export async function pageCommand(input) {
       );
     };
     const enabled = (node) => {
-      // The native pseudo-class includes controls disabled by a fieldset or
-      // optgroup, even when their own `disabled` property remains false.
       if (node.disabled || node.matches?.(":disabled")) return false;
-      for (
-        let current = node;
-        current;
-        current = current.parentElement ?? current.getRootNode?.()?.host ?? null
-      ) {
-        const state = current.getAttribute("aria-disabled")?.toLowerCase();
-        if (state === "true") return false;
-        if (state === "false") return true;
+      let aria;
+      for (let current = node; current; current = composedParent(current)) {
+        if (current.inert) return false;
+        const disabled = current.getAttribute?.("aria-disabled")?.toLowerCase();
+        if (aria === undefined && ["true","false"].includes(disabled)) aria = disabled === "true";
       }
-      return true;
+      return aria !== true;
     };
-    const roleExposed = (node) => {
-      const style = getComputedStyle(node);
-      if (["hidden", "collapse"].includes(style.visibility)) return false;
-      for (let current = node; current; current = current.parentElement) {
-        if (
-          current.getAttribute("aria-hidden")?.toLowerCase() === "true" ||
-          current.inert ||
-          getComputedStyle(current).display === "none"
-        )
-          return false;
+    const exposureCache = new WeakMap();
+    const structuralExposure = (node) => {
+      if (!renderedInTree(node)) return false;
+      const pending = [];
+      let result = true;
+      for (let current = node; current; current = composedParent(current)) {
+        if (exposureCache.has(current)) { result = exposureCache.get(current); break; }
+        pending.push(current);
+        if (current.getAttribute?.("aria-hidden")?.toLowerCase() === "true" || current.inert || getComputedStyle(current).display === "none") { result = false; break; }
       }
-      return true;
+      // Do not cache ancestor visibility:hidden: descendants may override it.
+      for (const current of pending) exposureCache.set(current,result);
+      return result;
     };
-    const role = (node) =>
-      node.getAttribute("role") ||
-      {
-        BUTTON: "button",
-        A: node.hasAttribute("href") ? "link" : "generic",
-        TEXTAREA: "textbox",
-        SELECT: "combobox",
-        IMG: "img",
-        H1: "heading",
-        H2: "heading",
-        H3: "heading",
-        INPUT: ["checkbox", "radio"].includes(node.type)
-          ? node.type
-          : ["button", "submit", "reset"].includes(node.type)
-            ? "button"
-            : "textbox",
-      }[node.tagName] ||
-      "generic";
-    // An implicit label contains the control itself. Its option/value text
-    // must not become part of that control's own locator name.
-    const labelText = (label, control) => {
-      if (!label.childNodes) return label.textContent || "";
-      const pending = [...label.childNodes].reverse(), parts = [];
-      while (pending.length) {
-        const child = pending.pop();
-        if (child === control) continue;
-        if (child.nodeType === 3) parts.push(child.nodeValue || "");
-        else if (child.nodeType === 1 && child.childNodes)
-          for (let i = child.childNodes.length - 1; i >= 0; i--)
-            pending.push(child.childNodes[i]);
+    const roleExposed = (node) => structuralExposure(node) && !["hidden","collapse"].includes(getComputedStyle(node).visibility);
+    const role = (node) => {
+      const explicit = node.getAttribute("role")?.trim().split(/\s+/)[0];
+      if (explicit) return explicit;
+      const tag = node.tagName;
+      if (/^H[1-6]$/.test(tag)) return "heading";
+      if (tag === "INPUT") {
+        if (["checkbox", "radio"].includes(node.type)) return node.type;
+        if (["button", "submit", "reset", "image"].includes(node.type)) return "button";
+        if (node.type === "range") return "slider";
+        if (node.type === "number") return "spinbutton";
+        if (node.type === "search") return node.hasAttribute("list") ? "combobox" : "searchbox";
+        if (node.type === "hidden") return "generic";
+        if (node.hasAttribute("list")) return "combobox";
+        // Preserve the existing password/file locator behavior; use the real
+        // input type/id when the native AX role is not a public Locator role.
+        return "textbox";
       }
-      return parts.join("").replace(/\s+/g, " ").trim();
+      if (tag === "SELECT") return node.multiple || node.size > 1 ? "listbox" : "combobox";
+      if (tag === "TH") return node.getAttribute("scope") === "row" || node.getAttribute("scope") === "rowgroup" ? "rowheader" : "columnheader";
+      return ({
+        BUTTON: "button", A: node.hasAttribute("href") ? "link" : "generic",
+        TEXTAREA: "textbox", IMG: "img", MAIN: "main", NAV: "navigation",
+        ASIDE: "complementary", ARTICLE: "article", DIALOG: "dialog",
+        FORM: "form", FIELDSET: "group", TABLE: "table", TR: "row",
+        TD: "cell", THEAD: "rowgroup", TBODY: "rowgroup", TFOOT: "rowgroup",
+        UL: "list", OL: "list", LI: "listitem", DL: "list", DT: "term",
+        DD: "definition", OPTION: "option", OPTGROUP: "group", PROGRESS: "progressbar",
+        METER: "meter", DETAILS: "group", SUMMARY: "button", P: "paragraph",
+        HR: "separator", OUTPUT: "status", FIGURE: "figure",
+      })[tag] || (node.isContentEditable ? "textbox" : "generic");
     };
-    const name = (node) =>
-      (node.getAttribute("aria-labelledby") || "")
-        .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent?.trim() || "")
-        .filter(Boolean)
-        .join(" ")
-        .trim() ||
-      node.getAttribute("aria-label") ||
-      Array.from(node.labels || [], (label) => labelText(label, node)).filter(Boolean).join(" ") ||
-      node.getAttribute("alt") ||
-      node.innerText?.trim() ||
-      node.textContent?.trim() ||
-      "";
+    // IDREFs are resolved in the target's own tree, not another root that
+    // happens to contain an identically named id. Native labels stay native.
+    const normalizeSpace = (value) => (value || "").replace(/\s+/g," ").trim();
+    const nameCache = new WeakMap();
+    const name = (node) => {
+      if (nameCache.has(node)) return nameCache.get(node);
+      const scope = node.getRootNode?.() ?? node.ownerDocument ?? document;
+      const referencedName = (label) => {
+        if (!label || !accessibleRoot(label) || owned(label)) return "";
+        // A referenced node can carry its own explicit accessible name,
+        // including a self IDREF used with another label. Resolve once, not
+        // recursively following a chain of IDREFs (which can contain cycles).
+        return normalizeSpace(label.getAttribute?.("aria-label")) ||
+          normalizeSpace(label.getAttribute?.("alt")) ||
+          normalizeSpace(textValue(label,label === node ? null : node,false,true)) ||
+          normalizeSpace(label.getAttribute?.("title"));
+      };
+      const labelledBy = [...new Set((node.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean))]
+        .map(id => referencedName(scope.getElementById?.(id))).filter(Boolean).join(" ");
+      const labels = Array.from(node.labels || [], label => normalizeSpace(textValue(label,node,false,true))).filter(Boolean).join(" ");
+      const value = normalizeSpace(labelledBy || node.getAttribute("aria-label") || labels || node.getAttribute("alt") ||
+        (node.tagName === "INPUT" && ["button","submit","reset"].includes(node.type) ? node.value : "") ||
+        (hasComposedContent(node) ? textValue(node,null,true,true) : node.innerText?.trim() || node.textContent?.trim()) ||
+        node.getAttribute("title") || "");
+      nameCache.set(node,value);
+      return value;
+    };
+    const regexCache = new WeakMap();
     const matcher = (value, rule, normalizeText = false) => {
       check(rule && ["text", "regexp"].includes(rule.kind));
       if (rule.kind === "regexp") {
@@ -152,7 +348,10 @@ export async function pageCommand(input) {
             encodeSize(rule.source) <= 1024 &&
             typeof rule.flags === "string",
         );
-        return new RegExp(rule.source, rule.flags).test(value);
+        let regex = regexCache.get(rule);
+        if (!regex) { regex = new RegExp(rule.source,rule.flags); regexCache.set(rule,regex); }
+        regex.lastIndex = 0;
+        return regex.test(value);
       }
       check(typeof rule.value === "string");
       const normalize = (text) =>
@@ -166,29 +365,65 @@ export async function pageCommand(input) {
         ? actual === expected
         : actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
     };
-    const skipText = (node) =>
-      ["SCRIPT", "STYLE", "NOSCRIPT"].includes(node.tagName) ||
-      !!node.ownerDocument?.head?.contains(node);
-    const textValue = (node) => {
-      if (skipText(node)) return "";
-      const buttonValue = (element) =>
-        element.tagName === "INPUT" &&
-        ["button", "submit", "reset"].includes(element.type?.toLowerCase());
-      if (buttonValue(node)) return node.value || "";
-      if (!node.childNodes) return node.textContent || "";
-      const pending = [...node.childNodes].reverse(),
-        parts = [];
+    const skipText = (node) => ["SCRIPT","STYLE","NOSCRIPT"].includes(node.tagName) || !!node.ownerDocument?.head?.contains(node) || owned(node);
+    const childrenForText = (node) => {
+      if (node.tagName === "SLOT") {
+        const assigned = node.assignedNodes?.({flatten:true});
+        if (assigned?.length) return [...assigned];
+      }
+      return [...(openRoot(node)?.childNodes ?? node.childNodes ?? node.children ?? [])];
+    };
+    const hasComposedContent = (node) => !!(openRoot(node) || node.getRootNode?.()?.host || node.assignedSlot || hasOpenBelow.has(node));
+    // Names use layout-aware word boundaries and accessible descendant
+    // labels, unlike raw getByText/hasText regex input. Do not expose internal
+    // closed-root text or change the native textContent return contract.
+    const textValue = (node, exclude = null, visibleOnly = false, forName = false) => {
+      const pending = [node], seen = new Set(), parts = [];
+      const space = Symbol("name-boundary");
       while (pending.length) {
         const child = pending.pop();
-        if (child.nodeType === 3) parts.push(child.nodeValue || "");
-        else if (child.nodeType === 1 && !skipText(child)) {
-          if (buttonValue(child)) parts.push(child.value || "");
-          else
-            for (let index = child.childNodes.length - 1; index >= 0; index--)
-              pending.push(child.childNodes[index]);
+        if (child === space) { parts.push(" "); continue; }
+        if (seen.has(child) || child === exclude) continue;
+        seen.add(child);
+        if (child.nodeType === 3) {
+          const parent = composedParent(child);
+          if (accessibleRoot(child) && !owned(child) && (!visibleOnly || !parent || roleExposed(parent))) parts.push(child.nodeValue || "");
+          continue;
         }
+        if (child.nodeType !== undefined && child.nodeType !== 1) continue;
+        if (skipText(child) || !accessibleRoot(child)) continue;
+        // visibility is inherited but can be restored by a descendant. Only
+        // prune truly absent/inert/aria-hidden branches; a hidden wrapper can
+        // contain visible content that contributes to the accessible name.
+        if (visibleOnly && !structuralExposure(child)) continue;
+        const ownVisible = !visibleOnly || roleExposed(child);
+        if (forName && child !== node && ownVisible) {
+          const explicit = child.getAttribute?.("aria-label");
+          const alt = child.tagName === "IMG" ? child.getAttribute?.("alt") : null;
+          if (explicit || alt) { parts.push(" ",explicit || alt," "); continue; }
+        }
+        if (child.tagName === "INPUT" && ["button","submit","reset"].includes(child.type?.toLowerCase())) { if (ownVisible) parts.push(child.value || ""); continue; }
+        if (!child.childNodes && !openRoot(child)) { if (ownVisible) parts.push(child.textContent || ""); continue; }
+        const boundary = forName && child !== node && (child.tagName === "BR" ||
+          (typeof getComputedStyle === "function" && /^(?:block|flow-root|flex|grid|table|list-item)/.test(getComputedStyle(child).display)));
+        if (boundary) { parts.push(" "); pending.push(space); }
+        const children = childrenForText(child);
+        for (let i = children.length-1; i >= 0; i--) pending.push(children[i]);
       }
       return parts.join("");
+    };
+    // SLOT is transparent to textual matching. The actual assigned element,
+    // or the enclosing control for assigned text nodes, is the useful target.
+    const textChildren = (node) => {
+      const pending = childrenForText(node).reverse(), result = [];
+      while (pending.length) {
+        const child = pending.pop();
+        if (child.tagName === "SLOT") {
+          const assigned = childrenForText(child);
+          for (let i=assigned.length-1;i>=0;i--) pending.push(assigned[i]);
+        } else if (child.nodeType === 1 || child.tagName) result.push(child);
+      }
+      return result;
     };
     const makeRef = (node) => {
       let byLease = state.reverse.get(node);
@@ -219,7 +454,7 @@ export async function pageCommand(input) {
       );
       const node = state.refs.get(ref);
       check(
-        node && node.isConnected,
+        node && node.isConnected && (!node.ownerDocument || node.ownerDocument === root) && accessibleRoot(node) && !owned(node),
         "STALE_REF",
         "The observed element is no longer available.",
       );
@@ -235,7 +470,7 @@ export async function pageCommand(input) {
       switch (ast.kind) {
         case "selector":
           check(typeof ast.selector === "string");
-          result = [...root.querySelectorAll(ast.selector)];
+          result = selectCSS(root, ast.selector);
           break;
         case "role":
           result = elements(root).filter(
@@ -254,15 +489,13 @@ export async function pageCommand(input) {
         case "label":
           result = elements(root).filter(
             (n) =>
-              matcher(name(n), ast.matcher) &&
-              (n.labels?.length ||
-                n.hasAttribute("aria-label") ||
-                n.hasAttribute("aria-labelledby")),
+              (n.labels?.length || n.hasAttribute("aria-label") || n.hasAttribute("aria-labelledby")) &&
+              renderedInTree(n) && matcher(name(n), ast.matcher),
           );
           break;
         case "placeholder":
           result = elements(root).filter((n) =>
-            matcher(n.getAttribute("placeholder") || "", ast.matcher),
+            n.hasAttribute("placeholder") && renderedInTree(n) && matcher(n.getAttribute("placeholder") || "", ast.matcher),
           );
           break;
         case "testId":
@@ -273,10 +506,10 @@ export async function pageCommand(input) {
         case "text":
           result = elements(root).filter(
             (n) =>
-              !skipText(n) &&
+              n.tagName !== "SLOT" && renderedInTree(n) && !skipText(n) &&
               matcher(textValue(n), ast.matcher, true) &&
-              ![...n.children].some(
-                (c) => !skipText(c) && matcher(textValue(c), ast.matcher, true),
+              !textChildren(n).some(
+                (c) => renderedInTree(c) && !skipText(c) && matcher(textValue(c), ast.matcher, true),
               ),
           );
           break;
@@ -289,15 +522,7 @@ export async function pageCommand(input) {
           break;
         }
         case "or":
-          result = [...new Set([...sub(ast.left), ...sub(ast.right)])].sort(
-            (left, right) => {
-              const position = left.compareDocumentPosition(right);
-              if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0;
-              if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-              if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-              return 0;
-            },
-          );
+          result = ordered(root,[...sub(ast.left),...sub(ast.right)]);
           break;
         case "position": {
           const all = sub(ast.query);
@@ -325,19 +550,23 @@ export async function pageCommand(input) {
               (!ast.hasNotText || !matcher(textValue(n), ast.hasNotText, true)),
           );
           break;
-        case "ref":
-          result = [getRef(ast.ref, ast.pageVersion)];
+        case "ref": {
+          const node = getRef(ast.ref, ast.pageVersion);
+          // A fixed reference already validated its original document and
+          // current open-root identity; no whole-document scan is needed.
+          return root === document || tree(root).order.has(node) ? [node] : [];
           break;
+        }
         default:
           failure("INVALID_ARGUMENT", "Unknown locator AST node.");
       }
-      return [...new Set(result)].filter((node) => !owned(node));
+      return ordered(root,result).filter(node => !owned(node) && accessibleRoot(node));
     };
     let root = document;
     const framePath = input.locator?.framePath || input.framePath || [];
     check(Array.isArray(framePath) && framePath.length <= 8);
     for (const selector of framePath) {
-      const frames = [...root.querySelectorAll(selector)];
+      const frames = selectCSS(root,selector);
       check(
         frames.length === 1,
         frames.length > 1 ? "AMBIGUOUS_TARGET" : "INVALID_TARGET",
@@ -389,11 +618,11 @@ export async function pageCommand(input) {
         "The requested position must be inside the current element rectangle.",
       );
       const point = { x: r.x + x, y: r.y + y };
-      const top = node.ownerDocument.elementFromPoint(point.x, point.y);
-      if (pending && !(top === node || node.contains(top)))
+      const hit = hits(node,point.x,point.y);
+      if (pending && !hit)
         return input.reportPendingReason ? { pendingReason: "element_blocked" } : null;
       check(
-        top === node || node.contains(top),
+        hit,
         "INVALID_TARGET",
         "Another element blocks the action target.",
         "element_blocked",
@@ -440,7 +669,7 @@ export async function pageCommand(input) {
             : HTMLTextAreaElement.prototype;
         Object.getOwnPropertyDescriptor(proto, "value").set.call(node, value);
       }
-      node.dispatchEvent(new Event("input", { bubbles: true }));
+      node.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
       node.dispatchEvent(new Event("change", { bubbles: true }));
     };
     let value;
@@ -477,8 +706,7 @@ export async function pageCommand(input) {
             ? getRef(input.expectedRef)
             : null;
           if (expected) {
-            const hit = document.elementFromPoint(input.x, input.y);
-            if (hit !== expected && !expected.contains(hit)) {
+            if (!hits(expected,input.x,input.y)) {
               value = { armed: false, documentToken: state.token };
               break;
             }
@@ -559,12 +787,11 @@ export async function pageCommand(input) {
                 : wanted === "visible"
                   ? found.some(visible)
                   : !found.some(visible);
-        } else if (condition.kind === "text")
-          matched = (
-            document.body?.innerText ??
-            document.documentElement?.textContent ??
-            ""
-          ).includes(condition.value);
+        } else if (condition.kind === "text") {
+          const body = root.body ?? root.documentElement;
+          tree(root);
+          matched = !!body && (hasComposedContent(body) ? textValue(body,null,true) : body.innerText ?? body.textContent ?? "").includes(condition.value);
+        }
         else if (condition.kind === "url")
           matched = location.href === condition.value;
         else if (condition.kind === "navigation")
@@ -589,15 +816,21 @@ export async function pageCommand(input) {
         let node =
           input.locator || input.ref || input.nodeId
             ? unique()
-            : root.elementFromPoint(input.x, input.y);
+            : deepestHit(root,input.x,input.y);
         check(
           node,
           "INVALID_TARGET",
           "There is no current media target at the requested point.",
         );
-        node = node.closest?.("img,video,audio,source") ?? node;
-        if (!["IMG", "VIDEO", "AUDIO", "SOURCE"].includes(node.tagName))
-          node = node.querySelector?.("img,video,audio,source");
+        const media = n => ["IMG","VIDEO","AUDIO","SOURCE"].includes(n?.tagName);
+        let ancestor = node;
+        while (ancestor && !media(ancestor)) ancestor = composedParent(ancestor);
+        if (ancestor) node = ancestor;
+        else {
+          const found = selectCSS(node,"img,video,audio");
+          check(found.length <= 1,"AMBIGUOUS_TARGET","Select one exact media element.","element_not_unique");
+          node = found[0];
+        }
         check(
           node && ["IMG", "VIDEO", "AUDIO", "SOURCE"].includes(node.tagName),
           "INVALID_TARGET",
@@ -741,10 +974,20 @@ export async function pageCommand(input) {
         value = null;
         break;
       }
-      case "focus":
-        unique(true).focus();
-        value = null;
+      case "focus": {
+        const node = unique(true);
+        node.focus();
+        check(deepActive(node.ownerDocument) === node,"INVALID_TARGET","The target did not receive keyboard focus.","element_not_actionable");
+        value = {ref:makeRef(node),documentToken:state.token};
         break;
+      }
+      case "assertFocus": {
+        const node = unique();
+        check(state.token === input.expectedDocumentToken && deepActive(node.ownerDocument) === node && enabled(node),
+          "STALE_REF","The original keyboard target lost focus or changed.");
+        value = true;
+        break;
+      }
       case "selectOption": {
         const node = unique(true);
         check(
@@ -772,7 +1015,7 @@ export async function pageCommand(input) {
         );
         for (const option of node.options)
           option.selected = matches.includes(option);
-        node.dispatchEvent(new Event("input", { bubbles: true }));
+        node.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
         node.dispatchEvent(new Event("change", { bubbles: true }));
         value = matches.map((o) => o.value);
         const actual = [...node.selectedOptions].map((o) => o.value);
@@ -791,7 +1034,7 @@ export async function pageCommand(input) {
           "INVALID_TARGET",
           "The target is not checkable.",
         );
-        value = node.checked;
+        value = input.captureRef ? {checked:node.checked,ref:makeRef(node),documentToken:state.token} : node.checked;
         break;
       }
       case "waitState": {
@@ -808,7 +1051,7 @@ export async function pageCommand(input) {
       }
       case "elementInfo":
       case "elementScreenshot": {
-        const node = root.elementFromPoint(input.x, input.y);
+        const node = deepestHit(root,input.x,input.y);
         if (input.command === "elementScreenshot") {
           check(
             node,

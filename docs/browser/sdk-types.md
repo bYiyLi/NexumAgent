@@ -437,6 +437,36 @@ interface PageSnapshot {
   truncated: boolean;
   artifact?: BrowserArtifact;
 }
+interface PageObservation {
+  tabId: string;
+  title?: string;
+  url?: string;
+  accessibility: string;
+  mode: "full" | "diff";
+}
+interface SemanticDomNode {
+  depth: number;
+  tag: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  attributes?: Readonly<Record<string, string>>;
+  states?: Readonly<Record<string, string | boolean | number>>;
+  frameSelector?: string;
+  locatorSupported?: false;
+}
+interface SemanticPageObservation {
+  target: BrowserTarget & { tabId: string; pageVersion: number };
+  title: string;
+  url: string;
+  readyState: "loading" | "interactive" | "complete" | "unknown";
+  coverage: "complete" | "partial";
+  warnings: readonly string[];
+  nodes: readonly SemanticDomNode[];
+  dialog?: { type: Dialog["type"]; message: string };
+  screenshot?: Uint8Array;
+}
+interface SemanticObservationOptions { screenshot?: boolean; }
 interface ActionResult {
   ok: true;
   operationId: string;

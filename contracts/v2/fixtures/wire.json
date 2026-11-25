@@ -812,22 +812,6 @@
     }
   },
   {
-    "name": "resource listing has no bytes",
-    "contract": "wire.output:agent.resources.list",
-    "valid": true,
-    "value": {
-      "resources": [
-        {
-          "uri": "nexum://agents/agent_a/resources/res_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "name": "image.png",
-          "mimeType": "image/png",
-          "size": 3
-        }
-      ],
-      "nextCursor": null
-    }
-  },
-  {
     "name": "stream HTTP handshake",
     "contract": "wire.stream",
     "valid": true,
@@ -2008,45 +1992,6 @@
     }
   },
   {
-    "name": "resource listing preserves standard metadata",
-    "contract": "wire.output:agent.resources.list",
-    "valid": true,
-    "value": {
-      "resources": [
-        {
-          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
-          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
-          "title": "Display title",
-          "description": "A remote resource",
-          "mimeType": "text/plain",
-          "size": 42,
-          "icons": [
-            {
-              "src": "https://example.com/icon.png",
-              "mimeType": "image/png",
-              "sizes": [
-                "48x48"
-              ],
-              "theme": "dark"
-            }
-          ],
-          "annotations": {
-            "audience": [
-              "user",
-              "assistant"
-            ],
-            "priority": 0.5,
-            "lastModified": "2026-11-14T08:00:00+08:00",
-            "custom": {
-              "expiresAt": "business-value"
-            }
-          }
-        }
-      ],
-      "nextCursor": null
-    }
-  },
-  {
     "name": "annotations standard priority is bounded",
     "contract": "wire.type:Result",
     "valid": false,
@@ -2228,62 +2173,6 @@
     "valid": false
   },
   {
-    "name": "resource listing can use fixed metadata body",
-    "contract": "wire.output:agent.resources.list",
-    "value": {
-      "body": {
-        "streamId": "stream_a",
-        "purpose": "result-meta",
-        "direction": "agent-to-cloud",
-        "expiresAt": "2026-11-14T00:00:00.000Z",
-        "maxBytes": 100,
-        "mimeType": "application/json",
-        "size": 3,
-        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
-    },
-    "valid": true
-  },
-  {
-    "name": "resource list body retains full standard icons",
-    "contract": "wire.body:ResourcesList",
-    "value": {
-      "resources": [
-        {
-          "uri": "nexum://agents/agent_a/mcp/remote_a/resource_a",
-          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
-          "title": "Display title",
-          "description": "A remote resource",
-          "mimeType": "text/plain",
-          "size": 42,
-          "icons": [
-            {
-              "src": "data:image/png;base64,YWJj",
-              "mimeType": "image/png",
-              "sizes": [
-                "48x48"
-              ],
-              "theme": "dark"
-            }
-          ],
-          "annotations": {
-            "audience": [
-              "user",
-              "assistant"
-            ],
-            "priority": 0.5,
-            "lastModified": "2026-11-14T08:00:00+08:00",
-            "custom": {
-              "expiresAt": "business-value"
-            }
-          }
-        }
-      ],
-      "nextCursor": null
-    },
-    "valid": true
-  },
-  {
     "name": "result wrapper keeps Host sidecar outside model body",
     "contract": "wire.type:ResultBody",
     "value": {
@@ -2304,25 +2193,6 @@
       }
     },
     "valid": true
-  },
-  {
-    "name": "resource list wrapper cannot mix inline entries",
-    "contract": "wire.output:agent.resources.list",
-    "value": {
-      "body": {
-        "streamId": "stream_a",
-        "purpose": "result-meta",
-        "direction": "agent-to-cloud",
-        "expiresAt": "2026-11-14T00:00:00.000Z",
-        "maxBytes": 100,
-        "mimeType": "application/json",
-        "size": 3,
-        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "resources": [],
-      "nextCursor": null
-    },
-    "valid": false
   },
   {
     "name": "Run output can deliver fixed model descriptor with independent Host sidecar",

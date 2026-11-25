@@ -2,6 +2,7 @@ import { AgentError, isAgentError, requireCondition } from "../contracts/errors.
 import { decodeGoResult, encodeGoArguments } from "./blob.js";
 import { decodeHostBrands, type HostBrandServices } from "./brands.js";
 import { isPlainRecord } from "../contracts/json.js";
+import type { ResourceReadResolver } from "./resource-read.js";
 import type { ModuleLoader } from "../runtime/modules.js";
 import type { WorkerCompile } from "../runtime/worker-execution.js";
 
@@ -55,6 +56,7 @@ export function bindGoScope(
   call: (method: string, params: unknown, signal: AbortSignal) => Promise<unknown>,
   signal: AbortSignal,
   brands?: HostBrandServices,
+  readResource?: ResourceReadResolver,
 ): GoScopeBindings {
   requireCondition(typeof scope.instanceId === "string" && scope.instanceId.length > 0 &&
     typeof scope.runId === "string" && scope.runId.length > 0 &&
@@ -99,6 +101,15 @@ export function bindGoScope(
             arguments: encoded.arguments, ...(encoded.binaryInputs.length > 0 ? { binaryInputs: encoded.binaryInputs } : {}) }, signal);
           const decoded = await decodeGoResult(result, binaryScope, call, signal);
           requireCondition(isPlainRecord(result), "invalid_sdk_result", "The SDK response is invalid.");
+          // This method's private receipt is not an SDK value. Resolve it in
+          // the trusted Host using its exact Go method identity, never a
+          // guest-supplied output object or arbitrary local resource path.
+          if (method.path.length === 2 && method.path[0] === "runtime" && method.path[1] === "readResource") {
+            requireCondition(readResource && Array.isArray(result.binaryOutputs) && result.binaryOutputs.length === 0 &&
+              (result.brands === undefined || (Array.isArray(result.brands) && result.brands.length === 0)),
+              "resource_read_unavailable", "The registered resource reader is unavailable.");
+            return await readResource(decoded, methodId);
+          }
           return decodeHostBrands(decoded, result.brands ?? [], brands);
         } catch (cause) {
           if (isAgentError(cause) && cause.code === "api_http_error") {

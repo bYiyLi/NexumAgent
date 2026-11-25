@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { crc32, deflateSync } from "node:zlib";
+import { monochromePng } from "./helpers/media-fixtures.mjs";
 import test from "node:test";
 
 // Real local result, artifact, Registry and Resources integrations. Remote reads
@@ -781,7 +782,7 @@ test("Host-only metadata has an independent bounded budget and never enters fall
   );
   const limited = new ResultEncoder(
     f.artifacts,
-    { metaBytes: 1024 },
+    { responseBytes: 1024 },
     undefined,
     f.router,
   );
@@ -798,12 +799,12 @@ test("remote Resources enforce full text/metadata and final encoded response bud
   const f = await fixture(t);
   const uri = f.router.uri(f.source, "file:///remote/" + "long".repeat(200));
   await assert.rejects(
-    f.router.readResource(uri, f.scope(), { textBytes: 256 }),
-    { code: "resource_read_too_large" },
+    f.router.readResource(uri, f.scope(), { responseBytes: 256 }),
+    { code: "mcp_response_too_large" },
   );
   const ordinary = f.router.uri(f.source, "file:///remote/report.txt");
   await assert.rejects(
-    f.router.listResources(f.source, f.scope(), undefined, { textBytes: 100 }),
+    f.router.listResources(f.source, f.scope(), undefined, { responseBytes: 100 }),
     { code: "resource_list_too_large" },
   );
   await assert.rejects(
@@ -816,8 +817,8 @@ test("remote Resources enforce full text/metadata and final encoded response bud
     ],
   }));
   await assert.rejects(
-    f.router.readResource(ordinary, f.scope(), { imageBytes: 1 }),
-    { code: "resource_read_too_large" },
+    f.router.readResource(ordinary, f.scope(), { responseBytes: 1 }),
+    { code: "mcp_response_too_large" },
   );
 });
 
@@ -1012,7 +1013,7 @@ test("fixed image/audio/embedded history survives a closed source while an unres
   assert.equal(f.reads.length, 0);
 });
 
-test("trusted MCP media respects individual, aggregate, final encoded and Host budgets", async (t) => {
+test("trusted MCP media respects the complete encoded response and Host capabilities", async (t) => {
   const f = await fixture(t),
     image = png(),
     audio = wav();
@@ -1020,48 +1021,10 @@ test("trusted MCP media respects individual, aggregate, final encoded and Host b
     { type: "image", data: image.toString("base64"), mimeType: "image/png" },
     { type: "audio", data: audio.toString("base64"), mimeType: "audio/wav" },
   ];
-  let registrations = 0;
-  const original = f.artifacts.register.bind(f.artifacts);
-  t.mock.method(f.artifacts, "register", (...args) => {
-    registrations++;
-    return original(...args);
-  });
-  for (const [index, field, bytes] of [
-    [0, "imageBytes", image],
-    [1, "audioBytes", audio],
-  ]) {
-    const lower = new ResultEncoder(
-      f.artifacts,
-      { [field]: bytes.length - 1 },
-      undefined,
-      f.router,
-    );
-    await assert.rejects(
-      lower.encode(f.wrap({ content: [blocks[index]] }), f.scope()),
-      { code: "invalid_media_encoding" },
-    );
-    assert.equal(registrations, 0);
-  }
-  const exact = new ResultEncoder(
-    f.artifacts,
-    { inlineBytes: image.length + audio.length },
-    undefined,
-    f.router,
-  );
+  const exact = f.encoder;
   const saved = await exact.encode(f.wrap({ content: blocks }), f.scope());
   const response = await exact.render(saved, f.scope(), run);
-  const lower = new ResultEncoder(
-    f.artifacts,
-    { inlineBytes: image.length + audio.length - 1 },
-    undefined,
-    f.router,
-  );
-  await assert.rejects(lower.encode(f.wrap({ content: blocks }), f.scope()), {
-    code: "invalid_media_encoding",
-  });
-  await assert.rejects(lower.render(saved, f.scope(), run), {
-    code: "inline_content_too_large",
-  });
+  assert.deepEqual(saved.content.map(item=>item.type),["image","audio"]);
   const size = Buffer.byteLength(JSON.stringify(response));
   assert.deepEqual(
     await exact.render(saved, f.scope(), run, { maxResponseBytes: size }),
@@ -1129,26 +1092,48 @@ test("transport descriptions preserve remote result slots and isolate Host metad
 });
 
 
-test("V1.1 nested image above inline policy becomes a real readable resource link", async (t) => {
-  const f = await fixture(t, { limits: { imageBytes: 32 } });
+test("V1.1 nested image remains a real inline image with readable resource coordinates", async (t) => {
+  const f = await fixture(t);
   const pngData = png();
   const source = f.output.image({ data: pngData, mimeType: "image/png" });
   const saved = await f.encoder.encode({ screenshot: source }, f.scope());
   assert.equal(saved.content.length, 1);
-  assert.equal(saved.content[0].type, "resource_link");
+  assert.equal(saved.content[0].type, "image");
   assert.equal(saved.resources.length, 1);
   assert.equal(saved.resources[0].path, "/screenshot");
-  assert.equal(saved.resources[0].delivery, "resource_link");
+  assert.equal(saved.resources[0].delivery, "inline");
   assert.equal(saved.resources[0].contentIndex, 0);
   assert.equal(saved.data.screenshot.uri, saved.resources[0].uri);
   assert.equal(saved.data.screenshot.mimeType, "image/png");
   const bytes = await f.artifacts.read(saved.resources[0].uri, f.scope(), { maxBytes: 1024 });
   assert.deepEqual(Buffer.from(bytes.data), pngData);
   const described = await f.encoder.describe(saved, f.scope());
-  assert.equal(described.result.content[0].type, "resource_link");
+  assert.equal(described.result.content[0].type, "image");
   assert.equal(described.result.resources[0].uri, saved.data.screenshot.uri);
   await assert.rejects(
     f.encoder.encode({ screenshot: f.output.image({ data: pngData, mimeType: "image/jpeg" }) }, f.scope()),
     { code: "media_type_mismatch" },
   );
+});
+
+// The production encoder validates at capture and again on historical reads.
+test("48 megapixel image bytes survive native return, explicit media and upstream MCP without rescaling", async (t) => {
+  const f = await fixture(t);
+  const image = monochromePng(8000, 6000);
+  const original = image.toString("base64");
+  const sources = [
+    image,
+    f.output.image({ data: image, mimeType: "image/png" }),
+    f.wrap({ content: [{ type: "image", data: original, mimeType: "image/png" }] }),
+  ];
+  for (const source of sources) {
+    const saved = await f.encoder.encode(source, f.scope());
+    assert.equal(saved.content.length, 1);
+    assert.equal(saved.content[0].type, "image");
+    for (let i = 0; i < 2; i++) {
+      const response = await f.encoder.render(saved, f.scope(), run, { textFallback: false });
+      assert.equal(response.content[0].mimeType, "image/png");
+      assert.equal(response.content[0].data, original);
+    }
+  }
 });

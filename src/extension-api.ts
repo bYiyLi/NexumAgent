@@ -28,7 +28,7 @@ export type {
   TransferListOptions,
 } from "./extensions/transfer.js";
 export type { StateService, StateNamespace, StateValue, StateDeletion } from "./extensions/state.js";
-export type { RuntimeSDK, RestartReceipt } from "./sdk/runtime.js";
+export type { RuntimeSDK, RestartReceipt, ResourceReadOptions, ResourceReadResult } from "./sdk/runtime.js";
 export type { ShSDK, ExecOptions, StartOptions, ProcessSnapshot, ProcessRead, ProcessStop } from "./sdk/sh.js";
 export type { TransferSDK } from "./sdk/transfer.js";
 export type {

@@ -61,7 +61,8 @@ export function keyDescription(input) {
   requireValue(
     [...value].length === 1,
     "INVALID_ARGUMENT",
-    "Use a single character or a supported native key name.",
+    "Use a single character or a supported native key name (for example Backspace, Enter, ArrowLeft, or ControlOrMeta). Key names are case-sensitive.",
+    "invalid_key",
   );
   const code = value.codePointAt(0),
     ascii = value.toUpperCase().charCodeAt(0);

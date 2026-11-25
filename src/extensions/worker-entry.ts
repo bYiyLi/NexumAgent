@@ -1,9 +1,9 @@
-import { parentPort, workerData } from "node:worker_threads";
+import { parentPort, workerData, receiveMessageOnPort, type MessagePort } from "node:worker_threads";
 import { deserialize } from "node:v8";
 import { randomUUID } from "node:crypto";
 import { types } from "node:util";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
-import { safeErrorData } from "../contracts/error-data.js";
+import { safeErrorData, isPublicErrorCode, failureFacts, boundErrorDetails, boundErrorMessage } from "../contracts/error-data.js";
 import { isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import type { JsonObject } from "../contracts/types.js";
@@ -17,7 +17,7 @@ import type {
 
 const port = parentPort;
 if (!port) throw new Error("The extension Worker must have an original Core port.");
-const config = workerData as { entryUrl: string };
+const config = workerData as { entryUrl: string; syncReplyPort: MessagePort };
 const syncBytes = 64 * 1024, syncHeaderBytes = 8;
 const waiting = new Map<string, ReturnType<typeof Promise.withResolvers<unknown>>>();
 const resources = new Map<string, {
@@ -33,6 +33,33 @@ void importAdmission.promise.catch(() => {});
 const outputViews = new WeakMap<object, { id: string; kind: string }>();
 const mcpViews = new WeakMap<object, { id: string; snapshot: Record<string, unknown> }>();
 let initialized: ExtensionInstance | undefined, stopping = false;
+interface WorkerMethod {
+  readonly definition: MethodDefinition;
+  readonly handle: MethodDefinition["handle"];
+  readonly normalize: MethodDefinition["normalize"];
+  readonly contract: {
+    readonly schema: unknown;
+    readonly dialect: MethodDefinition["schemaDialect"];
+    readonly references: MethodDefinition["schemas"];
+  };
+  validateInput?: (value: unknown) => void;
+}
+const methods = new Map<string, WorkerMethod>();
+function registeredMethod(name: string): WorkerMethod {
+  const method = methods.get(name);
+  requireCondition(method, "extension_worker_method_missing",
+    "The requested method is not part of this extension.");
+  return method;
+}
+function validateMethod(method: WorkerMethod, value: unknown): void {
+  // Compile once per instance/method from the declaration that was sent to
+  // Core. Invalid candidate schemas remain a Registry preparation failure;
+  // normalization and invoke both retain their actual validation step.
+  const validate = method.validateInput ??= compileMethodSchema(
+    method.contract.schema, method.contract.dialect, method.contract.references,
+  );
+  validate(value);
+}
 
 const send = (message: object) => port!.postMessage(message);
 function safeComponentCode(cause: unknown): string {
@@ -41,8 +68,7 @@ function safeComponentCode(cause: unknown): string {
     typeof current === "object" && !types.isProxy(current); depth++) {
     const value = Object.getOwnPropertyDescriptor(current, "code");
     if (value && "value" in value &&
-        typeof value.value === "string" &&
-        /^[A-Za-z][A-Za-z0-9_-]{0,95}$/.test(value.value))
+        isPublicErrorCode(value.value))
       return value.value;
     const nested = Object.getOwnPropertyDescriptor(current, "cause");
     current = nested && "value" in nested ? nested.value : null;
@@ -86,7 +112,7 @@ const componentMessages: Readonly<Record<string, string>> = Object.freeze({
   PORT_IN_USE: "No allowed local listener port is available.",
   PROFILE_CONFLICT: "Another active connection owns this browser profile.",
   PROFILE_MISMATCH: "The endpoint belongs to a different profile or extension identity.",
-  PLUGIN_VERSION_MISMATCH: "The installed browser plugin and package versions do not match.",
+  PLUGIN_VERSION_MISMATCH: "The running browser plugin does not match the installed Browser package. Reload the Nexum browser extension and discover it again.",
   QUEUE_FULL: "The current operation capacity is exhausted.",
   STALE_REF: "The observed reference belongs to an earlier target or document.",
   STALE_REGISTRATION: "The observed tool registration is no longer current.",
@@ -101,6 +127,7 @@ const componentMessages: Readonly<Record<string, string>> = Object.freeze({
 const componentReasons: Readonly<Record<string, readonly [string, string]>> = Object.freeze({
   element_not_found: ["INVALID_TARGET", "The locator did not match any current element."],
   element_not_unique: ["AMBIGUOUS_TARGET", "The locator matched multiple current elements."],
+  invalid_key: ["INVALID_ARGUMENT", "Use a single character or a supported case-sensitive native key name, such as Backspace, Enter, ArrowLeft, or ControlOrMeta."],
   element_not_actionable: ["INVALID_TARGET", "The current element is not visible and enabled."],
   element_blocked: ["INVALID_TARGET", "Another element blocks the action target."],
   download_not_owned: ["FILE_UNAVAILABLE", "The original download is not owned by this run target."],
@@ -110,6 +137,7 @@ const componentReasons: Readonly<Record<string, readonly [string, string]>> = Ob
   download_record_missing: ["FILE_UNAVAILABLE", "The original native download record is unavailable."],
   download_interrupted: ["FILE_UNAVAILABLE", "The browser download was interrupted."],
   download_path_invalid: ["FILE_UNAVAILABLE", "The completed browser download has no valid local filename."],
+  download_source_authorization_denied: ["permission_denied", "The owned browser download source was denied by the Agent. Check its current authorization before delivery."],
   source_file_missing: ["FILE_UNAVAILABLE", "The authorized source file is no longer present."],
   tab_closed: ["TARGET_GONE", "The original native browser tab is closed."],
   protected_page: ["PERMISSION_DENIED", "The native browser page is protected or not accessible."],
@@ -166,16 +194,12 @@ function componentError(cause: unknown): JsonObject {
     result.message = componentReasons[reason]![1];
     result.details = { reason };
   }
-  const dispatched = own("dispatched"), effect = own("effect"), retryable = own("retryable");
-  // Only a complete, internally consistent effect report is forwarded.
-  // A dispatched, unconfirmed effect must never authorize blind retry.
-  if (typeof dispatched === "boolean" && typeof retryable === "boolean" &&
-      (effect === "none" || effect === "confirmed" || effect === "unknown") &&
-      (dispatched || effect === "none")) {
-    result.details = { ...(isPlainRecord(result.details) ? result.details : {}), dispatched, effect, retryable: retryable && effect === "none" && !dispatched };
-  }
+  const facts = failureFacts(cause);
+  if (Object.keys(facts).length)
+    result.details = boundErrorDetails({...(isPlainRecord(result.details) ? result.details : {}),...facts})!;
+
   const details = isPlainRecord(result.details) ? result.details : {};
-  const recovery = details.effect === "unknown" ? "verify_effect" : componentRecovery(code, details.reason);
+  const recovery = details.effect === "unknown" || details.effect === "confirmed" || details.dispatched === true ? "verify_effect" : componentRecovery(code, details.reason);
   if (recovery) result.details = { ...details, recovery };
   return result;
 }
@@ -280,11 +304,10 @@ function errorFromCore(problem: unknown): AgentError {
     return new AgentError("extension_worker_call_failed",
       "An external service request failed.");
   return new AgentError(
-    typeof problem.code === "string"
+    isPublicErrorCode(problem.code)
       ? problem.code : "extension_worker_call_failed",
-    typeof problem.message === "string"
-      ? problem.message : "An external service request failed.",
-    isPlainRecord(problem.details) ? problem.details as JsonObject : undefined,
+    boundErrorMessage(problem.message, "An external service request failed."),
+    boundErrorDetails(problem.details,problem),
   );
 }
 
@@ -311,15 +334,23 @@ function rpc(
   const state = Atomics.load(header, 0);
   if (state === 3) return pending.promise;
   waiting.delete(id);
-  if (state !== 1)
-    throw new AgentError("extension_worker_rpc_timeout",
-      "The Core did not acknowledge this SDK call; do not blindly replay it.");
-  const count = Atomics.load(header, 1);
-  requireCondition(count > 0 && count <= syncBytes,
-    "extension_worker_result_invalid", "Invalid Core reply length.");
-  const response = deserialize(
-    Buffer.from(new Uint8Array(buffer, syncHeaderBytes, count)),
-  );
+  let response: unknown;
+  if (state === 4) {
+    const message = receiveMessageOnPort(config.syncReplyPort)?.message;
+    requireCondition(isPlainRecord(message) && message.id === id && isPlainRecord(message.payload),
+      "extension_worker_result_invalid", "The large Core reply has no matching identity.");
+    response = message.payload;
+  } else {
+    if (state === 5)
+      throw new AgentError("extension_worker_result_invalid", "The synchronous Core result is not transferable.");
+    if (state !== 1)
+      throw new AgentError("extension_worker_rpc_timeout",
+        "The Core did not acknowledge this SDK call; do not blindly replay it.");
+    const count = Atomics.load(header, 1);
+    requireCondition(count > 0 && count <= syncBytes,
+      "extension_worker_result_invalid", "Invalid Core reply length.");
+    response = deserialize(Buffer.from(new Uint8Array(buffer, syncHeaderBytes, count)));
+  }
   if (isPlainRecord(response) && response.error)
     throw errorFromCore(response.error);
   return decode((response as { value: unknown }).value);
@@ -500,13 +531,21 @@ async function initialize(payload: Record<string, unknown>) {
       Array.isArray(value.permissions),
     "extension_worker_contract_invalid",
     "Every extension method needs a real handler and declared permissions.");
+    const contract = structuredClone({
+      schema: value.inputSchema,
+      dialect: value.schemaDialect,
+      references: value.schemas,
+    });
+    methods.set(name, {
+      definition: value, handle: value.handle, normalize: value.normalize, contract,
+    });
     declarations.push({
       name, description: value.description,
       ...(value.callStyle === "input-object" ? { callStyle: value.callStyle } : {}),
       permissions: value.permissions, path: value.path,
-      inputSchema: value.inputSchema,
-      ...(value.schemaDialect ? { schemaDialect: value.schemaDialect } : {}),
-      ...(value.schemas ? { schemas: value.schemas } : {}),
+      inputSchema: contract.schema,
+      ...(contract.dialect ? { schemaDialect: contract.dialect } : {}),
+      ...(contract.references ? { schemas: contract.references } : {}),
       ...(value.outputSchema === undefined
         ? {} : { outputSchema: value.outputSchema }),
       ...(value.outputSchemaDialect
@@ -521,10 +560,7 @@ function normalize(payload: Record<string, unknown>): unknown {
   requireCondition(initialized && typeof payload.method === "string",
     "extension_worker_unavailable",
     "The extension is not initialized.");
-  const method = Object.getOwnPropertyDescriptor(
-    initialized.methods, payload.method)?.value as MethodDefinition | undefined;
-  requireCondition(method, "extension_worker_method_missing",
-    "The requested method is not part of this extension.");
+  const method = registeredMethod(payload.method);
   const envelope = payload.input as { __nexumWorkerArgs?: unknown[] };
   requireCondition(isPlainRecord(envelope) &&
     Array.isArray(envelope.__nexumWorkerArgs) &&
@@ -533,15 +569,14 @@ function normalize(payload: Record<string, unknown>): unknown {
   "The Worker must receive the original authorized SDK arguments.");
   const args = envelope.__nexumWorkerArgs;
   const normalized = method.normalize
-    ? method.normalize(Object.freeze([...args]))
+    ? Reflect.apply(method.normalize, method.definition, [Object.freeze([...args])])
     : args.length <= 1 ? (args.length ? args[0] : {}) :
       (() => { throw new AgentError("invalid_arguments",
         "The extension method accepts at most one data argument."); })();
   requireCondition(!(normalized instanceof Promise),
     "invalid_normalizer",
     "An extension normalizer must finish synchronously.");
-  compileMethodSchema(method.inputSchema, method.schemaDialect,
-    method.schemas)(normalized);
+  validateMethod(method, normalized);
   return normalized;
 }
 
@@ -549,17 +584,13 @@ async function invoke(payload: Record<string, unknown>): Promise<unknown> {
   requireCondition(initialized && typeof payload.method === "string",
     "extension_worker_unavailable",
     "The extension is not initialized.");
-  const method = Object.getOwnPropertyDescriptor(
-    initialized.methods, payload.method)?.value as MethodDefinition | undefined;
-  requireCondition(method, "extension_worker_method_missing",
-    "The requested method is not part of this extension.");
+  const method = registeredMethod(payload.method);
   const normalized = payload.input;
-  compileMethodSchema(method.inputSchema, method.schemaDialect,
-    method.schemas)(normalized);
+  validateMethod(method, normalized);
   const id = payload.callId as string;
   try {
     const call = invocation(id, payload);
-    return await method.handle(normalized, call);
+    return await Reflect.apply(method.handle, method.definition, [normalized, call]);
   } finally {
     callControllers.delete(id);
   }
@@ -573,7 +604,7 @@ port.on("message", (data: unknown) => {
   }
   if (data.type === "import-denied") {
     importAdmission.reject(new AgentError(
-      typeof data.code === "string" && /^[A-Za-z_][A-Za-z_0-9-]{0,95}$/.test(data.code)
+      isPublicErrorCode(data.code)
         ? data.code : "extension_package_changed",
       "The Core denied extension factory activation after native import.",
     ));
@@ -616,6 +647,7 @@ port.on("message", (data: unknown) => {
         if (!stopping) {
           await initialized?.dispose?.();
           stopping = true;
+          methods.clear();
         }
       } else throw new AgentError("extension_worker_request_invalid",
         "Unknown Worker lifecycle action.");

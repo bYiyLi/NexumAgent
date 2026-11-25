@@ -18,6 +18,7 @@ import {
 } from "./serialize.js";
 export type * from "./types.js";
 export { browserRoutes } from "./routes.js";
+export { formatSemanticObservation } from "./semantic-observation.js";
 export {
   normalizeBrowserValue,
   validateLocatorDescription,
@@ -1254,6 +1255,14 @@ function makeTab(
         accessibility,
         mode: accessibility.startsWith("AX diff") ? "diff" as const : "full" as const,
       }) satisfies t.PageObservation;
+    },
+    semanticSnapshot: (options?: t.SemanticObservationOptions) => {
+      const o = options === undefined ? {} : dataObject(options, ["screenshot"]);
+      return call<t.SemanticPageObservation>("tab.semanticSnapshot", o);
+    },
+    writeObservation: (options?: t.SemanticObservationOptions) => {
+      const o = options === undefined ? {} : dataObject(options, ["screenshot"]);
+      return call<t.OutputIntent>("tab.writeObservation", o);
     },
     screenshot: (options?: t.ScreenshotOptions) =>
       call<Uint8Array>("tab.screenshot", {

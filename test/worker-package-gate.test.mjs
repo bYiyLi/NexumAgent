@@ -32,3 +32,24 @@ test("approved npm mutation is blocked while a live Run Worker may import its de
   assert.equal(await loader.withPackageChanges(async () => 7), 7,
     "Only the confirmed worker exit releases npm mutation admission");
 });
+
+test("Worker creation reserves package maintenance before asynchronous Host dependency loading", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "nexum-worker-import-gate-"));
+  t.after(() => rm(scratch, {recursive:true,force:true}));
+  await writeFile(path.join(scratch,"package.json"),'{"private":true,"type":"module"}');
+  const loader=await ModuleLoader.create(scratch,"boot_import_gate",{
+    builtins:()=>[],approvedPackages:()=>new Map(),
+  });
+  const abort=new AbortController();
+  const events=[];
+  const preparing=loader.compileIsolated("return 1;",{context:{}},{
+    signal:abort.signal,onDiagnostic:event=>events.push(event),
+  });
+  const failure=assert.rejects(preparing,error=>error===abort.signal.reason || error.code==="run_cancelled");
+  const blocked=assert.rejects(loader.withPackageChanges(async()=>{}),{code:"module_busy"});
+  abort.abort(new Error("cancel before Worker creation"));
+  await blocked;
+  await failure;
+  assert.ok(!events.some(e=>e.stage==="spawn"),"cancelled import must not create a late Worker");
+  assert.equal(await loader.withPackageChanges(async()=>"idle"),"idle");
+});

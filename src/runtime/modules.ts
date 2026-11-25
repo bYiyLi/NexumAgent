@@ -10,9 +10,7 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { canonicalJson } from "../contracts/json.js";
 import { executionGlobals } from "./globals.js";
 import { inspectScriptError, type ScriptDiagnostic } from "./script-diagnostics.js";
-import {
-  compileWorker, type WorkerCompile, type IsolatedExecution,
-} from "./worker-execution.js";
+import type { WorkerCompile, IsolatedExecution } from "./worker-execution.js";
 
 export const defaultBuiltins = Object.freeze([
   "assert",
@@ -622,13 +620,21 @@ export class ModuleLoader {
       --this.#activeWorkers;
     };
     try {
+      // A Run/Registry Worker also imports ModuleLoader for native module
+      // resolution. It must not initialize the Host's Worker creator,
+      // result services or schema compilers just to evaluate a script.
+      const policy = {
+        builtins: [...this.#policy.builtins()],
+        approvedPackages: [...this.#policy.approvedPackages()],
+      };
+      // Reserve the package gate before the first await. The real Host
+      // readiness probe already exercises this same creation path.
+      const { compileWorker } = await import("./worker-execution.js");
+      options.signal?.throwIfAborted();
       return await compileWorker({
         work: this.work,
         code, context, bindings,
-        policy: {
-          builtins: this.#policy.builtins(),
-          approvedPackages: [...this.#policy.approvedPackages()],
-        },
+        policy,
         ...options,
         onDiagnostic: (event) => {
           if (event.stage === "shutdown") release();

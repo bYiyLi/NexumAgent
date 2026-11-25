@@ -10,7 +10,6 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 export interface MediaOptions {
   readonly signal?: AbortSignal;
   readonly maxBytes?: number;
-  readonly maxPixels?: number;
   readonly maxDurationSeconds?: number;
   readonly maxMetadataBytes?: number;
 }
@@ -107,7 +106,7 @@ export async function validateMedia(
   const length = Reflect.apply(viewLength, data, []) as number;
   const span = new Uint8Array(buffer, offset, length);
   const byteLimit =
-    options.maxBytes ?? (kind === "image" ? 10 : 32) * 1024 * 1024;
+    options.maxBytes ?? 128 * 1024 * 1024;
   requireCondition(
     Number.isSafeInteger(byteLimit) &&
       byteLimit > 0 &&
@@ -126,21 +125,17 @@ export async function validateMedia(
     "Inline media exceeds its channel's byte budget.",
     { kind, maxBytes: byteLimit },
   );
-  const maxPixels = options.maxPixels ?? 40_000_000;
   const maxDuration = options.maxDurationSeconds ?? 7200;
   const maxMetadata = options.maxMetadataBytes ?? 1024 * 1024;
   requireCondition(
-    Number.isSafeInteger(maxPixels) &&
-      maxPixels > 0 &&
-      maxPixels <= 1_000_000_000 &&
-      Number.isFinite(maxDuration) &&
+    Number.isFinite(maxDuration) &&
       maxDuration > 0 &&
       maxDuration <= 7 * 86400 &&
       Number.isSafeInteger(maxMetadata) &&
       maxMetadata >= 8192 &&
       maxMetadata <= 16 * 1024 * 1024,
     "invalid_media_options",
-    "Media probes require bounded pixel, duration and metadata limits.",
+    "Media probes require bounded duration and metadata limits.",
   );
   const hint = hintedMime === undefined ? undefined : normalizeMime(hintedMime);
   // Some metadata readers construct DataView over input.buffer without passing
@@ -193,7 +188,8 @@ export async function validateMedia(
         { cause },
       );
     }
-    let totalPixels = 0;
+    // Only metadata is inspected here. The original compressed bytes are
+    // delivered unchanged; actual pixel decoding belongs to the consumer.
     const images = dimensions.images?.length ? dimensions.images : [dimensions];
     requireCondition(
       images.length <= 4096,
@@ -208,19 +204,6 @@ export async function validateMedia(
           image.height > 0,
         "invalid_media_data",
         "The image dimensions must be positive representable integers.",
-      );
-      requireCondition(
-        image.width <= Math.floor(maxPixels / image.height),
-        "media_dimensions_exceeded",
-        "The image exceeds its pixel budget.",
-        { maxPixels },
-      );
-      totalPixels += image.width * image.height;
-      requireCondition(
-        totalPixels <= maxPixels,
-        "media_dimensions_exceeded",
-        "The image's combined dimension entries exceed its pixel budget.",
-        { maxPixels },
       );
     }
     compareHint(hint, mimeType);

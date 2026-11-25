@@ -284,3 +284,49 @@ test("known reasons refine errors without passing untrusted diagnostic text or u
       error => {assert.equal(error.details.reason,undefined);assert.doesNotMatch(JSON.stringify(error),/private|token/);return true;});
   } finally {await instance.dispose();}
 });
+
+test("large synchronous extension SDK results preserve their original return contract", {timeout:15000}, async(t)=>{
+ const f=await fixture(t,`
+ export default function(host) {
+   const direct=host.resources.list();
+   if (typeof direct.then === "function" || direct.value.length !== 1024*1024)
+     throw Error("sync SDK return was changed");
+   return {methods:{inspect:{description:"Large reply",permissions:[],schemaDialect:"draft7",
+    inputSchema:{type:"object"},handle(){return {length:direct.value.length,head:direct.value.slice(0,3)}}}}};
+ }`);
+ f.host.resources.list=()=>({value:"xyz"+"a".repeat(1024*1024-3)});
+ const instance=await f.factory(f.host);
+ try {
+  const result=await instance.methods.inspect.handle({__nexumWorkerArgs:[{}]},invocation());
+  assert.deepEqual(JSON.parse(JSON.stringify(result)),{length:1024*1024,head:"xyz"});
+ } finally {await instance.dispose()}
+});
+
+test("remote validator binding rejects a different declaration and a retired Worker identity", {timeout:15000}, async (t) => {
+  const {bindIsolatedHandlerInput}=await import("../dist/extensions/worker-bridge.js");
+  const {compileMethodSchema}=await import("../dist/contracts/validation.js");
+  const f=await fixture(t,`
+    export default function(){
+      return {methods:{inspect:{
+        description:"Original method",permissions:[],schemaDialect:"draft7",
+        inputSchema:{type:"integer"},handle(value){return value}
+      }}};
+    }
+  `);
+  const instance=await f.factory(f.host);
+  const handle=instance.methods.inspect.handle;
+  const original={schema:{type:"integer"},dialect:"draft7"};
+  const altered={schema:{type:"string"},dialect:"draft7"};
+  const validate=compileMethodSchema(original.schema,original.dialect);
+  try {
+    bindIsolatedHandlerInput(handle,original,validate);
+    assert.throws(()=>bindIsolatedHandlerInput(handle,altered,
+      compileMethodSchema(altered.schema,altered.dialect)),{code:"invalid_sdk_schema"});
+    assert.equal(await handle({__nexumWorkerArgs:[7]},invocation()),7);
+    await assert.rejects(handle({__nexumWorkerArgs:["bad"]},invocation()));
+  } finally {
+    await instance.dispose();
+  }
+  await assert.rejects(handle({__nexumWorkerArgs:[7]},invocation()),{code:"extension_worker_unavailable"});
+  assert.throws(()=>bindIsolatedHandlerInput(handle,original,validate),{code:"extension_worker_unavailable"});
+});

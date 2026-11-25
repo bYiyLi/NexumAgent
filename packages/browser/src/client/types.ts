@@ -167,6 +167,7 @@ export type DragOptions = {
 
 export type KeypressOptions = {
   duration?: number;
+  /** Case-sensitive native key names (Backspace, Enter, ArrowLeft, ControlOrMeta), F1–F24, or single characters. Chords are arrays of key names. */
   keys: Array<string>;
 };
 
@@ -198,6 +199,7 @@ export type DomDownloadMediaOptions = {
 };
 
 export type DomKeypressOptions = {
+  /** Same native key names and character rules as KeypressOptions. */
   keys: Array<string>;
 };
 
@@ -479,6 +481,34 @@ export interface PageObservation {
   accessibility: string;
   mode: "full" | "diff";
 }
+/** A compact preorder projection of the current native DOM and AX observations.
+ * depth represents retained ancestor context, not a direct-child CSS path.
+ * No native reference survives the capture or another Run. */
+export interface SemanticDomNode {
+  depth: number;
+  tag: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  attributes?: Readonly<Record<string, string>>;
+  states?: Readonly<Record<string, string | boolean | number>>;
+  frameSelector?: string;
+  /** Boundary marker for an observed closed shadow root, not an open-root locator restriction. */
+  locatorSupported?: false;
+}
+export interface SemanticPageObservation {
+  target: BrowserTarget & { tabId: string; pageVersion: number };
+  title: string;
+  url: string;
+  readyState: "loading" | "interactive" | "complete" | "unknown";
+  /** Coverage of the supported rendered/mounted projection, not the whole site. */
+  coverage: "complete" | "partial";
+  warnings: readonly string[];
+  nodes: readonly SemanticDomNode[];
+  dialog?: { type: Dialog["type"]; message: string };
+  screenshot?: Uint8Array;
+}
+export interface SemanticObservationOptions { screenshot?: boolean; }
 export interface NavigationOptions {
   waitUntil?: WaitUntil;
   timeoutMs?: number;
@@ -1085,6 +1115,8 @@ export interface Tab {
   ): Promise<void>;
   screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;
   observe(options?: { timeoutMs?: number; full?: boolean }): Promise<PageObservation>;
+  semanticSnapshot(options?: SemanticObservationOptions): Promise<SemanticPageObservation>;
+  writeObservation(options?: SemanticObservationOptions): Promise<OutputIntent>;
   title(): Promise<undefined | string>;
   url(): Promise<undefined | string>;
 }

@@ -49,13 +49,15 @@
 6. 对登录/权限/企业策略/系统页面等原生限制准确反馈；不把资料中的旧确认分级、单 origin 或 CDP 白名单重新实施。
 7. Avru 的 Tab/Frame/Playwright 便捷入口、Tabs.new/select、截图 quality/maxEdgePx、clickCount/position、Locator type.delayMs/press.modifiers、DOM NodeId 与 node_id 同型且不和原生 CDP nodeId 混用、导航 options、selector/text/url 等待、Dialog message/快照 dialog、Browser 元数据逐项验证；force 和未知字段拒绝，AXPoint 具名坐标与剪贴板 bytes 按当前合同。
 8. AST 嵌套/跨 frame/跨目标/无效正则/环/上限、all() 固定成员与旧节点不重用；WebMCP 同名工具重新注册不得自动执行新版本，绑定门面保真；CDP 已 detach child 的缓冲事件仍可筛选，send 则明确失效。
+9. Locator 自动查询当前 scope 的开放 Shadow DOM，包括嵌套根与 Slot；CSS 保持各原生根的匹配语义，跨根通过宿主链式定位，Frame 仍显式进入。覆盖同名 ID/名称歧义、组合查询、根内 IDREF 与布局分隔的名称、Slot 限定作用域及动态重分配、失活嵌套 Slot、固定引用失效（含 adopt 到其他文档）、内外层遮挡、可信点击、键盘焦点丢失、表单回读、普通及跨源 Frame 中的开放根；观察不导出闭合根内容或宣称不可验证的定位能力。文件选择和媒体读取使用实际节点、原有授权及原始字节。
+10. 超时、等待与取消：从实际传输剩余时间到 MV3 原生队列、Frame 渲染、轮询和事件回执使用一致截止；测试探测耗尽预算后的真实失败和无负数定时器、过期事件与排队动作拒绝、延迟字节发送/租约确认取消后的收尾和其他任务正常执行。
 
 ## E. 文件、多媒体与 Host 交付
 
 1. 多附件经平台完整准备；文件选择支持本机路径和真实 bytes，大于旧 64 KiB 的文件正常使用；失败/取消不交付半份文件。
 2. 下载先等待再触发，实际完成/存在/可读、目标 no-replace、文件变化、丢失、流中断、权限撤销、大小/hash不符覆盖；未知副作用不再次点击。
 3. 图片让模型实际收到标准 ImageContent；文本、JSON、音频、文件/文档/视频、混合结果按支持 Host 与预算真实交付；bytes 不落结构化结果或历史。
-4. 标准 resources/list/read 返回真实 text/blob；资源归属/profile、有效期、Task 保护和离线错误验证。资源预读不消费用户 Offer；历史回看不重截图/下载/读变化源。
+4. 标准 resources/read 按原 Run 交付的 URI 返回真实 text/blob；resources/list 不暴露 Run 产物；资源归属/profile、有效期、Task 保护和离线错误验证。资源预读不消费用户 Offer；历史回看不重截图/下载/读变化源。
 5. 所有数据量/尺寸/时长/编码预算和背压按当前平台与本地协议分别检查；超限/截断明确，不能以小 fixture 或改 MIME 代替媒体支持验收。
 6. 大快照先返回真实本机 artifact，不虚构 resourceUri/nextCursor；显式 output 后才注册真实资源；run 收尾不提前删除待物化结果源。下载跨页面导航仍按原 downloadId 查询，重复同名文件不误匹配。
 7. 文本/多 MIME 剪贴板是真实浏览器原生能力，bytes 不 base64 落盘；权限拒绝不可用时不伪造成功或在 Agent 增加 OS 剪贴板旁路。

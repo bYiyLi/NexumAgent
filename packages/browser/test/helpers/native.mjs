@@ -435,7 +435,7 @@ export async function nativeFixture(t, options = {}) {
       script,
       input: {
         ...input,
-        ...(fixtureBrowserId ? { fixtureBrowserId } : {}),
+        ...(fixtureBrowserId && !options.scriptName ? { fixtureBrowserId } : {}),
       },
       waitMs: 0,
       timeoutMs: 60000,

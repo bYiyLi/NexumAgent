@@ -755,12 +755,7 @@ export function mcpLogSnapshot(value: unknown): JsonObject | null {
 }
 
 export interface McpResourceLimits {
-  readonly textBytes?: number;
-  readonly imageBytes?: number;
-  readonly audioBytes?: number;
-  readonly inlineBytes?: number;
   readonly responseBytes?: number;
-  readonly metaBytes?: number;
 }
 export class McpResultResources {
   readonly agentId: string;
@@ -929,58 +924,11 @@ export class McpResultResources {
     const raw = await reader.readResource(routed.uri, authority);
     const wrapped = wrapMcpResourceResult(raw, routed.source),
       info = mcpResult(wrapped)!;
-    const maxText = limits.textBytes ?? 65536,
-      maxInline = limits.inlineBytes ?? 64 * 1024 * 1024,
-      maximum = limits.responseBytes ?? maximumProtocolBytes;
-    let textBytes = 0,
-      binaryBytes = 0;
-    const contents = (info.model.contents as JsonObject[]).map((item) => {
-      const value: JsonObject = {
-        ...item,
-        uri: this.uri(routed.source, item.uri as string),
-      };
-      if (typeof value.text === "string")
-        textBytes += boundedSize(
-          value.text,
-          maxText,
-          "resource_read_too_large",
-        );
-      else {
-        const blob = value.blob as string;
-        const length = base64Size(blob);
-        const mime =
-          typeof value.mimeType === "string"
-            ? new MIMEType(value.mimeType).essence
-            : "application/octet-stream";
-        const cap = mime.startsWith("image/")
-          ? (limits.imageBytes ?? 10 * 1024 * 1024)
-          : mime.startsWith("audio/")
-            ? (limits.audioBytes ?? 32 * 1024 * 1024)
-            : maxInline;
-        requireCondition(
-          length <= cap,
-          "resource_read_too_large",
-          "Remote resource bytes exceed this response budget; explicitly materialize a download if needed.",
-        );
-        binaryBytes += length;
-      }
-      return value;
-    });
-    requireCondition(
-      textBytes <= maxText && binaryBytes <= maxInline,
-      "resource_read_too_large",
-      "Remote resource contents exceed the aggregate read budget.",
-    );
+    const maximum = Math.min(limits.responseBytes ?? maximumProtocolBytes, maximumProtocolBytes);
+    const contents: JsonObject[] = (info.model.contents as JsonObject[]).map((item) => ({
+      ...item, uri: this.uri(routed.source, item.uri as string),
+    }));
     const response: JsonObject = { ...info.model, contents };
-    boundedSize(
-      {
-        contents: contents.map((item) =>
-          typeof item.blob === "string" ? { ...item, blob: "" } : item,
-        ),
-      },
-      maxText,
-      "resource_read_too_large",
-    );
     // This endpoint returns a complete standard ReadResourceResult to the
     // actual Host. Reattach only the finite resource protocol positions that
     // the model projection separated from ordinary business data.
@@ -990,14 +938,14 @@ export class McpResultResources {
         if (item)
           item._meta = copyMcpJSON(
             slot.meta,
-            limits.metaBytes ?? 16 * 1024 * 1024,
+            maximum,
           );
       }
     }
     applyProtocolMeta(
       response,
       info.meta,
-      limits.metaBytes ?? 16 * 1024 * 1024,
+      maximum,
     );
     requireCondition(
       boundedSize(response, maximum, "mcp_response_too_large") <= maximum,
@@ -1034,16 +982,16 @@ export class McpResultResources {
     requireCondition(
       boundedSize(
         result,
-        limits.textBytes ?? 65536,
+        limits.responseBytes ?? maximumProtocolBytes,
         "resource_list_too_large",
-      ) <= (limits.textBytes ?? 65536),
+      ) <= (limits.responseBytes ?? maximumProtocolBytes),
       "resource_list_too_large",
       "The remote resource directory exceeds its metadata budget.",
     );
     applyProtocolMeta(
       result,
       projected.meta,
-      limits.metaBytes ?? 16 * 1024 * 1024,
+      limits.responseBytes ?? maximumProtocolBytes,
     );
     boundedSize(
       result,

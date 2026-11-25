@@ -27,6 +27,8 @@ return { type: "resource_link", path: file.filename };
 
 对当前 Run 可靠关联、由 Browser 受管保存的完成下载，`download.path()` 和 `tab.saveDownload(id)` 只为确证的单个源文件取得专用读取权限，并将校验后的文件固定到 Run 的受管资源目录。历史下载记录、未关联下载和上传源文件仍遵循普通路径授权；不会扩大整个下载目录的访问范围。
 
+若返回 `permission_denied` 且 `reason` 为 `download_source_authorization_denied`，说明已匹配的受管下载源未通过 Agent 的专用读取授权，不代表网页下载未完成。保留原记录并报告拒绝；不得改用普通文件读取、猜测路径或重新触发下载来绕过拒绝。
+
 当前等待器无法确认下载身份时，`download.path()` 仍返回 `CAPABILITY_NOT_ALLOWED`；可以通过上述列表由 AI 选择文件。浏览器提供文件大小时，等待器路径的实际文件必须与之相符；大小未知时按实际读取结果处理。不会重发原请求。
 
 `tab.downloads()` 对 `data:` 下载省略 URL，因为 URL 本身包含文件内容；完整内容通过文件或资源交付。
@@ -53,7 +55,7 @@ if (file === null) return { status: "unconfirmed",
 return { type: "resource_link", path: file };
 ```
 
-结果层按当前路径授权和大小限制固定实际文件并返回标准 MCP 资源引用。只有收到真实资源引用才能认定文件可供 Host 读取；需要文件正文时使用 Host 支持的资源读取，或按当前 transfer Skill 建立下载通道。通道就绪不代表传输完成。
+结果层按当前路径授权和大小限制固定实际文件并返回标准 MCP 资源引用。只有收到真实资源引用才能认定文件可供 Host 读取；需要文件内容时使用 Host 支持的 resources/read；Host 未暴露该能力或需原始文件下载时，按实际资源 URI 调用已登记的 nexum/resource.read.js（input={uri,mode:"download"} 用于下载），需要新建其他传输通道时选 file-transfer Skill。通道就绪不代表传输完成。
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。
 

@@ -65,7 +65,7 @@ jobs:
       - name: Confirm native page and extension prerequisites
         run: node --experimental-vm-modules --test --test-name-pattern="native capability revisions" packages/browser/test/native-capabilities.acceptance.mjs
       - name: Exercise actual isolated browser scenarios
-        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs packages/browser/test/native-lease-receipt.acceptance.mjs
+        run: node --experimental-vm-modules --test --test-concurrency=1 --test-skip-pattern="native capability revisions" packages/browser/test/native.acceptance.mjs packages/browser/test/native-actions.acceptance.mjs packages/browser/test/native-capabilities.acceptance.mjs packages/browser/test/native-client.acceptance.mjs packages/browser/test/native-visual.acceptance.mjs packages/browser/test/native-lease-receipt.acceptance.mjs packages/browser/test/native-semantic-observation.acceptance.mjs packages/browser/test/native-shadow-locator.acceptance.mjs
       - name: Prepare isolated Linux display tools
         if: runner.os == 'Linux'
         run: |

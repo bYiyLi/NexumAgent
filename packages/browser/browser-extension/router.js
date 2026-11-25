@@ -1,3 +1,4 @@
+import { remainingBudget, requireBudget, narrowerBudget, deadlineTimer, timeoutError } from "./deadline.js";
 import {
   BrowserActionError,
   requireValue,
@@ -8,6 +9,7 @@ import {
   publicUrl,
 } from "./errors.js";
 import { pageCommand } from "./page.js";
+import { observeSemantic } from "./semantic-observation.js";
 import {
   chord,
   keyDescription,
@@ -288,30 +290,25 @@ const mappedOptions = (args, keys, ids = []) => {
     if (result[key] !== undefined) result[key] = nativeId(result[key]);
   return result;
 };
-const sleep = (milliseconds, signal, wakeups) =>
-  new Promise((resolve, reject) => {
-    signal?.throwIfAborted();
+const sleep = (milliseconds, signal, wakeups) => {
+  signal?.throwIfAborted();
+  requireValue(Number.isFinite(milliseconds) && milliseconds >= 0);
+  if (milliseconds === 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
     const deadline = performance.now() + milliseconds;
     const cleanup = () => {
-      clearTimeout(timer);
-      wakeups.delete(wake);
+      timer.clear();
+      wakeups.delete(timer.wake);
       signal?.removeEventListener("abort", cancel);
     };
-    const finish = () => {
-      cleanup();
-      resolve();
-    };
-    const wake = () => {
-      if (performance.now() >= deadline) finish();
-    };
-    const cancel = () => {
-      cleanup();
-      reject(signal.reason);
-    };
-    const timer = setTimeout(finish, milliseconds);
-    wakeups.add(wake);
-    signal?.addEventListener("abort", cancel, { once: true });
+    const finish = () => { cleanup(); resolve(); };
+    const cancel = () => { cleanup(); reject(signal.reason); };
+    const timer = deadlineTimer(deadline,finish,milliseconds);
+    wakeups.add(timer.wake);
+    signal?.addEventListener("abort",cancel,{once:true});
+    if (signal?.aborted) cancel();
   });
+};
 const routes = {};
 function route(method, handle, { needsTab = false, mutating = false } = {}) {
   routes[method] = Object.freeze({ method, handle, needsTab, mutating });
@@ -805,6 +802,7 @@ route("locator.selectOption", pageRoute("selectOption"), {
   mutating: true,
 });
 route("playwright.domSnapshot", pageRoute("domSnapshot"), { needsTab: true });
+route("tab.semanticSnapshot", (ctx, args) => observeSemantic(ctx, args.screenshot === true), { needsTab: true });
 route(
   "dom.getVisibleTree",
   async (ctx, args) => ({
@@ -961,8 +959,7 @@ route(
   async (ctx, args) => {
     requireValue(
       Number.isFinite(args.timeoutMs) &&
-        args.timeoutMs >= 0 &&
-        args.timeoutMs <= ctx.budgetMs,
+        args.timeoutMs >= 0,
     );
     await ctx.router.delay(ctx, args.timeoutMs);
     return null;
@@ -1140,7 +1137,7 @@ async function readyForInput(ctx, framePath = []) {
     framePath,
   });
   if (ready === "loading" || ready === "interactive") {
-    const remaining = ctx.budgetMs - (performance.now() - ctx.started);
+    const remaining = remainingBudget(ctx);
     requireValue(remaining > 0, "TIMEOUT", "The page did not become ready.");
     if (framePath.length)
       await ctx.router.poll(ctx, async () =>
@@ -1247,7 +1244,7 @@ async function click(ctx, args, double = false) {
       x: framePoint?.x ?? p.x,
       y: framePoint?.y ?? p.y,
       button: { left: 0, middle: 1, right: 2 }[args.button ?? "left"],
-      expiresAt: Date.now() + Math.min(3000, ctx.budgetMs),
+      expiresAt: Date.now() + Math.min(3000, requireBudget(ctx)),
       framePath,
       ...(args.frameId ? { expectedFrameId: args.frameId } : {}),
       ...(args.expectedRef ? { expectedRef: args.expectedRef } : {}),
@@ -1303,11 +1300,11 @@ async function click(ctx, args, double = false) {
         break;
       }
       try {
-        const result = await ctx.router.page(ctx, {
-          ...receipt,
-          action: "peek",
-        });
-        if (result.observed >= count) {
+        const result = await ctx.router.raceClickDialog(ctx, originalVersion, () =>
+          ctx.router.page(ctx, { ...receipt, action: "peek" }),
+        );
+        if (result.kind === "dialog") return { dialogOpened: true };
+        if (result.value.observed >= count) {
           observed = true;
           break;
         }
@@ -1325,6 +1322,7 @@ async function click(ctx, args, double = false) {
         // input. The action may still have happened, so never replay it.
         break;
       }
+      if (performance.now() >= expires) break;
       await ctx.router.delay(ctx, Math.min(40, expires - performance.now()));
     }
     if (!observed)
@@ -1335,17 +1333,17 @@ async function click(ctx, args, double = false) {
       );
     // Let the browser process the resulting task/render turn before the next
     // input, without misrepresenting arbitrary asynchronous business work.
-    const remaining = ctx.budgetMs - (performance.now() - ctx.started);
+    const remaining = remainingBudget(ctx);
     if (remaining > 120) await ctx.router.delay(ctx, 120);
   } finally {
     // A modal blocks page evaluation. The page receipt has its own bounded
     // expiry; never wait on script execution behind the modal to finish click.
     if (receipt && !openedDialog())
-      await ctx.router
-        .page(ctx, { ...receipt, action: "drop" })
-        .catch(() => {});
+      await ctx.router.raceClickDialog(ctx, originalVersion, () =>
+        ctx.router.page(ctx, { ...receipt, action: "drop" }),
+      ).catch(() => {});
   }
-  return null;
+  return openedDialog() ? { dialogOpened: true } : null;
 }
 route("cua.click", (ctx, args) => click(ctx, options(args)), {
   needsTab: true,
@@ -1436,10 +1434,22 @@ route(
   },
   { needsTab: true, mutating: true },
 );
+// Keep keyboard input bound to the exact focused node, not a re-query of
+// the original selector that might now match a replacement input.
+async function focusLocator(ctx,args) {
+  await ctx.router.attach(ctx);
+  const receipt = await ctx.router.page(ctx,{...args,command:"focus"});
+  return async () => {
+    ctx.signal?.throwIfAborted();
+    await ctx.router.page(ctx,{command:"assertFocus",ref:receipt.ref,expectedDocumentToken:receipt.documentToken,
+      framePath:args.locator?.framePath ?? args.framePath ?? [],expectedFrameId:receipt.frameId});
+  };
+}
 route(
   "locator.press",
   async (ctx, args) => {
-    await ctx.router.page(ctx, { ...args, command: "focus" });
+    const verifyFocus = await focusLocator(ctx,args);
+    await verifyFocus();
     await pressKeys(ctx, chord(args.value, options(args).modifiers));
     return null;
   },
@@ -1452,8 +1462,9 @@ for (const method of ["locator.type", "locator.pressSequentially"])
       stringData(args.value);
       const delayMs = options(args).delayMs ?? 0;
       requireValue(Number.isFinite(delayMs) && delayMs >= 0);
-      await ctx.router.page(ctx, { ...args, command: "focus" });
+      const verifyFocus = await focusLocator(ctx,args);
       for (const character of args.value) {
+        await verifyFocus();
         await pressKeys(ctx, [character]);
         if (delayMs > 0) await ctx.router.delay(ctx, delayMs);
       }
@@ -1577,7 +1588,7 @@ async function locatorClick(ctx, args, double = false) {
       waitUntil: expect.waitUntil ?? "load",
       timeoutMs:
         expect.timeoutMs ??
-        Math.min(15000, ctx.budgetMs - (performance.now() - ctx.started)),
+        Math.min(15000, requireBudget(ctx)),
     });
   try {
     const clicked = await click(
@@ -1673,16 +1684,15 @@ for (const [method, desired] of [
     async (ctx, args) => {
       const wanted = desired ?? args.checked;
       requireValue(typeof wanted === "boolean");
-      if (
-        (await ctx.router.page(ctx, { ...args, command: "checked" })) !== wanted
-      )
-        await locatorClick(ctx, args);
-      requireValue(
-        (await ctx.router.page(ctx, { ...args, command: "checked" })) ===
-          wanted,
-        "INVALID_TARGET",
-        "The requested checked state was not observed.",
-      );
+      const observed = await ctx.router.page(ctx,{...args,command:"checked",captureRef:true});
+      if (observed.checked !== wanted) {
+        const exact = {ref:observed.ref,framePath:args.locator?.framePath ?? args.framePath ?? [],expectedFrameId:observed.frameId};
+        // Resolve, actuate and confirm the same original checkable element.
+        // A matching replacement must not be mistaken for its result.
+        await locatorClick(ctx,{...exact,options:args.options});
+        requireValue(await ctx.router.page(ctx,{...exact,command:"checked"}) === wanted,
+          "INVALID_TARGET","The requested checked state was not observed on the original element.");
+      }
       return null;
     },
     { needsTab: true, mutating: true },
@@ -2185,8 +2195,13 @@ export function createBrowserRouter(
   };
   const settleWaiter = (waiter, value, cause) => {
     if (waiter.settled) return;
+    // The timer can be suspended in an inactive Worker. A late event
+    // cannot win merely because its timer callback has not run yet.
+    if (!cause && performance.now() >= waiter.deadlineAt)
+      cause = timeoutError("The browser event was not observed before its deadline.");
     waiter.settled = true;
-    clearTimeout(waiter.timer);
+    waiter.timer?.clear();
+
     if (cause) {
       waiter.error = cause;
       waiter.reject(cause);
@@ -2425,6 +2440,7 @@ export function createBrowserRouter(
     await stopLocalDownloadClick(ctx.lease, tabId);
     if (ctx.signal?.aborted || ctx.lease.ended || ctx.lease.revoked)
       return false;
+    requireBudget(ctx);
     const marker = crypto.randomUUID().replaceAll("-", ""),
       expiresAt = Date.now() + 2000;
     downloadMarks.set(marker, {
@@ -2435,14 +2451,15 @@ export function createBrowserRouter(
     });
     const entry = { marker, expiresAt, cancelled: false },
       clicks = (ctx.lease.localDownloadClicks ??= new Map());
-    entry.pending = Promise.resolve().then(() =>
-      chrome.scripting.executeScript({
+    entry.pending = Promise.resolve().then(() => {
+      requireBudget(ctx);
+      return chrome.scripting.executeScript({
         target: { tabId },
         world: "ISOLATED",
         func: manageLocalDownloadClick,
         args: [{ action: "arm", marker, expiresAt }],
-      }),
-    );
+      });
+    });
     clicks.set(tabId, entry);
     const result = await beforeDownloadClickExpiry(entry.pending, expiresAt);
     if (
@@ -2865,6 +2882,7 @@ export function createBrowserRouter(
     canClaim,
     wake() {
       for (const wake of [...wakeups]) wake();
+      for (const waiter of [...waiters.values()]) if (!waiter.settled) waiter.timer?.wake();
       visual?.wake?.();
     },
     start() {
@@ -3533,6 +3551,7 @@ export function createBrowserRouter(
       return closing;
     },
     async dispatch(input, signal, onDispatch = () => {}) {
+      const startedAt = performance.now();
       requireValue(started && !stopped && binding, "EXTENSION_OFFLINE");
       verifyTarget(input.target);
       const definition = routes[input.method];
@@ -3635,7 +3654,7 @@ export function createBrowserRouter(
                             (managementMethod === "close"
                               ? "remove"
                               : managementMethod);
-                        if (nativeMutation) actionSignal.throwIfAborted();
+                        requireBudget(ctx);
                         onDispatch();
                         if (nativeMutation) {
                           actionSignal.throwIfAborted();
@@ -3664,7 +3683,7 @@ export function createBrowserRouter(
       });
       const ctx = {
         chrome: observedChrome,
-        dispatched: onDispatch,
+        dispatched: () => { requireBudget(ctx); onDispatch(); },
         router,
         lease,
         target: input.target,
@@ -3674,12 +3693,13 @@ export function createBrowserRouter(
         runId: input.runId,
         signal: actionSignal,
         budgetMs: input.budgetMs,
-        started: performance.now(),
+        started: startedAt,
         pendingInfo: { tabId: input.target.tabId, actionId: input.actionId },
       };
+      const nativeNavigation = input.method === "tab.navigate";
       const perform = async () => {
         active(lease);
-        actionSignal.throwIfAborted();
+        requireBudget(ctx);
         let before = {},
           value;
         try {
@@ -3696,15 +3716,21 @@ export function createBrowserRouter(
               "tabs.closeTemporary",
             ].includes(input.method) &&
             !lease.temporaryTabs?.has(nativeId(input.target.tabId ?? "0")) &&
-            !visual &&
+            !nativeNavigation &&
             router.followSessionTab &&
             input.target.tabId !== undefined
-          )
-            await observedChrome.tabs.update(nativeId(input.target.tabId), {
-              active: true,
-            });
+          ) {
+            // Native tab following is part of input preparation, not an
+            // optional visual decoration. A degraded marker must not leave
+            // the actual input target inactive.
+            const id = nativeId(input.target.tabId);
+            if (!(await chrome.tabs.get(id)).active)
+              await observedChrome.tabs.update(id, { active: true });
+            actionSignal.throwIfAborted();
+          }
           if (
             visual &&
+            !nativeNavigation &&
             definition.mutating &&
             input.target.tabId !== undefined &&
             !lease.temporaryTabs?.has(nativeId(input.target.tabId)) &&
@@ -3724,8 +3750,13 @@ export function createBrowserRouter(
           )
             await router.trackVisualTab(ctx);
           actionSignal.throwIfAborted();
+          requireBudget(ctx);
           managementHandling = true;
           value = await definition.handle(ctx, input.args ?? {});
+          // Native navigation is allowed from protected new-tab documents.
+          // Decorate only the resulting document, never gate it on injection
+          // into the previous one.
+          if (visual && nativeNavigation) await router.trackVisualTab(ctx);
         } catch (cause) {
           if (audited)
             appendAudit(
@@ -3741,7 +3772,7 @@ export function createBrowserRouter(
         }
         if (audited)
           appendAudit(ctx, before, value, "confirmed", managementEntry);
-        actionSignal.throwIfAborted();
+        requireBudget(ctx);
         return value;
       };
       const nonBlocking =
@@ -3768,8 +3799,12 @@ export function createBrowserRouter(
           ? `native-mutation:${input.target.browserId}:${input.target.browserSessionId}`
           : input.target.tabId;
       let task;
+      let entered = false;
       if (queueKey && !nonBlocking) {
-        task = (queues.get(queueKey) ?? Promise.resolve()).then(perform);
+        task = (queues.get(queueKey) ?? Promise.resolve()).then(() => {
+          entered = true;
+          return perform();
+        });
         const tail = task.then(
           () => {},
           () => {},
@@ -3786,6 +3821,27 @@ export function createBrowserRouter(
           lease.controllers.delete(input.actionId);
         })
         .catch(() => {});
+      if (queueKey && !nonBlocking && !entered) {
+        const queued = Promise.withResolvers();
+        const timeout = deadlineTimer(ctx.started+ctx.budgetMs,() => {
+          if (!entered) {
+            const error = timeoutError("The browser action expired in its native queue.");
+            stop.abort(error);
+            queued.reject(error);
+          }
+        });
+        const cancel = () => { if (!entered) queued.reject(actionSignal.reason); };
+        wakeups.add(timeout.wake);
+        actionSignal.addEventListener("abort",cancel,{once:true});
+        if (actionSignal.aborted) cancel();
+        try {
+          return await Promise.race([task,queued.promise]);
+        } finally {
+          timeout.clear();
+          wakeups.delete(timeout.wake);
+          actionSignal.removeEventListener("abort",cancel);
+        }
+      }
       return task;
     },
     async resolveTab(ctx, requested) {
@@ -3990,7 +4046,7 @@ export function createBrowserRouter(
       const stages = (ctx.lease.clipboardStages ??= new Map());
       const previous = stages.get(payload.token);
       if (payload.command === "drop" && !previous) return null;
-      if (!cleanup) ctx.signal?.throwIfAborted();
+      if (!cleanup) requireBudget(ctx);
       if (
         previous &&
         !previous.recovered &&
@@ -4022,7 +4078,7 @@ export function createBrowserRouter(
         active(ctx.lease);
         ctx.signal?.throwIfAborted();
       }
-      ctx.dispatched();
+      if (!cleanup) ctx.dispatched();
       const responses = await chrome.scripting.executeScript({
         target: { tabId: nativeId(tabId) },
         world: "ISOLATED",
@@ -4045,11 +4101,11 @@ export function createBrowserRouter(
         stages.delete(payload.token);
         await persist();
       }
-      if (!cleanup) ctx.signal?.throwIfAborted();
+      if (!cleanup) requireBudget(ctx);
       return response.value;
     },
     async page(ctx, payload) {
-      ctx.signal?.throwIfAborted();
+      requireBudget(ctx);
       const input = {
         ...payload,
         pageVersion: version(ctx.target.tabId),
@@ -4068,15 +4124,16 @@ export function createBrowserRouter(
         );
       const framePath = payload.locator?.framePath ?? payload.framePath ?? [];
       if (framePath.length > 0) return framePage(ctx, payload, framePath);
-      ctx.dispatched();
-      const result = await nativeWithStop(ctx.signal, () =>
-        chrome.scripting.executeScript({
+      const result = await nativeWithStop(ctx.signal, () => {
+        requireBudget(ctx);
+        ctx.dispatched();
+        return chrome.scripting.executeScript({
           target: { tabId: nativeId(ctx.target.tabId) },
           world: "ISOLATED",
           func: pageCommand,
           args: [input],
-        }),
-      );
+        });
+      });
       // A main-frame replacement can finish an injection with no result. Only
       // a readiness observation may wait for a browser-confirmed transition;
       // actions and empty results from settled pages must still fail.
@@ -4104,19 +4161,20 @@ export function createBrowserRouter(
     async enableFrameTargets(ctx) {
       const id = nativeId(ctx.target.tabId);
       const pending = (ctx.lease.frameTargets ??= new Map());
-      if (!pending.has(id))
-        pending.set(
-          id,
-          router.send(ctx, "Target.setAutoAttach", {
-            autoAttach: true,
-            waitForDebuggerOnStart: false,
-            flatten: true,
-            filter: [{ type: "iframe", exclude: false }, { exclude: true }],
-          }),
-        );
-      await pending.get(id);
+      requireBudget(ctx);
+      if (!pending.has(id)) {
+        const task = router.send(ctx,"Target.setAutoAttach",{
+          autoAttach:true, waitForDebuggerOnStart:false, flatten:true,
+          filter:[{type:"iframe",exclude:false},{exclude:true}],
+        });
+        pending.set(id,task);
+        void task.catch(() => {if (pending.get(id)===task) pending.delete(id);});
+      }
+      await nativeWithStop(ctx.signal,() => pending.get(id));
+      requireBudget(ctx);
     },
     async frameSend(ctx, frameId, method, params) {
+      requireBudget(ctx);
       const childForFrame = () =>
         [...children.entries()].find(
           ([, child]) =>
@@ -4127,7 +4185,8 @@ export function createBrowserRouter(
         );
       let child = router.frameSource(ctx, frameId);
       try {
-        await child?.[1].ready;
+        if (child) await nativeWithStop(ctx.signal, () => child[1].ready);
+        requireBudget(ctx);
         return await router.send(
           ctx,
           method,
@@ -4153,7 +4212,8 @@ export function createBrowserRouter(
           "The actual child-frame target is no longer attached.",
         );
       }
-      await child[1].ready;
+      await nativeWithStop(ctx.signal, () => child[1].ready);
+      requireBudget(ctx);
       return router.send(ctx, method, params, { sessionId: child[0] });
     },
     noteFrameParent(ctx, child, parent) {
@@ -4248,31 +4308,39 @@ export function createBrowserRouter(
       );
     },
     async attach(ctx) {
+      requireBudget(ctx);
       const id = nativeId(ctx.target.tabId);
       active(ctx.lease);
       if (ctx.lease.attached.has(id)) return;
-      if (ctx.lease.attaching.has(id)) return ctx.lease.attaching.get(id);
+      if (ctx.lease.attaching.has(id)) {
+        await nativeWithStop(ctx.signal,() => ctx.lease.attaching.get(id));
+        requireBudget(ctx);
+        return;
+      }
       const task = (async () => {
         ctx.lease.intents.add(id);
         try {
           await persist();
           active(ctx.lease);
-          ctx.signal?.throwIfAborted();
+          ctx.dispatched();
         } catch (cause) {
           ctx.lease.intents.delete(id);
           await persist();
           throw cause;
         }
-        ctx.dispatched();
         await chrome.debugger.attach({ tabId: id }, "1.3");
         ctx.lease.attached.add(id);
         // Observe Page.javascriptDialogOpening before *any* page action can
         // synchronously open a prompt/confirm. Waiting until getJsDialog is
         // called loses the event while Runtime.evaluate may remain blocked.
         try {
-          await nativeWithStop(ctx.signal, () =>
-            chrome.debugger.sendCommand({ tabId: id }, "Page.enable", {}),
-          );
+          requireBudget(ctx);
+          active(ctx.lease);
+          await nativeWithStop(ctx.signal, () => {
+            requireBudget(ctx);
+            return chrome.debugger.sendCommand({ tabId: id }, "Page.enable", {});
+          });
+          requireBudget(ctx);
         } catch (cause) {
           await releaseControl(ctx.lease, id).catch(() => {});
           throw cause;
@@ -4292,9 +4360,39 @@ export function createBrowserRouter(
         ctx.lease.attaching.delete(id);
       }
     },
+    // The native input acknowledgement may arrive before the opening event.
+    // Receipt observation/cleanup must not wait for a paused renderer either.
+    // Each race belongs to the exact current tab, lease epoch and document.
+    async raceClickDialog(ctx, pageVersion, work) {
+      const tabId = nativeId(ctx.target.tabId);
+      const controlEpoch = ctx.lease.epochs?.get(tabId);
+      const opened = () => {
+        const dialog = router.dialog(ctx);
+        return dialog?.pageVersion === pageVersion;
+      };
+      ctx.signal?.throwIfAborted();
+      if (opened()) return { kind: "dialog" };
+      const pending = Promise.withResolvers();
+      const observer = { lease: ctx.lease, controlEpoch, pageVersion, resolve: pending.resolve };
+      clickDialogWaiters.set(tabId, observer);
+      try {
+        if (opened()) return { kind: "dialog" };
+        const native = Promise.resolve().then(() => {
+          ctx.signal?.throwIfAborted();
+          return work();
+        });
+        return await nativeWithStop(ctx.signal, () => Promise.race([
+          native.then(value => ({ kind: "reply", value })),
+          pending.promise.then(() => ({ kind: "dialog" })),
+        ]));
+      } finally {
+        if (clickDialogWaiters.get(tabId) === observer)
+          clickDialogWaiters.delete(tabId);
+      }
+    },
     async send(ctx, method, params, child, nativePointerStep = false) {
       active(ctx.lease);
-      ctx.signal?.throwIfAborted();
+      requireBudget(ctx);
       // Every high-level mouse move, click, hover and drag shares the same
       // physical trajectory. Raw cdp.send remains exact and unmodified.
       if (
@@ -4329,7 +4427,7 @@ export function createBrowserRouter(
         return result;
       }
       await router.attach(ctx);
-      ctx.signal?.throwIfAborted();
+      requireBudget(ctx);
       if (
         visual &&
         method === "Input.dispatchMouseEvent" &&
@@ -4339,7 +4437,7 @@ export function createBrowserRouter(
         !ctx.lease.temporaryTabs?.has(nativeId(ctx.target.tabId))
       )
         await router.preparePointer(ctx, { x: params.x, y: params.y });
-      ctx.signal?.throwIfAborted();
+      requireBudget(ctx);
       let source = { tabId: nativeId(ctx.target.tabId) };
       if (child) {
         requireValue(!(child.sessionId && child.targetId), "INVALID_ARGUMENT");
@@ -4470,16 +4568,12 @@ export function createBrowserRouter(
       const armedLocalDownload = watchStart
         ? await armLocalDownloadClick(ctx, tabId)
         : false;
-      if (ctx.signal?.aborted || ctx.lease.ended || ctx.lease.revoked) {
-        if (armedLocalDownload) await stopLocalDownloadClick(ctx.lease, tabId);
-        active(ctx.lease);
-        ctx.signal?.throwIfAborted();
-      }
-      ctx.dispatched();
-      if (method === "Network.loadNetworkResource")
-        ctx.pendingInfo.nativeNetworkTabId = tabId;
       let result, deferredRelease = false;
       try {
+        active(ctx.lease);
+        ctx.dispatched();
+        if (method === "Network.loadNetworkResource")
+          ctx.pendingInfo.nativeNetworkTabId = tabId;
         if (ctx.observeClickDialog && !child &&
             method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") {
           // Chromium may deliver the event, open a modal, and hold the CDP
@@ -4487,7 +4581,7 @@ export function createBrowserRouter(
           // lease/document's new dialog as well as the native reply. A raw
           // CDP command keeps its original semantics.
           const pending = Promise.withResolvers();
-          const observer = { lease: ctx.lease, controlEpoch: ctx.target.controlEpoch,
+          const observer = { lease: ctx.lease, controlEpoch: ctx.lease.epochs?.get(tabId),
             pageVersion: version(tabId), resolve: pending.resolve };
           clickDialogWaiters.set(tabId, observer);
           const held = inputMap?.get(token);
@@ -4531,6 +4625,7 @@ export function createBrowserRouter(
           // their actual settlement.
           result =
             method === "Runtime.evaluate" ||
+            (ctx.method !== "cdp.send" && method === "Input.dispatchMouseEvent" && params.type === "mouseMoved") ||
             (method === "Network.loadNetworkResource" && ctx.method === "cdp.send")
               ? await nativeWithStop(ctx.signal, () =>
                   chrome.debugger.sendCommand(source, method, params),
@@ -4596,16 +4691,11 @@ export function createBrowserRouter(
       await persist();
     },
     async delay(ctx, milliseconds) {
-      const remaining = Math.max(
-        0,
-        ctx.budgetMs - (performance.now() - ctx.started),
-      );
-      await sleep(Math.min(milliseconds, remaining), ctx.signal, wakeups);
-      requireValue(
-        milliseconds <= remaining,
-        "TIMEOUT",
-        "The browser action exceeded its deadline.",
-      );
+      requireValue(Number.isFinite(milliseconds) && milliseconds >= 0);
+      const remaining = requireBudget(ctx);
+      await sleep(Math.min(milliseconds,remaining),ctx.signal,wakeups);
+      requireBudget(ctx);
+      requireValue(milliseconds <= remaining,"TIMEOUT","The browser action exceeded its deadline.");
     },
     async axSnapshot(ctx) {
       const pageVersion = version(ctx.target.tabId);
@@ -5013,10 +5103,15 @@ export function createBrowserRouter(
             "CAPABILITY_NOT_ALLOWED",
             "The browser has not exposed this extension's exact isolated-world context.",
           );
-          const expression = `(()=>{const state=globalThis[Symbol.for("nexum.browser.document.v1")];const ref=${JSON.stringify(args.ref)};if(!state||state.document!==document||state.version!==${pageVersion}||!ref.startsWith(${JSON.stringify(`r_${router.referenceLease(ctx)}_${pageVersion}_`)}))throw new Error("STALE_REF");const node=state.refs.get(ref);if(!node||!node.isConnected)throw new Error("STALE_REF");return node})()`;
+          // Re-resolve through the same fixed-node guard after obtaining the
+          // isolated execution context. No second weaker copy of ref checks.
+          const expression = `(${pageCommand.toString()})(${JSON.stringify({
+            command:"nativeNodes",ref:args.ref,pageVersion,leaseId:router.referenceLease(ctx),
+          })})`;
           const resolved = await router.send(ctx, "Runtime.evaluate", {
             expression,
             contextId: contexts[0].id,
+            awaitPromise: true,
             returnByValue: false,
           });
           objectId = resolved.result?.objectId;
@@ -5385,17 +5480,16 @@ export function createBrowserRouter(
     async screenshot(ctx, input) {
       requireValue(!(input.fullPage && input.clip));
       await readyForInput(ctx);
-      const readyBudget = ctx.budgetMs - (performance.now() - ctx.started);
+      const readyBudget = remainingBudget(ctx);
       if (readyBudget > 130) await router.delay(ctx, 120);
-      const quality = input.quality ?? 80,
-        maxEdgePx = input.maxEdgePx ?? 1920;
+      const quality = input.quality ?? 75,
+        maxEdgePx = input.maxEdgePx;
       requireValue(
         Number.isInteger(quality) &&
           quality >= 0 &&
           quality <= 100 &&
-          Number.isInteger(maxEdgePx) &&
-          maxEdgePx > 0 &&
-          maxEdgePx <= 16384,
+          (maxEdgePx === undefined ||
+            (Number.isInteger(maxEdgePx) && maxEdgePx > 0)),
       );
       const metrics = await router.send(ctx, "Page.getLayoutMetrics", {});
       const size = input.fullPage
@@ -5414,28 +5508,23 @@ export function createBrowserRouter(
           clip.width > 0 &&
           clip.height > 0,
       );
-      // Read the native scale in our isolated world: the page's main world can
-      // replace window.devicePixelRatio. CDP clip sizes are CSS pixels, while
-      // the limit and decoded-pixel budget apply to the resulting image.
-      const pixelRatio = await router.page(ctx, {
-        command: "devicePixelRatio",
-      });
-      requireValue(
-        Number.isFinite(pixelRatio) && pixelRatio > 0,
-        "INVALID_TARGET",
-        "The native screenshot pixel scale is unavailable.",
-      );
-      const scale = Math.min(
-        1,
-        maxEdgePx / (Math.max(clip.width, clip.height) * pixelRatio),
-      );
-      requireValue(
-        Math.ceil(clip.width * pixelRatio * scale) *
-          Math.ceil(clip.height * pixelRatio * scale) <=
-          40000000,
-        "OUTPUT_TOO_LARGE",
-        "The screenshot exceeds its decoded-pixel budget.",
-      );
+      // Capture at the native scale unless the caller explicitly requests
+      // downscaling. Shared transport and result delivery own their budgets.
+      let scale = 1;
+      if (maxEdgePx !== undefined) {
+        const pixelRatio = await router.page(ctx, {
+          command: "devicePixelRatio",
+        });
+        requireValue(
+          Number.isFinite(pixelRatio) && pixelRatio > 0,
+          "INVALID_TARGET",
+          "The native screenshot pixel scale is unavailable.",
+        );
+        scale = Math.min(
+          1,
+          maxEdgePx / (Math.max(clip.width, clip.height) * pixelRatio),
+        );
+      }
       const result = await router.send(ctx, "Page.captureScreenshot", {
         format: "jpeg",
         quality,
@@ -5443,17 +5532,11 @@ export function createBrowserRouter(
         clip: { ...clip, scale },
       });
       requireValue(
-        typeof result.data === "string" &&
-          result.data.length <= Math.ceil((10 * 1024 * 1024) / 3) * 4 + 4,
-        "OUTPUT_TOO_LARGE",
-        "The encoded screenshot exceeds its byte budget.",
+        typeof result?.data === "string",
+        "PROTOCOL_MISMATCH",
+        "The browser did not return screenshot bytes.",
       );
       const decoded = atob(result.data);
-      requireValue(
-        decoded.length <= 10 * 1024 * 1024,
-        "OUTPUT_TOO_LARGE",
-        "The image exceeds its inline byte budget.",
-      );
       const data = new Uint8Array(decoded.length);
       for (let i = 0; i < data.length; i++) data[i] = decoded.charCodeAt(i);
       return data;
@@ -5467,41 +5550,21 @@ export function createBrowserRouter(
       };
     },
     async poll(ctx, predicate) {
-      while (performance.now() - ctx.started < ctx.budgetMs) {
-        ctx.signal?.throwIfAborted();
-        if (await predicate()) return;
-        await sleep(
-          Math.min(
-            ctx.pollingMs ?? 50,
-            ctx.budgetMs - (performance.now() - ctx.started),
-          ),
-          ctx.signal,
-          wakeups,
-        );
+      for (;;) {
+        requireBudget(ctx,"The browser condition was not observed before its deadline.");
+        const matched = await predicate();
+        // A native observation may finish after its budget. Do not start
+        // another timer, return late success, or permit another input.
+        const remaining = requireBudget(ctx,"The browser condition was not observed before its deadline.");
+        if (matched) return;
+        await sleep(Math.min(ctx.pollingMs ?? 50,remaining),ctx.signal,wakeups);
       }
-      throw new BrowserActionError(
-        "TIMEOUT",
-        "The browser condition was not observed before its deadline.",
-        { dispatched: true, effect: "unknown" },
-      );
     },
     async waitForCondition(ctx, args) {
       const condition = record(args.condition),
-        remaining = ctx.budgetMs - (performance.now() - ctx.started),
-        timeoutMs = condition.timeoutMs ?? remaining,
         pollingMs = condition.pollingMs ?? 50;
-      requireValue(
-        Number.isFinite(timeoutMs) &&
-          timeoutMs > 0 &&
-          Number.isFinite(pollingMs) &&
-          pollingMs >= 1,
-      );
-      const scoped = {
-        ...ctx,
-        started: performance.now(),
-        budgetMs: Math.min(timeoutMs, remaining),
-        pollingMs,
-      };
+      requireValue(Number.isFinite(pollingMs) && pollingMs >= 1);
+      const scoped = {...narrowerBudget(ctx, condition.timeoutMs),pollingMs};
       const payload = {
         framePath: args.framePath ?? [],
         condition,
@@ -5547,8 +5610,7 @@ export function createBrowserRouter(
           });
         }
       }
-      await router.poll(scoped, async () => {
-        const value = await router.page(scoped, payload);
+      const matches = (value) => {
         if (!value.matched) return false;
         if (
           condition.kind === "navigation" &&
@@ -5563,17 +5625,18 @@ export function createBrowserRouter(
           (state === "domcontentloaded" &&
             ["interactive", "complete"].includes(value.readyState))
         );
-      });
-      return {
-        matched: true,
-        snapshot: {
-          ...router.target(ctx.target.tabId, ctx.lease),
-          ...(await router.page(scoped, {
-            framePath: payload.framePath,
-            command: "snapshot",
-          })),
-        },
       };
+      requireBudget(scoped);
+      if (state === "networkidle" || !matches(first))
+        await router.poll(scoped,async () => matches(await router.page(scoped,payload)));
+      const snapshot = await router.page(scoped, {
+        framePath: payload.framePath,
+        command: "snapshot",
+      });
+      requireBudget(scoped);
+      return { matched: true, snapshot: {
+        ...router.target(ctx.target.tabId,ctx.lease), ...snapshot,
+      }};
     },
     eventCursor(ctx) {
       return JSON.stringify({
@@ -5784,10 +5847,7 @@ export function createBrowserRouter(
       return { released: true, target: target(ctx.target.tabId, ctx.lease) };
     },
     visualContext(ctx) {
-      const remaining = Math.max(
-        1,
-        ctx.budgetMs - (performance.now() - ctx.started),
-      );
+      const remaining = remainingBudget(ctx);
       const result = {
         leaseId: ctx.lease.id,
         runId: ctx.runId,
@@ -5795,7 +5855,9 @@ export function createBrowserRouter(
         target: { ...ctx.target, pageVersion: version(ctx.target.tabId) },
         signal: ctx.signal,
         deadline: Date.now() + remaining,
-        followSessionTab: router.followSessionTab,
+        // The router now owns native activation. Late optional visual work
+        // must not switch the user back to a previous target.
+        followSessionTab: false,
       };
       (ctx.lease.visualContexts ??= new Map()).set(nativeId(ctx.target.tabId), {
         ...result,
@@ -5898,7 +5960,7 @@ export function createBrowserRouter(
           signal: ctx.signal,
           deadline:
             Date.now() +
-            Math.max(1, ctx.budgetMs - (performance.now() - ctx.started)),
+            remainingBudget(ctx),
           name,
         });
     },
@@ -5981,17 +6043,22 @@ export function createBrowserRouter(
       const info = await router.armWaiter(ctx, {
         event: "navigation",
         waitUntil: needsNewDocument ? "commit" : stage,
-        timeoutMs: Math.min(input.timeoutMs ?? ctx.budgetMs, ctx.budgetMs),
+        timeoutMs: Math.min(input.timeoutMs ?? ctx.budgetMs, requireBudget(ctx)),
         // A native navigation may commit at a different URL after a legitimate
         // redirect. Explicit URL waiters still retain their exact URL filter.
       });
       try {
         ctx.signal?.throwIfAborted();
-        if (method === "navigate") await chrome.tabs.update(id, { url });
+        ctx.dispatched();
+        if (method === "navigate")
+          await chrome.tabs.update(id, {
+            url,
+            ...(router.followSessionTab ? { active: true } : {}),
+          });
         else await chrome.tabs[method](id);
         await router.getWaiter(ctx, info.id);
         if (needsNewDocument) {
-          const remaining = Math.min(input.timeoutMs ?? ctx.budgetMs, ctx.budgetMs) - (performance.now() - ctx.started);
+          const remaining = remainingBudget({...ctx,budgetMs:Math.min(input.timeoutMs ?? ctx.budgetMs,ctx.budgetMs)});
           requireValue(remaining > 0, "TIMEOUT", "Navigation exceeded its deadline.");
           await router.waitForLoadState(ctx, { state: "networkidle", timeoutMs: remaining });
         }
@@ -6003,21 +6070,7 @@ export function createBrowserRouter(
     async waitForLoadState(ctx, input) {
       const state = input.state ?? "load";
       requireValue(["load", "domcontentloaded", "networkidle"].includes(state));
-      const timeoutMs = input.timeoutMs ?? ctx.budgetMs;
-      requireValue(Number.isFinite(timeoutMs) && timeoutMs > 0);
-      const scoped = {
-        ...ctx,
-        started: performance.now(),
-        budgetMs: Math.min(
-          timeoutMs,
-          Math.max(0, ctx.budgetMs - (performance.now() - ctx.started)),
-        ),
-      };
-      requireValue(
-        scoped.budgetMs > 0,
-        "TIMEOUT",
-        "The page load deadline already elapsed.",
-      );
+      const scoped = narrowerBudget(ctx,input.timeoutMs);
       if (state !== "networkidle") {
         await router.poll(scoped, async () => {
           const tab = await chrome.tabs.get(nativeId(ctx.target.tabId));
@@ -6052,10 +6105,13 @@ export function createBrowserRouter(
             input.waitUntil ?? "load",
           ),
         );
-      const timeoutMs = input.timeoutMs ?? Math.min(30000, ctx.budgetMs);
+      const requested = input.timeoutMs ?? Math.min(30000, ctx.budgetMs);
       requireValue(
-        Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2147483647,
+        Number.isFinite(requested) && requested > 0 && requested <= 2147483647,
       );
+      const remaining = requireBudget(ctx);
+      const timeoutMs = ctx.method === "waiters.arm" ? requested : Math.min(requested,remaining);
+      const deadlineAt = performance.now() + timeoutMs;
       const tabId = nativeId(ctx.target.tabId);
       requireValue(
         [...waiters.values()].filter(
@@ -6065,7 +6121,7 @@ export function createBrowserRouter(
         "This run target already has 32 active event waiters.",
       );
       for (const [id, previous] of waiters)
-        if (previous.settled && previous.expiresAt < clock())
+        if (previous.settled && previous.deadlineAt <= performance.now())
           waiters.delete(id);
       requireValue(
         waiters.size < 1024,
@@ -6085,23 +6141,14 @@ export function createBrowserRouter(
         url: input.url,
         waitUntil: input.waitUntil ?? "load",
         expiresAt: clock() + timeoutMs,
+        deadlineAt,
         settled: false,
         cancelled: false,
         ready: false,
       };
       waiters.set(waiter.id, waiter);
-      waiter.timer = setTimeout(
-        () =>
-          settleWaiter(
-            waiter,
-            undefined,
-            new BrowserActionError(
-              "TIMEOUT",
-              "The browser event was not observed before its deadline.",
-            ),
-          ),
-        timeoutMs,
-      );
+      waiter.timer = deadlineTimer(deadlineAt, () =>
+        settleWaiter(waiter,undefined,timeoutError("The browser event was not observed before its deadline.")));
       try {
         // webNavigation owns commit/DOMContentLoaded/load receipts. Attaching
         // the debugger to an old protected new-tab document before a native
@@ -6123,7 +6170,8 @@ export function createBrowserRouter(
             enabled: true,
           });
         }
-        ctx.signal?.throwIfAborted();
+        requireBudget(ctx);
+        waiter.timer.wake();
         if (waiter.error) throw waiter.error;
         waiter.ready = true;
         return {
@@ -6152,19 +6200,21 @@ export function createBrowserRouter(
         "WAITER_GONE",
         "The event waiter does not belong to this run and target.",
       );
+      requireBudget(ctx);
+      waiter.timer?.wake();
       if (waiter.value) return waiter.value;
       if (waiter.error) throw waiter.error;
-      ctx.signal?.throwIfAborted();
-      if (!ctx.signal) return waiter.promise;
-      let onAbort;
-      const aborted = new Promise((_, reject) => {
-        onAbort = () => reject(ctx.signal.reason);
-        ctx.signal.addEventListener("abort", onAbort, { once: true });
-      });
+      const expired = Promise.withResolvers();
+      void expired.promise.catch(() => {});
+      const timer = deadlineTimer(ctx.started+ctx.budgetMs,() => expired.reject(timeoutError()));
+      wakeups.add(timer.wake);
       try {
-        return await Promise.race([waiter.promise, aborted]);
+        const value = await nativeWithStop(ctx.signal,() => Promise.race([waiter.promise,expired.promise]));
+        requireBudget(ctx);
+        return value;
       } finally {
-        ctx.signal.removeEventListener("abort", onAbort);
+        timer.clear();
+        wakeups.delete(timer.wake);
       }
     },
     async cancelWaiter(ctx, id) {

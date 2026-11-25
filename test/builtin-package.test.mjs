@@ -11,7 +11,8 @@ const cloudRoot = path.resolve(repository, "..");
 const cloudManifest = path.join(cloudRoot, "package.json");
 const cloudCheckout = path.basename(repository) === "agent" && existsSync(cloudManifest) &&
   JSON.parse(readFileSync(cloudManifest, "utf8")).name === "@nexum/workspace";
-const scripts = ["file.read.js", "file.list.js", "file.search.js", "file.patch.js", "git.status.js", "git.diff.js", "sh.get.js", "sh.list.js", "sh.write.js", "sh.resize.js", "sh.signal.js", "sh.stop.js", "transfer.get.js", "transfer.list.js", "transfer.cancel.js"];
+const scripts = ["file.read.js", "file.list.js", "file.search.js", "file.patch.js", "script.metadata.js", "resource.read.js", "sh.get.js", "sh.list.js", "sh.write.js", "sh.resize.js", "sh.signal.js", "sh.stop.js", "transfer.get.js", "transfer.list.js", "transfer.cancel.js"];
+const retired = ["builtin/git.status.js", "builtin/git.diff.js"];
 const required = [
   ...scripts.map((name) => "builtin/" + name),
   "skills/script-authoring/SKILL.md",
@@ -27,6 +28,7 @@ test("Node Host package includes the versioned builtin and recovery scripts in a
   const [pack] = JSON.parse(result.stdout);
   const entries = new Set(pack.files.map(({ path }) => path));
   for (const name of required) assert.ok(entries.has(name), "not packaged: " + name);
+  for (const name of retired) assert.ok(!entries.has(name), "retired script packaged: " + name);
 });
 
 // The portable archive is built by Cloud, not published by the Agent npm workflow.
@@ -66,4 +68,5 @@ test("Cloud Node Host archive bundles the versioned builtin and recovery scripts
   assert.ok(existsSync(archive));
   const entries = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" });
   for (const name of required) assert.ok(entries.includes("/" + name), "not packaged: " + name);
+  for (const name of retired) assert.ok(!entries.includes("/" + name), "retired script packaged: " + name);
 });

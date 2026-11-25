@@ -1,8 +1,8 @@
 /**
 {
   "scriptName": "sh.get.js",
-  "scriptDesc": "读取原受管进程的状态和增量输出",
-  "scriptWhenUse": "查询现有进程；需要转码时使用已确认的 encoding 并从头读取；普通 Run 已满时仍可使用",
+  "scriptDesc": "读取原受管进程状态和增量输出。输入 {processId,cursor?,maxBytes?,waitMs?,encoding?}，processId 用原 res_ ID；maxBytes 1–1048576，waitMs 0–30000 毫秒，encoding 默认 auto，也可指定编码或 null（原始字节）。返回紧凑状态及顺序日志；原始字节附原生 File 和段范围。按 Next cursor 使用同一 ID、编码续读；改编码时省略 cursor 从保留日志起点重读。",
+  "scriptWhenUse": "观察已有进程或等待输出；普通 Run 满载时仍可使用，不重建进程。",
   "scriptOpenDefault": false,
   "scriptInputSchema": {
     "type": "object",
@@ -112,230 +112,110 @@
     "additionalProperties": false
   },
   "scriptOutputSchema": {
-    "type": "object",
-    "properties": {
-      "processId": {
-        "type": "string"
-      },
-      "status": {
-        "type": "string"
-      },
-      "state": {
-        "type": "string"
-      },
-      "lifetime": {
+    "anyOf": [
+      {
         "type": "string",
-        "enum": [
-          "run",
-          "instance",
-          "background"
-        ]
+        "description": "状态、顺序日志与续读游标的 Markdown 文本。"
       },
-      "originRunId": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "contextId": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "origin": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": [
-              "local",
-              "platform",
-              "extension"
-            ]
-          },
-          "owner": {
-            "type": "string"
-          },
-          "namespace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revision": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "owner",
-          "namespace",
-          "version",
-          "revision"
-        ],
-        "additionalProperties": false
-      },
-      "createdAt": {
-        "type": "integer",
-        "minimum": 0
-      },
-      "closedAt": {
-        "anyOf": [
-          {
-            "type": "integer",
-            "minimum": 0
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "handedOffAt": {
-        "anyOf": [
-          {
-            "type": "integer",
-            "minimum": 0
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "controlAvailable": {
-        "type": "boolean"
-      },
-      "pid": {
-        "anyOf": [
-          {
-            "type": "integer"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "exitCode": {
-        "anyOf": [
-          {
-            "type": "integer"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "signal": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "outputComplete": {
-        "type": "boolean"
-      },
-      "details": {
-        "type": "object"
-      },
-      "output": {
+      {
         "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "stream": {
-              "type": "string",
-              "enum": [
-                "stdout",
-                "stderr",
-                "terminal"
-              ]
-            },
-            "data": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "object",
-                  "description": "Native byte value; delivery conversion is described by the Run result."
-                }
-              ]
-            }
-          },
-          "required": [
-            "stream",
-            "data"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "nextCursor": {
-        "anyOf": [
+        "items": [
           {
-            "type": "string"
+            "type": "string",
+            "description": "同一 Markdown 报告，标明文件中各原始字节段的流、偏移和长度。"
           },
           {
-            "type": "null"
+            "type": "object",
+            "description": "原生 File，按输出顺序连接本页原始字节段，非 JSON 字节数组。"
           }
-        ]
-      },
-      "hasMoreOutput": {
-        "type": "boolean"
-      },
-      "truncated": {
-        "type": "boolean"
+        ],
+        "minItems": 2,
+        "maxItems": 2,
+        "additionalItems": false
       }
-    },
-    "required": [
-      "processId",
-      "status",
-      "state",
-      "lifetime",
-      "originRunId",
-      "contextId",
-      "origin",
-      "createdAt",
-      "closedAt",
-      "handedOffAt",
-      "controlAvailable",
-      "pid",
-      "exitCode",
-      "signal",
-      "outputComplete",
-      "details",
-      "output",
-      "nextCursor",
-      "hasMoreOutput",
-      "truncated"
     ],
-    "additionalProperties": false
+    "description": "文本页返回字符串；含原生字节的页返回 [报告, File]。"
   }
 }
 */
-return await sh.get(context.input);
+const page = await sh.get(context.input);
+
+// Render only the current authoritative SDK page. Never re-decode bytes,
+// restart a process, poll repeatedly, or introduce a second output limit.
+const label = value => /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value)
+  ? JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ch => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"))
+  : value;
+const closed = page.status === "closed" && page.closedAt !== null && page.state !== "unavailable";
+const facts = [label(page.state)];
+if (page.status !== page.state && page.status !== "registered") facts.push("status: " + label(page.status));
+facts.push(label(page.lifetime));
+if (!closed && page.status !== "unavailable" && page.pid !== null) facts.push("PID " + page.pid);
+if (page.exitCode !== null) facts.push("exit code " + page.exitCode);
+if (page.signal !== null) facts.push("signal " + label(page.signal));
+facts.push(page.controlAvailable ? "control available" : "control unavailable");
+const sections = ["Process: " + label(page.processId) + "\n" + facts.join(" · ")];
+const details = page.details;
+const location = [];
+if (typeof details.executable === "string" && details.executable) location.push("Executable: " + label(details.executable));
+if (typeof details.cwd === "string" && details.cwd) location.push("cwd: " + label(details.cwd));
+if (page.originRunId !== null) location.push("Run: " + label(page.originRunId));
+if (typeof details.failure?.code === "string" && details.failure.code) location.push("Error: " + label(details.failure.code));
+if (location.length) sections.push(location.join(" · "));
+const raw = [];
+const filename = page.processId + "-output.bin";
+let rawBytes = 0;
+
+// Merge only adjacent text blocks from the same stream. Preserve the exact
+// text (including split lines, carriage returns and trailing whitespace).
+// A longer code fence prevents log content from closing its own block.
+function fenced(text) {
+  let width = 3;
+  for (const match of text.matchAll(/~+/g)) width = Math.max(width, match[0].length + 1);
+  const fence = "~".repeat(width);
+  return fence + "\n" + text + "\n" + fence;
+}
+let stream = null;
+let pending = [];
+function flush() {
+  if (pending.length) sections.push("### " + stream + "\n\n" + fenced(pending.join("")));
+  stream = null;
+  pending = [];
+}
+for (const block of page.output) {
+  if (typeof block.data === "string") {
+    if (stream !== block.stream) flush();
+    stream = block.stream;
+    pending.push(block.data);
+  } else {
+    flush();
+    const size = block.data.byteLength;
+    if (size) {
+      raw.push(block.data);
+      sections.push("### " + block.stream + "\n\nRaw bytes: " + filename +
+        " (offset " + rawBytes + ", length " + size + " bytes).");
+      rawBytes += size;
+    }
+  }
+}
+flush();
+if (!page.output.length) sections.push("No output on this read.");
+const footer = [
+  closed ? "Process closed." : "Process closure not confirmed.",
+  page.outputComplete ? "Output capture complete." : "Output capture not complete.",
+  page.hasMoreOutput ? "More retained output available." : "No more retained output at this read.",
+];
+if (page.truncated) footer.push("Earlier output was truncated by retention; the full original output is unavailable.");
+if (details.outputEncodingUncertain === true) footer.push("Some output could not be decoded. Use the confirmed encoding or encoding:null without a cursor to re-read the retained output.");
+if (page.nextCursor !== null) {
+  footer.push("Next cursor: " + JSON.stringify(page.nextCursor));
+  if (page.hasMoreOutput || (!closed && page.controlAvailable)) {
+    footer.push("Continue with the same processId and encoding; pass the cursor.");
+  }
+} else if (!closed && page.controlAvailable) {
+  footer.push("Output cursor not ready; query the same processId again.");
+}
+sections.push(footer.join("\n"));
+const report = sections.join("\n\n");
+if (!raw.length) return report;
+const { File } = await import("node:buffer");
+return [report, new File(raw, filename, { type: "application/octet-stream" })];
