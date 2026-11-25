@@ -54,14 +54,24 @@ function fixture(t, authorize = () => {}) {
     pwd = path.join(root, "project");
   mkdirSync(work);
   mkdirSync(pwd);
+  const temp = path.join(work, "tmp", "runs", "run_artifacts_fixture");
+  mkdirSync(temp, { recursive: true });
   const controller = new AbortController(),
     grants = [];
   const call = {
-    context: { runId: "run_artifacts_fixture", pwd },
+    context: { runId: "run_artifacts_fixture", pwd, paths: { temp } },
     signal: controller.signal,
     deadline: Date.now() + 60000,
     authorize(value) {
       grants.push({ ...value });
+      if (value.type === "path" && value.access === "write") {
+        const artifactRoot = path.join(temp, "artifacts");
+        const within = (root) => {
+          const rel = path.relative(root, value.value);
+          return !path.isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + path.sep);
+        };
+        assert.ok(within(artifactRoot) || within(pwd), "write escaped staging or explicit destination");
+      }
       authorize(value);
     },
   };
@@ -195,7 +205,7 @@ test("URL denial precedes file IO and revocation after copying removes undeliver
     (error) => error === forbidden,
   );
   assert.deepEqual(files(first.work), []);
-  assert.equal(existsSync(path.join(first.work, "tmp")), false);
+  assert.equal(existsSync(path.join(first.call.context.paths.temp, "artifacts")), false);
   let count = 0;
   const later = fixture(t, (grant) => {
     if (grant.type === "url" && ++count === 2) throw forbidden;
@@ -406,7 +416,7 @@ test("bundle preflight rejects duplicate identities/getters before publication; 
   assert.deepEqual(files(later.work), []);
   assert.equal(
     readdirSync(
-      path.join(later.work, "tmp", "browser", later.call.context.runId),
+      path.join(later.work, "tmp", "runs", later.call.context.runId, "artifacts"),
     ).some((name) => name.endsWith("-assets")),
     false,
   );

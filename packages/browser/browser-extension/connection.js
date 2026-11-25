@@ -21,6 +21,11 @@ const wait = (milliseconds) =>
 const sameBinding = (value, ready) =>
   value.connectionId === ready.connectionId &&
   value.generation === ready.generation;
+const rejectionCodes = new Set(["PROFILE_MISMATCH", "PLUGIN_VERSION_MISMATCH",
+  "PROTOCOL_MISMATCH", "PROFILE_CONFLICT"]);
+const connectionFailure = (cause, fallback = "PROTOCOL_MISMATCH") =>
+  cause instanceof BrowserActionError && rejectionCodes.has(cause.code) ? cause.code : fallback;
+
 /** Cold MV3 connection. Import and construction perform no storage, timer or socket I/O. */
 export function createExtensionConnection({
   chrome,
@@ -61,6 +66,10 @@ export function createExtensionConnection({
     preferredUrl,
     socketUrl,
     scanIndex = 0,
+    phase = "offline",
+    scanFailure,
+    lastFailure,
+    probeFailure,
     reconnectAttempt = 0,
     attemptSequence = 0,
     lastMessage = 0,
@@ -83,6 +92,8 @@ export function createExtensionConnection({
   };
   const state = () => ({
     profile,
+    phase,
+    ...(lastFailure ? { lastFailure } : {}),
     connected: !!ready && socket?.readyState === Socket.OPEN,
     ...(ready
       ? {
@@ -92,15 +103,16 @@ export function createExtensionConnection({
         }
       : {}),
   });
-  const status = (online) => {
+  const status = (next) => {
+    phase = next;
     void Promise.resolve(
-      chrome.action?.setBadgeText?.({ text: online ? "" : "OFF" }),
+      chrome.action?.setBadgeText?.({ text: phase === "connected" ? "" : phase === "connecting" ? "…" : "OFF" }),
     ).catch(() => {});
     void Promise.resolve(
       chrome.action?.setTitle?.({
-        title: online
+        title: phase === "connected"
           ? `Nexum browser (${profile})`
-          : `Nexum browser (${profile}) — offline`,
+          : `Nexum browser (${profile}) — ${phase}${phase === "offline" && lastFailure ? ": " + lastFailure : ""}`,
       }),
     ).catch(() => {});
   };
@@ -303,6 +315,24 @@ export function createExtensionConnection({
     leases.delete(lease.leaseId);
     await rememberLeaseClosed(lease, value);
   };
+  const nextCandidate = (failureCode) => {
+    if (stopped) return;
+    // A confirmed profile/protocol rejection is more diagnostic than a
+    // later connection refusal. Timeout is more specific than no endpoint.
+    if (failureCode &&
+        (!scanFailure || rejectionCodes.has(failureCode) ||
+          (failureCode === "HANDSHAKE_TIMEOUT" && scanFailure === "EXTENSION_OFFLINE")))
+      scanFailure = failureCode;
+    if (++scanIndex < endpoints.length) {
+      queueMicrotask(() => void connect().catch(schedule));
+    } else {
+      lastFailure = scanFailure ?? "EXTENSION_OFFLINE";
+      scanFailure = undefined;
+      scanIndex = 0;
+      status("offline");
+      schedule();
+    }
+  };
   const disconnected = async (expected) => {
     if (expected !== socket) return;
     const wasReady = Boolean(ready);
@@ -312,7 +342,6 @@ export function createExtensionConnection({
     probeTimer = undefined;
     clearInterval(keepAlive);
     keepAlive = undefined;
-    status(false);
     for (const action of actions.values())
       action.controller.abort(
         new BrowserActionError(
@@ -328,13 +357,13 @@ export function createExtensionConnection({
     for (const lease of leases.values()) void closeLease(lease).catch(() => {});
     if (!stopped) {
       if (wasReady) {
+        lastFailure = probeFailure ?? "EXTENSION_OFFLINE";
+        scanFailure = undefined;
         scanIndex = 0;
+        status("offline");
         schedule();
-      } else if (++scanIndex < endpoints.length) {
-        queueMicrotask(() => void connect().catch(schedule));
       } else {
-        scanIndex = 0;
-        schedule();
+        nextCandidate(probeFailure ?? "EXTENSION_OFFLINE");
       }
     }
   };
@@ -486,9 +515,10 @@ export function createExtensionConnection({
     const message = parseControl(event.data);
     lastMessage = Date.now();
     if (message.type === "ready") {
+      requireValue(message.profile === profile, "PROFILE_MISMATCH",
+        "The ready message belongs to another profile.");
       requireValue(
         !ready &&
-          message.profile === profile &&
           message.browserSessionId === identity.browserSessionId &&
           message.protocolVersion === 1 &&
           Number.isSafeInteger(message.generation) &&
@@ -512,14 +542,16 @@ export function createExtensionConnection({
           "PROTOCOL_MISMATCH",
           "The plugin and package use incompatible wire budgets.",
         );
+      router.bind(message);
       ready = Object.freeze(message);
       preferredUrl = socketUrl;
       scanIndex = 0;
       clearTimeout(probeTimer);
       probeTimer = undefined;
-      router.bind(message);
       reconnectAttempt = 0;
-      status(true);
+      scanFailure = undefined;
+      lastFailure = undefined;
+      status("connected");
       await snapshots();
       for (const receipt of pendingLeaseReceipts.values())
         send(
@@ -533,7 +565,7 @@ export function createExtensionConnection({
     }
     if (message.type === "error" && !ready)
       throw new BrowserActionError(
-        message.code ?? "PROTOCOL_MISMATCH",
+        rejectionCodes.has(message.code) ? message.code : "PROTOCOL_MISMATCH",
         "The local package rejected this plugin connection.",
       );
     requireValue(
@@ -735,20 +767,30 @@ export function createExtensionConnection({
     );
   };
   const connect = async () => {
-    if (stopped || socket) return;
+    if (stopped || socket || reconnectTimer) return;
     await initialize;
     // Recheck after initialization. A socket, including one still closing,
     // remains the current owner until its close handler starts cleanup.
-    if (stopped || socket) return;
+    if (stopped || socket || reconnectTimer) return;
     const choices = preferredUrl
       ? [preferredUrl, ...endpoints.filter((candidate) => candidate !== preferredUrl)]
       : endpoints;
+    status("connecting");
+    probeFailure = undefined;
     socketUrl = choices[scanIndex];
-    const expected = new Socket(socketUrl);
+    let expected;
+    try {
+      expected = new Socket(socketUrl);
+    } catch {
+      nextCandidate("EXTENSION_OFFLINE");
+      return;
+    }
     socket = expected;
     probeTimer = setTimeout(() => {
-      if (expected === socket && !ready && expected.readyState !== Socket.CLOSED)
+      if (expected === socket && !ready && expected.readyState !== Socket.CLOSED) {
+        probeFailure = "HANDSHAKE_TIMEOUT";
         expected.close();
+      }
     }, 3000);
     expected.binaryType = "arraybuffer";
     expected.addEventListener("open", () => {
@@ -779,6 +821,7 @@ export function createExtensionConnection({
       keepAlive = setInterval(() => {
         if (expected !== socket || expected.readyState !== Socket.OPEN) return;
         if (Date.now() - lastMessage >= offlineMs) {
+          probeFailure = "EXTENSION_OFFLINE";
           expected.close(4001, "peer offline");
           return;
         }
@@ -786,8 +829,11 @@ export function createExtensionConnection({
       }, pingMs);
     });
     expected.addEventListener("message", (event) => {
-      void receive(event, expected).catch(() => {
-        if (expected === socket) expected.close(4002, "protocol failure");
+      void receive(event, expected).catch((cause) => {
+        if (expected === socket) {
+          probeFailure = connectionFailure(cause);
+          expected.close(4002, "protocol failure");
+        }
       });
     });
     expected.addEventListener("close", () => {
@@ -795,8 +841,10 @@ export function createExtensionConnection({
       void disconnected(expected).catch(() => schedule());
     });
     expected.addEventListener("error", () => {
-      if (expected === socket && expected.readyState !== Socket.CLOSED)
+      if (expected === socket && expected.readyState !== Socket.CLOSED) {
+        probeFailure ??= "EXTENSION_OFFLINE";
         expected.close();
+      }
     });
   };
   const api = {
@@ -858,11 +906,15 @@ export function createExtensionConnection({
       })();
       void initialize.then(
         () =>
-          connect().catch(() => {
-            status(false);
+          connect().catch((cause) => {
+            lastFailure = connectionFailure(cause, "EXTENSION_OFFLINE");
+            status("offline");
             schedule();
           }),
-        () => status(false),
+        (cause) => {
+          lastFailure = connectionFailure(cause, "INITIALIZATION_FAILED");
+          status("offline");
+        },
       );
       listen(chrome.runtime.onStartup, () => void connect().catch(schedule));
       listen(chrome.alarms?.onAlarm, (alarm) => {
@@ -908,6 +960,7 @@ export function createExtensionConnection({
       if (socket && socket.readyState !== Socket.CLOSED)
         socket.close(1000, "plugin stopped");
       ready = undefined;
+      status("offline");
       inbox.discard();
       await chrome.alarms?.clear?.("nexum-browser-connect");
     },

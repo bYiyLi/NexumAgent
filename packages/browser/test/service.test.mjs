@@ -42,6 +42,9 @@ async function connect(
     client = "worker",
     attempt = 1,
     session = "browser-session",
+    profile = "development",
+    pluginVersion = "0.1.0",
+    protocol = { min: 1, max: 1 },
   } = {},
 ) {
   const socket = new WebSocket(
@@ -83,10 +86,10 @@ async function connect(
     JSON.stringify({
       v: 1,
       type: "hello",
-      profile: "development",
+      profile,
       extensionId,
-      extensionVersion: "0.1.0",
-      protocol: { min: 1, max: 1 },
+      extensionVersion: pluginVersion,
+      protocol,
       browserProfileId: profileId,
       browserSessionId: session,
       clientInstanceId: client,
@@ -591,4 +594,22 @@ test("Browser failed action without a public message explains how to inspect the
     assert(!error.message.includes("The browser operation failed."));
     return true;
   });
+});
+
+test("hello rejects mismatched profile, plugin version and protocol with distinct safe codes", async(t)=>{
+  const f=await fixture(t);
+  await f.service.start(new AbortController().signal);
+  for(const [options,code] of [
+    [{profile:"production"},"PROFILE_MISMATCH"],
+    [{pluginVersion:"9.9.9"},"PLUGIN_VERSION_MISMATCH"],
+    [{protocol:{min:2,max:2}},"PROTOCOL_MISMATCH"],
+  ]){
+    const peer=await connect(f,options);
+    const error=await peer.next("error");
+    assert.equal(error.code,code);
+    assert.deepEqual(f.service.list(),[]);
+  }
+  const peer=await connect(f);
+  const ready=await peer.ready();
+  assert.equal(ready.profile,"development");
 });

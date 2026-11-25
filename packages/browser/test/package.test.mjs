@@ -126,6 +126,8 @@ test("the actual private candidate tarball contains its own registered contribut
     "skills/browser-control/references/tabs-and-observation.md",
     "skills/browser-control/references/scripts.md",
     "scripts/discover.js",
+    "scripts/installation.js",
+    "skills/browser-control/references/installation.md",
     "scripts/screenshot.js",
     "skills/browser-control/SKILL.md",
     "implementation.json",

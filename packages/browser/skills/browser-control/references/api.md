@@ -398,11 +398,14 @@ export type BrowserFileSource =
 
 export type BrowserError = Error & {
   code: string;
-  dispatched: boolean;
-  effect: "none" | "confirmed" | "unknown";
-  retryable: boolean;
+  /** Absent when the platform cannot confirm dispatch facts. */
+  dispatched?: boolean;
+  effect?: "none" | "confirmed" | "unknown";
+  retryable?: boolean;
   operationId?: string;
   method?: string;
+  reason?: string;
+  hint?: string;
   ref?: ElementRef;
   target?: BrowserTarget;
 };
@@ -522,7 +525,10 @@ export interface BrowserArtifact {
   sha256: string;
 }
 export interface BrowserDownload {
+  /** Page download identity, not a Chrome DownloadItem ID. */
   id: string;
+  /** Present only while the exact native record association is proven. */
+  nativeRecordId?: number;
   target: BrowserTarget;
   url?: string;
   suggestedFilename: string;
@@ -1039,7 +1045,7 @@ export interface Browser {
   browserId: string;
   capabilities: BrowserCapabilityCollection;
   downloads: {
-    list(options?: { limit?: number }): Promise<BrowserDownloadRecord[]>;
+    list(options?: { limit?: number; id?: number }): Promise<BrowserDownloadRecord[]>;
   };
   tabs: Tabs;
   user: BrowserUser;
@@ -1302,6 +1308,9 @@ export interface PlaywrightLocator {
 }
 
 export interface PlaywrightDownload {
+  readonly id: string;
+  /** Actual page-reported name; it can contain the download correlation marker. */
+  readonly suggestedFilename: string;
   path(options?: { timeoutMs?: number }): Promise<null | string>;
 }
 

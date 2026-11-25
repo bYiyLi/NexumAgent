@@ -83,7 +83,7 @@ interface Browser {
   browserId: string;
   capabilities: BrowserCapabilityCollection;
   downloads: {
-    list(options?: { limit?: number }): Promise<BrowserDownloadRecord[]>;
+    list(options?: { limit?: number; id?: number }): Promise<BrowserDownloadRecord[]>;
   };
   tabs: Tabs;
   user: BrowserUser;
@@ -92,7 +92,7 @@ interface Browser {
 }
 ```
 
-`downloads.list()` 返回当前浏览器配置的原生下载记录和文件路径；它不按标签或目录筛选，也不将记录自动归属当前运行。选定文件后可用 Node 读取或通过 `{type:"resource_link",path:...}` 登记 MCP Resource；文件访问仍检查当前权限。
+`downloads.list()` 返回当前浏览器配置的原生下载记录和文件路径；已知原生数字 ID 时可用 `downloads.list({id})` 精确查询；它不按标签或目录筛选，也不将记录自动归属当前运行。选定文件后可用 Node 读取或通过 `{type:"resource_link",path:...}` 登记 MCP Resource；文件访问仍检查当前权限。
 
 ## BrowserUser
 
@@ -407,10 +407,12 @@ interface PlaywrightLocator {
 
 ## PlaywrightDownload
 
-返回经过实际完成确认的本机产物路径；向 Host 交付另走 output/transfer。
+等待器提供页面下载身份和实际事件建议名称；文件路径须经过实际完成确认。用原生 resource_link 返回或 transfer 向 Host 交付。
 
 ```typescript
 interface PlaywrightDownload {
+  readonly id: string;
+  readonly suggestedFilename: string;
   path(options?: { timeoutMs?: number }): Promise<null | string>;
 }
 ```
@@ -519,7 +521,7 @@ interface PromptDialog {
 | 文件与下载           | `tab.setFiles/downloads/saveDownload`                                                                                      | 全部输入准备好才提交；返回真实已完成本机文件                                                                    |
 | 对话框               | `tab.dialogAccept/dialogDismiss`、原生 Dialog 的 type/message                                                              | 对当前 dialogId 操作；text 仅用于 prompt；原生无障碍/权限错误如实反馈                                           |
 | 内容与剪贴板别名     | `tab.contentExport/exportGsuite/exportYouTubeTranscript/clipboardReadText/clipboardWriteText/clipboardRead/clipboardWrite` | 文本导出支持 html/markdown/text；文件和多格式剪贴板使用本机产物/原生 bytes，不使用旧 base64                     |
-| 窗口、标签、组、书签 | `selectedBrowser.management` 及 `windows/tabs/tabGroups/bookmarks` 便捷命名空间                                            | ManagementCapability 给出逐方法完整参数/返回；`tabs.select` 是显式激活，`tabs.new(url?,{active?})` 支持原有参数 |
+| 窗口、标签、组、书签 | `selectedBrowser.management` 及 `windows/tabs/tabGroups/bookmarks` 便捷命名空间                                            | ManagementCapability 给出逐方法完整参数/返回；`tabs.select` 是显式激活，`tabs.new(url?,{active?})` 支持 HTTP(S)、省略 URL 或显式 `about:blank` 创建空白标签；不因此开放其他受保护协议或页面控制 |
 | 组织审计             | `selectedBrowser.management.getAuditTrail`                                                                                 | 有界 before/变更分页；不自动撤销                                                                                |
 | 页面资产与文件导出   | `tab.assets.list/download/bundle`、`tab.exportFile`                                                                        | inventory/页面修订绑定；实际文件、manifest、逐项失败，不把导航当下载                                            |
 | WebMCP               | `tab.webmcp.listTools/invokeTool/fetchTools`、返回门面的 `invokeTool`                                                      | 精确绑定 document/registration revision；先发现后调用，不自动改用同名新注册                                     |

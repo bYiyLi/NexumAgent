@@ -32,6 +32,7 @@ export type Failure = Error & {
   effect: "none" | "confirmed" | "unknown";
   retryable: boolean;
   operationId?: string;
+  reason?: string;
   target?: Target;
 };
 export function failure(
@@ -40,7 +41,7 @@ export function failure(
   fields: Partial<
     Pick<
       Failure,
-      "dispatched" | "effect" | "retryable" | "operationId" | "target"
+      "dispatched" | "effect" | "retryable" | "operationId" | "reason" | "target"
     >
   > = {},
 ): Failure {

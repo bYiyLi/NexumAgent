@@ -639,14 +639,13 @@ export class BrowserRuntime {
           "QUEUE_FULL",
           "This run and target already have the maximum number of browser waiters.",
         );
-      const lease = await scope.reserve(
-        targets,
-        call,
-        !!target.tabId || mutating,
-        signal,
-      );
+      // Creating a new tab does not mutate any existing tab. Acquire its
+      // exclusive target reservation only after the native creation reply.
+      const createsTab = method === "tabs.new" || method === "tabs.createTemporary";
+      const exclusive = !!target.tabId || (mutating && !createsTab);
+      const lease = await scope.reserve(targets, call, exclusive, signal);
       reservedScope = scope;
-      reservedTargets = !!target.tabId || mutating ? targets : undefined;
+      reservedTargets = exclusive ? targets : undefined;
       const queued =
         !/^(waiters\.get|tabs\.closeTemporary|tab\.(?:markHandoff|getJsDialog|dialogAccept|dialogDismiss)|dialogs\.(?:accept|dismiss)|downloads\.path|tab\.saveDownload|playwright\.waitFor|(?:tab|frame|locator)\.waitFor|cdp\.(events|readEvents))/.test(
           method,

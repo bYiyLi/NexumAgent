@@ -174,6 +174,7 @@ function inspectRelease() {
     assert.equal(pack.name, item.name);
     assert.equal(pack.version, version);
     assert.match(pack.shasum, /^[a-f0-9]{40}$/);
+    assert.match(pack.integrity, /^sha512-[A-Za-z0-9+/]+=*$/);
     const names = new Set(pack.files.map(({ path: filename }) => filename));
     assertNoSourceMaps(item.name, names);
     for (const required of {
@@ -221,21 +222,42 @@ async function registryPackage(name) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitUntilIndexed(name, version, tag) {
-  // Public npm indexing can lag an accepted publish by more than 150 seconds.
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const result = await registryPackage(name);
-    if (result?.versions?.[version] && result["dist-tags"]?.[tag] === version)
-      return result;
-    if (attempt % 12 === 0)
-      console.log(
-        `Waiting for npm Registry: ${name}@${version} (${tag}), check ${attempt + 1}/60`,
-      );
-    await sleep(5000);
-  }
+// Only read the registry here. A slow index must never trigger another publish.
+export async function waitUntilIndexed(name, version, tag, pack, {
+  lookup = registryPackage, pause = sleep, now = Date.now, timeoutMs = 600000,
+} = {}) {
+  const deadline = now() + timeoutMs;
+  let attempt = 0;
+  do {
+    let result;
+    try {
+      result = await lookup(name);
+    } catch (error) {
+      // Registry/network errors are observation failures, not publish failures.
+      console.warn(`Registry observation failed for ${name}@${version}: ${error?.name ?? "Error"}`);
+    }
+    const indexed = result?.versions?.[version];
+    if (indexed) {
+      if (indexed.dist?.shasum !== pack.shasum || indexed.dist?.integrity !== pack.integrity)
+        throw new Error(`${name}@${version} is indexed with different contents.`);
+      if (result["dist-tags"]?.[tag] === version) return result;
+    }
+    if (attempt++ % 12 === 0)
+      console.log(`Waiting for npm Registry: ${name}@${version} (${tag})`);
+    if (now() >= deadline) break;
+    await pause(Math.min(5000, deadline - now()));
+  } while (now() < deadline);
   throw new Error(
-    `${name}@${version} was accepted or updated but is not indexed with ${tag}; inspect the registry before retrying.`,
+    `${name}@${version} was accepted or updated but is not indexed with ${tag}; verify-index checks the prepared release without publishing.`,
   );
+}
+
+async function verifyIndex() {
+  const { RELEASE_VERSION: version, RELEASE_TAG: tag } = process.env;
+  for (const item of inspectRelease()) {
+    await waitUntilIndexed(item.name, version, tag, item.pack);
+    console.log(`Registry confirmed ${item.name}@${version} (${tag})`);
+  }
 }
 
 async function publish() {
@@ -256,7 +278,7 @@ async function publish() {
       throw new Error(
         `${item.name}: refusing to downgrade ${tag} from ${latest} to ${version}.`,
       );
-    if (found && found.dist?.shasum !== item.pack.shasum)
+    if (found && (found.dist?.shasum !== item.pack.shasum || found.dist?.integrity !== item.pack.integrity))
       throw new Error(
         `${item.name}@${version} already exists with different contents; publish a new version instead.`,
       );
@@ -291,7 +313,7 @@ async function publish() {
         },
       );
     }
-    await waitUntilIndexed(item.name, version, tag);
+    await waitUntilIndexed(item.name, version, tag, item.pack);
     console.log(`Registry confirmed ${item.name}@${version} (${tag})`);
   }
 }
@@ -300,8 +322,9 @@ const command = process.argv[2];
 if (command === "prepare") prepare();
 else if (command === "verify") inspectRelease();
 else if (command === "publish") await publish();
+else if (command === "verify-index") await verifyIndex();
 else if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 )
-  throw new Error("Usage: node scripts/npm-release.mjs prepare|verify|publish");
+  throw new Error("Usage: node scripts/npm-release.mjs prepare|verify|publish|verify-index");

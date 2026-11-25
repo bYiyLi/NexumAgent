@@ -207,8 +207,8 @@ async function fixture(
       progress() {},
     });
   const policy = {
-    // Native file return uses the production-supported Node buffer/fs families.
-    builtins: () => ["buffer", "fs"],
+    // Match the production-supported Node families used by official scripts.
+    builtins: () => ["buffer", "fs", "path", "crypto"],
     approvedPackages: () => new Map([["@nexum-hub/browser", version]]),
   };
   let workerEntry;
@@ -411,6 +411,13 @@ async function fixture(
       get: async (id) => {
         const tab = tabs.find((value) => value.id === id);
         if (!tab) throw new Error("No tab");
+        return { ...tab };
+      },
+      create: async (options) => {
+        const tab = { id: Math.max(...tabs.map((value) => value.id)) + 1,
+          url: options.url ?? "about:blank", title: "New tab", active: options.active,
+          windowId: 1, groupId: -1 };
+        tabs.push(tab);
         return { ...tab };
       },
       update: async (id, change) => {
@@ -770,6 +777,11 @@ test("the installed Browser package publishes its own Skill, instructions and sc
 });
 test("registered Browser scripts deliver real discovery data and the original JPEG image", async (t) => {
   const f = await fixture(t);
+  const installation = await f.start(undefined, { scriptName: "browser/installation.js", input: {} });
+  assert.equal(installation.run.status, "succeeded", JSON.stringify(installation.run.error));
+  assert.equal(installation.result.data.assetsReady, true);
+  assert.equal(installation.result.data.directory, path.join(f.work, ".nexum-browser", "extension"));
+  assert.equal(installation.result.data.profile, "development");
   const discovery = await f.start(undefined, { scriptName: "browser/discover.js", input: {} });
   assert.equal(discovery.run.status, "succeeded", JSON.stringify(discovery.run.error));
   const browserId = f.plugin.state().browserId;
@@ -880,6 +892,27 @@ test("separate actual Core runs cannot take the same controlled tab and cancella
   assert.equal(f.counts.removed, 0);
 });
 
+test("a live lease on one tab does not prevent another Core Run from creating and controlling a different tab", async (t) => {
+  const f = await fixture(t);
+  let first = await f.start(select + 'await tab.cdp.send("Runtime.enable");await new Promise(resolve=>setTimeout(resolve,30000));', {waitMs:0,timeoutMs:45000});
+  const deadline = Date.now()+10000;
+  while (!first.operations?.items?.some(operation=>operation.method==="cdp.send" && operation.status==="succeeded")) {
+    assert.ok(Date.now()<deadline,"the first Run did not acquire its tab");
+    first=await f.observe(first.run.runId);
+  }
+  const created=await f.start('const {createBrowserClient}=await import("@nexum-hub/browser");const selected=await createBrowserClient(browser).browsers.get(context.input.fixtureBrowserId);const fresh=await selected.tabs.new("https://fixture.test/third",{active:false});return {id:fresh.id,title:await fresh.title()};');
+  assert.equal(created.run.status,"succeeded",JSON.stringify(created.run.error));
+  assert.deepEqual(created.result.data,{id:"3",title:"New tab"});
+  f.engine.cancel(caller,first.run.runId);
+  first=await f.observe(first.run.runId);
+  const cleanupDeadline=Date.now()+10000;
+  while(first.run.endedAt===null){
+    assert.ok(Date.now()<cleanupDeadline,"first Run cleanup not confirmed");
+    first=await f.observe(first.run.runId);
+  }
+  assert.equal(first.run.status,"cancelled");
+  assert.equal(f.attached.size,0);
+});
 test("revoked run cannot recreate browser control after native closure releases its scope", async () => {
   const { EventEmitter } = await import("node:events");
   const { BrowserRuntime } = await import("../dist/extension/scope.js");
@@ -1023,6 +1056,20 @@ test("repeated original download waiters stay usable while Core never copies a f
   assert.equal(existsSync(path.join(f.work, "copied.txt")), false);
   assert.deepEqual(readFileSync(f.downloadSource), f.downloadBytes);
   assert.equal(f.attached.size, 0);
+});
+
+test("a proven download record survives the complete SDK and native resource delivery path", async (t) => {
+  const f=await fixture(t,{nativeDownloads:"matched"});
+  const result=await f.start(select+
+    'const pending=tab.playwright.waitForDownload();await tab.cdp.send("Page.navigate",{url:"https://fixture.test/file"});const download=await pending;const file=await download.path();const row=(await tab.downloads()).find(item=>item.id===download.id);const records=await selected.downloads.list({id:row.nativeRecordId});if(download.id!=="download-fixture"||row.nativeRecordId!==71||records.length!==1||records[0].id!==71||records[0].state!=="complete")throw Error("download identity mismatch");return {type:"resource_link",path:file};');
+  assert.equal(result.run.status,"succeeded",JSON.stringify(result.run.error));
+  const rendered=await f.encoder.render(result.result,f.resultScope(),result.run);
+  const link=rendered.content.find(item=>item.type==="resource_link");
+  assert.ok(link?.uri);
+  const resource=await f.encoder.readResource(link.uri,f.resultScope());
+  const bytes=Buffer.from(resource.contents[0].blob,"base64");
+  assert.deepEqual(bytes,f.downloadBytes);
+  assert.equal(f.attached.size,0);
 });
 
 test("browser file size is enforced before the downloaded artifact is published", async (t) => {

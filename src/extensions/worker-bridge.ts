@@ -474,6 +474,7 @@ export function isolatedExtensionFactory(
               ? message.error.code : "extension_worker_failed",
             typeof message.error.message === "string"
               ? message.error.message : "The Worker rejected the request.",
+            isPlainRecord(message.error.details) ? message.error.details as JsonObject : undefined,
           ));
         else pending.resolve(decode(message.value));
         return;

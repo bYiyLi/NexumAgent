@@ -1,6 +1,6 @@
 ---
 name: browser-control
-description: 用户要求在已授权的 Nexum Agent 上查看或操作已连接的浏览器、标签和网页时选择，包括页面观察、表单填写、导航点击、截图、上传下载、导出及浏览器操作故障恢复；仅讨论浏览器概念或安装配置扩展时不选择。
+description: 用户要求在已授权的 Nexum Agent 上查看或操作已连接的浏览器、标签和网页时选择，包括页面观察、表单填写、导航点击、截图、上传下载、导出及浏览器操作故障恢复；也用于当前 Agent Browser 插件的安装、重新加载和连接诊断；仅讨论浏览器概念时不选择。
 ---
 
 # Nexum Browser
@@ -12,6 +12,8 @@ description: 用户要求在已授权的 Nexum Agent 上查看或操作已连接
 - 优先检查本次 `agent.open` 的 `agent.scripts`：若 `complete=false`，先按其真实 `index` 补读脚本清单；只有确实发现 `browser/discover.js` / `browser/screenshot.js` 且输入 Schema 匹配时才按 `scriptName` 运行。目录不完整或脚本未发现时不猜测可用性。其它交互使用 `createBrowserClient(browser)`，从当前注册能力取得 browserId / tabId。方法是否支持仍以实际注册表与 Schema 为准。
 
 ## 按当前任务加载参考
+
+- **安装、重新加载或查询插件路径**：读 [安装与更新](references/installation.md)，优先执行实际登记的 `browser/installation.js`；无需已有浏览器连接，不从 npm 包布局推导路径。
 
 - **发现浏览器/标签、拿到 Tab、简单查看页面**：仅在需要自行组合 SDK 调用时读 [初始化与发现](references/bootstrap.md)；能直接使用已注册发现脚本时不加载。
 - **点击、导航、定位、验证页面状态**：读 [页面交互](references/interaction.md)；需要截图或 AX/DOM 观察细节才读 [观察与截图](references/observation.md)。

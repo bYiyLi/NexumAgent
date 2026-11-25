@@ -935,6 +935,8 @@ const createExtension: ExtensionFactory = async (host) => {
       profile: installation.build!.profile,
       port: service.address!.port,
       pluginDirectory: installation.build!.directory,
+      extensionId: installation.build!.extensionId,
+      extensionVersion: installation.build!.extensionVersion,
       methodCount: Object.keys(methods).length,
     });
     return { methods, dispose: () => installation.dispose() };

@@ -68,7 +68,7 @@ CDP 原始参数和返回值保留浏览器协议类型，包括某些命令原�
 
 ## 用户加载插件与版本核对
 
-包启用后先准备当前 profile 的稳定插件目录，再向用户给出实际路径、预期插件版本和环境。路径按公开 context.paths.work 下的 .nexum-browser/extension 定位；不要求用户查 npx 缓存或访问 Agent 私有状态。Chrome 使用 chrome://extensions、Edge 使用 edge://extensions 的浏览器原生“加载已解压的扩展程序”流程选择该目录；安装权限和企业策略由浏览器处理，文档不承诺已获市场发布或静默安装。
+包启用后先准备当前 profile 的稳定插件目录，再向用户给出实际路径、预期插件版本和环境。由 Browser 生命周期发布稳定插件资产与版本描述；AI 从本次实际登记的 `browser/installation.js` 获取经过验证的路径、环境和版本，不推导 npm 布局，不新增 SDK 方法。脚本只验证该包自己的固定资产；失败不返回猜测路径。Chrome 使用 chrome://extensions、Edge 使用 edge://extensions 的浏览器原生“加载已解压的扩展程序”流程选择该目录；安装权限和企业策略由浏览器处理，文档不承诺已获市场发布或静默安装。
 
 插件显示 Nexum browser/对应开发环境名称；用户加载后自动握手，上线事实来自 ready/metadata/tabs，而不是文件夹已存在。包更新后插件仍运行旧版本时明确需要重新加载，核对实际 extensionVersion/protocol/ID，不能只看磁盘文件就宣称已生效。维护卸载按通用授权处理本包目录与连接，不静默移除浏览器插件或用户配置。
 
@@ -77,3 +77,7 @@ CDP 原始参数和返回值保留浏览器协议类型，包括某些命令原�
 lease_open 只有当前已登记 RunScope 能发出；插件 ack 前动作不派发。lease_end/closed 遵守 lifecycle.md 的真实收尾：断线后停止新派发、清理本包附着/等待/视觉，重连只核对关闭回执，不重续已停止 run。并发完成的关闭回执按顺序写入 session，避免较早的存储结果覆盖较新的记录；写入失败不能冒充回执已保存。旧代次的清理回执有显式 originalGeneration，只匹配原 lease，绝不能使旧 action_result 成为新 run 的结果。插件 worker 恢复时以实际 debugger/target 状态核对本插件的最小 session 记录，不能借新实例连接身份接管其他工具。
 
 SDK 的 waiters.arm 在插件安装真实事件监听并确认 ready 后才返回；浏览器事件先缓冲后交付，目标命令队列不能等待一个尚需后续命令触发的事件。waiters.get 主要等待本包缓冲，不在插件上占住唯一调度槽；cancel 撤监听与缓冲，不把原生下载开始误记为下载完成。每个浏览器事件除 sequence 还带 leaseId/waiterId 或明确的订阅身份，错误关联事件不能进入其他 run。
+
+正常候选端口探测和握手期间工具栏显示 connecting（…），单个候选连接被拒绝不是最终离线；仅全轮失败、初始化失败或已在线连接断开时显示 offline（OFF）。浏览器自身 DevTools 的 WebSocket 网络诊断可能仍显示候选拒绝，不关闭这些原生诊断。
+
+整轮连接失败在插件内部状态与工具栏保留已确证的 profile/扩展身份、插件版本、协议不匹配或 profile 争用分类；普通候选拒绝不覆盖该分类，成功握手清除旧提示。startup/alarms 遵守已有退避窗口，不因唤醒事件额外发起扫描。不将未知原生网络失败编造为具体权限原因。

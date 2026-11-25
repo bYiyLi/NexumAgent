@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { deserialize } from "node:v8";
 import { randomUUID } from "node:crypto";
+import { types } from "node:util";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
 import { safeErrorData } from "../contracts/error-data.js";
 import { isPlainRecord } from "../contracts/json.js";
@@ -37,16 +38,141 @@ const send = (message: object) => port!.postMessage(message);
 function safeComponentCode(cause: unknown): string {
   let current: unknown = cause;
   for (let depth = 0; depth < 6 && current &&
-    typeof current === "object"; depth++) {
+    typeof current === "object" && !types.isProxy(current); depth++) {
     const value = Object.getOwnPropertyDescriptor(current, "code");
     if (value && "value" in value &&
         typeof value.value === "string" &&
-        /^[A-Za-z][A-Za-z0-9_-]{0,100}$/.test(value.value))
+        /^[A-Za-z][A-Za-z0-9_-]{0,95}$/.test(value.value))
       return value.value;
     const nested = Object.getOwnPropertyDescriptor(current, "cause");
     current = nested && "value" in nested ? nested.value : null;
   }
   return "extension_worker_failed";
+}
+
+// Extension errors are untrusted. Preserve a bounded semantic diagnosis
+// without forwarding arbitrary messages, paths, target data or stack traces.
+const componentMessages: Readonly<Record<string, string>> = Object.freeze({
+  TAB_ALREADY_CLAIMED: "Another run already controls the requested browser target.",
+  INVALID_TARGET: "The requested target is unavailable or no longer current.",
+  INVALID_ARGUMENT: "The requested operation has invalid arguments.",
+  CAPABILITY_NOT_ALLOWED: "The requested capability is unavailable or not allowed.",
+  EXTENSION_OFFLINE: "The extension connection is offline.",
+  USER_TAKEOVER: "The user has taken control of the target.",
+  TIMEOUT: "The operation exceeded its deadline.",
+  DEADLINE_EXCEEDED: "The operation exceeded its deadline.",
+  CANCELLED: "The operation was cancelled.",
+  UNKNOWN_RESULT: "The operation result could not be confirmed.",
+  PROTOCOL_MISMATCH: "The extension returned an incompatible protocol result.",
+  FILE_CHANGED: "The source or staging file changed during preparation.",
+  FILE_SIZE_MISMATCH: "The received file size did not match the declared size.",
+  OUTPUT_TOO_LARGE: "The result exceeded its size budget.",
+  PERMISSION_DENIED: "The native operation was denied.",
+  permission_denied: "The current source, run or target is not authorized.",
+  forbidden: "Current access was revoked or denied.",
+  path_not_allowed: "The requested path is outside the authorized scope.",
+  AMBIGUOUS_TARGET: "More than one current element matches the target.",
+  ARTIFACT_PREPARATION_FAILED: "The artifact could not be fixed for delivery.",
+  CDP_DISCONNECTED: "The native debugger connection is unavailable.",
+  EXPECTATION_UNCONFIRMED: "The requested page condition was not confirmed after input.",
+  FILE_CLEANUP_FAILED: "Cleanup of the original file operation is not confirmed.",
+  FILE_CLOSE_FAILED: "Closure of the original file handle is not confirmed.",
+  FILE_IO_FAILED: "The authorized file operation could not be completed.",
+  FILE_UNAVAILABLE: "The original file or download is unavailable.",
+  INPUT_UNCONFIRMED: "The browser did not confirm the requested input.",
+  INVALID_CONTEXT: "The current execution context cannot support the operation.",
+  NATIVE_OPERATION_FAILED: "The native operation failed; its specific cause is not confirmed.",
+  NAVIGATION_FAILED: "The browser did not confirm successful navigation.",
+  PORT_IN_USE: "No allowed local listener port is available.",
+  PROFILE_CONFLICT: "Another active connection owns this browser profile.",
+  PROFILE_MISMATCH: "The endpoint belongs to a different profile or extension identity.",
+  PLUGIN_VERSION_MISMATCH: "The installed browser plugin and package versions do not match.",
+  QUEUE_FULL: "The current operation capacity is exhausted.",
+  STALE_REF: "The observed reference belongs to an earlier target or document.",
+  STALE_REGISTRATION: "The observed tool registration is no longer current.",
+  TARGET_GONE: "The original native target no longer exists.",
+  VISUAL_CANCELLED: "The browser visual action was cancelled.",
+  VISUAL_GROUP_UNAVAILABLE: "The browser visual group is unavailable.",
+  VISUAL_TARGET_RELEASED: "The visual target has already been released.",
+  VISUAL_TIMEOUT: "The browser visual action exceeded its deadline.",
+  VISUAL_UNAVAILABLE: "The browser visual capability is unavailable.",
+  WAITER_GONE: "The original event waiter no longer exists.",
+});
+const componentReasons: Readonly<Record<string, readonly [string, string]>> = Object.freeze({
+  element_not_found: ["INVALID_TARGET", "The locator did not match any current element."],
+  element_not_unique: ["AMBIGUOUS_TARGET", "The locator matched multiple current elements."],
+  element_not_actionable: ["INVALID_TARGET", "The current element is not visible and enabled."],
+  element_blocked: ["INVALID_TARGET", "Another element blocks the action target."],
+  download_not_owned: ["FILE_UNAVAILABLE", "The original download is not owned by this run target."],
+  download_identity_unconfirmed: ["CAPABILITY_NOT_ALLOWED", "The original download does not have a proven native file identity."],
+  download_identity_ambiguous: ["FILE_UNAVAILABLE", "The browser reported an ambiguous download identity."],
+  download_cancelled: ["FILE_UNAVAILABLE", "The browser download was cancelled."],
+  download_record_missing: ["FILE_UNAVAILABLE", "The original native download record is unavailable."],
+  download_interrupted: ["FILE_UNAVAILABLE", "The browser download was interrupted."],
+  download_path_invalid: ["FILE_UNAVAILABLE", "The completed browser download has no valid local filename."],
+  source_file_missing: ["FILE_UNAVAILABLE", "The authorized source file is no longer present."],
+});
+// Recovery is a bounded semantic category, not arbitrary extension-supplied advice.
+function componentRecovery(code: string, reason: unknown): string | undefined {
+  if (typeof reason === "string" && reason.startsWith("download_")) return "inspect_download";
+  switch (code) {
+    case "INVALID_ARGUMENT": return "correct_input";
+    case "INVALID_CONTEXT": return "observe_target";
+    case "INVALID_TARGET": case "AMBIGUOUS_TARGET": case "STALE_REF":
+    case "TARGET_GONE": case "STALE_REGISTRATION": case "NAVIGATION_FAILED": case "WAITER_GONE":
+      return "observe_target";
+    case "TAB_ALREADY_CLAIMED": case "QUEUE_FULL": case "PROFILE_CONFLICT":
+      return "wait_for_capacity";
+    case "CAPABILITY_NOT_ALLOWED": case "PERMISSION_DENIED":
+    case "permission_denied": case "forbidden": case "path_not_allowed":
+      return "check_authorization";
+    case "EXTENSION_OFFLINE": case "CDP_DISCONNECTED": case "PROFILE_MISMATCH":
+    case "PLUGIN_VERSION_MISMATCH": case "PROTOCOL_MISMATCH": case "PORT_IN_USE":
+      return "check_connection";
+    case "USER_TAKEOVER": return "stop_control";
+    case "FILE_UNAVAILABLE": case "FILE_CHANGED": case "FILE_SIZE_MISMATCH":
+    case "FILE_IO_FAILED": case "FILE_CLOSE_FAILED": case "FILE_CLEANUP_FAILED":
+    case "ARTIFACT_PREPARATION_FAILED": return "inspect_file";
+    case "OUTPUT_TOO_LARGE": return "reduce_scope";
+    case "UNKNOWN_RESULT": case "INPUT_UNCONFIRMED": case "EXPECTATION_UNCONFIRMED":
+    case "TIMEOUT": case "DEADLINE_EXCEEDED": case "NATIVE_OPERATION_FAILED":
+      return "verify_effect";
+    default: return undefined;
+  }
+}
+function componentError(cause: unknown): JsonObject {
+  const code = safeComponentCode(cause);
+  const fallback = {
+    code,
+    message: Object.hasOwn(componentMessages, code)
+      ? componentMessages[code]!
+      : "The extension Worker failed to complete its operation.",
+  };
+  const result = safeErrorData(cause, fallback);
+  if (isAgentError(cause) || !cause || typeof cause !== "object" || types.isProxy(cause))
+    return result;
+  const own = (key: string): unknown => {
+    const field = Object.getOwnPropertyDescriptor(cause, key);
+    return field && "value" in field ? field.value : undefined;
+  };
+  const reason = own("reason");
+  if (typeof reason === "string" && Object.hasOwn(componentReasons, reason) &&
+      componentReasons[reason]![0] === code) {
+    result.message = componentReasons[reason]![1];
+    result.details = { reason };
+  }
+  const dispatched = own("dispatched"), effect = own("effect"), retryable = own("retryable");
+  // Only a complete, internally consistent effect report is forwarded.
+  // A dispatched, unconfirmed effect must never authorize blind retry.
+  if (typeof dispatched === "boolean" && typeof retryable === "boolean" &&
+      (effect === "none" || effect === "confirmed" || effect === "unknown") &&
+      (dispatched || effect === "none")) {
+    result.details = { ...(isPlainRecord(result.details) ? result.details : {}), dispatched, effect, retryable: retryable && effect === "none" && !dispatched };
+  }
+  const details = isPlainRecord(result.details) ? result.details : {};
+  const recovery = details.effect === "unknown" ? "verify_effect" : componentRecovery(code, details.reason);
+  if (recovery) result.details = { ...details, recovery };
+  return result;
 }
 
 function encode(value: unknown): unknown {
@@ -491,10 +617,7 @@ port.on("message", (data: unknown) => {
       if (data.kind !== "initialize")
         send({ type: "reply", id, value: null });
     } catch (cause) {
-      const error = safeErrorData(cause, {
-        code: safeComponentCode(cause),
-        message: "The extension Worker failed to complete its operation.",
-      });
+      const error = componentError(cause);
       if (data.kind === "initialize")
         send({ type: "fatal", code: safeComponentCode(cause) });
       else send({ type: "reply", id, error });

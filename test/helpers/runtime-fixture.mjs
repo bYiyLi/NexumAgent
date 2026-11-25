@@ -268,9 +268,11 @@ export class ExecutionFixture {
         if (snapshot.metadata) compileInputSchema(snapshot.metadata.scriptInputSchema)(input.input ?? {});
         const view = await this.options.loadWork(work);
         current();
+        const temp = path.join(this.loader.work, "tmp", "runs", run.runId);
+        mkdirSync(temp, { recursive: true });
         services.context = { contextId: work.contextId, agentId: this.store.binding.agentId, runId: run.runId,
           pwd: input.pwd ?? view.pwd ?? work.pwd, project: view.project ?? null, caller, input: input.input ?? {}, attachments: [],
-          agent: view.agentShared ?? {}, user: view.userShared ?? {}, paths: { work: this.loader.work, resources: path.join(this.loader.work, "resources") },
+          agent: view.agentShared ?? {}, user: view.userShared ?? {}, paths: { work: this.loader.work, resources: path.join(this.loader.work, "resources"), temp },
           script: { name: snapshot.name, origin: snapshot.origin, code: snapshot.code, source: input.scriptName ? "named" : "inline" } };
         if (this.options.prepareAttachments) services.context.attachments = await this.options.prepareAttachments(input.attachments ?? [], "", services);
         current();

@@ -1310,3 +1310,96 @@ test(
     assert.equal(retained.controlAvailable, false);
   },
 );
+
+test("real sh output returns Unicode BOM text and can reread legacy code pages without rerunning the command", async t => {
+  const f = await fixture(t);
+  const input = command('process.stdout.write(Buffer.from("fffe2d4e87653dd800de","hex"));process.stderr.write(Buffer.from("c4e3bac3","hex"));');
+  // This fixture serializes only JSON, so project raw blocks explicitly;
+  // the real Run contract retains Buffer and renders it through the result encoder.
+  const first = data(await f.start('const r=await sh.exec(context.input);return {...r,output:r.output.map(x=>({stream:x.stream,data:typeof x.data==="string"?x.data:Array.from(x.data)}))};', {input}));
+  assert.equal(first.exitCode,0);
+  assert.equal(first.outputComplete,true);
+  assert.equal(first.output.filter(x=>x.stream==="stdout").map(x=>x.data).join(""),"中文😀");
+  // A Windows fallback may already have produced text. With no fallback,
+  // the retained raw blocks need the recovery hint.
+  if (first.output.some(x => Array.isArray(x.data))) {
+    assert.equal(first.details.outputEncodingUncertain,true);
+    assert.match(first.details.outputEncodingHint,/original processId/);
+  }
+  const legacy = data(await f.start(
+    'const result=await sh.get({processId:context.input,encoding:"cp936"}); return {processId:result.processId, stderr:result.output.filter(x=>x.stream==="stderr").map(x=>x.data).join("")};',
+    {input:first.processId}));
+  assert.equal(legacy.processId,first.processId);
+  assert.equal(legacy.stderr,"你好");
+  const bytes = data(await f.start(
+    'const result=await sh.get({processId:context.input,encoding:null});return result.output.filter(x=>x.stream==="stderr").flatMap(x=>Array.from(x.data));',
+    {input:first.processId}));
+  assert.deepEqual(bytes,[0xc4,0xe3,0xba,0xc3]);
+});
+
+test("Windows native commands use recorded code-page fallback without rewriting shell commands or changing the host console",
+  {skip: process.platform!=="win32", timeout:45000}, async t => {
+    const {readWindowsCodePages}=await import("../dist/process/windows-encoding.js");
+    const before=readWindowsCodePages();
+    const f=await fixture(t);
+    const project='const r=await sh.exec(context.input);return {...r,output:r.output.map(x=>({stream:x.stream,data:typeof x.data==="string"?x.data:Array.from(x.data)}))};';
+    const ping=data(await f.start(project,{input:{command:"ping.exe",args:["-n","1","127.0.0.1"]}}));
+    assert.equal(ping.exitCode,0);
+    assert.match(text(ping),/127\.0\.0\.1/);
+    assert.ok(ping.output.every(x=>typeof x.data==="string"),JSON.stringify(ping.details));
+    assert.doesNotMatch(text(ping),/�/u);
+    const pages=ping.details.windowsCodePages;
+    assert.equal(pages.source,"windows-system-and-host-console");
+    assert.ok(pages.ansi>0&&pages.oem>0);
+    // Explicit PowerShell UTF-8 output uses its ordinary source bytes, without
+    // Nexum rewriting the shell invocation. Use an ASCII script independent of
+    // the machine's active locale; the bytes are known and preserve Unicode.
+    const script='param(); $b=[Convert]::FromBase64String("5Lit5paHIOaXpeacrOiqniDwn5iA"); [Console]::OpenStandardOutput().Write($b,0,$b.Length); exit 7';
+    for(const shell of ["powershell.exe","pwsh.exe"]){
+      if(shell==="pwsh.exe"){
+        const found=await f.start('return await sh.which(context.input);',{input:shell});
+        if(found.run.status!=="succeeded")continue;
+      }
+      const result=data(await f.start(project,{input:{shell,shellCommand:script}}));
+      assert.equal(result.exitCode,7);
+      assert.match(text(result),/中文 日本語 😀/u);
+    }
+    const cmd=data(await f.start(project,{input:{command:"cmd.exe",args:["/d","/u","/c","echo 中文"]}}));
+    const decoded=data(await f.start('const r=await sh.get({processId:context.input,encoding:"utf16le"});return r.output.map(x=>x.data).join("");',{input:cmd.processId}));
+    assert.match(decoded,/中文/u);
+    assert.deepEqual(readWindowsCodePages(),before);
+  });
+
+test("real sh Run uses the prepared Windows fallback policy and retains it for history", async t => {
+  const f=await fixture(t);
+  // Simulate the *launch-time observation*, not a Windows native API result.
+  // The rest of the test uses the real managed backend, output ring and SDK.
+  const original=ManagedProcess.prototype.start;
+  ManagedProcess.prototype.start=function(prepare){
+    return original.call(this, async signal=>({
+      ...await prepare(signal),
+      windowsCodePages:{
+        ansi:936,oem:936,hostConsoleInput:null,hostConsoleOutput:65001,
+        source:"windows-system-and-host-console"
+      }
+    }));
+  };
+  let first;
+  try {
+    first=data(await f.start("return await sh.exec(context.input);",{
+      input:command('process.stdout.write(Buffer.from("50494e473a20c4e3bac3","hex"));process.stderr.write("UTF-8 中文");')
+    }));
+  } finally {
+    ManagedProcess.prototype.start=original;
+  }
+  assert.equal(first.exitCode,0);
+  assert.equal(first.details.windowsFallbackCodePage,936);
+  assert.equal(first.output.filter(x=>x.stream==="stdout").map(x=>x.data).join(""),"PING: 你好");
+  assert.equal(first.output.filter(x=>x.stream==="stderr").map(x=>x.data).join(""),"UTF-8 中文");
+  const historical=data(await f.get(first.processId));
+  assert.equal(historical.processId,first.processId);
+  assert.equal(historical.details.windowsFallbackCodePage,936);
+  assert.deepEqual(historical.output,first.output);
+  const bytes=data(await f.start('const r=await sh.get({processId:context.input,encoding:null});return r.output.filter(x=>x.stream==="stdout").flatMap(x=>Array.from(x.data));',{input:first.processId}));
+  assert.deepEqual(bytes,Array.from(Buffer.from("50494e473a20c4e3bac3","hex")));
+});

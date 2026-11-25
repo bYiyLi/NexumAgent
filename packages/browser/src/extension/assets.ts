@@ -7,6 +7,7 @@ import {
   rename,
   rm,
   copyFile,
+  writeFile,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -97,6 +98,7 @@ export async function preparePlugin(
   let backup: string | undefined,
     committed = false;
   try {
+    const files: string[] = [];
     for (const entry of await readdir(source, { withFileTypes: true })) {
       signal.throwIfAborted();
       check(
@@ -110,7 +112,20 @@ export async function preparePlugin(
         path.join(source, entry.name),
         path.join(temporary, entry.name),
       );
+      files.push(entry.name);
     }
+    // Installation information belongs to the same atomically published
+    // asset generation. It contains no paths, credentials or browser data.
+    await writeFile(
+      path.join(temporary, "nexum-installation.json"),
+      JSON.stringify({
+        profile,
+        extensionId: build.extensionId,
+        extensionVersion: release.extensionVersion,
+        files: files.sort(),
+      }) + "\n",
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
     signal.throwIfAborted();
     host.authorize({ type: "path", value: destination, access: "write" });
     try {

@@ -15,7 +15,8 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { StringDecoder } from "node:string_decoder";
+import { initialAutoModes, normalizeOutputEncoding, outputDecoder, windowsLegacyEncoding,
+  type AutoEncodingMode, type CanonicalOutputEncoding, type OutputEncoding } from "./output-encoding.js";
 import { types } from "node:util";
 import { AgentError, requireCondition } from "../contracts/errors.js";
 import { privateDirectory } from "../runtime/paths.js";
@@ -31,7 +32,7 @@ export interface ProcessOutputOptions {
 export interface ProcessOutputReadOptions {
   readonly cursor?: string;
   readonly maxBytes?: number;
-  readonly encoding?: BufferEncoding | null;
+  readonly encoding?: OutputEncoding | null;
   readonly signal?: AbortSignal;
 }
 export interface ProcessOutputPage {
@@ -61,60 +62,15 @@ const viewLength = Object.getOwnPropertyDescriptor(
   typedPrototype,
   "byteLength",
 )!.get!;
-// These are Node's native decoder continuation accessors. The bounded bytes
-// reconstruct an independent decoder for every read; no decoder object crosses
-// the public boundary or survives by relying on a reader's in-memory session.
-const decoderNeed = Object.getOwnPropertyDescriptor(
-  StringDecoder.prototype,
-  "lastNeed",
-)!.get!;
-const decoderTotal = Object.getOwnPropertyDescriptor(
-  StringDecoder.prototype,
-  "lastTotal",
-)!.get!;
-const decoderChar = Object.getOwnPropertyDescriptor(
-  StringDecoder.prototype,
-  "lastChar",
-)!.get!;
-type Encoding =
-  "utf8" | "utf16le" | "latin1" | "ascii" | "base64" | "base64url" | "hex";
 interface Position {
   frame: number;
   offset: number;
-  encoding: Encoding | null;
+  encoding: CanonicalOutputEncoding | null;
   carry: string[];
+  modes?: AutoEncodingMode[];
+  fallback?: number;
 }
 
-function encoding(value: unknown): Encoding | null {
-  if (value === null) return null;
-  requireCondition(
-    typeof value === "string",
-    "unsupported_output_encoding",
-    "Output encoding must be a supported Node encoding or null.",
-  );
-  const aliases: Readonly<Record<string, Encoding>> = {
-    utf8: "utf8",
-    "utf-8": "utf8",
-    utf16le: "utf16le",
-    "utf-16le": "utf16le",
-    ucs2: "utf16le",
-    "ucs-2": "utf16le",
-    latin1: "latin1",
-    binary: "latin1",
-    ascii: "ascii",
-    base64: "base64",
-    base64url: "base64url",
-    hex: "hex",
-  };
-  const key = value.toLowerCase();
-  const result = Object.hasOwn(aliases, key) ? aliases[key] : undefined;
-  requireCondition(
-    result,
-    "unsupported_output_encoding",
-    "This encoding cannot be incrementally decoded by the current Node runtime.",
-  );
-  return result;
-}
 function integer(value: unknown, min: number, max: number): value is number {
   return (
     Number.isSafeInteger(value) &&
@@ -148,6 +104,8 @@ export class ProcessOutputLog extends EventEmitter {
   #finishing = false;
   #complete = false;
   #truncated = false;
+  #windowsFallback = 0;
+  #encodingConfigured = false;
   #start = 0;
   #end = 0;
   #identity = Buffer.alloc(0);
@@ -199,6 +157,24 @@ export class ProcessOutputLog extends EventEmitter {
   }
   get outputComplete(): boolean {
     return this.#complete;
+  }
+
+  /** Captured once, before starting the child. The previously reserved
+   * header bytes are zero in old logs, which remain readable without
+   * inventing an encoding from the current machine. */
+  configureWindowsFallback(codePage: number): Promise<void> {
+    this.#assertOpen();
+    requireCondition(codePage === 0 || windowsLegacyEncoding(codePage) !== undefined,
+      "invalid_output_options", "Unsupported Windows fallback code page.");
+    return this.#enqueue(0, async () => {
+      this.#assertOpen();
+      requireCondition(!this.#readOnly && !this.#finishing && !this.#encodingConfigured &&
+        this.#start === 0 && this.#end === 0,
+        "invalid_output_options", "The original process encoding context is already fixed.");
+      this.#encodingConfigured = true;
+      this.#windowsFallback = codePage;
+      if (codePage !== 0) await this.#saveHeader();
+    });
   }
 
   #enqueue<T>(
@@ -390,6 +366,7 @@ export class ProcessOutputLog extends EventEmitter {
     // Completion is published only after the data writer has actually closed.
     bytes[108] = 0;
     bytes[109] = Number(this.#truncated);
+    bytes.writeUInt16LE(this.#windowsFallback, 110);
     await this.#writeAll(this.#handle!, bytes, 0);
   }
   async #loadHeader(file: FileHandle): Promise<void> {
@@ -397,6 +374,7 @@ export class ProcessOutputLog extends EventEmitter {
     const start = Number(bytes.readBigUInt64LE(92)),
       end = Number(bytes.readBigUInt64LE(100));
     const maximum = bytes.readUInt32LE(88);
+    const fallback = bytes.readUInt16LE(110);
     requireCondition(
       bytes.subarray(0, 8).equals(magic) &&
         bytes
@@ -408,6 +386,7 @@ export class ProcessOutputLog extends EventEmitter {
         end - start <= maximum - headerBytes - completionBytes &&
         bytes[108] === 0 &&
         bytes[109]! <= 1 &&
+        (fallback === 0 || windowsLegacyEncoding(fallback) !== undefined) &&
         (await file.stat()).size <= maximum - completionBytes,
       "output_unavailable",
       "The output log header does not match its process or retention policy.",
@@ -418,6 +397,8 @@ export class ProcessOutputLog extends EventEmitter {
       "output_unavailable",
       "The output log identity was replaced.",
     );
+    requireCondition(!this.#identity.length || this.#end === 0 || this.#windowsFallback === fallback,
+      "output_unavailable", "The retained output encoding context was replaced.");
     this.#identity = Buffer.from(identity);
     this.#key = Buffer.from(bytes.subarray(24, 56));
     this.#maxBytes = maximum;
@@ -425,6 +406,9 @@ export class ProcessOutputLog extends EventEmitter {
     this.#end = end;
     this.#complete = await this.#completion();
     this.#truncated = bytes[109] === 1;
+    // Once output exists, a live reader may not reinterpret it using changed
+    // header metadata. Old logs have zero in this reserved field.
+    this.#windowsFallback = fallback;
   }
   async #completion(): Promise<boolean> {
     const filename = `${this.path}.complete`;
@@ -608,14 +592,15 @@ export class ProcessOutputLog extends EventEmitter {
     ).toString("base64url");
     return `${value}.${createHmac("sha256", this.#key).update(value).digest("base64url")}`;
   }
-  #position(cursor: string | undefined, selected: Encoding | null): Position {
-    if (cursor === undefined)
-      return {
-        frame: this.#start,
-        offset: 0,
-        encoding: selected,
-        carry: ["", "", ""],
-      };
+  #position(cursor: string | undefined, selected: CanonicalOutputEncoding | null, legacyDefault: boolean): Position {
+    const fresh = (mode: CanonicalOutputEncoding | null): Position => ({
+      frame: this.#start,
+      offset: 0,
+      encoding: mode,
+      carry: ["", "", ""],
+      ...(mode === "auto" ? { modes: initialAutoModes(this.#truncated), fallback: this.#windowsFallback } : {}),
+    });
+    if (cursor === undefined) return fresh(selected);
     try {
       requireCondition(
         typeof cursor === "string" &&
@@ -640,11 +625,22 @@ export class ProcessOutputLog extends EventEmitter {
       requireCondition(
         data.id === this.#identity.toString("hex") &&
           data.processId === this.processId &&
-          data.encoding === selected &&
+          (data.encoding === selected || (legacyDefault && selected === "auto" && data.encoding === "utf8")) &&
           integer(data.frame, 0, this.#end) &&
           integer(data.offset, 0, 65536) &&
           Array.isArray(data.carry) &&
           data.carry.length === 3 &&
+          (data.encoding !== "auto" ||
+            (Array.isArray(data.modes) && data.modes.length === 3 &&
+              data.modes.every(mode => ["pending", "undecided", "utf8", "utf16le", "utf-16be", "raw", ...(this.#windowsFallback ? ["legacy"] : [])].includes(mode)) &&
+              data.modes[2] === "utf8" &&
+              (data.fallback === this.#windowsFallback ||
+                // An empty pre-launch read may precede setting the fallback.
+                // An already consumed cursor must retain its original policy.
+                ((data.fallback === 0 || data.fallback === undefined) &&
+                  data.frame === 0 && data.offset === 0 &&
+                  data.modes[0] === "pending" && data.modes[1] === "pending" &&
+                  data.carry.every(item => item === ""))))) &&
           data.carry.every(
             (item) =>
               typeof item === "string" &&
@@ -654,14 +650,9 @@ export class ProcessOutputLog extends EventEmitter {
         "invalid_output_cursor",
         "The output cursor does not match this process, position or encoding.",
       );
-      return data.frame < this.#start
-        ? {
-            frame: this.#start,
-            offset: 0,
-            encoding: selected,
-            carry: ["", "", ""],
-          }
-        : data;
+      if (data.frame < this.#start) return fresh(data.encoding);
+      if (data.encoding === "auto") data.fallback = this.#windowsFallback;
+      return data;
     } catch (cause) {
       if (cause instanceof AgentError) throw cause;
       throw new AgentError(
@@ -676,8 +667,8 @@ export class ProcessOutputLog extends EventEmitter {
   read(options: ProcessOutputReadOptions = {}): Promise<ProcessOutputPage> {
     this.#assertOpen();
     const maximum = options.maxBytes ?? 65536,
-      selected = encoding(
-        options.encoding === undefined ? "utf8" : options.encoding,
+      selected = normalizeOutputEncoding(
+        options.encoding === undefined ? "auto" : options.encoding,
       );
     requireCondition(
       integer(maximum, 1, 1024 * 1024),
@@ -699,17 +690,15 @@ export class ProcessOutputLog extends EventEmitter {
           owned = true;
         }
         await this.#loadHeader(file);
-        const position = this.#position(options.cursor, selected);
+        const position = this.#position(options.cursor, selected, options.encoding === undefined);
         const output: ProcessOutputPage["output"] = [];
         const decoders =
-          selected === null
+          position.encoding === null
             ? null
-            : streams.map((_, index) => {
-                const decoder = new StringDecoder(selected);
-                if (position.carry[index])
-                  decoder.write(Buffer.from(position.carry[index]!, "base64"));
-                return decoder;
-              });
+            : streams.map((_, index) =>
+                outputDecoder(position.encoding!, position.carry[index]!, position.modes?.[index],
+                  index === 2 ? undefined : windowsLegacyEncoding(this.#windowsFallback)),
+              );
         const emit = (stream: ProcessOutputStream, data: string | Buffer) => {
           if (data.length) output.push({ stream, data });
         };
@@ -754,13 +743,8 @@ export class ProcessOutputLog extends EventEmitter {
             const decoder = decoders[index]!;
             if (this.#complete && position.frame === this.#end)
               emit(streams[index]!, decoder.end());
-            const need = decoderNeed.call(decoder) as number,
-              total = decoderTotal.call(decoder) as number;
-            position.carry[index] = need
-              ? (decoderChar.call(decoder) as Buffer)
-                  .subarray(0, total - need)
-                  .toString("base64")
-              : "";
+            position.carry[index] = decoder.carry();
+            if (position.modes && decoder.mode) position.modes[index] = decoder.mode();
           }
         check(options.signal);
         return {

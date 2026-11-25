@@ -20,7 +20,7 @@ Go 与 Node 使用父子进程 stdin/stdout 上的逐行双向 JSON-RPC 2.0；�
 
 Node Host 的源码包为私有 `@nexum/node-host`，**不再作为 npm Core 发布或安装**。主仓库 Cloud Docker 镜像构建时从本仓库固定 Submodule 提交生成 `node-host-<version>.tar.gz`，Go Native Agent 按当前 Cloud 的 Host Manifest 下载、验证和管理本地 `node-host/<version>/`。Node Host 的安装身份与平台 SDK Owner 不同；内置平台统一使用固定 Owner `nexum`，不从 npm 包名推导权限。
 
-npm 仅发布独立的 `@nexum-hub/sdk` 与可选 `@nexum-hub/browser`。GitHub Actions `.github/workflows/npm-next.yml` 在 `vX.Y.Z` Tag 发布正式版本（`latest`），在 `main` 手动运行时发布测试版（`next`），并使用 OIDC 回读 npm Registry；普通 `main` 推送不自动发布 npm 包。两包的版本和发布门禁由 `scripts/npm-release.mjs` 管理。
+npm 仅发布独立的 `@nexum-hub/sdk` 与可选 `@nexum-hub/browser`。GitHub Actions `.github/workflows/npm-next.yml` 在 `vX.Y.Z` Tag 发布正式版本（`latest`），在 `main` 手动运行时发布测试版（`next`），并使用 OIDC 回读 npm Registry；普通 `main` 推送不自动发布 npm 包。两包的版本和发布门禁由 `scripts/npm-release.mjs` 管理。上传被接受后只读 Registry 索引最长等待 10 分钟/包，同时核对版本、dist-tag、SHA-1 与 SHA-512；超时不自动重发。保留相同的已准备版本、包字节及 RELEASE_VERSION/RELEASE_TAG 时，可用 `node scripts/npm-release.mjs verify-index` 重新验证，不上传或改动 dist-tag。
 
 SDK/Browser 的 npm 发行与 Cloud 镜像、六平台 Go Agent、Node Host 归档及设备部署分别验收。不能将 npm 成功发布等同于 Native 或 Node Host 已部署成功。
 

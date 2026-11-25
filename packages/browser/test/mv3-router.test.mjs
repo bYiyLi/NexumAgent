@@ -2358,6 +2358,7 @@ test("a same-URL native download before or after an owned event never authorizes
     assert.equal(rows[0].id, "owned-original-guid");
     assert.equal(rows[0].state, "complete");
     assert.equal(Object.hasOwn(rows[0], "filename"), false);
+    assert.equal(Object.hasOwn(rows[0], "nativeRecordId"), false);
     await assert.rejects(f.call("downloads.path", { downloadId: rows[0].id }), {
       code: "CAPABILITY_NOT_ALLOWED",
     });
@@ -2491,6 +2492,18 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
       .map((call) => call[1]),
     [{ id: 72 }],
   );
+  // The marker changes the basename; matching the original filename would
+  // miss the exact record even though the browser completed the download.
+  const own = (await f.call("tab.downloads")).find(row=>row.id===receipt.downloadId);
+  assert.equal(own.nativeRecordId, 72);
+  assert.equal(own.suggestedFilename, filename);
+  const exactRecord = await f.call("browsers.downloads", {options:{id:own.nativeRecordId}}, {id:null});
+  assert.equal(exactRecord.length,1);
+  assert.equal(exactRecord[0].id,72);
+  assert.equal(exactRecord[0].filename, `/downloads/Nexum/${filename}`);
+  assert.equal(exactRecord[0].filename.includes("report.bin"),false);
+  assert.deepEqual(f.calls.filter(call=>call[0]==="downloads.search").at(-1)[1],{orderBy:["-startTime"],id:72});
+  assert.deepEqual(await f.call("browsers.downloads",{options:{id:999}},{id:null}),[]);
   downloads[1].fileSize = -1;
   assert.deepEqual(
     await f.call("downloads.path", { downloadId: receipt.downloadId }),
@@ -2501,6 +2514,13 @@ test("an awaited attachment binds the exact browser download ID and leaves unrel
     f.call("downloads.path", { downloadId: receipt.downloadId }),
     { code: "PROTOCOL_MISMATCH" },
   );
+  downloads[1].fileSize = 3;
+  downloads[1].state = "interrupted";
+  await assert.rejects(f.call("downloads.path",{downloadId:receipt.downloadId}),
+    {code:"FILE_UNAVAILABLE",reason:"download_interrupted"});
+  downloads.splice(1,1);
+  await assert.rejects(f.call("downloads.path",{downloadId:receipt.downloadId}),
+    {code:"FILE_UNAVAILABLE",reason:"download_record_missing"});
   await f.call("waiters.cancel", { id: waiter.id });
   assert.ok(f.calls.some((call) => call[2] === "Fetch.disable"));
 });
@@ -2688,6 +2708,7 @@ test("a duplicated marked identity is never used to read either browser file", a
     url: "https://example.com/report.bin",
     suggestedFilename: filename,
   });
+  assert.equal((await f.call("tab.downloads"))[0].nativeRecordId, undefined);
   await assert.rejects(
     f.call("downloads.path", { downloadId: "ambiguous-download-guid" }),
     {
@@ -4433,4 +4454,79 @@ test("resuming explicit handoff publishes a new control epoch without reviving o
     invoke(fresh, "downloads.path", { downloadId: "before-resume" }),
     { code: "FILE_UNAVAILABLE" },
   );
+});
+
+test("implicit select labels exclude the control's own options; explicit and ARIA labels still work", async () => {
+  const text = (nodeValue) => ({ nodeType: 3, nodeValue });
+  const make = (attributes = {}) => ({
+    nodeType: 1, tagName: "SELECT", textContent: "SmallMedium",
+    childNodes: [{nodeType:1, childNodes:[text("Small"),text("Medium")]}],
+    closest: () => null,
+    getAttribute: (key) => attributes[key] ?? null,
+    hasAttribute: (key) => Object.hasOwn(attributes,key),
+  });
+  const implicit = make(), explicit = make(), aria = make({"aria-label":"ARIA size"});
+  implicit.labels = [{childNodes:[text("Size "),implicit],textContent:"Size SmallMedium"}];
+  explicit.labels = [{childNodes:[text("Explicit size")],textContent:"Explicit size"}];
+  const document = {querySelectorAll: () => [implicit,explicit,aria],getElementById:()=>null};
+  const scope = vm.createContext({document,crypto,TextEncoder,Uint8Array});
+  const count = async (value) => JSON.parse(JSON.stringify(await vm.runInContext(
+    `(${pageCommand.toString()})(${JSON.stringify({command:"count",pageVersion:1,leaseId:"label",locator:{query:{kind:"label",matcher:{kind:"text",value,exact:true}}}})})`,scope)));
+  for (const name of ["Size","Explicit size","ARIA size"])
+    assert.deepEqual(await count(name), {ok:true,value:1});
+  assert.deepEqual(await count("Size SmallMedium"), {ok:true,value:0});
+});
+
+
+test("tab creation accepts an explicit blank page but rejects privileged URL schemes", async (t) => {
+  const f=fixture(t);
+  f.router.start();f.router.bind(binding);f.open("lease",null);
+  const blank=await f.call("tabs.new",{url:"about:blank",options:{active:false}},{id:null});
+  assert.equal(blank.id,"4");
+  assert.deepEqual(f.calls.find(v=>v[0]==="tabs.create")[1],{url:"about:blank",active:false});
+  await assert.rejects(f.call("tabs.new",{url:"chrome://settings/"},{id:null}),{code:"INVALID_ARGUMENT"});
+  assert.equal(f.calls.filter(v=>v[0]==="tabs.create").length,1);
+});
+
+test("two run targets downloading the same URL keep distinct proven native record IDs", async(t)=>{
+  const downloads=[];
+  const f=fixture(t,{nativeDownloads:downloads});
+  f.router.start();f.router.bind(binding);
+  const url="https://example.com/shared.bin";
+  const cases=[{leaseId:"run-a",id:"1",nativeId:71,guid:"guid-a"},{leaseId:"run-b",id:"2",nativeId:72,guid:"guid-b"}];
+  for(const item of cases)f.open(item.leaseId,item.id);
+  await Promise.all(cases.map(item=>f.call("waiters.arm",{event:"download",timeoutMs:1000},item)));
+  for(const item of cases) {
+    const source={tabId:Number(item.id)};
+    const requestId="request-"+item.id;
+    f.chrome.debugger.onEvent.emit(source,"Fetch.requestPaused",{requestId,request:{url}});
+    await delay(0);
+    f.chrome.debugger.onEvent.emit(source,"Fetch.requestPaused",{requestId,request:{url},responseStatusCode:200,responseHeaders:[{name:"Content-Disposition",value:"attachment; filename=shared.bin"}]});
+    await delay(0);
+    const response=f.calls.find(call=>call[2]==="Fetch.continueResponse"&&call[3].requestId===requestId);
+    assert.ok(response);
+    const filename=/filename="([^"]+)"/.exec(response[3].responseHeaders[0].value)[1];
+    item.filename=filename;
+    const native={id:item.nativeId,filename:"/downloads/Nexum/"+filename,state:"complete",fileSize:3};
+    downloads.push(native);
+    f.chrome.debugger.onEvent.emit(source,"Page.downloadWillBegin",{guid:item.guid,url,suggestedFilename:filename});
+    // A page event alone does not prove the native DownloadItem identity.
+    assert.equal((await f.call("tab.downloads",{},item))[0].nativeRecordId,undefined);
+    f.chrome.downloads.onDeterminingFilename.emit(native,()=>{});
+    f.chrome.debugger.onEvent.emit(source,"Page.downloadProgress",{guid:item.guid,state:"completed",receivedBytes:3,totalBytes:3});
+  }
+  assert.notEqual(cases[0].filename,cases[1].filename);
+  for(const item of cases){
+    const rows=await f.call("tab.downloads",{},item);
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].id,item.guid);
+    assert.equal(rows[0].nativeRecordId,item.nativeId);
+    const own=await f.call("downloads.path",{downloadId:item.guid},item);
+    assert.equal(own.path,"/downloads/Nexum/"+item.filename);
+    const foreign=cases.find(other=>other!==item);
+    await assert.rejects(f.call("downloads.path",{downloadId:foreign.guid},item),
+      {code:"FILE_UNAVAILABLE",reason:"download_not_owned"});
+  }
+  await f.router.endLease("run-a");
+  assert.equal((await f.call("tab.downloads",{},cases[1]))[0].nativeRecordId,72);
 });

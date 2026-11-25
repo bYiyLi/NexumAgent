@@ -8,13 +8,13 @@
 
 需要下载附件时，等待真实下载完成再使用下载文件；单纯的页面点击或下载开始事件不是文件已写入成功的证据。
 
-如果网页下载没有被当前等待器关联，可以直接查看当前浏览器配置的下载列表。`selected.downloads.list()` 返回原生记录，`filename` 是浏览器报告的本机路径；列表包含其他标签和目录的记录，不能凭同名文件认定是本次请求的下载；只有用户请求的目标与来源证据能够对应时才交付。默认最多 1000 条，可用 `limit` 调整数量，`0` 表示全部。先只读确认用户本次请求对应的实际下载记录 id，在新的 Run 中将它作为 `context.input.downloadRecordId` 传入；仅当记录仍存在且 `state === "complete"` 时才交付，不能按同名文件自动选取：
+如果网页下载没有被当前等待器关联，可以直接查看当前浏览器配置的下载列表。`selected.downloads.list()` 返回原生记录，`filename` 是浏览器报告的本机路径；列表包含其他标签和目录的记录，不能凭同名文件认定是本次请求的下载；只有用户请求的目标与来源证据能够对应时才交付。默认最多 1000 条，可用 `limit` 调整数量，`0` 表示全部。已知真实数字 ID 时使用 `selected.downloads.list({id})` 精确查询，不受列表中其他下载的条数影响。先只读确认用户本次请求对应的实际下载记录 id，在新的 Run 中将它作为 `context.input.downloadRecordId` 传入；仅当记录仍存在且 `state === "complete"` 时才交付，不能按同名文件自动选取：
 
 ```javascript
-const records = await selected.downloads.list({ limit: 20 });
 const id = context.input?.downloadRecordId; // 来自本次已核对的下载记录
-if (!Number.isSafeInteger(id)) return { status: "unconfirmed",
+if (typeof id !== "number" || !Number.isSafeInteger(id)) return { status: "unconfirmed",
   reason: "尚未确认本次请求对应的下载记录 id，不能按同名文件猜测" };
+const records = await selected.downloads.list({ id });
 const file = records.find((item) => item.id === id && item.state === "complete");
 if (!file) return { status: "unconfirmed",
   reason: "指定下载记录不存在或尚未完成，不能交付文件" };
@@ -22,6 +22,8 @@ return { type: "resource_link", path: file.filename };
 ```
 
 列表中路径可能位于浏览器配置的任意下载目录；实际读取仍使用当前 Agent 的路径授权和大小规则。记录由浏览器提供，文件可能已移动或删除，`exists` 也可能滞后。浏览器记录的数字 `id` 与 `tab.downloads()` 的页面下载 ID 不同，不可用于 `tab.saveDownload`。列表不返回来源 URL，避免将下载内容或凭据放进模型上下文。
+
+等待器返回的 `downloaded.id` 是页面下载身份；`suggestedFilename` 是实际页面事件名称，受控下载可能包含 `-nexum-<唯一编号>` 并保存到浏览器下载目录的 Nexum 子目录。不要拿原始网页文件名匹配实际保存路径。在同一 Run 内可用 `(await tab.downloads()).find(item => item.id === downloaded.id)` 找到对应页面记录；只有实际返回 `nativeRecordId` 才可按该数字 ID 精确读取原生记录。该关联可能在等待器返回后才出现，也可能无法确认；缺少它不能猜测。记录完成、文件存在、路径授权和字节固定是独立事实。
 
 当前等待器无法确认下载身份时，`download.path()` 仍返回 `CAPABILITY_NOT_ALLOWED`；可以通过上述列表由 AI 选择文件。浏览器提供文件大小时，等待器路径的实际文件必须与之相符；大小未知时按实际读取结果处理。不会重发原请求。
 

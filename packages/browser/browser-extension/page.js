@@ -1,14 +1,15 @@
 /** Serialized by chrome.scripting into the extension's isolated page world. No outer closure is used. */
 export async function pageCommand(input) {
-  const failure = (code, message) => {
-    throw Object.assign(new Error(message), { code });
+  const failure = (code, message, reason) => {
+    throw Object.assign(new Error(message), { code, reason });
   };
   const check = (
     value,
     code = "INVALID_ARGUMENT",
     message = "The page input is invalid.",
+    reason,
   ) => {
-    if (!value) failure(code, message);
+    if (!value) failure(code, message, reason);
   };
   try {
     const slot = Symbol.for("nexum.browser.document.v1");
@@ -115,6 +116,21 @@ export async function pageCommand(input) {
             : "textbox",
       }[node.tagName] ||
       "generic";
+    // An implicit label contains the control itself. Its option/value text
+    // must not become part of that control's own locator name.
+    const labelText = (label, control) => {
+      if (!label.childNodes) return label.textContent || "";
+      const pending = [...label.childNodes].reverse(), parts = [];
+      while (pending.length) {
+        const child = pending.pop();
+        if (child === control) continue;
+        if (child.nodeType === 3) parts.push(child.nodeValue || "");
+        else if (child.nodeType === 1 && child.childNodes)
+          for (let i = child.childNodes.length - 1; i >= 0; i--)
+            pending.push(child.childNodes[i]);
+      }
+      return parts.join("").replace(/\s+/g, " ").trim();
+    };
     const name = (node) =>
       (node.getAttribute("aria-labelledby") || "")
         .split(/\s+/)
@@ -123,7 +139,7 @@ export async function pageCommand(input) {
         .join(" ")
         .trim() ||
       node.getAttribute("aria-label") ||
-      node.labels?.[0]?.textContent?.trim() ||
+      Array.from(node.labels || [], (label) => labelText(label, node)).filter(Boolean).join(" ") ||
       node.getAttribute("alt") ||
       node.innerText?.trim() ||
       node.textContent?.trim() ||
@@ -346,6 +362,7 @@ export async function pageCommand(input) {
         visible(node) && enabled(node),
         "INVALID_TARGET",
         "The current element is not visible and enabled.",
+        "element_not_actionable",
       );
       // The first preflight scrolls the target into view. Later checks must
       // observe the compositor's settled position without requesting another
@@ -377,6 +394,7 @@ export async function pageCommand(input) {
         top === node || node.contains(top),
         "INVALID_TARGET",
         "Another element blocks the action target.",
+        "element_blocked",
       );
       return { rect: r, point };
     };
@@ -387,6 +405,7 @@ export async function pageCommand(input) {
         found.length === 1,
         found.length > 1 ? "AMBIGUOUS_TARGET" : "INVALID_TARGET",
         "The locator must resolve to exactly one current element.",
+        found.length > 1 ? "element_not_unique" : "element_not_found",
       );
       const node = found[0];
       if (action) actionGeometry(node);
@@ -873,6 +892,7 @@ export async function pageCommand(input) {
           typeof cause?.code === "string"
             ? cause.message
             : "The page command could not be completed.",
+        ...(typeof cause?.reason === "string" ? { reason: cause.reason } : {}),
       },
     };
   }

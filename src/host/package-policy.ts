@@ -25,7 +25,10 @@ export class HostPackagePolicy {
       builtins: () => defaultBuiltins,
       approvedPackages: () => {
         if (!this.#usable || this.#closed) return new Map();
-        return cloudManagedPackages(this.root);
+        // Inventory for execution is fail-closed per dependency. A bad optional
+        // package cannot prevent a Worker using only builtins from running.
+        // Maintenance verification below remains strict.
+        return cloudManagedPackages(this.root, true);
       },
     };
   }

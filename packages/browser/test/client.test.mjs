@@ -138,6 +138,8 @@ test("browser download listing uses the selected browser and returns native path
   assert.deepEqual(request.input.options, { limit: 50 });
   await browser.downloads.list({ limit: 0 });
   assert.equal(f.calls.at(-1).input.options.limit, 0);
+  assert.deepEqual(await browser.downloads.list({ id: 17 }), rows);
+  assert.deepEqual(f.calls.at(-1).input.options, { id: 17 });
 });
 
 test("locator combinations are bounded immutable AST with native regexp flags and exact frame/target ownership", async () => {
@@ -302,6 +304,8 @@ test("waitForEvent establishes an arm-ready barrier while its get wait never blo
   armed.resolve({ id: "waiter-1", target, expiresAt: Date.now() + 1000 });
   await click;
   const download = await pending;
+  assert.equal(download.id, "download-1");
+  assert.equal(download.suggestedFilename, "report.txt");
   assert.equal(await download.path(), "/fixture/report.txt");
   assert.equal(f.calls.at(-1).input.downloadId, "download-1");
   assert.equal(f.calls.filter((call) => call.path === "waiters.get").length, 1);

@@ -5,6 +5,7 @@ import { AgentError, requireCondition } from "../contracts/errors.js";
 import { authorizeCall } from "../contracts/caller.js";
 import { isPlainRecord } from "../contracts/json.js";
 import type { ProcessLaunch } from "./backend.js";
+import { readWindowsCodePages, type WindowsCodePages } from "./windows-encoding.js";
 import {
   discoverEnvironment,
   mergeChildEnvironment,
@@ -65,6 +66,7 @@ export interface PreparedLaunch {
   readonly executable: Executable;
   readonly environment: EnvironmentSnapshot;
   readonly shell: string | null;
+  readonly windowsCodePages?: WindowsCodePages;
 }
 
 function text(
@@ -493,5 +495,6 @@ export async function prepareLaunch(
     executable,
     environment,
     shell: shell === null ? null : launchPath,
+    windowsCodePages: readWindowsCodePages(),
   });
 }

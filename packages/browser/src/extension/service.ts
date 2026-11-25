@@ -441,22 +441,16 @@ export class BrowserService extends EventEmitter {
     socket: WebSocket,
     value: Record<string, unknown>,
   ): Promise<BrowserPeer> {
-    check(
-      value.profile === this.options.profile &&
-        value.extensionId === this.options.extensionId &&
-        value.extensionVersion === this.options.extensionVersion &&
-        value.protocol &&
-        typeof value.protocol === "object" &&
-        (value.protocol as Record<string, unknown>).min === 1 &&
-        (value.protocol as Record<string, unknown>).max === 1 &&
-        identifier(value.browserProfileId) &&
-        identifier(value.browserSessionId) &&
-        identifier(value.clientInstanceId) &&
-        Number.isSafeInteger(value.attemptSequence) &&
-        Number(value.attemptSequence) > 0,
-      "PROFILE_MISMATCH",
-      "The browser hello does not match this profile and plugin build.",
-    );
+    check(value.profile === this.options.profile && value.extensionId === this.options.extensionId,
+      "PROFILE_MISMATCH", "The browser hello does not match this profile and extension identity.");
+    check(value.extensionVersion === this.options.extensionVersion,
+      "PLUGIN_VERSION_MISMATCH", "The browser plugin version does not match the installed package.");
+    check(record(value.protocol) && value.protocol.min === 1 && value.protocol.max === 1,
+      "PROTOCOL_MISMATCH", "The browser hello uses an incompatible protocol version.");
+    check(identifier(value.browserProfileId) && identifier(value.browserSessionId) &&
+      identifier(value.clientInstanceId) && Number.isSafeInteger(value.attemptSequence) &&
+      Number(value.attemptSequence) > 0,
+      "PROTOCOL_MISMATCH", "The browser hello has no valid connection identity.");
     const profileId = value.browserProfileId,
       claim = {};
     let old = this.#profiles.get(profileId);
@@ -752,13 +746,16 @@ export class BrowserService extends EventEmitter {
                 ? message.message.slice(0, 1024)
                 : "The browser extension reported a failed operation without a public reason. Inspect operationId, dispatched and effect before retrying; unknown effects must be observed first.",
               {
-                dispatched: message.dispatched !== false,
+                dispatched: message.dispatched !== false || message.effect === "confirmed" || message.effect === "unknown",
                 effect:
                   message.effect === "none"
                     ? "none"
                     : message.effect === "confirmed"
                       ? "confirmed"
                       : "unknown",
+                retryable: message.retryable === true && message.effect === "none" && message.dispatched === false,
+                ...(typeof message.reason === "string" && /^[a-z][a-z0-9_]{0,95}$/.test(message.reason)
+                  ? { reason: message.reason } : {}),
                 operationId: pending.operationId,
               },
             ),

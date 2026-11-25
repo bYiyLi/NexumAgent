@@ -180,7 +180,7 @@ function pwd(call: Invocation): string {
   );
   return value;
 }
-async function directory(
+export async function artifactDirectory(
   call: Invocation,
   work: string,
 ): Promise<{ path: string; stat: BigIntStats }> {
@@ -195,29 +195,28 @@ async function directory(
     "INVALID_CONTEXT",
     "Browser artifacts require the actual current run identity.",
   );
-  authorize(call, work, "write");
-  let parent = await realpath(work);
-  authorize(call, parent, "write");
-  for (const name of ["tmp", "browser", run]) {
-    const next = path.join(parent, name);
-    authorize(call, next, "write");
-    try {
-      await mkdir(next, { mode: 0o700 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-    const stat = await lstat(next, { bigint: true });
-    check(
-      stat.isDirectory() &&
-        !stat.isSymbolicLink() &&
-        (await realpath(next)) === next,
-      "FILE_CHANGED",
-      "The browser artifact directory is not a stable local directory.",
-    );
-    authorize(call, next, "write");
-    parent = next;
+  const paths = call.context.paths;
+  const temp = path.join(work, "tmp", "runs", run);
+  check(
+    paths !== null && typeof paths === "object" && !Array.isArray(paths) && paths.temp === temp,
+    "INVALID_CONTEXT",
+    "Browser artifacts require the current run temporary directory.",
+  );
+  const next = path.join(temp, "artifacts");
+  // Only this run's artifact subtree is writable, never the profile or the
+  // private run metadata directory. The core prepares the parent directory.
+  authorize(call, next, "write");
+  check((await realpath(temp)) === temp, "FILE_CHANGED", "The run temporary directory was redirected.");
+  try {
+    await mkdir(next, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  return { path: parent, stat: await lstat(parent, { bigint: true }) };
+  const stat = await lstat(next, { bigint: true });
+  check(stat.isDirectory() && !stat.isSymbolicLink() && (await realpath(next)) === next,
+    "FILE_CHANGED", "The browser artifact directory is not a stable local directory.");
+  authorize(call, next, "write");
+  return { path: next, stat };
 }
 async function directoryCurrent(
   target: OutputDirectory,
@@ -327,9 +326,21 @@ async function copyFile(
   );
   const requested = path.resolve(pwd(call), input.path);
   authorize(call, requested, "read");
-  const canonical = await realpath(requested);
+  const sourceFile = async <T>(read: () => Promise<T>): Promise<T> => {
+    try {
+      return await read();
+    } catch (cause) {
+      // This catch surrounds filesystem observations only, never authorization.
+      if (cause && typeof cause === "object" && !types.isProxy(cause) &&
+          Object.getOwnPropertyDescriptor(cause, "code")?.value === "ENOENT")
+        throw failure("FILE_UNAVAILABLE", "The authorized source file is no longer present.",
+          { reason: "source_file_missing" });
+      throw cause;
+    }
+  };
+  const canonical = await sourceFile(() => realpath(requested));
   authorize(call, canonical, "read");
-  const observed = await lstat(canonical, { bigint: true });
+  const observed = await sourceFile(() => lstat(canonical, { bigint: true }));
   check(
     observed.isFile(),
     "INVALID_ARGUMENT",
@@ -389,7 +400,7 @@ async function copyFile(
       input.destination === undefined
         ? undefined
         : await destinationDirectory(input.destination, call);
-    const target = plan?.target ?? (await directory(call, work));
+    const target = plan?.target ?? (await artifactDirectory(call, work));
     const id = randomUUID();
     temporary = path.join(target.path, `.${id}.partial`);
     final = plan?.final ?? path.join(target.path, id);
@@ -816,7 +827,7 @@ async function nativeDataFile(
   return result!;
 }
 async function inputDirectory(call: Invocation, work: string): Promise<string> {
-  const root = await directory(call, work),
+  const root = await artifactDirectory(call, work),
     leaf = path.join(root.path, randomUUID());
   authorize(call, leaf, "write");
   await directoryCurrent(root, call);

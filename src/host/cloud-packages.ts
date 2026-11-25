@@ -7,7 +7,7 @@ const name = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const version = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
 
 /** Go manages work package changes; the host exposes only actual direct dependencies. */
-export function cloudManagedPackages(root: string): ReadonlyMap<string, string> {
+export function cloudManagedPackages(root: string, availableOnly = false): ReadonlyMap<string, string> {
   const packages = new Map<string, string>();
   try {
     const work = root;
@@ -40,15 +40,17 @@ export function cloudManagedPackages(root: string): ReadonlyMap<string, string> 
           "package_manifest_invalid", "The installed package metadata is invalid.");
         const item: unknown = JSON.parse(readFileSync(metadata, "utf8"));
         requireCondition(isPlainRecord(item) && item.name === packageName &&
-          typeof item.version === "string" && version.test(item.version),
+          typeof item.version === "string" && version.test(item.version) &&
+          (!version.test(specifier) || item.version === specifier),
         "package_manifest_invalid", "The installed package identity is invalid.");
         packages.set(packageName, item.version);
       } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code === "ENOENT") continue;
+        if (availableOnly || (cause as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw cause;
       }
     }
   } catch (cause) {
+    if (availableOnly) return new Map();
     if (cause instanceof SyntaxError)
       throw new AgentError("package_manifest_invalid", "A package manifest contains invalid JSON.", undefined, { cause });
     if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;

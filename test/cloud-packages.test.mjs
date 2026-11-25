@@ -37,3 +37,25 @@ test("Go-managed work uses declared, installed pnpm packages without legacy appr
   await writeFile(path.join(work, "package.json"), "{invalid");
   assert.throws(() => cloudManagedPackages(root), { code: "package_manifest_invalid" });
 });
+
+test("runtime inventory withholds damaged packages without granting them or blocking healthy imports", async t => {
+  const root = realpathSync.native(await mkdtemp(path.join(tmpdir(), "nexum-package-isolation-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const modules = path.join(root, "node_modules");
+  await mkdir(modules);
+  for (const [name, body] of Object.entries({
+    good: '{"name":"good","version":"1.0.0"}',
+    broken: "{invalid",
+    wrong: '{"name":"wrong","version":"2.0.0"}',
+  })) {
+    await mkdir(path.join(modules, name));
+    await writeFile(path.join(modules, name, "package.json"), body);
+  }
+  await writeFile(path.join(root, "package.json"), JSON.stringify({
+    dependencies: {good:"1.0.0",broken:"1.0.0",wrong:"1.0.0"},
+  }));
+  assert.deepEqual([...cloudManagedPackages(root, true)], [["good", "1.0.0"]]);
+  assert.throws(() => cloudManagedPackages(root), { code:"package_manifest_invalid" });
+  await writeFile(path.join(root,"package.json"), "{invalid");
+  assert.deepEqual([...cloudManagedPackages(root, true)], []);
+});

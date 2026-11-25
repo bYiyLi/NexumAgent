@@ -12,6 +12,7 @@ import type {
 } from "./backend.js";
 import { defaultEofAlreadyClosed } from "./backend.js";
 import { ProcessOutputLog, type ProcessOutputOptions } from "./output-log.js";
+import { selectWindowsFallback } from "./output-encoding.js";
 import type { LaunchInput, PreparedLaunch } from "./launch.js";
 
 const instances = new WeakSet<object>();
@@ -174,6 +175,10 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
             executable: this.#prepared.executable.path,
             shell: this.#prepared.shell,
             cwd: this.#prepared.launch.cwd,
+            ...(this.#prepared.windowsCodePages ? {
+              windowsCodePages: { ...this.#prepared.windowsCodePages },
+              windowsFallbackCodePage: this.input.tty ? null : selectWindowsFallback(this.#prepared.windowsCodePages) || null,
+            } : {}),
           }
         : {}),
       ...(this.#stopReason ? { stopReason: this.#stopReason } : {}),
@@ -293,6 +298,10 @@ export class ManagedProcess extends EventEmitter implements ManagedResource {
     );
     signal.throwIfAborted();
     this.#prepared = await prepare(signal);
+    signal.throwIfAborted();
+    // Set before the first output byte; PTY is natively UTF-8.
+    const fallback = this.input.tty ? 0 : selectWindowsFallback(this.#prepared.windowsCodePages);
+    await this.#log.configureWindowsFallback(fallback);
     signal.throwIfAborted();
     await this.#backend.start(this.#prepared.launch);
     signal.throwIfAborted();

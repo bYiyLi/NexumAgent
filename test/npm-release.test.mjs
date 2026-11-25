@@ -4,6 +4,7 @@ import {
   assertNoSourceMaps,
   parseTag,
   releasePlan,
+  waitUntilIndexed,
 } from "../scripts/npm-release.mjs";
 
 test("npm release rejects source maps in any package archive", () => {
@@ -77,4 +78,20 @@ test("manual publishing from tags or non-main branches is rejected", () => {
       }),
     /run number/,
   );
+});
+
+
+test("registry verification tolerates delayed indexing but never accepts different bytes", async () => {
+  const pack = {shasum:"expected-sha",integrity:"expected-integrity"};
+  const indexed = {versions:{"1.0.0":{dist:pack}},"dist-tags":{next:"1.0.0"}};
+  let clock = 0, checks = 0;
+  const value = await waitUntilIndexed("fixture","1.0.0","next",pack,{
+    now:()=>clock,pause:async(ms)=>{clock+=ms;},
+    lookup:async()=>{if (++checks < 65) return null; return indexed;},
+  });
+  assert.equal(value,indexed);
+  assert.ok(clock>300000);
+  await assert.rejects(waitUntilIndexed("fixture","1.0.0","next",pack,{
+    lookup:async()=>({...indexed,versions:{"1.0.0":{dist:{...pack,integrity:"other"}}}}),
+  }),/different contents/);
 });

@@ -63,7 +63,7 @@ add("management.tabs.group", "将指定标签加入实际标签组，返回 grou
 add("management.tabGroups.query", "查询标签组列表。", list(nativeGroup));
 add("management.tabGroups.get management.tabGroups.update management.tabGroups.move", "读取或修改指定标签组，返回实际标签组属性。", nativeGroup);
 add("browsers.history", "根据条件读取浏览历史；返回真实 URL、标题（可能缺失）和访问时间。", list(obj({ url: str, title: str, dateVisited: str }, ["dateVisited"])));
-add("browsers.downloads", "读取浏览器下载记录及下载状态、大小和时间；仅包含浏览器实际提供的字段。", list(obj({ id: int, filename: str, state: str, startTime: str, endTime: str, fileSize: num, totalBytes: num, bytesReceived: num, mime: str, exists: bool }, ["id"])));
+add("browsers.downloads", "读取浏览器原生下载记录及下载状态、大小和时间；可按实际数字 id 精确查询。", list(obj({ id: int, filename: str, state: str, startTime: str, endTime: str, fileSize: num, totalBytes: num, bytesReceived: num, mime: str, exists: bool }, ["id"])));
 add("tab.saveDownload content.export content.exportGsuite content.exportYouTubeTranscript tab.exportFile cua.downloadMedia dom.downloadMedia locator.downloadMedia", "取得经过授权并实际保存到 Agent 工作区的文件，返回路径、名称、媒体类型、字节数及 SHA-256；需要交付时使用文件输出。", artifact);
 add("downloads.path", "取得已完成下载的本地路径；尚无完成文件时返回 null。", nullable(str));
 add("tab.markHandoff", "将真实标签释放给用户；运行时验证原生 released 回执后返回 undefined。");
@@ -131,7 +131,7 @@ add("webmcp.fetchTools", "读取当前页面真实 WebMCP 工具集合及文档/
 const eventSource = obj({ ...binding, tabId: str, sessionId: str, targetId: str, controlEpoch: str, pageVersion: int }, Object.keys(binding));
 const cdpEvent = obj({ method: str, params: { type: "object" }, sequence: int, source: eventSource }, ["method", "sequence", "source"]);
 add("cdp.events cdp.readEvents", "读取实际 CDP 事件及游标，事件参数随 CDP 方法变化；核对截断及后续分页。", obj({ cursor: int, events: list(cdpEvent), nextCursor: str, hasMore: bool, truncated: bool }, ["cursor", "events", "nextCursor", "hasMore", "truncated"]));
-add("tab.downloads", "读取当前运行相关的真实下载记录，依据实际状态选择已完成文件。", list(obj({ id: str, target, suggestedFilename: str, url: str, state: str, bytesReceived: num, totalBytes: num }, ["id", "target", "suggestedFilename", "state", "bytesReceived"])));
+add("tab.downloads", "读取当前运行相关的真实页面下载记录；nativeRecordId 仅在可靠关联原生记录时提供。", list(obj({ id: str, nativeRecordId: int, target, suggestedFilename: str, url: str, state: str, bytesReceived: num, totalBytes: num }, ["id", "target", "suggestedFilename", "state", "bytesReceived"])));
 add("dev.logs tab.devLogs", "读取实际开发者日志记录，按级别、时间和条数筛选。", list(obj({ level: str, message: str, timestamp: str, url: str }, ["level", "message", "timestamp"])));
 
 export function browserResultContract(path: string): { description: string; outputSchema?: Schema } {

@@ -35,7 +35,7 @@ return image;
 
 同机可用的 CDP 文件选择使用真实可访问路径；需要经插件传 bytes 时走有界二进制流。多个文件必须全部准备并确认当前 chooser/目标/页面有效后再提交；预检失败不发送文件选择命令，也不把已消费 chooser 自动重用；已派发后取消/断连仍按 effect=unknown 记录，不承诺网站没有接收或提交。文件输入使用上述明确的路径或原生 bytes/Blob 类型；不为旧 QuickJS base64 输入另建兼容层。
 
-初始或后续聊天附件由 Nexum 在脚本执行/续接前完整准备；browser 使用 context.attachments 中的实际本机路径。不增加浏览器附件模型工具，也不要求 Host 自行构造本机文件路径。
+默认下载、上传副本、导出和资产包统一使用当前 `context.paths.temp/artifacts`；只申请该 Run 子树的具体读写权限，不申请 profile、`tmp` 或运行元数据目录的写权限。显式保存位置继续按当前项目路径授权。初始或后续聊天附件由 Nexum 在脚本执行/续接前完整准备；browser 使用 context.attachments 中的实际本机路径。不增加浏览器附件模型工具，也不要求 Host 自行构造本机文件路径。
 
 ## Google Workspace 原生导出
 
@@ -49,7 +49,7 @@ Google Markdown 的文本响应兼容 `text/x-markdown` 等同义 MIME，结果�
 
 `selected.downloads.list({limit?})` 读取当前已连接浏览器配置的正常下载记录，包括其他标签、此前运行及不同目录中的记录；不按 Agent 的工作目录筛选，也不声称每条记录都由当前任务触发。记录沿用浏览器的数字 `id`、`filename` 本机完整路径、状态、时间、大小和 MIME 等字段，按开始时间倒序返回；默认与浏览器 API 一样最多取 1000 条，调用方可用 `limit` 调整数量，`0` 表示全部。记录的文件路径是浏览器报告的状态，读取时仍需实际检查文件及当前路径授权。为避免把下载内容或带凭据的链接塞进列表，不返回来源 URL；`data:` 文件内容通过文件或 Resource 读取。
 
-AI 可以从这份列表选择具体完成的文件，然后使用 `{type:"resource_link",path:record.filename}`；后者沿用平台现有规则登记标准 MCP Resource。浏览器原生记录的数字 `id` 不是 `tab.downloads()` 或 `waitForDownload()` 返回的页面下载身份，不能互换。没有唯一目标时由调用方根据列表判断，不把某条记录自动当作当前任务的结果。
+AI 可以从这份列表选择具体完成的文件，然后使用 `{type:"resource_link",path:record.filename}`；后者沿用平台现有规则登记标准 MCP Resource。浏览器原生记录的数字 `id` 不是 `tab.downloads()` 或 `waitForDownload()` 返回的页面下载身份，不能互换。 等待器门面公开当前页面下载 `id` 和实际事件 `suggestedFilename`；`tab.downloads()` 仅在两端原始事件通过唯一标记确证、归属一致且无冲突时返回可选 `nativeRecordId`，据此可用 `selected.downloads.list({id: nativeRecordId})` 精确读取原生记录。名称可能带唯一标记，不能按原文件名或 URL 推断；记录查询不授予文件读取权限。没有唯一目标时由调用方根据列表判断，不把某条记录自动当作当前任务的结果。
 
 先注册下载等待器，再触发网页操作；记录 downloadId、目标/页面/连接、当前 run/operation 与实际状态。文件实际完成、可读且与已知的浏览器文件大小一致后，复制到本次临时目录或已授权明确目标；原子 no-replace，失败保留已发生下载事实并清理未提交临时文件，不重复点击下载。
 

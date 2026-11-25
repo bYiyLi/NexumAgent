@@ -9,14 +9,14 @@ import { ModuleLoader } from "../dist/runtime/modules.js";
 import { File } from "node:buffer";
 import { encodeHostResult } from "../dist/host/result.js";
 
-async function fixture(t) {
+async function fixture(t, builtins = ["path"]) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nexum-host-runner-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const work = root;
   await mkdir(path.join(work, "modules"), { recursive: true });
   await writeFile(path.join(work, "package.json"), '{"private":true,"type":"module"}');
   const loader = await ModuleLoader.create(work, `boot_${randomUUID()}`, {
-    builtins: () => ["path"],
+    builtins: () => builtins,
     approvedPackages: () => new Map(),
   });
   const runner = new HostRunner(loader);
@@ -319,4 +319,45 @@ test("cancellation waits for admitted Go calls and closes admission immediately"
   pending.resolve();
   await failed;
   assert.equal(runner.cancel("run_10"), false);
+});
+
+test("filesystem exceptions preserve safe codes and omit private paths", async (t) => {
+  const { runner, loader } = await fixture(t, ["path", "fs"]);
+  const code = 'const fs=await import("node:fs/promises"); return await fs.readFile(context.target);';
+  const input = run("run_missing_file", code);
+  input.context.target = path.join(loader.work, "private-nonexistent-file");
+  await assert.rejects(runner.start(input), error => {
+    assert.equal(error.code, "file_not_found");
+    assert.equal(error.details.osCode, "ENOENT");
+    assert.equal(error.details.operation, "open");
+    assert.ok(!JSON.stringify(error.details).includes(input.context.target));
+    assert.ok(!error.message.includes(input.context.target));
+    return true;
+  });
+  const file = path.join(loader.work, "file");
+  await writeFile(file, "x");
+  const wrong = run("run_non_directory", code);
+  wrong.context.target = path.join(file, "child");
+  await assert.rejects(runner.start(wrong), error => error.code === "not_a_directory");
+  const existing = run("run_existing_file", 'const fs=await import("node:fs/promises"); await fs.writeFile(context.target,"y",{flag:"wx"});');
+  existing.context.target = file;
+  await assert.rejects(runner.start(existing), error => error.code === "file_already_exists");
+  const fake = run("run_error_accessor", 'const err=new Error("safe"); Object.defineProperty(err,"code",{get(){throw new Error("unsafe");}}); throw err;');
+  await assert.rejects(runner.start(fake), error => error.code === "script_execution_failed");
+});
+
+test("concurrent native file operations resolve explicitly from each Run directory", async (t) => {
+  const { runner, loader } = await fixture(t, ["path", "fs"]);
+  const dirs = [path.join(loader.work, "first"), path.join(loader.work, "second")];
+  for (const [index, dir] of dirs.entries()) {
+    await mkdir(dir);
+    await writeFile(path.join(dir, "example.txt"), String(index));
+  }
+  const script = 'const fs=await import("node:fs/promises");const path=await import("node:path");return await fs.readFile(path.resolve(context.pwd,"example.txt"),"utf8");';
+  const inputs = dirs.map((pwd, index) => {
+    const input = run("run_cwd_"+index, script);
+    input.context.pwd = pwd;
+    return input;
+  });
+  assert.deepEqual(await Promise.all(inputs.map(input => runner.start(input))), ["0","1"]);
 });

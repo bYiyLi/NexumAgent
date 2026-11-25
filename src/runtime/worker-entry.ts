@@ -50,6 +50,39 @@ const syncBytes = 64 * 1024;
 const syncHeaderBytes = 8;
 const send = (value: object) => port.postMessage(value);
 
+// Classify a filesystem-shaped native exception without exporting the raw
+// message, absolute paths, stack, or arbitrary guest properties. These codes
+// are diagnostic only, not evidence of authorization or absence of effects.
+function filesystemErrorData(cause: unknown): JsonObject | null {
+  if (!cause || typeof cause !== "object" ||
+      types.isProxy(cause) || !types.isNativeError(cause)) return null;
+  const own = (key: string): unknown => {
+    const descriptor = Object.getOwnPropertyDescriptor(cause, key);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
+  };
+  const code = own("code"), syscall = own("syscall"), errno = own("errno");
+  if (typeof code !== "string" || typeof syscall !== "string" ||
+      typeof errno !== "number" || !Number.isSafeInteger(errno) ||
+      !["open", "read", "write", "stat", "lstat", "fstat", "realpath",
+        "scandir", "mkdir", "rmdir", "unlink", "rename", "copyfile",
+        "access", "readlink", "link", "symlink", "truncate", "ftruncate",
+        "chmod", "fchmod", "chown", "fchown", "opendir", "fsync",
+        "fdatasync", "utime", "utimes"].includes(syscall)) return null;
+  const kinds: Record<string, [string, string]> = {
+    ENOENT: ["file_not_found", "The requested file or directory does not exist."],
+    EACCES: ["permission_denied", "The filesystem denied the operation."],
+    EPERM: ["permission_denied", "The filesystem did not permit the operation."],
+    EEXIST: ["file_already_exists", "The destination already exists."],
+    ENOTDIR: ["not_a_directory", "A path component is not a directory."],
+    EISDIR: ["is_a_directory", "The operation requires a file, not a directory."],
+    ENOSPC: ["storage_exhausted", "The filesystem has insufficient free space."],
+    EROFS: ["permission_denied", "The filesystem is read-only."],
+  };
+  if (!Object.hasOwn(kinds, code)) return null;
+  const [publicCode, message] = kinds[code]!;
+  return { code: publicCode, message, details: { osCode: code, operation: syscall } };
+}
+
 // A literal message authored in the submitted script is already visible to
 // its AI caller. Return that useful message instead of hiding every explicit
 // throw behind a generic Worker error. Never forward a dynamically assembled
@@ -722,11 +755,12 @@ async function prepare() {
           }
           send({ type: "done", value: fixed });
         } catch (cause) {
-          const error = safeErrorData(cause, {
+          const fileError = !isAgentError(cause) ? filesystemErrorData(cause) : null;
+          const error = fileError ?? safeErrorData(cause, {
             code: "script_execution_failed",
             message: "The JavaScript execution failed.",
           });
-          const authoredMessage = explicitScriptErrorMessage(cause);
+          const authoredMessage = fileError ? null : explicitScriptErrorMessage(cause);
           if (authoredMessage && !isAgentError(cause)) error.message = authoredMessage;
           send({
             type: "failed",

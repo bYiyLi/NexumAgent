@@ -1,4 +1,5 @@
 import type * as t from "./types.js";
+import { types } from "node:util";
 import { browserRoutes } from "./routes.js";
 import {
   clientError,
@@ -115,7 +116,44 @@ class Router {
       (value.locator as { target?: unknown } | undefined)?.target) as
       t.BrowserTarget | undefined;
     if (barrier && target?.tabId) await this.#barriers.get(targetKey(target));
-    return (await Reflect.apply(fn, undefined, [value])) as T;
+    try {
+      return (await Reflect.apply(fn, undefined, [value])) as T;
+    } catch (cause) {
+      // The isolated host transports bounded structured effect facts in details.
+      // Expose them through the existing BrowserError contract as well.
+      if (cause && typeof cause === "object" && !types.isProxy(cause) && cause instanceof Error) {
+        const details = Object.getOwnPropertyDescriptor(cause, "details")?.value;
+        if (plain(details)) {
+          if (Object.isExtensible(cause)) {
+            if (!Object.hasOwn(cause, "method"))
+              Object.defineProperty(cause, "method", { value: path, enumerable: true, configurable: true });
+            for (const key of ["reason", "hint", "operationId"] as const) {
+              const field = Object.getOwnPropertyDescriptor(details, key)?.value;
+              if (typeof field === "string" && !Object.hasOwn(cause, key))
+                Object.defineProperty(cause, key, { value: field, enumerable: true, configurable: true });
+            }
+          }
+          const dispatched = Object.getOwnPropertyDescriptor(details, "dispatched")?.value;
+          const effect = Object.getOwnPropertyDescriptor(details, "effect")?.value;
+          const retryable = Object.getOwnPropertyDescriptor(details, "retryable")?.value;
+          if (typeof dispatched === "boolean" && typeof retryable === "boolean" &&
+              (effect === "none" || effect === "confirmed" || effect === "unknown") &&
+              (dispatched || effect === "none")) {
+            const code = Object.getOwnPropertyDescriptor(cause, "code")?.value;
+            if (typeof code === "string" && Object.isExtensible(cause)) {
+              // Keep the original Core error brand/provenance for unhandled Run errors.
+              const fields = { dispatched, effect, retryable: retryable && effect === "none" && !dispatched,
+                method: path, ...(target ? { target } : {}) };
+              for (const [key, field] of Object.entries(fields)) {
+                if (!Object.hasOwn(cause, key))
+                  Object.defineProperty(cause, key, { value: field, enumerable: true, configurable: true });
+              }
+            }
+          }
+        }
+      }
+      throw cause;
+    }
   }
 }
 const locatorDescriptions = new WeakMap<object, t.LocatorDescription>();
@@ -432,6 +470,8 @@ function makeDownload(
   );
   const downloadId = input.downloadId;
   return freeze({
+    id: downloadId,
+    suggestedFilename: input.suggestedFilename,
     path: (value?: { timeoutMs?: number }) =>
       router.call<string | null>("downloads.path", {
         target,
@@ -699,7 +739,7 @@ function makeBrowser(router: Router, value: t.BrowserInfo): t.Browser {
       router.call<t.ActionResult>("viewport.reset", { target, tabId }),
   });
   const downloads = freeze({
-    list: (options?: { limit?: number }) =>
+    list: (options?: { limit?: number; id?: number }) =>
       router.call<t.BrowserDownloadRecord[]>("browsers.downloads", {
         target,
         options: router.option("browsers.downloads", options),

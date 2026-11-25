@@ -247,3 +247,40 @@ test("crashing an extension method does not exit the Core process", {
     e.phase === "failed" && e.code === "extension_worker_exited"));
   await instance.dispose();
 });
+
+
+test("extension effect diagnostics cross the worker without exposing arbitrary error text", async (t) => {
+  const f = await fixture(t, `export default () => ({methods:{fail:{
+    description:"Failure",permissions:[],schemaDialect:"draft7",inputSchema:{type:"object"},
+    handle(){throw Object.assign(new Error("private path and secret"),{
+      code:"TAB_ALREADY_CLAIMED",dispatched:false,effect:"none",retryable:false,
+      target:{secret:"private target"}
+    })}}}})`);
+  const instance = await f.factory(f.host);
+  try {
+    await assert.rejects(instance.methods.fail.handle({__nexumWorkerArgs:[{}]},invocation()),
+      error => {
+        assert.equal(error.code,"TAB_ALREADY_CLAIMED");
+        assert.match(error.message,/Another run/);
+        assert.deepEqual(error.details,{dispatched:false,effect:"none",retryable:false,recovery:"wait_for_capacity"});
+        assert.doesNotMatch(JSON.stringify(error),/private|secret/);
+        return true;
+      });
+  } finally { await instance.dispose(); }
+});
+
+test("known reasons refine errors without passing untrusted diagnostic text or unsafe retry advice", async (t) => {
+  const f=await fixture(t,`export default () => ({methods:{fail:{
+    description:"Failure",permissions:[],schemaDialect:"draft7",inputSchema:{type:"object"},
+    handle(input){throw Object.assign(new Error("private URL token"),{
+      code:"INVALID_TARGET",reason:input.reason,dispatched:true,effect:"unknown",retryable:true
+    })}}}})`);
+  const instance=await f.factory(f.host);
+  try {
+    await assert.rejects(instance.methods.fail.handle({__nexumWorkerArgs:[{reason:"element_not_found"}]},invocation()),
+      error => {assert.match(error.message,/did not match/);assert.deepEqual(error.details,
+        {reason:"element_not_found",dispatched:true,effect:"unknown",retryable:false,recovery:"verify_effect"});return true;});
+    await assert.rejects(instance.methods.fail.handle({__nexumWorkerArgs:[{reason:"private URL token"}]},invocation()),
+      error => {assert.equal(error.details.reason,undefined);assert.doesNotMatch(JSON.stringify(error),/private|token/);return true;});
+  } finally {await instance.dispose();}
+});

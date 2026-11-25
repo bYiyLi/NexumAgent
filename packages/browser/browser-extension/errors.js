@@ -2,7 +2,7 @@ export class BrowserActionError extends Error {
   constructor(
     code,
     message,
-    { dispatched = false, effect = "none", retryable = false } = {},
+    { dispatched = false, effect = "none", retryable = false, reason } = {},
   ) {
     super(message);
     this.name = "BrowserError";
@@ -10,14 +10,16 @@ export class BrowserActionError extends Error {
     this.dispatched = dispatched;
     this.effect = effect;
     this.retryable = retryable;
+    if (typeof reason === "string") this.reason = reason;
   }
 }
 export function requireValue(
   value,
   code = "INVALID_ARGUMENT",
   message = "The browser input is invalid.",
+  reason,
 ) {
-  if (!value) throw new BrowserActionError(code, message);
+  if (!value) throw new BrowserActionError(code, message, { reason });
 }
 export function record(value, keys) {
   requireValue(
@@ -93,12 +95,13 @@ export function publicError(cause, dispatched = false) {
       message: cause.message,
       dispatched: cause.dispatched || dispatched,
       effect: cause.effect === "none" && dispatched ? "unknown" : cause.effect,
-      retryable: cause.retryable,
+      retryable: cause.retryable && cause.effect === "none" && !dispatched,
+      ...(cause.reason === undefined ? {} : { reason: cause.reason }),
     };
   // Native errors can contain page contents, URLs or input; retain a bounded diagnostic category.
   return {
-    code: "PERMISSION_DENIED",
-    message: "The browser rejected the native operation.",
+    code: "NATIVE_OPERATION_FAILED",
+    message: "The browser rejected the native operation; the specific cause is not confirmed.",
     dispatched,
     effect: dispatched ? "unknown" : "none",
     retryable: false,

@@ -1026,3 +1026,54 @@ test("a proven pre-admission lease rejection returns a closed receipt without di
     false,
   );
 });
+
+
+test("failed candidate probes stay connecting until the endpoint scan is exhausted", async (t) => {
+  const f = fixture(t);
+  const badges = [];
+  f.chrome.action.setBadgeText = async ({text}) => badges.push(text);
+  await f.connection.start();
+  await until(() => f.sockets.length === 1);
+  f.sockets[0].close();
+  await until(() => f.sockets.length === 2);
+  assert.ok(badges.includes("…"));
+  assert.ok(!badges.includes("OFF"));
+  f.sockets[1].open();
+  f.sockets[1].message(f.ready());
+  await until(() => f.connection.state().connected);
+  assert.equal(badges.at(-1), "");
+});
+
+
+test("the entire candidate scan retains a real handshake rejection and obeys backoff", async (t) => {
+  const f=fixture(t);
+  const titles=[];
+  f.chrome.action.setTitle=async({title})=>titles.push(title);
+  await f.connection.start();
+  await until(()=>f.sockets.length===1);
+  const first=f.sockets[0];
+  first.open();
+  first.message({v:1,type:"error",code:"PLUGIN_VERSION_MISMATCH",message:"untrusted endpoint payload"});
+  await until(()=>f.sockets.length===2);
+  for(let index=1;index<10;index++){
+    const candidate=f.sockets[index];
+    candidate.close();
+    if(index<9)await until(()=>f.sockets.length===index+2);
+  }
+  await until(()=>f.connection.state().phase==="offline");
+  assert.equal(f.connection.state().connected,false);
+  assert.equal(f.connection.state().lastFailure,"PLUGIN_VERSION_MISMATCH");
+  assert.match(titles.at(-1),/PLUGIN_VERSION_MISMATCH/);
+  assert.doesNotMatch(titles.join(" "),/untrusted endpoint payload/);
+  assert.deepEqual(f.sockets.map(s=>Number(new URL(s.url).port)),
+    Array.from({length:10},(_,i)=>29030+i));
+  f.chrome.runtime.onStartup.emit();
+  await delay(20);
+  assert.equal(f.sockets.length,10);
+  await until(()=>f.sockets.length===11,3000);
+  const replacement=f.sockets[10];
+  replacement.open();replacement.message(f.ready());
+  await until(()=>f.connection.state().connected);
+  assert.equal(f.connection.state().phase,"connected");
+  assert.equal(f.connection.state().lastFailure,undefined);
+});

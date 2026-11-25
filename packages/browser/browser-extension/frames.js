@@ -185,7 +185,7 @@ export async function framePage(ctx, payload, selectors, execute) {
     );
     const result = response.result.value;
     if (!result.ok)
-      throw new BrowserActionError(result.error.code, result.error.message);
+      throw new BrowserActionError(result.error.code, result.error.message, { reason: result.error.reason });
     if (input.command === "resolve" && result.value?.rect) {
       const framePoint = { ...result.value.point };
       // scrollIntoView in the resolved descendant can scroll every native ancestor.

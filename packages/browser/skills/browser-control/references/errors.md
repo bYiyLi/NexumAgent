@@ -11,6 +11,8 @@
 
 只根据实际返回的错误码和诊断描述判断。不能确定内层根因时写“尚未确认”，不编造更具体的错误码、重试保证或异常来源。
 
+常见具体原因：`element_not_found` / `element_not_unique` 需要重新定位；`element_blocked` / `element_not_actionable` 需要观察当前可交互状态；`download_identity_unconfirmed` / `download_record_missing` / `download_interrupted` 等需要核对原下载事实；`source_file_missing` 需要重新核对实际文件；`path_not_allowed` 保持权限拒绝。
+
 ## AI 恢复路径
 
 1. 记录已知的 `operation`、原始错误码/消息、`runId` 与浏览器/标签目标（若响应包含），确认是否在浏览器方法内部失败，还是脚本提交/序列化阶段失败。
@@ -25,4 +27,4 @@
 
 内部故障的端口/连接代次/资源收尾证据在 [内部诊断依据](diagnostics.md)，只在需要深入排查时读取。
 
-本 Skill 是**当前行为使用指南**，并不宣称运行时已经实现新的结构化错误字段或自动恢复功能。
+SDK 错误可能提供 `reason`、`operationId`、`method` 和 `hint`；公共运行历史保留同一份有界诊断。对未派发、已确认或未知的效果以实际 `dispatched/effect/retryable` 为准；缺失字段不表示无副作用。无法分类的原生操作失败使用 `NATIVE_OPERATION_FAILED`，不把所有原生错误当成权限拒绝；不复制原生堆栈、页面内容或私有路径。恢复提示不是授权，也不会自动恢复旧动作。

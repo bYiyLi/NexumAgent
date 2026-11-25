@@ -32,14 +32,24 @@ function fixture(t, authorize = () => {}) {
     pwd = path.join(root, "project");
   mkdirSync(work);
   mkdirSync(pwd);
+  const temp = path.join(work, "tmp", "runs", "run_files_fixture");
+  mkdirSync(temp, { recursive: true });
   const controller = new AbortController(),
     grants = [];
   const call = {
-    context: { runId: "run_files_fixture", pwd },
+    context: { runId: "run_files_fixture", pwd, paths: { temp } },
     deadline: Date.now() + 60000,
     signal: controller.signal,
     authorize(target) {
       grants.push({ ...target });
+      if (target.access === "write") {
+        const artifactRoot = path.join(temp, "artifacts");
+        const within = (root) => {
+          const rel = path.relative(root, target.value);
+          return !path.isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + path.sep);
+        };
+        assert.ok(within(artifactRoot) || within(pwd), "write escaped staging or explicit destination");
+      }
       authorize(target);
     },
   };
@@ -47,7 +57,7 @@ function fixture(t, authorize = () => {}) {
   return { root, work, pwd, call, controller, grants };
 }
 function artifacts(work) {
-  const run = path.join(work, "tmp", "browser", "run_files_fixture");
+  const run = path.join(work, "tmp", "runs", "run_files_fixture", "artifacts");
   return existsSync(run) ? readdirSync(run) : [];
 }
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -75,8 +85,9 @@ test("downloads create durable exact snapshots with current lexical/canonical au
     path.join(
       realpathSync.native(f.work),
       "tmp",
-      "browser",
+      "runs",
       f.call.context.runId,
+      "artifacts",
     ),
   );
   exact(readFileSync(result.path), bytes);
@@ -141,7 +152,7 @@ test("a failed later file removes all undelivered copies and never mutates a bro
   writeFileSync(path.join(f.pwd, "one.txt"), "first");
   await assert.rejects(
     prepareFiles(["one.txt", "absent.txt"], f.call, f.work),
-    { code: "ENOENT" },
+    { code: "FILE_UNAVAILABLE", reason: "source_file_missing" },
   );
   assert.deepEqual(artifacts(f.work), []);
   const completed = await materializeDownload(
@@ -227,7 +238,7 @@ test("existing final destinations are never replaced and a failed publication re
   assert.equal(files[0].endsWith(".partial"), false);
   assert.equal(
     readFileSync(
-      path.join(f.work, "tmp", "browser", f.call.context.runId, files[0]),
+      path.join(f.work, "tmp", "runs", f.call.context.runId, "artifacts", files[0]),
       "utf8",
     ),
     "existing",
@@ -254,12 +265,12 @@ test("deadlines, unsafe run IDs, unwriteable work and redirected profile subdire
     { code: "INVALID_CONTEXT" },
   );
   // A pre-existing file in the output directory position is a real filesystem failure on every OS.
-  writeFileSync(path.join(f.work, "tmp"), "obstruction");
+  writeFileSync(path.join(f.call.context.paths.temp, "artifacts"), "obstruction");
   await assert.rejects(
     materializeDownload({ path: "source" }, f.call, f.work),
     { code: "FILE_CHANGED" },
   );
-  assert.equal(readFileSync(path.join(f.work, "tmp"), "utf8"), "obstruction");
+  assert.equal(readFileSync(path.join(f.call.context.paths.temp, "artifacts"), "utf8"), "obstruction");
 });
 
 test("canonical read authorization is required for symlinked local sources", async (t) => {
@@ -467,10 +478,10 @@ test("10 MiB native subviews do not enumerate millions of numeric properties und
       "--input-type=module",
       "-e",
       `
- import assert from 'node:assert/strict';import {mkdtempSync,mkdirSync,readFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {prepareFiles} from ${JSON.stringify(module)};
+ import assert from 'node:assert/strict';import {mkdtempSync,mkdirSync,readFileSync,rmSync,realpathSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {prepareFiles} from ${JSON.stringify(module)};
  const source=new Uint8Array(10*1024*1024+20);source.fill(42);const view=source.subarray(9,-11);let calls=0;Object.defineProperty(view,'private',{get(){calls++;throw Error('leak')}});
- const root=mkdtempSync(path.join(tmpdir(),'nexum-browser-files-heap-'));const work=path.join(root,'work');mkdirSync(work);
- try {const call={context:{pwd:root,runId:'run_heap'},signal:new AbortController().signal,deadline:Date.now()+10000,authorize(){}};
+ const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),'nexum-browser-files-heap-')));const work=path.join(root,'work');mkdirSync(work);const temp=path.join(work,'tmp','runs','run_heap');mkdirSync(temp,{recursive:true});
+ try {const call={context:{pwd:root,runId:'run_heap',paths:{temp}},signal:new AbortController().signal,deadline:Date.now()+10000,authorize(){}};
  const [result]=await prepareFiles([{data:view,name:'large.bin'}],call,work);const data=readFileSync(result.path);assert.equal(data.length,10*1024*1024);assert.equal(data[0],42);assert.equal(calls,0);assert.equal(Object.hasOwn(result,'private'),false);assert.equal(path.basename(result.path),'large.bin');}finally{rmSync(root,{recursive:true,force:true});}
  `,
     ],

@@ -15,6 +15,7 @@ import {
   materializeDownload,
   prepareFiles,
   browserFileBudget,
+  artifactDirectory,
 } from "./files.js";
 import { check, failure } from "./protocol.js";
 
@@ -471,40 +472,7 @@ async function bundleDirectory(
   call: Invocation,
   work: string,
 ): Promise<{ path: string; stat: BigIntStats }> {
-  check(
-    path.isAbsolute(work),
-    "INVALID_CONTEXT",
-    "Browser artifacts require an absolute profile work directory.",
-  );
-  const run = text(call.context.runId, 128, "A browser artifact run identity");
-  check(
-    /^[A-Za-z0-9_-]+$/.test(run),
-    "INVALID_CONTEXT",
-    "A browser artifact requires the actual run identity.",
-  );
-  current(call);
-  call.authorize({ type: "path", value: work, access: "write" });
-  let parent = await realpath(work);
-  call.authorize({ type: "path", value: parent, access: "write" });
-  for (const segment of ["tmp", "browser", run]) {
-    const next = path.join(parent, segment);
-    current(call);
-    call.authorize({ type: "path", value: next, access: "write" });
-    try {
-      await mkdir(next, { mode: 0o700 });
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-    }
-    const stat = await lstat(next, { bigint: true });
-    check(
-      stat.isDirectory() &&
-        !stat.isSymbolicLink() &&
-        (await realpath(next)) === next,
-      "FILE_CHANGED",
-      "The browser artifact directory was redirected.",
-    );
-    parent = next;
-  }
+  const { path: parent } = await artifactDirectory(call, work);
   const target = path.join(parent, `${randomUUID()}-assets`);
   current(call);
   call.authorize({ type: "path", value: target, access: "write" });

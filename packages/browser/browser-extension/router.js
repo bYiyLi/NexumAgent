@@ -373,10 +373,12 @@ route(
   "tabs.new",
   async (ctx, args) => {
     const tab = await ctx.chrome.tabs.create({
-      ...(args.url === undefined ? {} : { url: httpUrl(args.url) }),
+      ...(args.url === undefined ? {} : { url: args.url === "about:blank" ? "about:blank" : httpUrl(args.url) }),
       active: options(args).active ?? true,
     });
     const info = tabInfo(ctx, tab);
+    // Bind the actual newly created native identity before returning it.
+    ctx.router.claim(ctx.lease, nativeId(info.id));
     await ctx.router.trackVisualTab({ ...ctx, target: info.target });
     return info;
   },
@@ -506,16 +508,21 @@ route("browsers.history", async (ctx, args) => {
     }));
 });
 route("browsers.downloads", async (ctx, args) => {
-  const limit = options(args).limit;
+  const { limit, id } = options(args);
   requireValue(
     limit === undefined ||
       (Number.isInteger(limit) && limit >= 0 && limit <= 2147483647),
   );
+  requireValue(id === undefined ||
+    (Number.isSafeInteger(id) && id >= 0 && id <= 2147483647));
   const items = await ctx.chrome.downloads.search({
     orderBy: ["-startTime"],
     ...(limit === undefined ? {} : { limit }),
+    ...(id === undefined ? {} : { id }),
   });
-  requireValue(Array.isArray(items), "PROTOCOL_MISMATCH");
+  requireValue(Array.isArray(items) &&
+    (id === undefined || (items.length <= 1 && items.every(item => item.id === id))),
+    "PROTOCOL_MISMATCH", "The browser returned an unexpected download record identity.");
   return items.map((item) =>
     fields(item, [
       "id",
@@ -2034,6 +2041,13 @@ export function createBrowserRouter(
       suggest(destination);
     }
   });
+  const ownedDownloadMark = (ctx, value) => {
+    const mark = value?.marker && downloadMarks.get(value.marker);
+    return mark && !mark.ambiguous && mark.guid === value.id &&
+      mark.leaseId === ctx.lease.id && mark.runId === ctx.runId &&
+      mark.tabId === nativeId(ctx.target.tabId) &&
+      mark.controlEpoch === ctx.target.controlEpoch ? mark : undefined;
+  };
   const verifyTarget = (value) => {
     record(value);
     requireValue(
@@ -3978,6 +3992,7 @@ export function createBrowserRouter(
         throw new BrowserActionError(
           response.error.code,
           response.error.message,
+          { reason: response.error.reason },
         );
       if (payload.command === "drop") {
         stages.delete(payload.token);
@@ -4031,6 +4046,7 @@ export function createBrowserRouter(
         throw new BrowserActionError(
           result[0].result.error.code,
           result[0].result.error.message,
+          { reason: result[0].result.error.reason },
         );
       return result[0].result.value;
     },
@@ -6075,25 +6091,18 @@ export function createBrowserRouter(
             v.target.tabId === ctx.target.tabId &&
             v.target.controlEpoch === ctx.target.controlEpoch,
         )
-        .map(
-          ({
-            id,
-            target: source,
-            suggestedFilename,
-            url,
-            state,
-            bytesReceived,
-            totalBytes,
-          }) => ({
-            id,
-            target: source,
-            suggestedFilename,
+        .map((value) => {
+          const { id, target: source, suggestedFilename, url, state,
+            bytesReceived, totalBytes } = value;
+          const mark = ownedDownloadMark(ctx, value);
+          return {
+            id, target: source, suggestedFilename,
+            ...(Number.isSafeInteger(mark?.nativeId) ? { nativeRecordId: mark.nativeId } : {}),
             ...(url === undefined ? {} : { url }),
-            state,
-            bytesReceived,
+            state, bytesReceived,
             ...(totalBytes === undefined ? {} : { totalBytes }),
-          }),
-        );
+          };
+        });
     },
     async downloadPath(ctx, id) {
       const value = downloadRecords.get(id);
@@ -6104,18 +6113,14 @@ export function createBrowserRouter(
           value.target.controlEpoch === ctx.target.controlEpoch,
         "FILE_UNAVAILABLE",
         "The original download is not owned by this run target.",
+        "download_not_owned",
       );
-      const mark = value.marker && downloadMarks.get(value.marker);
+      const mark = ownedDownloadMark(ctx, value);
       requireValue(
-        mark &&
-          !mark.ambiguous &&
-          mark.guid === id &&
-          mark.leaseId === ctx.lease.id &&
-          mark.runId === ctx.runId &&
-          mark.tabId === nativeId(ctx.target.tabId) &&
-          mark.controlEpoch === ctx.target.controlEpoch,
+        mark,
         "CAPABILITY_NOT_ALLOWED",
         "The original download does not have a proven browser file identity.",
+        "download_identity_unconfirmed",
       );
       let completed;
       await router.poll(ctx, async () => {
@@ -6123,11 +6128,13 @@ export function createBrowserRouter(
           !mark.ambiguous,
           "FILE_UNAVAILABLE",
           "The browser reported an ambiguous download identity.",
+          "download_identity_ambiguous",
         );
         requireValue(
           value.state !== "cancelled",
           "FILE_UNAVAILABLE",
           "The browser download was cancelled.",
+          "download_cancelled",
         );
         if (value.state !== "complete" || !Number.isSafeInteger(mark.nativeId))
           return false;
@@ -6138,12 +6145,16 @@ export function createBrowserRouter(
             items[0].id === mark.nativeId,
           "FILE_UNAVAILABLE",
           "The original browser download record is unavailable.",
+          "download_record_missing",
         );
+        requireValue(ownedDownloadMark(ctx, value) === mark,
+          "FILE_UNAVAILABLE", "The original browser download identity changed during observation.");
         const item = items[0];
         requireValue(
           item.state !== "interrupted",
           "FILE_UNAVAILABLE",
           "The browser download was interrupted.",
+          "download_interrupted",
         );
         if (item.state !== "complete") return false;
         requireValue(
@@ -6154,6 +6165,7 @@ export function createBrowserRouter(
             !/[\x00-\x1f\x7f]/.test(item.filename),
           "FILE_UNAVAILABLE",
           "The completed browser download has no valid local filename.",
+          "download_path_invalid",
         );
         requireValue(
           item.fileSize === undefined ||
