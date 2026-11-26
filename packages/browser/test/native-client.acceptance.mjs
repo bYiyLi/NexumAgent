@@ -390,7 +390,7 @@ test(
     ];
     assert.deepEqual(JSON.parse(result.result.data.first), expected);
     assert.equal(result.result.data.unchanged, result.result.data.first);
-    assert.equal(result.result.data.failure, "ENOENT");
+    assert.equal(result.result.data.failure, "FILE_UNAVAILABLE");
     assert.deepEqual(JSON.parse(result.result.data.retry), [
       { name: "retry.txt", size: 5, type: "text/plain", length: 5 },
     ]);

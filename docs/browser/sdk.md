@@ -597,6 +597,7 @@ capabilities.get 的受管结果只返回能力 ID/版本/支持状态及已声�
 3. `const pending = tab.playwright.waitForEvent("download"); await link.click(); await pending;` 同样成立。客户端在进入 waitForEvent 时同步排入该目标的“等待就绪”屏障，后续动作只等 **arm ready**；get 的长等待不阻塞目标发送队列或让 click 排在事件之后。不能把整个 get Promise 放入串行队列形成自锁。arm 失败拒绝对应后续动作，避免点击发生而下载无人跟踪。
 4. get 从当前 run 的有界缓冲取精确事件；早到事件不丢失，重复 get 返回同一已消费事实，不再触发网页工作。最多每 run/target 32 个等待器，事件数据受连接预算；超量先拒绝再动作。下载/chooser 描述由客户端构造公开门面；有访问权的 ID 也不能跨 run/页面偷用。
 5. cancel 幂等，取消/到期/运行收尾清理远端监听、缓冲和关联；无所有权报 WAITER_GONE/权限错误。下载事件只证明原生下载已开始，path/saveDownload 还需实际完成证据；取消等待器不等于撤回网页下载。
+6. 主动交还、关闭目标或结束租约时，已登记且正在读取的等待器保留已观察的事件或已确定的取消错误 `WAITER_GONE`；通用动作收尾不得覆盖该终态。独立调用取消、期限及授权检查仍有效。读取已观察的事件不恢复旧控制身份，不证明触发事件的业务动作成功；其他可能已派发的动作保留真实未知效果。
 
 `waitForDownload/waitForFileChooser` 是 waitForEvent 的别名。浏览器事件等待与 runtime.requestInput 的单次用户输入等待是两种不同资源；不占用或替代平台唯一的输入槽。WebMCP 的 listTools/fetchTools 返回版本数据后，客户端缓存**这一份**注册描述；invokeTool 无先前发现则先完成发现并使用其返回描述，已有描述失效就报错，不能静默自动换成新版本。`fetchTools()` 返回门面的 invokeTool 永远要求绑定它那次获取的精确注册。原生协议不提供 opaque toolId 时仍可发现工具，描述标注 `invocationBinding: "name"`；仅直接调用显式传 `{binding:"name"}` 才允许名称绑定，调用前仍核对文档与已观测修订，但不保证浏览器在检查和实际解析之间不会选择同名替换工具。不得将名称映射伪装成精确注册 ID。
 

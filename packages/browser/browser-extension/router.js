@@ -2546,6 +2546,13 @@ export function createBrowserRouter(
       );
     waiter.cancelled = true;
   };
+  // Lifecycle cleanup settles owned waiters synchronously before stopping
+  // other actions. An admitted waiters.get only observes that fixed receipt;
+  // do not let the generic action abort replace its known terminal outcome.
+  // This does not exempt arm, nested navigation waits, or native mutations.
+  const stopLeaseAction = (controller, cause) => {
+    if (!controller.waiterReceipt?.settled) controller.stop.abort(cause);
+  };
   const activeNavigation = (details) =>
     details.frameId === 0 &&
     (!details.documentLifecycle || details.documentLifecycle === "active");
@@ -3500,7 +3507,8 @@ export function createBrowserRouter(
         if (waiter.leaseId === lease.id) cancelWaiter(waiter);
       const closing = (async () => {
         for (const controller of lease.controllers.values())
-          controller.stop.abort(
+          stopLeaseAction(
+            controller,
             new BrowserActionError(
               "UNKNOWN_RESULT",
               "The run control lease is ending.",
@@ -3796,6 +3804,7 @@ export function createBrowserRouter(
             visual &&
             definition.needsTab &&
             !definition.mutating &&
+            input.method !== "waiters.get" &&
             input.target.tabId !== undefined &&
             !lease.temporaryTabs?.has(nativeId(input.target.tabId))
           )
@@ -4013,7 +4022,8 @@ export function createBrowserRouter(
             cancelWaiter(waiter);
         for (const [actionId, controller] of lease.controllers)
           if (actionId !== ctx.actionId && controller.tabId === String(id))
-            controller.stop.abort(
+            stopLeaseAction(
+              controller,
               new BrowserActionError(
                 "INVALID_TARGET",
                 "The native tab was closed by this run.",
@@ -5866,7 +5876,8 @@ export function createBrowserRouter(
           cancelWaiter(waiter);
       for (const [actionId, controller] of lease.controllers)
         if (actionId !== ctx.actionId && controller.tabId === ctx.target.tabId)
-          controller.stop.abort(
+          stopLeaseAction(
+            controller,
             new BrowserActionError(
               "UNKNOWN_RESULT",
               "The tab is being handed back to the user.",
@@ -6259,6 +6270,10 @@ export function createBrowserRouter(
         "The event waiter does not belong to this run and target.",
       );
       requireBudget(ctx);
+      if (ctx.method === "waiters.get") {
+        const controller = ctx.lease.controllers.get(ctx.actionId);
+        if (controller) controller.waiterReceipt = waiter;
+      }
       waiter.timer?.wake();
       if (waiter.value) return waiter.value;
       if (waiter.error) throw waiter.error;

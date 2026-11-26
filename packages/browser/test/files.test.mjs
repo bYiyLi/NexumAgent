@@ -152,7 +152,16 @@ test("a failed later file removes all undelivered copies and never mutates a bro
   writeFileSync(path.join(f.pwd, "one.txt"), "first");
   await assert.rejects(
     prepareFiles(["one.txt", "absent.txt"], f.call, f.work),
-    { code: "FILE_UNAVAILABLE", reason: "source_file_missing" },
+    (error) => {
+      assert.equal(error.code, "FILE_UNAVAILABLE");
+      assert.equal(error.reason, "source_file_missing");
+      assert.equal(error.dispatched, false);
+      assert.equal(error.effect, "none");
+      assert.equal(error.cause?.code, "ENOENT");
+      assert.equal(Object.keys(error).includes("cause"), false);
+      assert.equal(error.message.includes(f.pwd), false);
+      return true;
+    },
   );
   assert.deepEqual(artifacts(f.work), []);
   const completed = await materializeDownload(

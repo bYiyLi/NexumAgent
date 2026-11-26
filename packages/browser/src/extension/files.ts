@@ -360,9 +360,12 @@ async function copyFile(
     } catch (cause) {
       // This catch surrounds filesystem observations only, never authorization.
       if (cause && typeof cause === "object" && !types.isProxy(cause) &&
-          Object.getOwnPropertyDescriptor(cause, "code")?.value === "ENOENT")
-        throw failure("FILE_UNAVAILABLE", "The authorized source file is no longer present.",
+          Object.getOwnPropertyDescriptor(cause, "code")?.value === "ENOENT") {
+        const error = failure("FILE_UNAVAILABLE", "The authorized source file is no longer present.",
           { reason: "source_file_missing" });
+        Object.defineProperty(error, "cause", { value: cause, configurable: true });
+        throw error;
+      }
       throw cause;
     }
   };

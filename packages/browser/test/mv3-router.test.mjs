@@ -2078,6 +2078,67 @@ test("same-run leases extend targets and local handoff releases one tab only aft
   assert.equal(await f.call("tab.title", {}, { id: "2" }), "Two");
 });
 
+test("confirmed lifecycle cancellation keeps the original waiter result", async (t) => {
+  for (const mode of ["handoff", "close", "end"])
+    await t.test(mode, async (t) => {
+      const f = fixture(t);
+      f.router.start();
+      f.router.bind(binding);
+      f.open("lease", "1");
+      f.open("lease", "2");
+      const waiter = await f.call("waiters.arm", { event: "download", timeoutMs: 5000 });
+      const other = await f.call("waiters.arm", { event: "navigation", waitUntil: "commit", timeoutMs: 5000 }, { id: "2" });
+      const pending = f.call("waiters.get", { id: waiter.id }, { budgetMs: 5000 });
+      const rejected = assert.rejects(pending, { code: "WAITER_GONE", effect: "none" });
+      void rejected.catch(() => {});
+      const otherPending = f.call("waiters.get", { id: other.id }, { id: "2", budgetMs: 5000 });
+      void otherPending.catch(() => {});
+      if (mode === "end") {
+        const otherRejected = assert.rejects(otherPending, { code: "WAITER_GONE" });
+        assert.equal((await f.router.endLease("lease")).closed, true);
+        await otherRejected;
+      } else {
+        await f.call(mode === "handoff" ? "tab.markHandoff" : "tab.close");
+        f.chrome.webNavigation.onCommitted.emit({ tabId: 2, frameId: 0, url: "https://example.com/other" });
+        assert.equal((await otherPending).url, "https://example.com/other");
+        assert.equal(await f.call("tab.title", {}, { id: "2" }), "Two");
+        await assert.rejects(f.call("tab.title"), { code: "INVALID_TARGET" });
+      }
+      await rejected;
+    });
+});
+
+test("handoff preserves an event already observed by an in-flight waiter without restoring control", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const waiter = await f.call("waiters.arm", { event: "navigation", waitUntil: "commit", timeoutMs: 5000 });
+  const pending = f.call("waiters.get", { id: waiter.id });
+  void pending.catch(() => {});
+  f.chrome.webNavigation.onCommitted.emit({ tabId: 1, frameId: 0, url: "https://example.com/observed" });
+  await f.call("tab.markHandoff");
+  assert.equal((await pending).url, "https://example.com/observed");
+  await assert.rejects(f.call("tab.title"), { code: "INVALID_TARGET" });
+});
+
+test("an independent action abort still stops an unresolved waiter observation", async (t) => {
+  const f = fixture(t);
+  f.router.start();
+  f.router.bind(binding);
+  f.open("lease");
+  const waiter = await f.call("waiters.arm", { event: "navigation", waitUntil: "commit", timeoutMs: 5000 });
+  const stop = new AbortController();
+  const cause = new Error("Independent observation cancelled");
+  const pending = f.call("waiters.get", { id: waiter.id }, { signal: stop.signal });
+  const rejected = assert.rejects(pending, (error) => error === cause);
+  stop.abort(cause);
+  f.chrome.webNavigation.onCommitted.emit({ tabId: 1, frameId: 0, url: "https://example.com/late" });
+  await rejected;
+  assert.equal((await f.call("waiters.get", { id: waiter.id })).url, "https://example.com/late");
+  assert.equal(await f.call("tab.title"), "One");
+});
+
 test("user context reads require the actual reserved tab and preserve other-run, handoff and closed-target fences", async (t) => {
   const f = fixture(t);
   f.router.start();
