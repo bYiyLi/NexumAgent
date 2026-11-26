@@ -118,3 +118,45 @@ export function publicError(cause, dispatched = false) {
     retryable: false,
   };
 }
+
+// Private loopback diagnostic, not a public SDK message. The receiving Agent
+// persists it in its local error log before producing the public projection.
+export function nativeDiagnostic(cause) {
+  const seen = new Set();
+  let remaining = 4096;
+  function visit(value, depth) {
+    if (remaining-- <= 0 || depth > 64) return "[diagnostic traversal limit]";
+    if (value === null || typeof value === "string" || typeof value === "boolean" ||
+        typeof value === "number") return value;
+    if (!value || typeof value !== "object") return "[" + typeof value + "]";
+    if (seen.has(value)) return "[circular cause]";
+    seen.add(value);
+    try {
+      const result = {};
+      for (const key of ["name", "message", "code", "stack"]) {
+        const field = Object.getOwnPropertyDescriptor(value, key);
+        if (field && "value" in field &&
+            (typeof field.value === "string" || typeof field.value === "number"))
+          result[key] = field.value;
+      }
+      const nested = Object.getOwnPropertyDescriptor(value, "cause");
+      if (nested && "value" in nested) result.cause = visit(nested.value, depth + 1);
+      const aggregate = Object.getOwnPropertyDescriptor(value, "errors");
+      if (aggregate && "value" in aggregate && Array.isArray(aggregate.value)) {
+        result.errors = [];
+        for (let i = 0; i < aggregate.value.length && remaining > 0; i++) {
+          const item = Object.getOwnPropertyDescriptor(aggregate.value, String(i));
+          result.errors.push(visit(item && "value" in item ? item.value : undefined, depth + 1));
+        }
+        if (result.errors.length < aggregate.value.length)
+          result.errors.push("[diagnostic traversal limit]");
+      }
+      return result;
+    } catch {
+      return "[native error could not be inspected]";
+    } finally {
+      seen.delete(value);
+    }
+  }
+  return JSON.stringify(visit(cause, 0), null, 2);
+}

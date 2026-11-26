@@ -207,6 +207,7 @@ export class ExtensionPackageLoader {
         const candidate = this.options.createInstance
           ? await this.options.createInstance(descriptor, host)
           : await isolatedExtensionFactory(descriptor.entry.url, {
+              diagnosticRoot: this.modules.work,
               onEvent: (phase, code, durationMs) =>
                 this.options.onWorkerEvent?.(
                   descriptor.packageName, phase, code, durationMs,

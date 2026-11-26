@@ -612,8 +612,14 @@ test("rewritten mandatory instructions cannot expand beyond 64 KiB", async (t) =
   assert.equal(catalog.published().instructions.length, 0);
 });
 
-test("local file links map to fixed declared copies and Windows device namespaces get safe directory names", async (t) => {
-  const f = await fixture(t, { namespace: "aux" });
+test("Windows device namespaces are rejected before extension material preparation", async (t) => {
+  for (const namespace of ["aux", "CON", "LPT1", "CONIN$"]) {
+    await assert.rejects(fixture(t, { namespace }), { code: "invalid_namespace" });
+  }
+});
+
+test("local file links map to fixed declared copies and legal dollar namespaces get safe directory names", async (t) => {
+  const f = await fixture(t, { namespace: "$aux" });
   const file = path.join(f.source, "skills-source/audit/references/manual/guide.md");
   write(
     path.join(f.source, "skills-source/audit/references/manual/README.md"),
@@ -626,7 +632,7 @@ test("local file links map to fixed declared copies and Windows device namespace
     );
   assert.match(
     path.relative(f.work, prepared.directory),
-    /extensions[/\\]x-617578$/,
+    /extensions[/\\]x-24617578$/,
   );
   assert.match(
     readFileSync(path.join(prepared.directory, "skills/audit/references/manual/README.md"), "utf8"),

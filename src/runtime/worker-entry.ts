@@ -1,3 +1,4 @@
+import { retainErrorData } from "../contracts/error-log.js";
 import {
   parentPort, workerData, receiveMessageOnPort, type MessagePort,
 } from "node:worker_threads";
@@ -14,6 +15,7 @@ import { packWorkerBinary, unpackWorkerBinary } from "./worker-binary.js";
 
 interface WorkerStart {
   work: string;
+  diagnosticRoot?: string;
   bootId: string;
   code: string;
   context: unknown;
@@ -44,6 +46,7 @@ const outputKinds: Readonly<Record<string, string>> = Object.freeze({
 let counter = 0;
 let started = false;
 let lastScriptDiagnostic: ScriptDiagnostic | undefined;
+let lastScriptStack: string | undefined;
 const syncBytes = 64 * 1024;
 const syncHeaderBytes = 8;
 const send = (value: object) => port.postMessage(value);
@@ -667,6 +670,7 @@ async function prepare() {
     filename: data.filename,
     console: safeConsole as unknown as Console,
     onModule: (use) => send({ type: "module", use }),
+    retainStack: (stack) => { lastScriptStack = stack; },
     onScriptError: (diagnostic) => {
       lastScriptDiagnostic = diagnostic;
       send({ type: "script-error", diagnostic });
@@ -681,10 +685,10 @@ async function prepare() {
         send({ type: "audit-result", ok: true });
       }, (cause) => {
         send({ type: "audit-result",
-          error: safeErrorData(cause, {
+          error: retainErrorData(data.diagnosticRoot,"worker-async",cause,safeErrorData(cause, {
             code: "unhandled_async_error",
             message: "The Run contains an unhandled asynchronous rejection.",
-          }) });
+          })) });
       });
       return;
     }
@@ -702,10 +706,10 @@ async function prepare() {
         send({ type: "callback-result", requestId: entry.requestId, value: await settle(value, 0, true) }),
       ).catch((cause) =>
         send({ type: "callback-result", requestId: entry.requestId,
-          error: safeErrorData(cause, {
+          error: retainErrorData(data.diagnosticRoot,"worker-callback",cause,safeErrorData(cause, {
             code: "worker_callback_failed",
             message: "The guest callback failed.",
-          }) }),
+          })) }),
       );
       return;
     }
@@ -793,7 +797,7 @@ async function prepare() {
           if (builtin) error.details = {nexumBuiltinFailure: builtin};
           send({
             type: "failed",
-            ...error,
+            ...retainErrorData(data.diagnosticRoot,"worker",cause,error,lastScriptStack),
             ...(isAgentError(cause) && issuedErrors.has(cause) ? {issuedErrorId:issuedErrors.get(cause)} : {}),
             ...(lastScriptDiagnostic
               ? { diagnostic: lastScriptDiagnostic } : {}),
@@ -809,13 +813,13 @@ void prepare().catch((cause) => {
     cause instanceof SyntaxError;
   send({
     type: "failed",
-    ...safeErrorData(cause, {
+    ...retainErrorData(data.diagnosticRoot,"worker-prepare",cause,safeErrorData(cause, {
       code: syntax
         ? "script_syntax_error" : "worker_prepare_failed",
       message: syntax
         ? "The script contains invalid JavaScript syntax."
         : "The script Worker could not be prepared.",
-    }),
+    }),lastScriptStack),
     ...(lastScriptDiagnostic
       ? { diagnostic: lastScriptDiagnostic } : {}),
   });

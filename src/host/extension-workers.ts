@@ -1,3 +1,4 @@
+import { retainErrorData } from "../contracts/error-log.js";
 import { isPublicErrorCode, boundErrorMessage, boundErrorDetails } from "../contracts/error-data.js";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
@@ -113,7 +114,7 @@ export class ExtensionWorkers {
           const code = value[field];
           if (isPublicErrorCode(code)) codes[field] = code;
         }
-        throw new AgentError("extension_initialization_failed", "The extension could not initialize.", codes);
+        throw new AgentError("extension_initialization_failed", "The extension could not initialize.", {...codes,...boundErrorDetails(value.details)});
       }
       requireCondition(isPlainRecord(value) && value.type === "ready" && isPlainRecord(value.info) &&
         isPlainRecord(value.scope) && value.scope.instanceId === this.instanceId &&
@@ -422,8 +423,8 @@ export class ExtensionWorkers {
         signal.removeEventListener("abort", onAbort);
       };
       const onMessage = (message: unknown) => { if (!accepts(message)) return; cleanup(); resolve(message); };
-      const onError = () => { cleanup(); reject(new AgentError("extension_worker_failed", "The extension Worker failed.")); };
-      const onExit = () => { cleanup(); reject(new AgentError("extension_worker_exited", "The extension Worker exited.")); };
+      const onError = (cause: Error) => { cleanup(); const data=retainErrorData(this.root,"extension-worker",cause,{code:"extension_worker_failed",message:"The extension Worker failed."}); reject(new AgentError("extension_worker_failed", "The extension Worker failed.",boundErrorDetails(data.details),{cause})); };
+      const onExit = (code: number) => { cleanup(); reject(new AgentError("extension_worker_exited", "The extension Worker exited.",{exitCode:code})); };
       const onAbort = () => { cleanup(); reject(signal.reason); };
       worker.on("message", onMessage);
       worker.once("error", onError);

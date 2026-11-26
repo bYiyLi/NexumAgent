@@ -8,13 +8,15 @@ import type { JsonObject, JsonValue } from "./types.js";
 export const isPublicErrorCode = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,255}$/.test(value);
 
+export const errorInlineBytes = 4096;
+
 export function boundErrorMessage(value: unknown, fallback: string): string {
   if (typeof value !== "string" || !value.trim() || /[\u0000-\u001f\u007f-\u009f]|Traceback/.test(value))
     return fallback;
   const bytes = Buffer.from(value, "utf8");
-  if (bytes.length <= 1024) return value;
+  if (bytes.length <= errorInlineBytes) return value;
   const suffix = "…[truncated]";
-  let end = 1024 - Buffer.byteLength(suffix);
+  let end = errorInlineBytes - Buffer.byteLength(suffix);
   while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
   return bytes.subarray(0,end).toString("utf8")+suffix;
 }
@@ -44,7 +46,7 @@ export function failureFacts(value: unknown): JsonObject {
   return result;
 }
 
-const privateKey = /^(?:stack|stacktrace|traceback|trace|exception|cause|password|passwd|secret|token|accesstoken|refreshtoken|idtoken|apikey|privatekey|clientsecret|credential|credentials|authorization|cookie|cookies|setcookie|headers|requestheaders|responseheaders|actual|rawerror|rawresponse|requestbody|responsebody)$/i;
+const privateKey = /^(?:stack|stacktrace|traceback|trace|exception|cause|password|passwd|secret|token|accesstoken|refreshtoken|idtoken|apikey|privatekey|clientsecret|credential|credentials|authorization|cookie|cookies|setcookie|headers|requestheaders|responseheaders|actual|rawerror|rawresponse|requestbody|responsebody|agentdiagnostictext)$/i;
 function clean(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(clean);
   if (value !== null && typeof value === "object") {
@@ -58,11 +60,22 @@ function clean(value: JsonValue): JsonValue {
 
 function recoveryFacts(value: unknown): JsonObject {
   const result = failureFacts(value);
-  for (const key of ["phase","reason","component","namespace","method","operation","operationId","runId","agentId","contextId","projectId","requestId","waitId","transferId","processId","recovery","field","exceptionType"]) {
+  for (const key of ["diagnosticRetained","truncated","logSaveFailed","outputLogSaveFailed","diagnosticIncomplete","diagnosticRestricted"]) {
+    const fact = own(value,key);
+    if (typeof fact === "boolean") result[key] = fact;
+  }
+  for (const key of ["logPath","outputLogPath"]) {
+    const fact = own(value,key);
+    if (typeof fact !== "string" || Buffer.byteLength(fact)>2048 || /[\u0000-\u001f\u007f-\u009f]/.test(fact)) continue;
+    const normalized=fact.replaceAll("\\","/");
+    if (/^(?:[A-Za-z]:\/|\/)(?:[^/]+\/)*logs\/errors\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{9}_[a-zA-Z0-9_-]{1,64}_[a-f0-9]{32}\.log$/.test(normalized) &&
+        !normalized.split("/").some(part=>part==="."||part==="..")) result[key]=fact;
+  }
+  for (const key of ["phase","reason","component","namespace","method","operation","operationId","runId","agentId","contextId","projectId","requestId","waitId","transferId","processId","recovery","field","exceptionType","sourceCode","packageCheckStage","systemOperation","osErrorName"]) {
     const fact = own(value,key);
     if (typeof fact === "string" && Buffer.byteLength(fact) <= 256 && /^[\p{L}\p{N}_.:\-[\]]+$/u.test(fact)) result[key] = fact;
   }
-  for (const key of ["status","exitCode","signal"]) {
+  for (const key of ["status","exitCode","signal","osErrorCode","logSaveErrorCode"]) {
     const fact = own(value,key);
     if (typeof fact === "number" && Number.isSafeInteger(fact) || isPublicErrorCode(fact)) result[key] = fact as string|number;
   }

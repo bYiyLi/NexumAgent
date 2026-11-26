@@ -1,3 +1,4 @@
+import { isSDKNamespace } from "../contracts/sdk-name.js";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
 import { decodeGoResult, encodeGoArguments } from "./blob.js";
 import { decodeHostBrands, type HostBrandServices } from "./brands.js";
@@ -73,7 +74,7 @@ export function bindGoScope(
       method.methodId.length <= 1024 && Array.isArray(method.path) &&
       method.path.length > 0 && method.path.length <= 8 &&
       method.path.every((key: unknown, index: number) => typeof key === "string" &&
-        (index === 0 ? /^[A-Za-z0-9_$][A-Za-z0-9_.$-]{0,256}$/.test(key) : key.length <= 8192)) &&
+        (index === 0 ? isSDKNamespace(key) : key.length <= 8192)) &&
       method.path[0] !== "context",
     "invalid_run_scope", "The Go Run method path is invalid.");
     let node = root;
@@ -144,12 +145,14 @@ export function bindGoScope(
 /** Executes already-admitted Runs through the existing scoped ModuleLoader. */
 export class HostRunner {
   readonly #loader: ModuleLoader;
+  readonly #diagnosticRoot?: string;
   readonly #active = new Map<string, ActiveRun>();
   #closing = false;
   #closeTask?: Promise<void>;
 
-  constructor(loader: ModuleLoader) {
+  constructor(loader: ModuleLoader, diagnosticRoot?: string) {
     this.#loader = loader;
+    this.#diagnosticRoot = diagnosticRoot;
   }
 
   start(run: HostRun): Promise<unknown> {
@@ -183,6 +186,7 @@ export class HostRunner {
         { ...run.bindings, context: run.context },
         {
           signal: controller.signal,
+          diagnosticRoot: this.#diagnosticRoot,
           filename: run.filename,
           console: run.console,
           onModule: run.onModule,

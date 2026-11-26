@@ -759,9 +759,8 @@ export class BrowserService extends EventEmitter {
           );
           if (!pending.expire()) pending.resolve(value);
         }
-        else
-          pending.reject(
-            failure(
+        else {
+          const original = failure(
               identifier(message.code) ? message.code : "UNKNOWN_RESULT",
               typeof message.message === "string"
                 ? message.message.slice(0, 1024)
@@ -779,8 +778,25 @@ export class BrowserService extends EventEmitter {
                   ? { reason: message.reason } : {}),
                 operationId: pending.operationId,
               },
-            ),
-          );
+            );
+          // A diagnostic is not a new result and cannot change dispatch/effect
+          // evidence or replace a known action failure.
+          try {
+            if (message.value !== undefined || message.valueStream) {
+              const diagnostic = unpack(message.value, message.attachments,
+                message.valueStream, peer.inbox, pending);
+              if (typeof diagnostic === "string")
+                Object.defineProperty(original, "cause", { value: new Error(diagnostic) });
+            } else if (typeof message.message === "string") {
+              Object.defineProperty(original, "cause", { value: new Error(message.message) });
+            }
+          } catch {
+            Object.defineProperty(original, "cause", { value: new Error("Browser diagnostic transport was incomplete.") });
+          }
+          if (message.diagnosticUnavailable === true)
+            Object.defineProperty(original, "diagnosticIncomplete", { value: true });
+          pending.reject(original);
+        }
       } catch (cause) {
         pending.reject(cause);
         throw cause;

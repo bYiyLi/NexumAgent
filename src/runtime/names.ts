@@ -1,3 +1,4 @@
+import { isSDKNamespace } from "../contracts/sdk-name.js";
 import { requireCondition } from "../contracts/errors.js";
 import vm from "node:vm";
 import { executionGlobals } from "./globals.js";
@@ -30,7 +31,7 @@ const portableReserved = new Set(
 
 export function extensionNamespace(value: string): void {
   requireCondition(
-    /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(value) &&
+    isSDKNamespace(value) &&
       !portableReserved.has(value.toLowerCase()),
     "invalid_namespace",
     "The extension namespace conflicts with JavaScript, a global, or a platform binding.",

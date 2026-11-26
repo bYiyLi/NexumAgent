@@ -21,8 +21,29 @@ async function fixture(t, builtins = ["path"]) {
   });
   const runner = new HostRunner(loader);
   t.after(() => runner.close());
-  return { loader, runner };
+  return { loader, runner, root };
 }
+
+test("a real Worker failure retains its long native diagnostic in the authenticated profile", async (t) => {
+  const { loader, root } = await fixture(t);
+  const runner = new HostRunner(loader, root);
+  t.after(() => runner.close());
+  const message = "错误🙂".repeat(3000)+"last-native-cause";
+  let failure;
+  try {
+    await runner.start(run("run_diagnostic",
+      "throw new Error('top failure', {cause: new Error("+JSON.stringify(message)+")});"));
+  } catch (cause) {
+    failure = cause;
+  }
+  assert.ok(failure, "the failing Run must not resolve successfully");
+  assert.equal(failure.details?.diagnosticRetained, true);
+  assert.equal(failure.details?.truncated, true);
+  assert.ok(failure.details.logPath.startsWith(path.join(root, "logs", "errors")+path.sep));
+  const diagnostic = JSON.parse(await readFile(failure.details.logPath, "utf8"));
+  assert.equal(diagnostic.message, "top failure");
+  assert.equal(diagnostic.cause.message, message);
+});
 
 function run(runId, code, bindings = {}) {
   return {

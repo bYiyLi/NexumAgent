@@ -15,6 +15,7 @@ import { Console as NativeConsole } from "node:console";
 import { Writable } from "node:stream";
 import test from "node:test";
 import { ModuleLoader } from "../dist/runtime/modules.js";
+import { errorInlineBytes } from "../dist/contracts/error-data.js";
 
 async function fixture(t) {
   const root = realpathSync.native(
@@ -422,23 +423,38 @@ test("script body supports await and native errors, and the required VM option i
   assert.equal(result.stdout.trim(), "runtime_configuration");
 });
 
-test("non-identifier MCP connection keys remain callable through globalThis without renaming", async (t) => {
+test("SDK roots must be identifiers while original tool names remain callable", async (t) => {
   const { loader } = await fixture(t);
   const observed = await loader.execute(
-    'return await globalThis["remote-api"]["tool_list-issues"]({repo:"demo"});',
-    { context: {}, "remote-api": { "tool_list-issues": async ({ repo }) => ({ repo }) } },
+    'return await remote_api["tool_list-issues"]({repo:"demo"});',
+    { context: {}, remote_api: { "tool_list-issues": async ({ repo }) => ({ repo }) } },
   );
   assert.equal(observed.repo, "demo");
-  await assert.rejects(loader.execute("return 1;", {
-    context: {}, "invalid key": { ping: () => 1 },
-  }), { code: "invalid_namespace" });
+  for (const name of ["remote-api", "remote.api", "1remote", "invalid key", "x".repeat(65), "CON", "nUl", "LPT1", "conin$"]) {
+    await assert.rejects(loader.execute("return 1;", {
+      context: {}, [name]: { ping: () => 1 },
+    }), { code: "invalid_namespace" });
+  }
 });
 
-test("an actual Run Worker calls an approved hyphenated MCP binding", async (t) => {
+test("a Worker rejects reserved device roots without blocking legal names", async (t) => {
+  const { loader } = await fixture(t);
+  for (const name of ["CON", "NUL", "LPT1", "CONOUT$"]) {
+    await assert.rejects(loader.compileIsolated("return 1;", {
+      context: {}, [name]: { ping: async () => 42 },
+    }), { code: "worker_binding_invalid" });
+  }
+  const run = await loader.compileIsolated('return await $plugin["tool_list-issues"]({});', {
+    context: {}, $plugin: { "tool_list-issues": async () => 42 },
+  });
+  try { assert.equal(await run(), 42); } finally { await run.close(); }
+});
+
+test("an actual Run Worker calls an approved SDK binding", async (t) => {
   const { loader } = await fixture(t);
   const run = await loader.compileIsolated(
-    'return await globalThis["remote-api"]["tool_ping"]({ count: 41 });',
-    { context: {}, "remote-api": { tool_ping: async ({ count }) => count + 1 } },
+    'return await remote_api["tool_ping"]({ count: 41 });',
+    { context: {}, remote_api: { tool_ping: async ({ count }) => count + 1 } },
   );
   try {
     assert.equal(await run(), 42);
@@ -451,7 +467,7 @@ test("rethrowing an SDK-issued failure cannot change the recorded public diagnos
   const { loader } = await fixture(t);
   const { AgentError } = await import("../dist/contracts/errors.js");
   const code = "BROWSER_"+"X".repeat(200);
-  const run = await loader.compileIsolated(`try { await globalThis["fixture-error"].fail(); } catch (error) {
+  const run = await loader.compileIsolated(`try { await fixture_error.fail(); } catch (error) {
     if (error.code !== context.code || error.details.effect !== "unknown" || error.details.retryable !== false) throw new Error("unexpected SDK diagnostic");
     error.code = "forged_code";
     error.message = "FORGED_MESSAGE";
@@ -459,9 +475,9 @@ test("rethrowing an SDK-issued failure cannot change the recorded public diagnos
     error.details.effect = "none";
     error.details.retryable = true;
     throw error;
-  }`,{context:{code},"fixture-error":{fail:async()=>{throw new AgentError(code,"故障🙂".repeat(1024),{operationId:"op_original",effect:"unknown",dispatched:true,retryable:true,nested:{token:"PRIVATE_TOKEN"}});}}});
+  }`,{context:{code},fixture_error:{fail:async()=>{throw new AgentError(code,"故障🙂".repeat(1024),{operationId:"op_original",effect:"unknown",dispatched:true,retryable:true,nested:{token:"PRIVATE_TOKEN"}});}}});
   try {
-    await assert.rejects(run(), error=>{assert.equal(error.code,code);assert.equal(error.details.operationId,"op_original");assert.equal(error.details.effect,"unknown");assert.equal(error.details.retryable,false);assert.ok(Buffer.byteLength(error.message)<=1024);assert.doesNotMatch(JSON.stringify(error),/PRIVATE_TOKEN|FORGED_MESSAGE/);return true;});
+    await assert.rejects(run(), error=>{assert.equal(error.code,code);assert.equal(error.details.operationId,"op_original");assert.equal(error.details.effect,"unknown");assert.equal(error.details.retryable,false);assert.ok(Buffer.byteLength(error.message)<=errorInlineBytes);assert.doesNotMatch(JSON.stringify(error),/PRIVATE_TOKEN|FORGED_MESSAGE/);return true;});
   } finally {await run.close();}
 });
 

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { types } from "node:util";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
 import { safeErrorData, isPublicErrorCode, failureFacts, boundErrorDetails, boundErrorMessage } from "../contracts/error-data.js";
+import { retainErrorData } from "../contracts/error-log.js";
 import { isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import type { JsonObject } from "../contracts/types.js";
@@ -17,7 +18,7 @@ import type {
 
 const port = parentPort;
 if (!port) throw new Error("The extension Worker must have an original Core port.");
-const config = workerData as { entryUrl: string; syncReplyPort: MessagePort };
+const config = workerData as { entryUrl: string; syncReplyPort: MessagePort; diagnosticRoot?: string };
 const syncBytes = 64 * 1024, syncHeaderBytes = 8;
 const waiting = new Map<string, ReturnType<typeof Promise.withResolvers<unknown>>>();
 const resources = new Map<string, {
@@ -654,9 +655,9 @@ port.on("message", (data: unknown) => {
       if (data.kind !== "initialize")
         send({ type: "reply", id, value: null });
     } catch (cause) {
-      const error = componentError(cause);
+      const error = retainErrorData(config.diagnosticRoot, "extension-call", cause, componentError(cause));
       if (data.kind === "initialize")
-        send({ type: "fatal", code: safeComponentCode(cause) });
+        send({ type: "fatal", code: safeComponentCode(cause), error });
       else send({ type: "reply", id, error });
     }
   })();

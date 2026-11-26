@@ -1,3 +1,4 @@
+import { isSDKNamespace } from "../contracts/sdk-name.js";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
@@ -479,6 +480,7 @@ export class ModuleLoader {
       filename?: string;
       onModule?: (use: ModuleUse) => void;
       onScriptError?: (value: ScriptDiagnostic) => void;
+      retainStack?: (stack: string) => void;
       console?: Console;
     } = {},
   ): () => Promise<unknown> {
@@ -521,25 +523,15 @@ export class ModuleLoader {
       ),
       require: guardedRequire,
     };
-    const identifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
-    const names = Object.keys(publicParameters).filter((name) => identifier.test(name));
-    const properties = Object.keys(publicParameters).filter((name) => !identifier.test(name));
+    const names = Object.keys(publicParameters);
     requireCondition(
-      properties.every((name) => /^[A-Za-z_$][A-Za-z0-9_.$-]{0,63}$/.test(name) &&
-        !["__proto__", "prototype", "constructor"].includes(name)),
+      names.every(isSDKNamespace),
       "invalid_namespace",
-      "An MCP connection key must be a safe JSON property name.",
+      "SDK root bindings must be JavaScript identifiers of at most 64 ASCII characters.",
     );
     const realm = vm.createContext(
       Object.assign(Object.create(null), executionGlobals(options.console)),
     );
-    // Non-identifier MCP keys remain addressable as globalThis["remote-api"].
-    // They cannot be vm.compileFunction parameter identifiers.
-    for (const name of properties) {
-      Object.defineProperty(realm, name, {
-        value: publicParameters[name], configurable: false, writable: false, enumerable: true,
-      });
-    }
     const filename = options.filename ?? "nexum:script.js";
     const nativeStackGetter = vm.runInContext(
       "Object.getOwnPropertyDescriptor(new Error(), 'stack').get",
@@ -557,7 +549,7 @@ export class ModuleLoader {
     );
     const report = (cause: unknown) => {
       const diagnostic = inspectScriptError(
-        cause, nativeStackGetter, filename, allowedPrototypes, realmError,
+        cause, nativeStackGetter, filename, allowedPrototypes, realmError, options.retainStack,
       );
       if (diagnostic) options.onScriptError?.(diagnostic);
     };
@@ -606,6 +598,7 @@ export class ModuleLoader {
     parameters: Readonly<Record<string, unknown>>,
     options: Parameters<ModuleLoader["compile"]>[2] &
       { signal?: AbortSignal;
+        diagnosticRoot?: string;
         onDiagnostic?: WorkerCompile["onDiagnostic"];
         onRootReturned?: WorkerCompile["onRootReturned"] } = {},
   ): Promise<IsolatedExecution> {

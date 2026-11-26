@@ -5,6 +5,7 @@ import { serialize } from "node:v8";
 import { types } from "node:util";
 import { AgentError, isAgentError, requireCondition } from "../contracts/errors.js";
 import { safeErrorData, isPublicErrorCode, boundErrorDetails, boundErrorMessage } from "../contracts/error-data.js";
+import { retainErrorData } from "../contracts/error-log.js";
 import { canonicalJson, isPlainRecord } from "../contracts/json.js";
 import { compileMethodSchema } from "../contracts/validation.js";
 import { mcpResult } from "../results/mcp.js";
@@ -108,6 +109,7 @@ interface RemoteCall {
 export function isolatedExtensionFactory(
   entryUrl: string,
   options: {
+    diagnosticRoot?: string;
     onEvent?: (phase: string, code: string, durationMs: number) => void;
     /** Recheck current package identity and enable intent after native import,
      * before the third-party factory may create resources or side effects. */
@@ -125,7 +127,7 @@ export function isolatedExtensionFactory(
     };
     const syncReply = new MessageChannel();
     const worker = new Worker(new URL("./worker-entry.js", import.meta.url), {
-      workerData: { entryUrl, syncReplyPort: syncReply.port2 },
+      workerData: { entryUrl, syncReplyPort: syncReply.port2, diagnosticRoot: options.diagnosticRoot },
       transferList: [syncReply.port2],
       execArgv: process.execArgv.includes("--experimental-vm-modules")
         ? ["--experimental-vm-modules"] : process.execArgv,
@@ -146,11 +148,12 @@ export function isolatedExtensionFactory(
     let shutdown: Promise<void> | undefined;
     const terminate = (): Promise<void> =>
       (terminating ??= worker.terminate().then(() => {}));
-    const fail = (code: string) => {
+    const fail = (code: string, diagnostic?: JsonObject) => {
       if (ended) return;
       ended = true;
       const error = new AgentError(code,
-        "The third-party extension Worker could not complete its lifecycle.");
+        boundErrorMessage(diagnostic?.message, "The third-party extension Worker could not complete its lifecycle."),
+        boundErrorDetails(diagnostic?.details));
       if (!ready) prepared.reject(error);
       for (const pending of requests.values()) pending.reject(error);
       requests.clear();
@@ -449,10 +452,12 @@ export function isolatedExtensionFactory(
       if (!notified)
         worker.postMessage({ type: "reply", id: entry.id, ...payload });
     };
-    worker.on("error", (cause: Error & { code?: string }) => fail(
-      isPublicErrorCode(cause.code)
-        ? cause.code : "extension_worker_failed",
-    ));
+    worker.on("error", (cause: Error & { code?: string }) => {
+      const code = isPublicErrorCode(cause.code) ? cause.code : "extension_worker_failed";
+      fail(code, retainErrorData(options.diagnosticRoot, "extension-worker", cause, {
+        code, message: "The third-party extension Worker could not complete its lifecycle.",
+      }));
+    });
     worker.once("online", () => emit("online", "extension_worker_online"));
     worker.on("exit", () => {
       syncReply.port1.close();
@@ -501,7 +506,7 @@ export function isolatedExtensionFactory(
       }
       if (message.type === "fatal") {
         fail(typeof message.code === "string" ? message.code :
-          "extension_worker_failed");
+          "extension_worker_failed", isPlainRecord(message.error) ? message.error as JsonObject : undefined);
         return;
       }
       if (message.type === "resource-closed") {

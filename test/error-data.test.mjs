@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AgentError } from "../dist/contracts/errors.js";
-import { safeErrorData } from "../dist/contracts/error-data.js";
+import { safeErrorData, boundErrorDetails } from "../dist/contracts/error-data.js";
 
+test("oversized error details retain the producing device's diagnostic path", () => {
+  const logPath = "C:\\Users\\yi\\.nexum-dev\\logs\\errors\\2026-11-26\\06-00-00-000000000_worker_0123456789abcdef0123456789abcdef.log";
+  const details = boundErrorDetails({
+    logPath, diagnosticRetained: true, truncated: true, debug: "x".repeat(128*1024),
+  });
+  assert.equal(details.logPath, logPath);
+  assert.equal(details.diagnosticRetained, true);
+  assert.equal(details.omitted, true);
+});
 test("safe error data reads only branded own data, bounds messages and omits invalid details", () => {
   const fallback = { code: "safe_fallback", message: "Safe failure." };
   let calls = 0;
   const error = new AgentError("known", "m".repeat(5000), { kept: 1 });
   const normal = safeErrorData(error, fallback);
   assert.equal(normal.code, "known");
-  assert.equal(Buffer.byteLength(normal.message), 1024);
+  assert.equal(Buffer.byteLength(normal.message), 4096);
   assert.match(normal.message, /\[truncated\]$/);
   error.details.kept = 2;
   assert.deepEqual(normal.details, { kept: 1 });
@@ -46,7 +55,7 @@ test("public error projection preserves case, UTF8, recovery identity and irreve
   const e = new AgentError(code,"故障🙂".repeat(1024),details);
   const data = safeErrorData(e,{code:"fallback",message:"fallback"});
   assert.equal(data.code,code);
-  assert.ok(Buffer.byteLength(data.message)<=1024);
+  assert.ok(Buffer.byteLength(data.message)<=4096);
   assert.ok(!data.message.includes("�"));
   assert.deepEqual(data.details.nested,[{field:"name"}]);
   assert.equal(data.details.retryable,false);

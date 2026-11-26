@@ -39,6 +39,7 @@ export function inspectScriptError(
   filename: string,
   prototypes: ReadonlyMap<object, string>,
   realmError: typeof Error,
+  retainStack?: (stack: string) => void,
 ): ScriptDiagnostic | null {
   if (utilTypes.isProxy(cause) || !utilTypes.isNativeError(cause)) return null;
   const prototype = Object.getPrototypeOf(cause) as object;
@@ -86,6 +87,7 @@ export function inspectScriptError(
   // Guest-supplied getters *and* writable stack strings are untrusted.
   // V8's lazy getter is captured in the VM realm and compared by identity.
   if (typeof stack !== "string") return diagnostic;
+  retainStack?.(stack);
   let frames = stack;
   if (multilineMessage !== undefined) {
     const header = "AssertionError [ERR_ASSERTION]: " + multilineMessage + "\n";

@@ -4,6 +4,7 @@ import {
   record,
   text,
   publicError,
+  nativeDiagnostic,
 } from "./errors.js";
 import {
   BrowserBinaryInbox,
@@ -502,6 +503,21 @@ export function createExtensionConnection({
           ok: false,
           ...publicError(cause, action.dispatched),
         };
+        // Transport the original diagnostic separately from the stable failure
+        // code. Use the existing byte stream when it does not fit a frame.
+        // Diagnostic transport failure must not replace the action outcome.
+        try {
+          const diagnostic = nativeDiagnostic(cause);
+          reply.message = reply.message.slice(0, 1024);
+          const packed = await sendPacked(diagnostic, message, expected,
+            action.controller, () => {
+              action.timer.wake();
+              action.controller.signal.throwIfAborted();
+            });
+          Object.assign(reply, packed);
+        } catch {
+          reply.diagnosticUnavailable = true;
+        }
       } finally {
         action.timer.clear();
         inbox.discard(message.actionId);
@@ -509,6 +525,13 @@ export function createExtensionConnection({
       }
       // Receipts contain only control data. Binary results are not retained for replay.
       const receipt = { ...reply };
+      if (!receipt.ok && (receipt.value !== undefined || receipt.valueStream)) {
+        // Private diagnostics are not retained in the replay cache.
+        delete receipt.value;
+        delete receipt.valueStream;
+        delete receipt.attachments;
+        receipt.diagnosticUnavailable = true;
+      }
       if (receipt.ok && (receipt.attachments?.length || receipt.valueStream)) {
         receipt.ok = false;
         delete receipt.value;

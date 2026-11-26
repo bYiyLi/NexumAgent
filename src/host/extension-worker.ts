@@ -1,3 +1,4 @@
+import { retainErrorData } from "../contracts/error-log.js";
 import { MessagePort, parentPort, workerData } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -258,8 +259,8 @@ async function start(): Promise<void> {
             parent.postMessage({ type: "invoked", id, result: { value: encoded.arguments[0],
               binaryOutputs: encoded.binaryInputs.map((item) => ({ ...item, path: item.path.slice(1) })) } });
           } catch (cause) {
-            parent.postMessage({ type: "invoked", id, error: safeErrorData(cause,
-              { code: "extension_invocation_failed", message: "The extension operation failed." }) });
+            parent.postMessage({ type: "invoked", id, error: retainErrorData(root,"extension",cause,safeErrorData(cause,
+              { code: "extension_invocation_failed", message: "The extension operation failed." })) });
           } finally {
             if (timer) clearTimeout(timer);
             active.delete(id);
@@ -296,7 +297,8 @@ async function start(): Promise<void> {
 
 void start().catch((cause: unknown) => {
   const nested = cause instanceof Error ? cause.cause : undefined;
-  parentPort?.postMessage({ type: "failed", code: isAgentError(cause) ? cause.code : "extension_initialization_failed",
+  const error=retainErrorData(typeof workerData.root==="string"?workerData.root:undefined,"extension-init",cause,safeErrorData(cause,{code:"extension_initialization_failed",message:"The extension could not initialize."}));
+  parentPort?.postMessage({ type: "failed", ...error,
     ...(isAgentError(nested) ? { causeCode: nested.code } : {}) });
   parentPort?.close();
 });

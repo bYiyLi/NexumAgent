@@ -176,7 +176,7 @@ export class HostService {
         );
         this.#packages = packages;
         this.#loader = loader;
-        this.#runner = new HostRunner(loader);
+        this.#runner = new HostRunner(loader, root);
         if (extensionBinding && bootId)
           this.#extensions = new ExtensionWorkers(
             root,

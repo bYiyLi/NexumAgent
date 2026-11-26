@@ -1,3 +1,5 @@
+import { isSDKNamespace } from "../contracts/sdk-name.js";
+import { retainErrorData } from "../contracts/error-log.js";
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +20,7 @@ import type { ScriptDiagnostic } from "./script-diagnostics.js";
 
 export interface WorkerCompile {
   work: string;
+  diagnosticRoot?: string;
   code: string;
   context: unknown;
   bindings: Readonly<Record<string, unknown>>;
@@ -48,7 +51,6 @@ const maxRpc = 1024;
 const maxDepth = 24;
 const syncBytes = 64 * 1024;
 const syncHeaderBytes = 8;
-const validSegment = /^[A-Za-z0-9_$][A-Za-z0-9_.$-]{0,256}$/;
 function aliasTree(
   bindings: Readonly<Record<string, unknown>>,
   token: string,
@@ -78,7 +80,7 @@ function aliasTree(
       "worker_binding_invalid", "SDK constant bindings must be plain data.");
     const data = Object.create(null) as Record<string, unknown>;
     for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      requireCondition((keys.length === 0 ? validSegment.test(key) : key.length <= 8192) &&
+      requireCondition((keys.length === 0 ? isSDKNamespace(key) : key.length <= 8192) &&
         "value" in descriptor,
         "worker_binding_invalid", "SDK bindings need stable named properties.");
       data[key] = visit(descriptor.value, [...keys, key], depth + 1);
@@ -157,7 +159,7 @@ export async function compileWorker(
   const syncReplyChannel = new MessageChannel();
   const worker = new Worker(new URL("./worker-entry.js", import.meta.url), {
     workerData: {
-      work: options.work, bootId, code: options.code,
+      work: options.work, diagnosticRoot: options.diagnosticRoot, bootId, code: options.code,
       context, template, policy: options.policy, filename: options.filename,
       syncReplyPort: syncReplyChannel.port2,
     },
@@ -236,9 +238,10 @@ export async function compileWorker(
     void finalize().then(() => {
       if (!wasPrepared) ready.reject(error);
       result.reject(error);
-    }, () => {
+    }, (cleanupCause) => {
+      const diagnostic=retainErrorData(options.diagnosticRoot,"worker-cleanup",new AggregateError([error,cleanupCause]),{code:"worker_cleanup_unconfirmed",message:"The JavaScript Worker did not confirm its shutdown."});
       const unresolved = new AgentError("worker_cleanup_unconfirmed",
-        "The JavaScript Worker did not confirm its shutdown.");
+        "The JavaScript Worker did not confirm its shutdown.",boundErrorDetails(diagnostic.details),{cause:error});
       if (!wasPrepared) ready.reject(unresolved);
       result.reject(unresolved);
     });
@@ -249,11 +252,13 @@ export async function compileWorker(
   30_000);
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
-  worker.on("error", () => fail("worker_failed",
-    "The JavaScript Worker failed before completion."));
+  worker.on("error", (cause) => {
+    const data=retainErrorData(options.diagnosticRoot,"worker",cause,{code:"worker_failed",message:"The JavaScript Worker failed before completion."});
+    fail(String(data.code),String(data.message),boundErrorDetails(data.details));
+  });
   worker.on("exit", (code) => {
     if (!settled) fail("worker_exited",
-      "The JavaScript Worker exited without a confirmed result.");
+      "The JavaScript Worker exited without a confirmed result.", {exitCode: code});
   });
   worker.on("message", (message: unknown) => {
     if (settled || !message || typeof message !== "object") return;
@@ -404,10 +409,10 @@ export async function compileWorker(
         }
       };
       const safe = (cause: unknown): object => {
-        const error = safeErrorData(cause, {
+        const error = retainErrorData(options.diagnosticRoot,"sdk",cause,safeErrorData(cause, {
           code: "sdk_call_failed",
           message: "The SDK invocation did not complete.",
-        });
+        }));
         // Native SDK errors are inspected only as real native errors or
         // privately branded Core errors. No arbitrary guest Proxy hooks.
         const inspectable = isAgentError(cause) ||
