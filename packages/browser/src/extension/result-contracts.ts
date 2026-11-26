@@ -79,7 +79,7 @@ add("tab.semanticSnapshot tab.writeObservation", "读取当前已授权页面的
 add("ax.get ax.write", "按 mode 读取辅助功能状态文本、截图字节或两者；write 返回 Host 原生文本/图像结果。不要将媒体伪造成 JSON。");
 add("tab.evaluate playwright.evaluate locator.evaluate locator.evaluateAll", "在当前受控页面执行表达式，结果取决于表达式的真实序列化值；无固定业务结构。");
 add("cdp.send", "调用实际 CDP method；返回结构由该 CDP method 决定，不使用统一的伪造结果 Schema。");
-add("webmcp.invokeTool", "执行已发现、同文档和注册修订的页面工具；结果由该工具的实际合同及内容类型决定。");
+add("webmcp.invokeTool", "执行当前发现且修订有效的页面工具；默认精确注册。仅名称绑定工具需要显式 binding:name，原生解析可能命中派发前替换的注册；结果由实际工具合同决定。");
 // The page snapshot has a flattened target and an explicitly described DOM tree.
 const snapshotNode = obj({ ref: str, role: str, name: str, disabled: bool, checked: bool,
   children: list({ $ref: "#/definitions/SnapshotNode" }) }, ["ref", "role"]);
@@ -126,8 +126,8 @@ add("pageAssets.list", "读取实际页面资产清单及真实 inventoryId、ta
 }));
 add("pageAssets.download", "下载实际授权资产，返回每项保存的文件或失败原因。", obj({ files: list(obj({ ...artifactProperties, url: str })), failures: list(obj({ url: str, reason: str })) }));
 add("pageAssets.bundle", "打包实际资产并返回已保存的目录、清单、资产、失败与统计。", obj({ directoryPath: str, manifestPath: str, assets: list(obj({ ...artifactProperties, id: str, kind: assetKind, url: str })), failures: list(obj({ id: str, url: str, name: str, reason: str })), summary: obj({ requestedCount: int, downloadedCount: int, failedCount: int, elapsedMs: num }) }));
-const webTool = obj({ documentRevision: str, registrationRevision: str, name: str, description: str, inputSchema: { type: "object" }, annotations: { type: "object" } }, ["documentRevision", "registrationRevision", "name", "inputSchema"]);
-add("webmcp.listTools", "列出当前页面真实 WebMCP 工具及其输入 Schema 和修订。", list(webTool));
+const webTool = obj({ documentRevision: str, registrationRevision: str, name: str, description: str, inputSchema: { type: "object" }, annotations: { type: "object" }, invocationBinding: { enum: ["name"] } }, ["documentRevision", "registrationRevision", "name", "inputSchema"]);
+add("webmcp.listTools", "列出当前页面真实 WebMCP 工具、输入 Schema 和修订；invocationBinding:name 表示原生协议仅支持名称绑定。", list(webTool));
 add("webmcp.fetchTools", "读取当前页面真实 WebMCP 工具集合及文档/注册修订。", obj({ documentRevision: str, registrationRevision: str, tools: list(webTool) }));
 const eventSource = obj({ ...binding, tabId: str, sessionId: str, targetId: str, controlEpoch: str, pageVersion: int }, Object.keys(binding));
 const cdpEvent = obj({ method: str, params: { type: "object" }, sequence: int, source: eventSource }, ["method", "sequence", "source"]);

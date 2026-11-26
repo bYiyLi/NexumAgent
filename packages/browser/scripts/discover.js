@@ -1,7 +1,7 @@
 /**
 {
   "scriptName": "discover.js",
-  "scriptDesc": "发现当前 Agent 已授权的在线浏览器与标签。输入 {}。返回文本，含完整 browserId、tabId、名称、profile、实际版本、已知标题/URL；个别标签查询失败保留原身份和错误。只观察，不创建或切换标签，不取得页面控制。没有在线浏览器不证明插件未安装或禁用。PLUGIN_VERSION_MISMATCH 等连接异常按已验证资产目录及原因处理；资产就绪不表示插件已加载，用户重载后重新发现。权限拒绝不得绕过。脚本未登记时核对实际 Open 警告和当前包安装/启用状态，不猜设备或路径。",
+  "scriptDesc": "发现当前 Agent 已授权的在线浏览器与标签。输入 {}。返回文本，含完整 browserId、tabId、名称、profile、实际版本、已知标题/URL；个别标签查询失败保留原身份和错误。只观察，不创建或切换标签，不取得页面控制。没有在线浏览器不证明插件未安装或禁用。PLUGIN_VERSION_MISMATCH 等连接异常按已验证资产目录及原因处理；资产就绪不表示插件已加载；只用当前验证资产恢复，用户操作后重新发现。权限拒绝不得绕过。脚本未登记时按实际 Open 警告选择 environment-maintenance 核对 @nexum-hub/browser 的安装、版本及启用状态，不猜设备或路径。",
   "scriptWhenUse": "需要选择浏览器/标签或诊断连接时；仅查安装目录用 browser/installation.js。",
   "scriptInputSchema": {
     "type": "object",
@@ -22,11 +22,11 @@ const label = value => /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u20
 
 // Only classify actual SDK connection errors, not guessed installation states.
 const connectionGuidance = {
-  PLUGIN_VERSION_MISMATCH: "An incompatible plugin handshake was confirmed. The running extension does not match this package's build.",
-  EXTENSION_OFFLINE: "The requested connection is offline. Check the browser and extension connection, then rediscover.",
-  PROFILE_MISMATCH: "The connection does not match this Agent profile or extension identity. Use the matching environment.",
-  PROTOCOL_MISMATCH: "The connection protocol is incompatible. Check the matching package and extension.",
-  PROFILE_CONFLICT: "Another connection owns the profile identity. Resolve the conflict without taking over another browser.",
+  PLUGIN_VERSION_MISMATCH: "An incompatible plugin handshake was confirmed. The running extension does not match this package's build, even if its display version is unchanged. Check current installation assets before choosing a reload.",
+  EXTENSION_OFFLINE: "The requested connection is offline. Check whether Chrome/Edge is running and the matching extension is enabled on this Agent, then rediscover. Offline alone does not prove that an update is needed.",
+  PROFILE_MISMATCH: "The connection does not match this Agent profile or extension identity. Use the matching development/production extension; do not switch to another Agent.",
+  PROTOCOL_MISMATCH: "The connection protocol is incompatible. Check the matching package and extension build; use the selected release channel if a package update is actually needed.",
+  PROFILE_CONFLICT: "Another connection owns the profile identity. Resolve the conflict with the user without taking over another browser.",
   PORT_IN_USE: "The matching listener could not bind. Check the Agent Browser initialization; do not seize another listener.",
 };
 const tabGuidance = {
@@ -45,11 +45,14 @@ async function installationReport(lines, code) {
   const { inspectInstallation, formatInstallationInspection } = await import("@nexum-hub/browser/installation");
   const result = await inspectInstallation(context.paths?.work, context.profile);
   lines.push("", "## Installation diagnosis", formatInstallationInspection(result));
-  if (!result.assetsReady) return;
+  if (!result.assetsReady) {
+    lines.push("Do not load or reload unverified assets. Resolve the asset failure before installing or reloading the extension.");
+    return;
+  }
   if (code === "PLUGIN_VERSION_MISMATCH") {
-    lines.push("On this Agent, reload the matching extension from this verified directory in chrome://extensions or edge://extensions, then rediscover.");
+    lines.push("On this Agent, reload the matching extension from this verified directory (affected connection only) in chrome://extensions or edge://extensions, then rediscover. If the mismatch persists despite verified assets and the correct loaded directory, ask the user to disable and re-enable only that matching extension once, then rediscover. The expected asset revision above identifies this build; the display version alone is insufficient.");
   } else if (!code || code === "EXTENSION_OFFLINE") {
-    lines.push("Check current authorization and whether Chrome/Edge is running on this Agent. In chrome://extensions or edge://extensions, confirm whether the extension is installed and enabled. If absent, load this verified directory using developer mode; reload an existing matching extension only when needed. Rediscover after connection.");
+    lines.push("Check current authorization and whether Chrome/Edge is running on this Agent. In chrome://extensions or edge://extensions, check the matching Extension ID, Profile, loaded directory and enabled state. If absent, load this verified directory using developer mode. If the matching extension is disabled, enable it. If its build is confirmed incompatible or reload was explicitly requested, reload the matching extension. Unknown state requires checking, not reinstalling. Rediscover after connection.");
   } else {
     lines.push("Resolve the confirmed connection problem before installation or reload. The directory is only the verified asset location.");
   }
@@ -101,7 +104,7 @@ for (const info of choices) {
   }
   complete++;
   tabCount += tabs.length;
-  lines.push("Connection: online at observation", "Tabs returned: " + tabs.length);
+  lines.push("Connection: online at observation (matching plugin build verified at handshake)", "Tabs returned: " + tabs.length);
   for (const tab of tabs) {
     // Keep only public tab identity and observed labels. User content is data.
     lines.push("    Tab ID: " + label(tab.id)
@@ -116,5 +119,8 @@ const heading = complete === choices.length ? "Browser discovery: complete"
 const report = [heading + "\nAuthorized online browsers discovered: " + choices.length +
   "\nTab lists retrieved: " + complete + "/" + choices.length +
   "\nTabs returned: " + tabCount, ...sections];
-if (complete === 0 && connectionErrors.size === 1) await installationReport(report, [...connectionErrors][0]);
+// A healthy peer must not hide a confirmed mismatch on a different queried
+// peer. Preserve working peers; only the affected connection needs recovery.
+if (connectionErrors.has("PLUGIN_VERSION_MISMATCH")) await installationReport(report, "PLUGIN_VERSION_MISMATCH");
+else if (complete === 0 && connectionErrors.size === 1) await installationReport(report, [...connectionErrors][0]);
 return report.join("\n\n");

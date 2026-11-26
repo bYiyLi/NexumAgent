@@ -1103,6 +1103,31 @@ test("the entire candidate scan retains a real handshake rejection and obeys bac
   assert.equal(f.connection.state().lastFailure,undefined);
 });
 
+test("final profile and protocol rejections have safe actionable toolbar guidance", async t => {
+  for (const [code, hint] of [
+    ["PROFILE_MISMATCH", /same profile/],
+    ["PROTOCOL_MISMATCH", /matching Agent Browser package/],
+    ["PROFILE_CONFLICT", /conflicting browser connection/],
+  ]) {
+    const f = fixture(t);
+    const titles = [];
+    f.chrome.action.setTitle = async ({title}) => titles.push(title);
+    await f.connection.start();
+    await until(() => f.sockets.length === 1);
+    f.sockets[0].open();
+    f.sockets[0].message({v:1,type:"error",code,message:"private endpoint message"});
+    for(let index=1; index<10; index++){
+      await until(()=>f.sockets.length===index+1);
+      f.sockets[index].close();
+    }
+    await until(()=>f.connection.state().phase==="offline");
+    assert.equal(f.connection.state().lastFailure, code);
+    assert.match(titles.at(-1), hint);
+    assert.doesNotMatch(titles.join(" "), /private endpoint message/);
+    await f.connection.dispose();
+  }
+});
+
 test("attachment reception consumes the original action budget and late streams cannot restart it", async t=>{
   const f=fixture(t),socket=await online(f);
   const declare=async(id,budgetMs)=>{

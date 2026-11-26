@@ -388,10 +388,13 @@ export class RunScope implements ManagedResource {
       );
     if (this.#disposing) return this.#disposing;
     const task = (async () => {
-      for (const lease of this.#leases.values()) {
+      // A blocked send on one browser must not delay stopping the other
+      // independent browser connections. Closure still requires every receipt.
+      const stops = [...this.#leases.values()].map(async (lease) => {
         if (!lease.started) this.#closedLease(lease);
         else if (!lease.closed) await this.runtime.service.endLease(lease.id);
-      }
+      });
+      await Promise.all(stops);
       this.#maybeClosed();
     })();
     this.#disposing = task;

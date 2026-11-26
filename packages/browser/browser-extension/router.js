@@ -649,6 +649,15 @@ route(
       "INVALID_TARGET",
       "A task group must stay in one actual browser window.",
     );
+    const windowId = tabs[0].windowId;
+    if (input.groupId !== undefined) {
+      const group = await ctx.chrome.tabGroups.get(nativeId(input.groupId));
+      requireValue(group.windowId === windowId, "INVALID_TARGET",
+        "The requested tab group belongs to another window.");
+    }
+    if (input.createProperties?.windowId !== undefined)
+      requireValue(decimal(input.createProperties.windowId) === windowId,
+        "INVALID_TARGET", "The new group must belong to the tabs' current window.");
     for (const id of ids) ctx.router.canClaim(ctx.lease, id);
     for (const id of ids) ctx.router.claim(ctx.lease, id);
     const id = await ctx.chrome.tabs.group({
@@ -3007,21 +3016,25 @@ export function createBrowserRouter(
               );
               let changed = false;
               for (const tool of params.tools) {
-                requireValue(
-                  typeof tool.toolId === "string",
-                  "CAPABILITY_NOT_ALLOWED",
-                  "This browser's native WebMCP protocol has no opaque registration IDs; invoking a tool by name cannot preserve the observed registration.",
-                );
-                text(tool.toolId, 512);
+                // Older native domains identify tools by frame and name.
+                // This key is only for discovery; it is not an opaque native ID.
+                const byName = tool.toolId === undefined;
+                if (byName) {
+                  text(tool.name, 256);
+                  text(tool.frameId, 512);
+                } else text(tool.toolId, 512);
+                const key = byName
+                  ? JSON.stringify(["name", tool.frameId, tool.name])
+                  : JSON.stringify(["id", tool.toolId]);
                 if (method === "WebMCP.toolsRemoved")
-                  changed = state.tools.delete(tool.toolId) || changed;
+                  changed = state.tools.delete(key) || changed;
                 else {
                   text(tool.name, 256);
                   stringData(tool.description, 8192);
                   text(tool.frameId, 512);
                   record(tool.inputSchema ?? {});
                   requireValue(
-                    state.tools.has(tool.toolId) || state.tools.size < 256,
+                    state.tools.has(key) || state.tools.size < 256,
                     "OUTPUT_TOO_LARGE",
                     "The WebMCP registry exceeds its tool budget.",
                   );
@@ -3035,11 +3048,11 @@ export function createBrowserRouter(
                       "annotations",
                     ]),
                   };
-                  changed ||= !sameData(
-                    state.tools.get(tool.toolId),
+                  changed ||= byName || !sameData(
+                    state.tools.get(key),
                     descriptor,
                   );
-                  state.tools.set(tool.toolId, descriptor);
+                  state.tools.set(key, descriptor);
                 }
               }
               requireValue(
@@ -3703,11 +3716,22 @@ export function createBrowserRouter(
         let before = {},
           value;
         try {
-          if (audited)
+          if (audited) {
             before = managementSnapshot = await managementBefore(
               ctx,
               input.args ?? {},
             );
+            const layoutMutation =
+              input.method === "management.windows.create" ||
+              ["management.tabs.move", "management.tabs.group", "management.tabs.ungroup",
+               "management.tabs.close", "management.tabGroups.move", "management.tabGroups.update"].includes(input.method) ||
+              (input.method === "management.tabs.update" && options(input.args).pinned !== undefined);
+            if (layoutMutation && visual?.preserveLayout && before.tabs?.length) {
+              await nativeWithStop(actionSignal, () => visual.preserveLayout(before.tabs));
+              requireBudget(ctx);
+              before = managementSnapshot = await managementBefore(ctx, input.args ?? {});
+            }
+          }
           if (
             definition.mutating &&
             ![
@@ -5239,6 +5263,7 @@ export function createBrowserRouter(
               description: tool.description,
               inputSchema: tool.inputSchema ?? { type: "object" },
               ...(tool.annotations ? { annotations: tool.annotations } : {}),
+              ...(tool.toolId === undefined ? { invocationBinding: "name" } : {}),
             };
             native.set(tool.name, {
               toolId: tool.toolId,
@@ -5338,7 +5363,6 @@ export function createBrowserRouter(
             await router.send(ctx, "Runtime.enable", {});
             supported = true;
           } else if (id === "webmcp") {
-            await router.send(ctx, "WebMCP.enable", {});
             await router.webMcpSnapshot(ctx);
             supported = true;
           } else {
@@ -5390,8 +5414,15 @@ export function createBrowserRouter(
         "STALE_REGISTRATION",
         "The exact observed WebMCP registration is no longer current.",
       );
-      // Native invokeTool uses the opaque toolId and performs the tool's native input-Schema validation.
-      // It must never fall back to toolName when a page unregisters and replaces a tool.
+      // Exact registration remains the default. A name-only browser can be
+      // used only through the explicitly selected native name semantics.
+      const byName = observed.toolId === undefined;
+      requireValue(
+        !byName || args.binding === "name",
+        "CAPABILITY_NOT_ALLOWED",
+        "This native WebMCP domain supports name binding only; exact registration invocation is unavailable.",
+        "native_name_binding_only",
+      );
       requireValue(
         webMcpPending.size < 64,
         "QUEUE_FULL",
@@ -5399,7 +5430,7 @@ export function createBrowserRouter(
       );
       const response = await router.send(ctx, "WebMCP.invokeTool", {
         frameId: observed.frameId,
-        toolId: observed.toolId,
+        ...(byName ? { toolName: args.name } : { toolId: observed.toolId }),
         input: args.args,
       });
       text(response.invocationId, 512);

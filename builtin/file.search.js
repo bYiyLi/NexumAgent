@@ -138,7 +138,7 @@ const sections = [];
 
 if (path.isAbsolute(relative) || path.win32.isAbsolute(relative) || /^[A-Za-z]:/.test(relative) ||
     relative.split(/[\\/]/).includes("..") || (path.sep === "\\" && relative.includes(":"))) {
-  throw Error("file_path_escape: path relative to Project root or current working directory required");
+  throw Object.assign(Error("file_path_escape: path relative to Project root or current working directory required"), { nexumBuiltinFailure: { code: "file_path_escape" } });
 }
 const initial = path.resolve(root, relative);
 function expired() {
@@ -155,7 +155,7 @@ async function verify(target) {
   const inside = path.relative(root, actual);
   if (info.isSymbolicLink() || inside === ".." || inside.startsWith(".." + path.sep) ||
       path.isAbsolute(inside) || path.relative(target, actual) !== "") {
-    throw Error("file_path_escape: search target outside file-script root or redirected");
+    throw Object.assign(Error("file_path_escape: search target outside file-script root or redirected"), { nexumBuiltinFailure: { code: "file_path_escape" } });
   }
   return info;
 }
@@ -402,7 +402,7 @@ async function searchOne(file) {
 }
 const queue = initialInfo.isDirectory() ? [{ dir: initial, inGit }] : [];
 if (!initialInfo.isDirectory() && !reason) {
-  if (!initialInfo.isFile()) throw Error("file_path_escape: expected regular file or directory");
+  if (!initialInfo.isFile()) throw Object.assign(Error("file_path_escape: expected regular file or directory"), { nexumBuiltinFailure: { code: "file_path_escape" } });
   const name = path.basename(initial);
   const ignored = inGit ? await ignoredByGit(base, [{ name, isDirectory: () => false }]) : new Set();
   if (!reason && !ignored.has("./" + name) && !matches(exclude, name) && (!include.length || matches(include, name))) await searchOne(initial);

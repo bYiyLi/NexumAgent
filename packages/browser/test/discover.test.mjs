@@ -95,6 +95,7 @@ test("discover preserves actual confirmed connection diagnostics, validates asse
   assert.match(report, /Installation assets: unavailable/);
   assert.match(report, /Reason: asset_missing/);
   assert.doesNotMatch(report, /Directory:|reload the matching extension from this verified directory/);
+  assert.match(report, /Do not load or reload unverified assets/);
 });
 test("discover retains other authorized browsers when a target fails; failure is not an empty tab list", async t => {
   const f = await fixture(t);
@@ -119,6 +120,20 @@ test("discover preserves permission, cancellation and unexpected SDK failures in
   }
   const error = failure("run_cancelled");
   await assert.rejects(f.execute({ choices: [info("browser-a")], errors: { "browser-a": error } }), cause => cause === error);
+});
+test("discover retains a healthy peer and gives a targeted recovery path for a mismatched peer", async t => {
+  const f = await fixture(t, { ready: true });
+  const report = await f.execute({
+    choices: [info("healthy"), info("stale")],
+    errors: { stale: failure("PLUGIN_VERSION_MISMATCH") },
+    tabs: { healthy: [{ id: "5" }] },
+  });
+  assert.match(report, /^Browser discovery: partial/);
+  assert.match(report, /Browser ID: healthy[\s\S]*Tab ID: 5/);
+  assert.match(report, /Browser ID: stale[\s\S]*Error: PLUGIN_VERSION_MISMATCH/);
+  assert.match(report, /Expected asset revision: [a-f0-9]{64}/);
+  assert.match(report, /affected connection only/);
+  assert.doesNotMatch(report, /SECRET/);
 });
 test("discover publishes a complete direct invocation contract and retains the empty object input", () => {
   const metadata = JSON.parse(source.slice(3, source.indexOf("\n*/\n")));

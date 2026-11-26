@@ -1,13 +1,15 @@
-# 浏览器连接问题：AI 操作步骤
+# 浏览器连接诊断
 
-仅在浏览器不可用、扩展离线、端口冲突、权限拒绝或明确断连时读取本文件。普通页面定位失败不是连接失败。
+用于目标浏览器不可用、握手拒绝、连接断开或监听失败。普通页面定位失败不属于连接异常。
 
-1. 从本次 `agent.open` 核对目标 Agent、实际授权及完整脚本清单；已注册的 `browser/discover.js` 可直接传 input={}，阅读返回文本的浏览器/标签身份、查询失败及必要安装资产诊断。脚本未登记且 Browser 能力不可用时，先检查当前 Agent 的包安装、启用或初始化状态，不能调用不存在的脚本；只有真实 SDK 可用时才按 [初始化与发现](bootstrap.md) 使用 `client.browsers.list()`。没有可见在线浏览器不证明未安装、未启用或服务故障；安装资产就绪不证明已加载插件。部分标签查询失败不是空标签列表，只使用实际观察到的目标。
-2. 如果提示 `PLUGIN_VERSION_MISMATCH`，运行中的插件与 Agent 当前包不配套（显示版本号相同也可能发生）。使用 discover 已校验的当前 profile 安装目录；只有没有这项证据时才按 [安装与更新](installation.md) 查询。请用户在对应 Chrome/Edge 扩展管理界面重新加载，成功重新发现后再操作。如果提示 `EXTENSION_OFFLINE`，报告当前 Agent/浏览器和连接状态，检查实际安装、启用和连接信息；不能将离线猜成版本不一致。资产不可用时不提供猜测路径。
-3. 如果提示 `PORT_IN_USE`，说明本地 Browser 监听端口不可用；保持已有服务与用户浏览器原状，不抢占其他监听者，也不跨 development / production profile 猜测替代端口。
-4. 如果提示权限、企业策略、受保护页面或 debugger 冲突，准确报告受阻操作和需由用户/管理员处理的权限。不要绕过系统策略或改用未获授权的浏览器控制方式。
-5. 只有确认连接被重建时，才重新发现 browserId、tabId 和当前页面；旧控制代次、ref、Dialog、Chooser 不自动有效。连接恢复不能证明之前的点击、提交或下载没有发生，先只读核对业务状态。
+1. 核对本次 Open 的 Agent、授权及实际登记能力。优先调用 `browser/discover.js`（input={}）；仅 SDK 已登记时可按 [初始化与发现](bootstrap.md) 查询。若 Browser 能力未发布，走本次登记的 environment-maintenance；无可用入口时报告缺口。部分标签查询失败不是空列表，保留健康连接和已取得的结果。
+2. 根据实际错误选择恢复：
+   - `PLUGIN_VERSION_MISMATCH`：确认握手构建不匹配。按 [安装与重载](installation.md) 核对当前 Profile 的资产，再引导用户重载受影响插件；复用已有有效安装诊断。资产不可用时先恢复资产。
+   - `EXTENSION_OFFLINE` 或没有授权可见连接：核对浏览器是否运行及插件安装、启用、连接状态；离线不证明未安装或需要升级。需要安装或重载时走 [安装与重载](installation.md)。
+   - `PROFILE_MISMATCH`：核对 Agent 与插件的正式/开发 Profile 及身份。
+   - `PROTOCOL_MISMATCH`：核对当前包、插件构建及协议；确需更新包时走 environment-maintenance，不猜测升级通道。
+   - `PROFILE_CONFLICT` / `PORT_IN_USE`：核对冲突浏览器或监听服务，不抢占其他连接、监听者或跨 Profile 探测替代端口。
+   - 权限、企业策略、受保护页面或 debugger 冲突：报告受阻操作和用户/管理员需要处理的权限，不绕过。
+3. 连接恢复后重新发现 browserId、tabId 和目标页面；旧控制代次、ref、Dialog、Chooser 不自动有效。此前动作效果未知时按 [错误与恢复](errors.md) 核对原业务状态，不重放。
 
-无法诊断时返回实际错误码、已核对的连接信息、未执行步骤及需要的恢复条件。需要端口、握手、profile、lease 的工程排查证据时按需读取 [内部诊断依据](diagnostics.md)。
-
-插件工具栏的 connecting（…）表示仍在候选探测或握手，单端口拒绝不是最终离线。整轮失败的 offline（OFF）提示保留已确认的 `PROFILE_MISMATCH`、`PLUGIN_VERSION_MISMATCH`、`PROTOCOL_MISMATCH`、`PROFILE_CONFLICT` 或有界连接超时/断开分类；不能把版本不匹配解释成需要开放其他环境端口。成功重连后清除旧失败提示。Chrome 自身网络诊断仍可能显示候选端口拒绝。
+插件工具栏 connecting（…）表示候选探测或握手中；单端口拒绝不是最终离线。offline（OFF）时查看实际分类和恢复提示；重新连接成功后清除旧提示。无法确认原因时报告实际错误、已核对状态和缺失条件。只有需要端口、握手、Profile 或 lease 的工程证据时读 [内部诊断依据](diagnostics.md)。

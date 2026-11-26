@@ -864,15 +864,17 @@ test(
       if(!info.supported)return {mode:'native-unsupported',registration,info,capabilityError:await reject(()=>tab.capabilities.get('webmcp')),listError:await reject(()=>tab.webmcp.listTools()),fetchError:await reject(()=>tab.webmcp.fetchTools())};
       const webmcp=await tab.capabilities.get('webmcp'),listed=await webmcp.listTools(),bound=await webmcp.fetchTools();
       if(!registration.available)return {mode:'native-domain-only',registration,info,listed,bound:{documentRevision:bound.documentRevision,registrationRevision:bound.registrationRevision,tools:bound.tools}};
-      const direct=await webmcp.invokeTool('nexum_native_echo',{value:'direct'}),fetched=await bound.invokeTool('nexum_native_echo',{value:'bound'});
+      const nameOnly=listed[0]?.invocationBinding==='name',binding=nameOnly?{binding:'name'}:undefined;
+      const defaultRejection=nameOnly?await reject(()=>webmcp.invokeTool('nexum_native_echo',{value:'must-not-run'})):null;
+      const direct=await webmcp.invokeTool('nexum_native_echo',{value:'direct'},binding),fetched=nameOnly?await reject(()=>bound.invokeTool('nexum_native_echo',{value:'bound'})):await bound.invokeTool('nexum_native_echo',{value:'bound'});
       const facadeList=await tab.webmcp.listTools(),facadeBound=await tab.webmcp.fetchTools();
-      const facadeDirect=await tab.webmcp.invokeTool('nexum_native_echo',{value:'facade-direct'}),facadeFetched=await facadeBound.invokeTool('nexum_native_echo',{value:'facade-bound'});
+      const facadeDirect=await tab.webmcp.invokeTool('nexum_native_echo',{value:'facade-direct'},binding),facadeFetched=nameOnly?await reject(()=>facadeBound.invokeTool('nexum_native_echo',{value:'facade-bound'})):await facadeBound.invokeTool('nexum_native_echo',{value:'facade-bound'});
       await tab.playwright.evaluate("async() => {window.nativeWebMcpController.abort();window.nativeWebMcpController=new AbortController();await document.modelContext.registerTool({name:'nexum_native_echo',description:'A new native registration of the same name',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value'],additionalProperties:false},execute:async({value})=>{window.nativeWebMcp.calls.push('replacement:'+value);return 'native-replacement:'+value;}},{signal:window.nativeWebMcpController.signal});return true;}");
       let replaced;const replacementDeadline=Date.now()+5000;
       do{replaced=await webmcp.listTools();if(replaced[0]?.registrationRevision!==bound.registrationRevision)break;await tab.playwright.waitForTimeout(15);}while(Date.now()<replacementDeadline);
       const stale=await reject(()=>bound.invokeTool('nexum_native_echo',{value:'must-not-run'})),facadeStale=await reject(()=>facadeBound.invokeTool('nexum_native_echo',{value:'facade-must-not-run'}));
-      const replacement=await webmcp.invokeTool('nexum_native_echo',{value:'current'});
-      return {mode:'native-registered',registration,info,listed,bound:{documentRevision:bound.documentRevision,registrationRevision:bound.registrationRevision,tools:bound.tools},direct,fetched,facadeList,facadeDirect,facadeFetched,replaced,stale,facadeStale,replacement,calls:await tab.playwright.evaluate('() => window.nativeWebMcp.calls')};
+      const replacement=await webmcp.invokeTool('nexum_native_echo',{value:'current'},binding);
+      return {mode:'native-registered',nameOnly,defaultRejection,registration,info,listed,bound:{documentRevision:bound.documentRevision,registrationRevision:bound.registrationRevision,tools:bound.tools},direct,fetched,facadeList,facadeDirect,facadeFetched,replaced,stale,facadeStale,replacement,calls:await tab.playwright.evaluate('() => window.nativeWebMcp.calls')};
       `,
       { base: f.base },
     );
@@ -914,6 +916,7 @@ test(
     }
     assert.equal(data.mode, "native-registered");
     assert.equal(data.registration.ready, true);
+    t.diagnostic(JSON.stringify({nativeWebMcpBinding:data.nameOnly ? "name" : "exact", executed:data.calls}));
     assert.deepEqual(
       data.listed.map((tool) => tool.name),
       ["nexum_native_echo"],
@@ -926,10 +929,16 @@ test(
     );
     assert.deepEqual(data.listed[0].inputSchema.required, ["value"]);
     assert.equal(data.direct, "native-echo:direct");
-    assert.equal(data.fetched, "native-echo:bound");
+    if(data.nameOnly) {
+      assert.equal(data.defaultRejection.code, "CAPABILITY_NOT_ALLOWED");
+      assert.equal(data.fetched.code, "CAPABILITY_NOT_ALLOWED");
+      assert.equal(data.facadeFetched.code, "CAPABILITY_NOT_ALLOWED");
+    } else {
+      assert.equal(data.fetched, "native-echo:bound");
+      assert.equal(data.facadeFetched, "native-echo:facade-bound");
+    }
     assert.deepEqual(data.facadeList, data.listed);
     assert.equal(data.facadeDirect, "native-echo:facade-direct");
-    assert.equal(data.facadeFetched, "native-echo:facade-bound");
     assert.notEqual(
       data.replaced[0].registrationRevision,
       data.bound.registrationRevision,
@@ -939,9 +948,9 @@ test(
     assert.equal(data.replacement, "native-replacement:current");
     assert.deepEqual(data.calls, [
       "direct",
-      "bound",
+      ...(data.nameOnly ? [] : ["bound"]),
       "facade-direct",
-      "facade-bound",
+      ...(data.nameOnly ? [] : ["facade-bound"]),
       "replacement:current",
     ]);
   },

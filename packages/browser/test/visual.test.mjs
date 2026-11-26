@@ -89,6 +89,10 @@ function fixture({ execute, frame } = {}) {
       },
     },
     tabGroups: {
+      get: async (id) => {
+        if (!groups.has(id)) throw new Error("No group with that id");
+        return { ...groups.get(id) };
+      },
       update: async (id, change) => {
         calls.push(["groups.update", id, change]);
         Object.assign(groups.get(id), change);
@@ -210,6 +214,29 @@ test("AI-touched tabs retain their blue group after the run while user groups an
   assert.equal(f.chrome.tabs.onActivated.size, 0);
   assert.equal(f.chrome.tabs.onUpdated.size, 0);
   assert.equal(f.chrome.tabs.onRemoved.size, 0);
+});
+
+test("explicit tab layout survives later observations, and cached groups cannot move tabs across windows", async () => {
+  const f = fixture();
+  await f.controller.start({ browserSessionId: "session" });
+  await f.controller.beforeAction(context("1"));
+  const groupId = f.tabs.get(1).groupId;
+  assert.ok(groupId >= 0);
+  // A native user move changes the group's actual window.
+  f.groups.get(groupId).windowId = 20;
+  await f.controller.beforeAction(context("2"));
+  assert.equal(f.tabs.get(2).groupId, -1);
+  assert.equal(f.tabs.get(2).windowId, 10);
+  // A subsequent explicit management operation owns the layout.
+  await f.controller.preserveLayout([{ tabId: "1", windowId: "10" }]);
+  f.tabs.get(1).windowId = 20;
+  f.tabs.get(1).groupId = -1;
+  await f.controller.trackTab(context("1"));
+  await f.controller.beforeAction(context("1", {runId:"run-next", leaseId:"lease-next"}));
+  assert.equal(f.tabs.get(1).groupId, -1);
+  assert.equal(f.tabs.get(1).windowId, 20);
+  assert.equal(f.saved.at(-1).find(marker => marker.tabId === 1).manualLayout, true);
+  await f.controller.dispose();
 });
 
 test("a newly created tab keeps its group and favicon without pointer movement and restores after worker restart", async () => {
@@ -1090,4 +1117,20 @@ test("user activation keeps the live-run result and release preserves both group
   assert.equal(f.tabs.get(1).groupId, 100);
   assert.equal(f.saved.at(-1).length, 1);
   await f.controller.dispose();
+});
+
+test("explicit layout of an unmarked tab is restored without fabricating a visual marker", async () => {
+  const f=fixture();
+  await f.controller.start({browserSessionId:"session"});
+  await f.controller.preserveLayout([{tabId:"2",windowId:"10"}]);
+  const saved=f.saved.at(-1);
+  assert.deepEqual(saved,[{browserSessionId:"session",tabId:2,manualLayout:true,layoutOnly:true}]);
+  assert.ok(!f.calls.some(call=>call[0]==="execute"));
+  await f.controller.dispose();
+  const restored=fixture();
+  await restored.controller.start({browserSessionId:"session",markers:saved});
+  assert.ok(!restored.calls.some(call=>call[0]==="execute"));
+  await restored.controller.beforeAction(context("2"));
+  assert.equal(restored.tabs.get(2).groupId,-1);
+  await restored.controller.dispose();
 });

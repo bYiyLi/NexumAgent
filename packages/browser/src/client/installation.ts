@@ -9,7 +9,7 @@ export type InstallationFailureReason =
   | "assets_changed" | "asset_read_failed" | "inspection_failed";
 
 export type InstallationInspection =
-  | { assetsReady: true; profile: "production" | "development"; directory: string; name: string; extensionVersion: string; extensionId: string }
+  | { assetsReady: true; profile: "production" | "development"; directory: string; name: string; extensionVersion: string; extensionId: string; assetRevision: string }
   | { assetsReady: false; code: "browser_assets_unavailable"; reason: InstallationFailureReason };
 
 class InspectionFailure extends Error {
@@ -136,7 +136,7 @@ export async function inspectInstallation(work: unknown, expectedProfile?: unkno
     requireEvidence(expected.equals(Buffer.from(profileSource(profile, extensionVersion) + revisionSource(revision))), "build_mismatch");
     requireEvidence((await readOwnedBytes("nexum-installation.json")).equals(descriptor), "assets_changed");
     await checkDirectories();
-    return { assetsReady: true, profile, directory, name: manifest.name, extensionVersion, extensionId };
+    return { assetsReady: true, profile, directory, name: manifest.name, extensionVersion, extensionId, assetRevision: revision };
   } catch (cause) {
     return { assetsReady: false, code: "browser_assets_unavailable",
       reason: cause instanceof InspectionFailure ? cause.reason : "inspection_failed" };
@@ -145,13 +145,13 @@ export async function inspectInstallation(work: unknown, expectedProfile?: unkno
 
 const failureGuidance: Record<InstallationFailureReason, string> = {
   invalid_context: "The current Agent work or profile is unavailable or invalid. Verify the selected Agent and its Browser package initialization.",
-  assets_not_prepared: "The expected stable asset directory is absent. Check whether the current Browser package prepared its assets.",
+  assets_not_prepared: "The expected stable asset directory is absent. Check the Browser package's installed version, SDK enablement and asset preparation before loading a plugin.",
   asset_missing: "A required installation asset is missing. Check the current Browser package's asset preparation before loading an extension.",
   asset_invalid: "The asset descriptor or manifest is invalid, or an asset exceeds its validation limits. Check the current package and prepared assets.",
   unsafe_asset_path: "An asset path is redirected or unsafe. Do not follow it; check the current Agent's package-owned asset preparation.",
   profile_mismatch: "The prepared assets belong to a different profile. Verify the selected Agent and matching production/development package.",
   integrity_mismatch: "Prepared asset contents, version or extension identity do not match the recorded build. Check the current package's prepared assets.",
-  build_mismatch: "The prepared assets do not match the current Browser package build. Check package initialization and asset preparation.",
+  build_mismatch: "The prepared assets do not match the current Browser package build. Check package activation and any approved update result. If a restart is still required and authorized, finish and verify it before checking assets again. Do not reload stale assets.",
   assets_changed: "The assets changed during inspection. Wait for package preparation to settle and check again.",
   asset_read_failed: "A required directory or asset could not be read. Check the current Agent's filesystem access and package preparation.",
   inspection_failed: "The asset inspection could not confirm its result. Check the current Agent's Browser lifecycle diagnostics.",
@@ -166,10 +166,12 @@ export function formatInstallationInspection(result: InstallationInspection): st
   if (!result.assetsReady) {
     return ["Installation assets: unavailable", "Error: " + result.code, "Reason: " + result.reason,
       "Browser extension installation: unknown", failureGuidance[result.reason],
+      "If package or SDK state needs inspection, select environment-maintenance for @nexum-hub/browser. A failed asset check does not prove that a newer npm release exists.",
       "Do not guess an installation path or bypass permissions."].join("\n");
   }
   return ["Installation assets: ready (verified disk assets, not proof of installation)",
     "Browser extension installation: unknown", "Profile: " + label(result.profile),
     "Extension: " + label(result.name), "Extension version: " + label(result.extensionVersion),
-    "Extension ID: " + label(result.extensionId), "Directory: " + label(result.directory)].join("\n");
+    "Extension ID: " + label(result.extensionId), "Expected asset revision: " + result.assetRevision,
+    "Directory: " + label(result.directory)].join("\n");
 }

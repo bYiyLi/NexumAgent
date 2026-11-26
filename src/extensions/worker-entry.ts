@@ -83,13 +83,13 @@ const componentMessages: Readonly<Record<string, string>> = Object.freeze({
   INVALID_TARGET: "The requested target is unavailable or no longer current.",
   INVALID_ARGUMENT: "The requested operation has invalid arguments.",
   CAPABILITY_NOT_ALLOWED: "The requested capability is unavailable or not allowed.",
-  EXTENSION_OFFLINE: "The extension connection is offline.",
+  EXTENSION_OFFLINE: "The extension connection is offline. Check the target connection; offline alone does not establish a version or installation problem.",
   USER_TAKEOVER: "The user has taken control of the target.",
   TIMEOUT: "The operation exceeded its deadline.",
   DEADLINE_EXCEEDED: "The operation exceeded its deadline.",
   CANCELLED: "The operation was cancelled.",
   UNKNOWN_RESULT: "The operation result could not be confirmed.",
-  PROTOCOL_MISMATCH: "The extension returned an incompatible protocol result.",
+  PROTOCOL_MISMATCH: "The extension returned an incompatible protocol result. Inspect the actual failure; this alone does not establish a package version mismatch.",
   FILE_CHANGED: "The source or staging file changed during preparation.",
   FILE_SIZE_MISMATCH: "The received file size did not match the declared size.",
   OUTPUT_TOO_LARGE: "The result exceeded its size budget.",
@@ -109,10 +109,10 @@ const componentMessages: Readonly<Record<string, string>> = Object.freeze({
   INVALID_CONTEXT: "The current execution context cannot support the operation.",
   NATIVE_OPERATION_FAILED: "The native operation failed; its specific cause is not confirmed.",
   NAVIGATION_FAILED: "The browser did not confirm successful navigation.",
-  PORT_IN_USE: "No allowed local listener port is available.",
-  PROFILE_CONFLICT: "Another active connection owns this browser profile.",
-  PROFILE_MISMATCH: "The endpoint belongs to a different profile or extension identity.",
-  PLUGIN_VERSION_MISMATCH: "The running browser plugin does not match the installed Browser package. Reload the Nexum browser extension and discover it again.",
+  PORT_IN_USE: "No allowed local listener port is available. Check the current extension listener; do not seize another listener.",
+  PROFILE_CONFLICT: "Another active connection owns this browser profile. Check the conflict without taking over the other connection.",
+  PROFILE_MISMATCH: "The endpoint belongs to a different profile or extension identity. Check the matching profile and extension; do not switch environments to bypass the mismatch.",
+  PLUGIN_VERSION_MISMATCH: "Plugin build mismatch, even if display versions match. Check current Profile installation assets; if verified ready, reload the affected matching extension and rediscover. Do not reload stale or unverified assets.",
   QUEUE_FULL: "The current operation capacity is exhausted.",
   STALE_REF: "The observed reference belongs to an earlier target or document.",
   STALE_REGISTRATION: "The observed tool registration is no longer current.",
@@ -153,13 +153,13 @@ function componentRecovery(code: string, reason: unknown): string | undefined {
     case "INVALID_TARGET": case "AMBIGUOUS_TARGET": case "STALE_REF":
     case "TARGET_GONE": case "STALE_REGISTRATION": case "NAVIGATION_FAILED": case "WAITER_GONE":
       return "observe_target";
-    case "TAB_ALREADY_CLAIMED": case "QUEUE_FULL": case "PROFILE_CONFLICT":
+    case "TAB_ALREADY_CLAIMED": case "QUEUE_FULL":
       return "wait_for_capacity";
     case "CAPABILITY_NOT_ALLOWED": case "PERMISSION_DENIED":
     case "permission_denied": case "forbidden": case "path_not_allowed":
       return "check_authorization";
     case "EXTENSION_OFFLINE": case "CDP_DISCONNECTED": case "PROFILE_MISMATCH":
-    case "PLUGIN_VERSION_MISMATCH": case "PROTOCOL_MISMATCH": case "PORT_IN_USE":
+    case "PLUGIN_VERSION_MISMATCH": case "PROTOCOL_MISMATCH": case "PORT_IN_USE": case "PROFILE_CONFLICT":
       return "check_connection";
     case "USER_TAKEOVER": return "stop_control";
     case "FILE_UNAVAILABLE": case "FILE_CHANGED": case "FILE_SIZE_MISMATCH":

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { crc32, deflateSync } from "node:zlib";
 import { nativeFixture, select } from "./helpers/native.mjs";
 test("native closing an attached tab preserves the same run's other tab for both close entry points", async (t) => {
@@ -284,7 +285,10 @@ test("native declined, cancelled, expired and revoked continuations never renew 
   const finish = async (state) => {
     const limit = Date.now() + 5000;
     while (state.run.endedAt === null) {
-      assert.ok(Date.now() < limit, "continuation did not close");
+      assert.ok(Date.now() < limit, `continuation did not close: ${JSON.stringify(state.run)}`);
+      // An observation returns immediately while input is pending. Yield to
+      // the deadline timer rather than starving it with a microtask loop.
+      await delay(10);
       state = await f.observe(state.run.runId);
     }
     return state;

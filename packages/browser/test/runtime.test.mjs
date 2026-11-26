@@ -749,7 +749,8 @@ test("stale Worker rejection is actionable through the isolated SDK and matching
   const f=await fixture(t,{isolatedWorker:true,probeStaleBuild:true});
   assert.equal(f.staleDiscovery.run.status,"succeeded",JSON.stringify(f.staleDiscovery.run.error));
   assert.equal(f.staleDiscovery.result.data.code,"PLUGIN_VERSION_MISMATCH");
-  assert.match(f.staleDiscovery.result.data.message,/Reload the Nexum browser extension/);
+  assert.match(f.staleDiscovery.result.data.message,/if verified ready, reload the affected matching extension/);
+  assert.match(f.staleDiscovery.result.data.message,/Do not reload stale or unverified assets/);
   for (const observed of [f.offlineDiscovery, f.damagedDiscovery, f.staleNamedDiscovery, f.offlineInstallation, f.damagedInstallation]) {
     assert.equal(observed.run.status, "succeeded", JSON.stringify(observed.run.error));
     assert.equal(typeof observed.result.data, "string");
@@ -760,6 +761,7 @@ test("stale Worker rejection is actionable through the isolated SDK and matching
   assert.match(f.damagedDiscovery.result.data, /Error: browser_assets_unavailable/);
   assert.match(f.damagedDiscovery.result.data, /Reason: integrity_mismatch/);
   assert.doesNotMatch(f.damagedDiscovery.result.data, /Directory:/);
+  assert.match(f.damagedDiscovery.result.data, /Do not load or reload unverified assets/);
   assert.match(f.offlineInstallation.result.data, /^Installation assets: ready/);
   assert.ok(f.offlineInstallation.result.data.includes("Directory: "+path.join(f.work,".nexum-browser","extension")));
   assert.match(f.offlineInstallation.result.data, /## Install or reload/);
@@ -1372,4 +1374,30 @@ test("handoff reaches the nonblocking control plane while a native command is pe
   assert.equal(result.result.data.after, "USER_TAKEOVER");
   assert.equal(f.attached.size, 0);
   assert.equal(f.counts.removed, 0);
+});
+
+test("RunScope sends independent browser stop requests without waiting for a stalled peer", async () => {
+  const {RunScope}=await import("../dist/extension/scope.js");
+  const blocked=Promise.withResolvers(), leases=new Map(), stops=[];
+  const service={
+    target(target){return {id:target.browserId};},
+    openLease(peer,input){leases.set(input.id,{peer,close:input.onClosed});return Promise.resolve();},
+    endLease(id){const entry=leases.get(id);stops.push(entry.peer.id);
+      if(entry.peer.id==="slow")return blocked.promise;
+      entry.close();return Promise.resolve();}
+  };
+  let finished=false;
+  const runtime={service,assertFree(){},lock(){},unlock(){},finished(){finished=true;}};
+  const scope=new RunScope(runtime,"run_fixture",Date.now()+30000);
+  const call={operationId:"operation_fixture",signal:new AbortController().signal};
+  const target=id=>({browserId:id,bootId:"boot",browserSessionId:"session-"+id,generation:1,tabId:"1"});
+  await scope.reserve([target("slow")],call);
+  await scope.reserve([target("fast")],call);
+  const disposing=scope.dispose();
+  assert.deepEqual(stops,["slow","fast"]);
+  assert.equal(finished,false);
+  const slow=[...leases.values()].find(entry=>entry.peer.id==="slow");
+  slow.close();blocked.resolve();
+  await disposing;await scope.closed;
+  assert.equal(finished,true);
 });

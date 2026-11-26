@@ -346,6 +346,8 @@ export function createVisualController(
     groups = new Map(),
     names = new Map(),
     markers = new Map(),
+    manualLayout = new Set(),
+    groupTasks = new Map(),
     closedKeys = new Map(),
     styles = new Map(),
     listeners = [],
@@ -376,6 +378,12 @@ export function createVisualController(
       ...value,
       target: { ...value.target },
     }));
+    // Explicitly managed tabs may not yet have a visual marker. Persist only
+    // their native identity, not a fabricated marker or control receipt.
+    if (browserSessionId !== undefined)
+      for (const tabId of manualLayout)
+        if (!markers.has(tabId))
+          snapshot.push({ browserSessionId, tabId, manualLayout: true, layoutOnly: true });
     const task = persistence.catch(() => {}).then(() => persist(snapshot));
     persistence = task;
     return task;
@@ -553,7 +561,8 @@ export function createVisualController(
     records.set(token, record);
     return record;
   };
-  const group = async (record, ctx, tab) => {
+  const groupRaw = async (record, ctx, tab) => {
+    if (manualLayout.has(record.tabId) || tab.pinned) return;
     const groupKey = JSON.stringify([ctx.runId, tab.windowId]);
     let pending = groups.get(groupKey);
     if (tab.groupId >= 0 && !pending) return; // Existing user/shared groups are never adopted.
@@ -561,7 +570,8 @@ export function createVisualController(
       pending = (async () => {
         const latest = await chrome.tabs.get(record.tabId);
         assertCtx(ctx);
-        if (latest.groupId >= 0) return null;
+        if (manualLayout.has(record.tabId) || latest.pinned ||
+            latest.windowId !== tab.windowId || latest.groupId >= 0) return null;
         const groupId = await chrome.tabs.group({
           tabIds: [record.tabId],
           createProperties: { windowId: latest.windowId },
@@ -588,14 +598,59 @@ export function createVisualController(
       });
     }
     const owned = await pending;
-    if (!owned) return;
+    if (groups.get(groupKey) !== pending) return;
+    if (!owned) { groups.delete(groupKey); return; }
+    // Chrome may move a whole group to another window, or remove it when
+    // its last tab leaves. Never join a cached ID without live window facts.
+    let actualGroup;
+    try {
+      actualGroup = await chrome.tabGroups.get(owned.id);
+    } catch {
+      if (groups.get(groupKey) === pending) groups.delete(groupKey);
+      return;
+    }
     const latest = await chrome.tabs.get(record.tabId);
     assertCtx(ctx);
-    if (latest.windowId !== owned.windowId) return;
+    if (actualGroup.windowId !== owned.windowId) {
+      if (groups.get(groupKey) === pending) groups.delete(groupKey);
+      return;
+    }
+    if (manualLayout.has(record.tabId) || latest.pinned ||
+        groups.get(groupKey) !== pending || latest.windowId !== owned.windowId) return;
     if (latest.groupId < 0)
       await chrome.tabs.group({ tabIds: [record.tabId], groupId: owned.id });
     if (latest.groupId < 0 || latest.groupId === owned.id)
       record.groupId = owned.id;
+  };
+  const group = (record, ctx, tab) => {
+    const task = groupRaw(record, ctx, tab);
+    groupTasks.set(task, tab.windowId);
+    void task.finally(() => groupTasks.delete(task)).catch(() => {});
+    return task;
+  };
+  // Called before an explicit native layout mutation. Fence the affected
+  // tabs and discard cached groups in their windows, then join group writes
+  // already issued there. Passive page markers remain independent.
+  const preserveLayout = async (tabs) => {
+    const windows = new Set(tabs.map(tab => Number(tab.windowId)));
+    let changed = false;
+    for (const tab of tabs) {
+      const id = nativeId(tab.tabId);
+      if (!manualLayout.has(id)) {
+        manualLayout.add(id);
+        changed = true;
+      }
+      const marker = markers.get(id);
+      if (marker && !marker.manualLayout) {
+        marker.manualLayout = true;
+        changed = true;
+      }
+    }
+    for (const key of groups.keys())
+      if (windows.has(JSON.parse(key)[1])) groups.delete(key);
+    await Promise.allSettled([...groupTasks].filter(([, windowId]) =>
+      windows.has(windowId)).map(([task]) => task));
+    if (changed) await save().catch(() => {});
   };
   const beforeActionRaw = async (ctx) => {
     assertCtx(ctx);
@@ -614,6 +669,7 @@ export function createVisualController(
         leaseId: ctx.leaseId,
         runId: ctx.runId,
         operationId: ctx.operationId,
+        ...(manualLayout.has(record.tabId) ? { manualLayout: true } : {}),
       });
       await save();
       // Grouping and the favicon use the same checked document but do not
@@ -710,6 +766,7 @@ export function createVisualController(
         leaseId: ctx.leaseId,
         runId: ctx.runId,
         operationId: ctx.operationId,
+        ...(manualLayout.has(tabId) ? { manualLayout: true } : {}),
       });
       await save();
       await group(record, limited, tab);
@@ -779,6 +836,7 @@ export function createVisualController(
         leaseId: ctx.leaseId,
         runId: ctx.runId,
         operationId: ctx.operationId,
+        ...(manualLayout.has(record.tabId) ? { manualLayout: true } : {}),
       });
       await save();
       return { degraded: false };
@@ -860,14 +918,19 @@ export function createVisualController(
     current(ctx);
     names.set(ctx.runId, ctx.name.trim());
     let degraded = false;
-    for (const pending of groups.values())
+    for (const [groupKey, pending] of groups)
       try {
         const value = await pending;
-        if (value?.runId === ctx.runId)
-          await chrome.tabGroups.update(value.id, {
+        if (value?.runId === ctx.runId && groups.get(groupKey) === pending) {
+          const actual = await chrome.tabGroups.get(value.id);
+          if (groups.get(groupKey) !== pending || actual.windowId !== value.windowId) continue;
+          const task = chrome.tabGroups.update(value.id, {
             title: ctx.name.trim(),
             color: "blue",
           });
+          groupTasks.set(task, value.windowId);
+          try { await task; } finally { groupTasks.delete(task); }
+        }
       } catch {
         degraded = true;
         notice(ctx, "VISUAL_GROUP_UNAVAILABLE");
@@ -900,6 +963,7 @@ export function createVisualController(
     // User switching tabs must not erase the AI-touched indicator.
     listen(chrome.tabs.onRemoved, (tabId) => {
       markers.delete(tabId);
+      manualLayout.delete(tabId);
       for (const [token, record] of records)
         if (record.tabId === tabId) records.delete(token);
       void save().catch(() => {});
@@ -934,7 +998,17 @@ export function createVisualController(
       ).catch(() => {});
     });
     if (session !== undefined)
-      for (const value of saved.slice(0, 256))
+      for (const value of saved.slice(0, 256)) {
+        if (value?.layoutOnly === true && value.manualLayout === true &&
+            value.browserSessionId === session && Number.isSafeInteger(value.tabId) &&
+            value.tabId >= 0) {
+          try {
+            await chrome.tabs.get(value.tabId);
+            if (stopped) return;
+            manualLayout.add(value.tabId);
+          } catch {}
+          continue;
+        }
         if (
           value &&
           value.browserSessionId === session &&
@@ -955,6 +1029,7 @@ export function createVisualController(
               target: { ...value.target },
             };
             markers.set(tabId, marker);
+            if (marker.manualLayout === true) manualLayout.add(tabId);
             const frame = await observe(
               chrome.webNavigation.getFrame({ tabId, frameId: 0 }),
               key(markerCtx(marker)),
@@ -973,6 +1048,7 @@ export function createVisualController(
             );
           } catch {}
         }
+      }
   };
   const dispose = () => {
     if (disposal) return disposal;
@@ -1011,6 +1087,7 @@ export function createVisualController(
       closedKeys.clear();
       styles.clear();
       groups.clear();
+      manualLayout.clear();
       names.clear();
       await persistence.catch(() => {});
     })();
@@ -1024,6 +1101,7 @@ export function createVisualController(
     },
     beforeAction,
     trackTab,
+    preserveLayout,
     beforePointer,
     markDeliverable,
     releaseTab,

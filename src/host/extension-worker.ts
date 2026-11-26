@@ -150,9 +150,10 @@ async function start(): Promise<void> {
           try {
             scope.abort();
             await Promise.all([...active.values()].filter((entry) => entry.runId === runId).map((entry) => entry.done));
-            const report = await runtime!.resources.cleanupRun(runId);
-            requireCondition(report.unconfirmed.length === 0, "resource_cleanup_unconfirmed",
-              "Run resources did not confirm their actual cleanup.");
+            // cleanupRun has a bounded first observation. A late native closure
+            // must still settle this original stop; do not cache a failure solely
+            // because the first resource observation was inconclusive.
+            await runtime!.resources.cleanupRun(runId);
             await runtime!.resources.waitForRunClosure(runId);
             if (runs.get(runId) === scope) runs.delete(runId);
             parent.postMessage({ type: "run.stopped", id });

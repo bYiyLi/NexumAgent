@@ -4,7 +4,7 @@
 
 ## 页面综合观察
 
-已登记 `browser/observe.js` 时直接传 `{browserId,tabId,screenshot?}`；两 ID 必填，使用当前发现的实际身份。默认只返回一份紧凑语义树；screenshot:true 追加原生 JPEG（quality=75，原始像素密度，不自动缩放）。自行组合 SDK 时，`await tab.semanticSnapshot()` 返回结构化 `SemanticPageObservation`；`return await tab.writeObservation({screenshot:true})` 交付同一观察的文本及图片。旧 `tab.observe()` 保留 AX full/diff 合同，不等同新语义树。需要文本时直接 return `tab.writeObservation()` 的结果，不自行拼装或调用已废弃的 output 全局。
+已登记 `browser/observe.js` 时直接传 `{browserId,tabId,screenshot?}`；两 ID 必填，使用当前发现的实际身份。默认只返回一份紧凑语义树；screenshot:true 追加原生 JPEG（quality=75，原始像素密度，不自动缩放）。自行组合 SDK 时，`await tab.semanticSnapshot()` 返回结构化 `SemanticPageObservation`；`return await tab.writeObservation({screenshot:true})` 交付同一观察的文本及图片。旧 `tab.observe()` 保留 AX full/diff 合同，不等同新语义树；旧 DOM Snapshot 的覆盖范围不能代替当前语义观察，未返回元素不证明其不存在。需要文本时直接 return `tab.writeObservation()` 的结果，不自行拼装或调用已废弃的 output 全局。
 
 - 使用节点真实 tag、AX role/name、id、name、data-testid、可用业务 data-*-id、class、表单属性及当前 value/checked/selected/disabled 等。优先用真实属性和 scoped Locator；不同 Run 重新查询并确认目标唯一，不能将树节点位置当作固定引用。树中缩进为精简后保留的祖先上下文，不是 CSS 直接子代关系；AX 角色/名称与本包查询式 Locator 可能不同，先 count 或选用明确属性。观察到的 frame-selector 是当时的 CSS 选择器；用 `frameLocator` 逐层进入并重新确认。现有 Locator 自动查找 open Shadow DOM 和当前作用域内实际分配到 Slot 的节点；CSS 不跨根组合，不把 Slot 当作分配节点的原生 CSS 父节点。使用宿主/容器属性加链式 Locator 缩小范围。closed Shadow 标记 locator=unsupported，只保留边界，不猜测内部元素。无权访问、失效或不能可靠关联的 frame 明确标记。
 - 当前可见/已挂载内容与原生 AX 是顺序观察而非原子快照；不自动等待 load、导航、滚动或展开。Coverage: complete 只表示支持范围内的语义投影，不表示所有未加载业务数据；partial 及 Warnings 表示真实覆盖缺口。页面发生导航或控制身份变化时重新观察，失败不使用旧树。现有通用结果预算仍生效。

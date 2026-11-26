@@ -26,6 +26,16 @@ const rejectionCodes = new Set(["PROFILE_MISMATCH", "PLUGIN_VERSION_MISMATCH",
   "PROTOCOL_MISMATCH", "PROFILE_CONFLICT"]);
 const connectionFailure = (cause, fallback = "PROTOCOL_MISMATCH") =>
   cause instanceof BrowserActionError && rejectionCodes.has(cause.code) ? cause.code : fallback;
+// These are local, fixed recovery messages, not text from a candidate endpoint.
+const offlineGuidance = Object.freeze({
+  PLUGIN_VERSION_MISMATCH: "Reload the extension for this profile in the browser extensions page after verifying current installation assets",
+  PROFILE_MISMATCH: "Use the extension and Agent for the same profile",
+  PROTOCOL_MISMATCH: "Check the matching Agent Browser package and plugin build before choosing an update or reload",
+  PROFILE_CONFLICT: "Check the conflicting browser connection; do not take over another profile",
+  HANDSHAKE_TIMEOUT: "Check that the matching Agent Browser SDK is ready, then retry the connection",
+  INITIALIZATION_FAILED: "Check extension initialization and browser permissions before reloading",
+  EXTENSION_OFFLINE: "Check that the matching Agent and Browser SDK are running",
+});
 
 /** Cold MV3 connection. Import and construction perform no storage, timer or socket I/O. */
 export function createExtensionConnection({
@@ -119,7 +129,7 @@ export function createExtensionConnection({
       chrome.action?.setTitle?.({
         title: phase === "connected"
           ? `Nexum browser (${profile})`
-          : `Nexum browser (${profile}) — ${phase}${phase === "offline" && lastFailure ? ": " + lastFailure : ""}${phase === "offline" && lastFailure === "PLUGIN_VERSION_MISMATCH" ? " — Reload the extension" : ""}`,
+          : `Nexum browser (${profile}) — ${phase}${phase === "offline" && lastFailure ? ": " + lastFailure + " — " + (offlineGuidance[lastFailure] ?? "Check the matching Agent and extension connection") : ""}`,
       }),
     ).catch(() => {});
   };

@@ -36,7 +36,7 @@ async function fixture(t, enabled) {
         if (input.keep) {
           const closed = Promise.withResolvers();
           await call.resources.register({ kind: "fixture.live", value: {
-            closed: closed.promise, dispose() { closed.resolve(); },
+            closed: closed.promise, dispose() { if (input.delayClosure) setTimeout(() => closed.resolve(), 5500); else closed.resolve(); },
           } });
           return { created: true };
         }
@@ -257,10 +257,18 @@ test("host publishes the actual extension methods only after Go accepts them", a
     const kept = await extensions.invoke({ sourceInstanceId: published.scope.sourceInstanceId,
       runId, methodId: published.methods[0].methodId, operationId: `operation_${"8".repeat(32)}`,
       context: { runId, pwd: input.root }, deadlineAt: Date.now() + 10_000,
-      arguments: [{ keep: true }] }, new AbortController().signal);
+      arguments: [{ keep: true, delayClosure: true }] }, new AbortController().signal);
     assert.deepEqual(kept, { value: { created: true }, binaryOutputs: [] });
     assert.equal(resource.closedAt, null);
-    await extensions.stopRun(runId);
+    const stop = extensions.stopRun(runId);
+    assert.strictEqual(extensions.stopRun(runId), stop);
+    // First observation expires at 5 seconds; actual closure arrives later.
+    // Do not freeze the original stop as a failure or repeat dispose().
+    await new Promise(resolve => setTimeout(resolve, 5100));
+    assert.equal(extensions.runStatus(runId), "running");
+    assert.equal(resource.closedAt, null);
+    await stop;
+    assert.equal(extensions.runStatus(runId), "stopped");
     assert.equal(resource.status, "closed");
     const transactionId = `package_${"4".repeat(32)}`;
     await extensions.beginPackages(transactionId);

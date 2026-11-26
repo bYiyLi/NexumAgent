@@ -210,6 +210,15 @@ export class ExecutionFixture {
       source: { ...snapshot?.origin, workRevision: work.revision, workSnapshotRef: work.snapshotRef }, scriptName: snapshot?.name ?? input.scriptName ?? null, timeoutMs: input.timeoutMs }).run;
     const state = { controller: new AbortController(), accepting: true, pending: new Set(), result: null, wait: null, snapshotRef: work.snapshotRef };
     this.active.set(run.runId, state);
+    // Mirror the production Go scheduler's deadline even while the Worker is
+    // blocked on requestInput: observing a Run is not what stops its clock.
+    const deadlineTimer = setTimeout(() => {
+      const row = this.store.getRun(run.runId);
+      if (row.endedAt !== null || row.stop !== null) return;
+      this.store.requestStop(run.runId, { kind: "deadline", code: "run_deadline_exceeded" });
+      state.controller.abort(new AgentError("run_deadline_exceeded", "The fixture Run reached its deadline."));
+    }, Math.max(0, run.deadlineAt - Date.now()));
+    deadlineTimer.unref();
     const current = () => {
       state.controller.signal.throwIfAborted();
       assert(this.store.getRun(run.runId).endedAt === null, "run_closed");
@@ -296,11 +305,13 @@ export class ExecutionFixture {
         release();
       }
       const row = this.store.getRun(run.runId);
-      const cancelled = row.stop !== null;
-      this.store.transitionRun(run.runId, row.revision, cancelled ? "cancelled" : failure ? "failed" : "succeeded", {
-        error: cancelled ? { code: "run_cancelled" } : failure ? errorData(failure) : null,
+      clearTimeout(deadlineTimer);
+      const cancelled = row.stop?.kind === "cancel";
+      const expired = row.stop?.kind === "deadline";
+      this.store.transitionRun(run.runId, row.revision, cancelled ? "cancelled" : expired || failure ? "failed" : "succeeded", {
+        error: cancelled ? { code: "run_cancelled" } : expired ? { code: "run_deadline_exceeded" } : failure ? errorData(failure) : null,
       });
-      if (failure || cancelled) state.result = null;
+      if (failure || cancelled || expired) state.result = null;
     })();
     return this.observe(caller, run.runId, input.waitMs ?? 3000);
   }
@@ -313,7 +324,9 @@ export class ExecutionFixture {
       operations: { items: this.store.operationsForRun(id) }, resources: { items: this.store.resourcesForRun(id) } };
   }
   cancel(caller, id) {
-    this.options.authorize(caller, { action: "cancel", run: this.store.getRun(id) });
+    const row = this.store.getRun(id);
+    this.options.authorize(caller, { action: "cancel", run: row });
+    if (row.endedAt !== null || row.stop !== null) return {accepted:false,run:row};
     this.store.requestStop(id, { kind: "cancel" });
     this.active.get(id).controller.abort(new AgentError("run_cancelled", "The fixture Run was cancelled."));
     return { accepted: true, run: this.store.getRun(id) };
@@ -322,6 +335,7 @@ export class ExecutionFixture {
     const state = this.active.get(input.runId);
     assert(state.wait?.waitId === input.waitId, "input_wait_mismatch");
     const row = this.store.getRun(input.runId);
+    assert(row.endedAt === null && row.stop === null, "run_stopping");
     this.store.transitionRun(row.runId, row.revision, "running");
     const waiting = state.wait;
     state.wait = null;

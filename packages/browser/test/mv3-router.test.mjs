@@ -3761,40 +3761,57 @@ test("load-state waits do not accept the old ready document before a pending nav
   assert.equal(reads, 1);
 });
 
-test("native WebMCP versions with only tool names report their exact registration-safety limitation without an unsafe fallback", async (t) => {
+test("native name-only WebMCP discovery is supported but invocation requires explicit name binding", async (t) => {
   const f = fixture(t);
   f.router.start();
   f.router.bind(binding);
   f.open("lease");
   const original = f.chrome.debugger.sendCommand;
+  const tool = {
+    name: "submit",
+    description: "A real pre-toolId protocol descriptor",
+    frameId: "main-frame",
+    inputSchema: { type: "object" },
+  };
+  let invokes = 0;
   f.chrome.debugger.sendCommand = async (source, method, params) => {
     const result = await original(source, method, params);
     if (method === "WebMCP.enable")
       f.chrome.debugger.onEvent.emit(source, "WebMCP.toolsAdded", {
-        tools: [
-          {
-            name: "submit",
-            description: "A real pre-toolId protocol descriptor",
-            frameId: "main-frame",
-            inputSchema: { type: "object" },
-          },
-        ],
+        tools: [tool],
       });
+    if (method === "WebMCP.invokeTool") {
+      invokes++;
+      assert.deepEqual(params, {
+        frameId: "main-frame", toolName: "submit", input: {},
+      });
+      const invocationId = "name-invocation-" + invokes;
+      queueMicrotask(() => f.chrome.debugger.onEvent.emit(source, "WebMCP.toolResponded", {
+        invocationId, status: "Completed", output: "ok",
+      }));
+      return { invocationId };
+    }
     return result;
   };
   const info = await f.call("capabilities.tabGet", { id: "webmcp" });
-  assert.equal(info.supported, false);
-  assert.match(info.reason, /opaque registration IDs/);
-  await assert.rejects(f.call("webmcp.fetchTools"), {
+  assert.equal(info.supported, true);
+  const discovered = (await f.call("webmcp.fetchTools")).tools[0];
+  assert.equal(discovered.invocationBinding, "name");
+  const input = { name: "submit", args: {}, tool: discovered };
+  await assert.rejects(f.call("webmcp.invokeTool", input), {
     code: "CAPABILITY_NOT_ALLOWED",
   });
-  assert.equal(
-    f.calls.some(
-      (call) =>
-        call[0] === "debugger.sendCommand" && call[2] === "WebMCP.invokeTool",
-    ),
-    false,
-  );
+  assert.equal(invokes, 0);
+  assert.equal(await f.call("webmcp.invokeTool", { ...input, binding: "name" }), "ok");
+  // Even an identical replacement invalidates the previous observation.
+  f.chrome.debugger.onEvent.emit({ tabId: 1 }, "WebMCP.toolsRemoved", {
+    tools: [{ name: tool.name, frameId: tool.frameId }],
+  });
+  f.chrome.debugger.onEvent.emit({ tabId: 1 }, "WebMCP.toolsAdded", { tools: [tool] });
+  await assert.rejects(f.call("webmcp.invokeTool", { ...input, binding: "name" }), {
+    code: "STALE_REGISTRATION",
+  });
+  assert.equal(invokes, 1);
 });
 
 test("WebMCP discovery binds exact native registration IDs and cancellation targets only the original invocation", async (t) => {

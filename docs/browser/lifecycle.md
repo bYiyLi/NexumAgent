@@ -29,7 +29,7 @@
 
 每个 run 的首次控制 I/O，扩展从真实 call.context.runId 查找或创建本包 RunScope；并发首次创建共享同一登记结果。RunScope 是扩展自有 ManagedResource，先用 call.resources.register 登记冷对象，再取得目标锁、开启远端控制租约、attach CDP/监听或设置视觉状态。它保存本 run 的目标、按键、等待器、订阅、临时标签、视口和视觉标记，不能保存旧 call 服务给其他 run 使用。操作调用结束不释放整个 RunScope；本次 run 的正常收尾、失败或取消通过公共资源 dispose 触发相同清理，不需要 onRunEnd 回调、读取内部 RunStore 或监听核心私有事件。
 
-RunScope.dispose 先关闭该 run 的新动作准入，取消等待/在途动作、释放本包按键和临时覆盖，发送远端 lease_end 并等待本包 CDP/监听/active 状态清理事实，关闭临时后台标签，最后释放锁；用户原有/新建普通/结果标签保持打开。清理不能把取消前尚未发生的 markDeliverable 补成成功。结果标记只表示该标签被脚本明确标为交付或结束控制，不表示 run succeeded；运行终态仍由核心在资源收尾后裁决。一个本地等待器结束不证明整个 RunScope 已关闭。
+RunScope.dispose 先关闭该 run 的新动作准入，取消等待/在途动作、释放本包按键和临时覆盖，发送远端 lease_end 并等待本包 CDP/监听/active 状态清理事实，关闭临时后台标签，最后释放锁；用户原有/新建普通/结果标签保持打开。清理不能把取消前尚未发生的 markDeliverable 补成成功。结果标记只表示该标签被脚本明确标为交付或结束控制，不表示 run succeeded；运行终态仍由核心在资源收尾后裁决。一个本地等待器结束不证明整个 RunScope 已关闭。Core 对原 extension.run.stop 进行有界观察，Node 保留同一 Run 停止任务直到真实资源关闭；观察到期后通过状态继续核对，已确认未启动时可按同一 Run 身份幂等发起停止，迟到回执继续推进尚未开始的清理阶段。没有关闭证据时保留未确认状态，不伪造终态。
 
 连接共享不占用“永远忙碌”的业务资源。浏览器原生下载可在控制释放后继续，但本期不承诺脱离 run 的隐形下载执行器/订阅：需要 path/saveDownload 结果时必须等真实完成；运行结束后不再执行旧 call.log/progress 或后台提交网页动作。公共 handoff 虽存在，本包不为没有公开查询/停止协议的资源自动 handoff；若以后提出独立 browser 后台工作，必须另有明确能力合同和验收，不能由当前文字视为已交付。
 

@@ -118,7 +118,7 @@ interface LeaseWait {
   opened: boolean;
   onClosed?: (evidence?: LeaseEvidence) => void;
 }
-const versionMismatchMessage = "The running browser plugin does not match the installed Browser package. Reload the Nexum browser extension and discover it again.";
+const versionMismatchMessage = "Plugin build mismatch, even if display versions match. Check current Profile installation assets; if verified ready, reload the affected matching extension and rediscover. Do not reload stale or unverified assets.";
 const versionMismatchTTL = 120000;
 /** Cold, package-owned native listener. Only explicit start performs filesystem/network I/O. */
 export class BrowserService extends EventEmitter {
@@ -469,7 +469,7 @@ export class BrowserService extends EventEmitter {
           this.#versionMismatches.delete(this.#versionMismatches.keys().next().value!);
         this.#versionMismatches.set(profileId, Date.now());
       }
-      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage, { reason: "plugin_version_or_build_mismatch" });
     }
     let old = this.#profiles.get(profileId);
     if (old && Date.now() - old.lastSeen > 60000) {
@@ -959,16 +959,16 @@ export class BrowserService extends EventEmitter {
   }
   requireCurrentAssets(): void {
     if (!this.#peers.size && this.#hasVersionMismatch())
-      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage, { reason: "plugin_version_or_build_mismatch" });
   }
   get(id: string): BrowserPeer {
     const peer = this.#peers.get(id);
     if (!peer && this.#hasVersionMismatch(id))
-      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage);
+      throw failure("PLUGIN_VERSION_MISMATCH", versionMismatchMessage, { reason: "plugin_version_or_build_mismatch" });
     check(
       peer && !this.#stopping,
       "EXTENSION_OFFLINE",
-      "The selected browser is offline.",
+      "The selected browser is offline. Check that the browser is running and the matching extension is enabled, then discover it again; offline alone does not prove a version mismatch.",
     );
     return peer;
   }

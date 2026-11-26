@@ -43,6 +43,10 @@ return await tab.evaluate(
 - 组合键按键名数组提供，例如 `{keys:["ControlOrMeta","a"]}`；ControlOrMeta 在 macOS 表示 Meta，在其他系统表示 Control。长文本用 fill、type 或 pressSequentially，不要把长文本当作单个键名。
 - INVALID_ARGUMENT 且 reason: invalid_key 时先修正键名，不重复执行原来的输入。其他入口的参数形状以实际 SDK 方法签名为准。
 
+## 剪贴板
+
+剪贴板操作依赖目标文档真实焦点及浏览器原生授权。仅在任务允许切换焦点时选择已确认标签和窗口；必要时请用户激活目标页面或处理原生权限提示。原生拒绝不等同于空剪贴板，不改用系统剪贴板或其他页面绕过。已派发写入而效果未知时先核对状态，不自动重写。
+
 ## 不可猜测的公开方法
 
 - `tab.playwright.elementInfo({x, y})` 返回**数组**，可为空；单元素也用 `result[0].boundingBox`。

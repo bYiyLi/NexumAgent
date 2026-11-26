@@ -32,17 +32,24 @@ for (const profile of ["development","production"]) {
     assert.equal(found.directory,built.directory);
     assert.equal(found.profile,profile);
     assert.equal(found.extensionVersion,built.extensionVersion);
+    assert.equal(found.assetRevision,built.assetRevision);
     assert.equal(found.extensionId,built.extensionId);
     const report=await run(context);
     assert.match(report, /^Installation assets: ready/);
     assert.ok(report.includes("Directory: "+built.directory));
     assert.ok(report.includes("Profile: "+profile));
     assert.ok(report.includes("Extension version: "+built.extensionVersion));
+    assert.ok(report.includes("Expected asset revision: "+built.assetRevision));
     assert.ok(report.includes("Extension ID: "+built.extensionId));
     assert.match(report,/Browser extension installation: unknown/);
     assert.match(report,/chrome:\/\/extensions/);
     assert.match(report,/edge:\/\/extensions/);
-    assert.match(report,/Load unpacked/);
+    assert.match(report,/If absent, enable Developer mode, choose Load unpacked/);
+    assert.match(report,/If the matching extension is disabled, enable it/);
+    assert.match(report,/If its build is confirmed incompatible or reload was explicitly requested/);
+    assert.match(report,/A matching connected build needs no reload unless requested/);
+    assert.match(report,/a past npm update alone does not establish mismatch/);
+    assert.match(report,/If status is unknown, check it before choosing an action/);
     assert.match(report,/browser\/discover\.js/);
     await expectFailure({...context,profile:profile==="production"?"development":"production"},"profile_mismatch");
     const descriptor=JSON.parse(await readFile(path.join(built.directory,"nexum-installation.json"),"utf8"));
@@ -135,6 +142,10 @@ test("installation metadata and all diagnostic labels describe only observed evi
     const report=formatInstallationInspection({assetsReady:false,code:"browser_assets_unavailable",reason});
     assert.ok(report.includes("Reason: "+reason));
     assert.doesNotMatch(report,/undefined|Directory:|Load unpacked/);
+    if(reason==="build_mismatch"){
+      assert.match(report,/If a restart is still required and authorized/);
+      assert.match(report,/Do not reload stale assets/);
+    }
   }
 });
 

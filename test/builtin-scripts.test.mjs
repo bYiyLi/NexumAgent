@@ -554,7 +554,7 @@ test("all packaged script headers compile on Node and file search preserves lite
   for (const dir of ["../builtin/","../packages/browser/scripts/"]) {
     const directory = new URL(dir, import.meta.url);
     const files = readdirSync(directory).filter(name => name.endsWith(".js"));
-    assert.equal(files.length, dir.includes("browser") ? 4 : 15);
+    assert.equal(files.length, dir.includes("browser") ? 4 : 16);
     for (const name of files) {
       const metadata = scriptHeader(readFileSync(new URL(name,directory),"utf8"));
       assert.equal(metadata.scriptName,name);

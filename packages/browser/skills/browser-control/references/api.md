@@ -783,6 +783,8 @@ export interface WebMcpTool {
   description?: string;
   inputSchema: Record<string, unknown>;
   annotations?: Record<string, unknown>;
+  /** Present when the native protocol resolves a tool by frame and name, not an opaque registration ID. */
+  invocationBinding?: "name";
 }
 export interface WebMcpTools {
   documentRevision: string;
@@ -792,7 +794,8 @@ export interface WebMcpTools {
 }
 export interface WebMcpCapability {
   listTools(): Promise<WebMcpTool[]>;
-  invokeTool(name: string, args: unknown): Promise<unknown>;
+  /** Name binding is opt-in; the browser may resolve a replacement between observation and dispatch. */
+  invokeTool(name: string, args: unknown, options?: { binding: "name" }): Promise<unknown>;
   fetchTools(): Promise<WebMcpTools>;
 }
 export interface VisibilityCapability {

@@ -269,6 +269,34 @@ test("extension effect diagnostics cross the worker without exposing arbitrary e
   } finally { await instance.dispose(); }
 });
 
+test("Browser connection recovery survives the public Worker error boundary without unconditional reload or replay", async (t) => {
+  const f=await fixture(t,`export default () => ({methods:{fail:{
+    description:"Failure",permissions:[],schemaDialect:"draft7",inputSchema:{type:"object"},
+    handle(input){throw Object.assign(new Error("private endpoint advice"),{
+      code:input.code,dispatched:false,effect:"none",retryable:false
+    })}}}})`);
+  const instance=await f.factory(f.host);
+  try {
+    for (const [code, message] of [
+      ["PLUGIN_VERSION_MISMATCH", /if verified ready, reload the affected matching extension/],
+      ["EXTENSION_OFFLINE", /offline alone does not establish a version or installation problem/],
+      ["PROTOCOL_MISMATCH", /does not establish a package version mismatch/],
+      ["PROFILE_MISMATCH", /do not switch environments/],
+      ["PROFILE_CONFLICT", /without taking over the other connection/],
+      ["PORT_IN_USE", /do not seize another listener/],
+    ]) {
+      await assert.rejects(instance.methods.fail.handle({__nexumWorkerArgs:[{code}]},invocation()),
+        error=>{
+          assert.equal(error.code,code);
+          assert.match(error.message,message);
+          assert.deepEqual(error.details,{dispatched:false,effect:"none",retryable:false,recovery:"check_connection"});
+          assert.doesNotMatch(JSON.stringify(error),/private endpoint advice/);
+          return true;
+        });
+    }
+  } finally {await instance.dispose();}
+});
+
 test("known reasons refine errors without passing untrusted diagnostic text or unsafe retry advice", async (t) => {
   const f=await fixture(t,`export default () => ({methods:{fail:{
     description:"Failure",permissions:[],schemaDialect:"draft7",inputSchema:{type:"object"},

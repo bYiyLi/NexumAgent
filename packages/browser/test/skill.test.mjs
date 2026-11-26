@@ -42,7 +42,9 @@ test("Browser Skill selection boundaries and progressive routes are explicit", (
   assert.match(find("截图与视觉观察"), /references\/observation\.md/);
   assert.match(find("页面结构与定位"), /browser\/observe\.js/);
   assert.match(find("页面结构与定位"), /references\/observation\.md/);
-  assert.match(find("连接失败"), /references\/errors\.md/);
+  assert.match(find("连接、握手或监听异常"), /references\/connection\.md/);
+  assert.match(find("连接、握手或监听异常"), /其他错误.*references\/errors\.md/);
+  assert.doesNotMatch(find("连接、握手或监听异常"), /断连再读/);
   assert.match(find("精确参数"), /references\/api-index\.md/);
   assert.match(find("资产"), /references\/advanced\.md/);
   assert.doesNotMatch(skill, /\.\.\/\.\.\/docs\/|references\/usage\.md/);

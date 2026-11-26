@@ -999,6 +999,7 @@ tab(
   {
     name: string,
     args: {},
+    binding: enumOf("name"),
     tool: object(
       {
         documentRevision: id,
@@ -1007,6 +1008,7 @@ tab(
         description: string,
         inputSchema: { type: "object" },
         annotations: { type: "object" },
+        invocationBinding: enumOf("name"),
       },
       ["documentRevision", "registrationRevision", "name", "inputSchema"],
     ),

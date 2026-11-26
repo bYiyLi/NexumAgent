@@ -81,7 +81,7 @@ const deadline = Date.now() + 5000;
 const skipRecursion = new Set([".git", "node_modules", "dist", "build", ".cache", ".next", "coverage", ".platform-controls"]);
 
 if (path.isAbsolute(relative) || path.win32.isAbsolute(relative) || /^[A-Za-z]:/.test(relative) || relative.split(/[\\/]/).includes("..")) {
-  throw Error("file_path_escape: path relative to Project root or current working directory required");
+  throw Object.assign(Error("file_path_escape: path relative to Project root or current working directory required"), { nexumBuiltinFailure: { code: "file_path_escape" } });
 }
 function contained(directory) {
   const inside = path.relative(root, directory);
@@ -89,9 +89,9 @@ function contained(directory) {
 }
 async function verifyDirectory(directory) {
   const info = await fs.lstat(directory);
-  if (!info.isDirectory() || info.isSymbolicLink()) throw Error("file_path_escape: target must be a real directory");
+  if (!info.isDirectory() || info.isSymbolicLink()) throw Object.assign(Error("file_path_escape: target must be a real directory"), { nexumBuiltinFailure: { code: "file_path_escape" } });
   const actual = await fs.realpath(directory);
-  if (!contained(actual) || path.relative(directory, actual) !== "") throw Error("file_path_escape: directory outside file-script root or redirected");
+  if (!contained(actual) || path.relative(directory, actual) !== "") throw Object.assign(Error("file_path_escape: directory outside file-script root or redirected"), { nexumBuiltinFailure: { code: "file_path_escape" } });
 }
 const directory = path.resolve(root, relative);
 // Reject links in any explicit path component, not just the last component.

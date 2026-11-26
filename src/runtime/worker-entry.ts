@@ -117,6 +117,29 @@ function explicitScriptErrorMessage(cause: unknown): string | null {
   return literals.some((literal) => data.code.includes(literal)) ? message : null;
 }
 
+// A named builtin may attach a structured candidate. Never pass arbitrary
+// message/detail values; Go validates the retained official source digest and
+// removes this internal candidate from all public Run results.
+function builtinFailureCandidate(cause: unknown): JsonObject | undefined {
+  if (!cause || typeof cause !== "object" || types.isProxy(cause) || !types.isNativeError(cause)) return undefined;
+  const own = (value: object, key: string): unknown => {
+    const field = Object.getOwnPropertyDescriptor(value, key);
+    return field && "value" in field ? field.value : undefined;
+  };
+  const candidate = own(cause, "nexumBuiltinFailure");
+  if (!candidate || typeof candidate !== "object" || types.isProxy(candidate)) return undefined;
+  const code = own(candidate, "code");
+  if (typeof code !== "string" || !/^(?:file_changed|file_patch_conflict|file_path_escape|file_not_text|file_too_large|invalid_patch|file_patch_budget|file_patch_io_failed|file_patch_partial|invalid_line_range|file_output_too_large|file_read_budget|file_not_found|permission_denied|file_read_failed)$/.test(code)) return undefined;
+  const result: JsonObject = {code};
+  if (code === "file_changed") {
+    for (const key of ["expectedRevision", "currentRevision"]) {
+      const value = own(candidate, key);
+      if (typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) result[key] = value;
+    }
+  }
+  return result;
+}
+
 /** Preserve bounded factual status from an already verified Core error,
  * without transporting arbitrary exception properties or private targets. */
 function attachFailureFacts(
@@ -764,6 +787,10 @@ async function prepare() {
               error.message = "A JavaScript assertion failed.";
             else if (authoredMessage) error.message = authoredMessage;
           }
+          // Only the untrusted builtin candidate travels here. It does not
+          // override a filesystem/SDK-issued error or grant error authority.
+          const builtin = !fileError && !isAgentError(cause) ? builtinFailureCandidate(cause) : undefined;
+          if (builtin) error.details = {nexumBuiltinFailure: builtin};
           send({
             type: "failed",
             ...error,

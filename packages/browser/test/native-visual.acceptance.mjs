@@ -230,3 +230,43 @@ test("native visual feedback preserves user groups and keeps AI markers after ru
   assert.equal(latest().layer, true);
   assert.match(latest().original, /^data:image\/svg\+xml,/);
 });
+
+test("native explicit window and group layout survives visual follow and later runs", {timeout: 120000}, async(t)=>{
+  const f=await nativeFixture(t,{html:'<!doctype html><title>Owned layout</title><button id="target">Owned action</button>'});
+  const result=await f.run(select+`
+    const first=await selected.tabs.new(context.input.base+'?layout-first');
+    const second=await selected.tabs.new(context.input.base+'?layout-second');
+    const window=await selected.management.windows.create({tabId:first.id});
+    await selected.management.tabs.move(second.id,{windowId:window.id,index:-1});
+    const group=await selected.management.tabs.group({tabIds:[first.id,second.id],createProperties:{windowId:window.id}});
+    await selected.management.tabGroups.update(group.groupId,{title:'Explicit layout',color:'green'});
+    await first.playwright.getByRole('button',{name:'Owned action'}).click();
+    const grouped=await selected.management.tabGroups.get(group.groupId);
+    await selected.management.tabs.ungroup([first.id,second.id]);
+    await selected.management.tabs.update(first.id,{pinned:true});
+    await selected.management.tabs.update(first.id,{pinned:false});
+    await second.playwright.getByRole('button',{name:'Owned action'}).click();
+    return {windowId:window.id,firstId:first.id,secondId:second.id,grouped,before:[await selected.management.tabs.get(first.id),await selected.management.tabs.get(second.id)]};
+  `,{base:f.base});
+  assert.equal(result.run.status,"succeeded",JSON.stringify(result.run.error));
+  const data=result.result.data;
+  assert.equal(data.grouped.title,"Explicit layout");
+  assert.equal(data.grouped.color,"green");
+  for(const item of data.before){
+    assert.equal(item.windowId,data.windowId);
+    assert.equal(item.groupId,undefined);
+  }
+  const later=await f.run(select+`
+    const first=await selected.tabs.get(context.input.firstId);
+    const second=await selected.tabs.get(context.input.secondId);
+    await selected.nameSession('Later observation must not regroup');
+    await first.playwright.getByRole('button',{name:'Owned action'}).click();
+    await second.playwright.getByRole('button',{name:'Owned action'}).click();
+    return [await selected.management.tabs.get(first.id),await selected.management.tabs.get(second.id)];
+  `,{base:f.base,firstId:data.firstId,secondId:data.secondId});
+  assert.equal(later.run.status,"succeeded",JSON.stringify(later.run.error));
+  for(const item of later.result.data){
+    assert.equal(item.windowId,data.windowId);
+    assert.equal(item.groupId,undefined);
+  }
+});

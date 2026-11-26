@@ -5,7 +5,7 @@
 - **参数或目标错误**：`INVALID_ARGUMENT`、`INVALID_TARGET`、`AMBIGUOUS_TARGET`。检查方法签名、元素类型、唯一性和页面状态；不要因为文案包含 Worker 就直接判断扩展进程崩溃。
 - **能力或权限问题**：`CAPABILITY_NOT_ALLOWED`、`POLICY_DENIED`、`USER_TAKEOVER` 等。以本次注册能力及实际授权为准；缺方法不能猜调用，拒绝不能绕过。
 - **引用/上下文过期**：`STALE_REF` 等。重新发现标签、观察元素、获取新的 ref 或上下文；不能复用旧 ref。
-- **连接或运行资源问题**：`EXTENSION_OFFLINE`、`PORT_IN_USE`、争用/超时等。报告哪个环境、浏览器、连接阶段、实际检测结果；只有确认连接已断开时才按 [连接与限制](connection.md) 处理。
+- **连接或运行资源问题**：`EXTENSION_OFFLINE`、`PLUGIN_VERSION_MISMATCH`、`PROFILE_MISMATCH`、`PROTOCOL_MISMATCH`、`PORT_IN_USE`、争用/超时等。报告哪个环境、浏览器、连接阶段、实际检测结果；连接、握手或监听异常按 [连接诊断](connection.md) 处理（不要求曾经连接成功）；普通操作超时不证明断连。
 - **Agent 脚本层**：`script_execution_failed` 或 `worker_script_failed` 表示脚本/Worker 层失败，**不足以证明 Chrome 扩展 Worker 崩溃**。保留原始错误、Run ID 和可获得的操作记录，检查有无已发生副作用。
 - **业务未验证**：`INPUT_UNCONFIRMED`、`EXPECTATION_UNCONFIRMED` 及 `effect: unknown`。已发送的点击/提交可能生效；先回读页面，不能自动重复执行。
 

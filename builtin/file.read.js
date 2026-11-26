@@ -95,7 +95,7 @@ const textBudget = Math.min(12 * 1024, Math.floor(24 * 1024 / requests.length));
 const deadline = Date.now() + 5000;
 let remaining = 64 * 1024 * 1024;
 
-const failure = (code, message) => Object.assign(Error(code + ": " + message), { fileReadCode: code, fileReadMessage: message });
+const failure = (code, message, revisions = {}) => Object.assign(Error(code + ": " + message), { fileReadCode: code, fileReadMessage: message, nexumBuiltinFailure: { code, ...revisions } });
 function classify(error) {
   if (error.fileReadCode) return error;
   if (error.code === "ENOENT" || error.code === "ENOTDIR") return failure("file_not_found", "requested file does not exist");
@@ -151,7 +151,7 @@ async function readOne(request) {
   const { target, info } = await resolveFile(request.path);
   if (BigInt(remaining) < info.size && remaining < 4) throw failure("file_read_budget", "batch read budget exhausted; request fewer files");
   const revision = fingerprint(info);
-  if (request.expectedRevision && revision !== request.expectedRevision) throw failure("file_changed", "file changed since the earlier read; restart reading");
+  if (request.expectedRevision && revision !== request.expectedRevision) throw failure("file_changed", "file changed since the earlier read; restart reading", { expectedRevision: request.expectedRevision, currentRevision: revision });
   // Verify the opened handle before reading. Nonblocking/no-follow on POSIX
   // prevents a replaced regular file from blocking on a FIFO or following a link.
   const flags = constants.O_RDONLY | (path.sep === "\\" ? 0 : (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));

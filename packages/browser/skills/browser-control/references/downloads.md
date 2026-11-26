@@ -55,7 +55,7 @@ if (file === null) return { status: "unconfirmed",
 return { type: "resource_link", path: file };
 ```
 
-结果层按当前路径授权和大小限制固定实际文件并返回标准 MCP 资源引用。只有收到真实资源引用才能认定文件可供 Host 读取；需要文件内容时使用 Host 支持的 resources/read；Host 未暴露该能力或需原始文件下载时，按实际资源 URI 调用已登记的 nexum/resource.read.js（input={uri,mode:"download"} 用于下载），需要新建其他传输通道时选 file-transfer Skill。通道就绪不代表传输完成。
+结果层按当前路径授权和大小限制固定实际文件并返回标准 MCP 资源引用。只有收到真实资源引用才能认定文件可供 Host 读取；需要文件内容时使用 Host 支持的 resources/read；Host 未暴露该能力或需原始文件下载时，按实际资源 URI 调用已登记的 nexum/resource.read.js（input={uri,mode:"download"} 用于下载），需要新建其他传输通道时选 file-transfer Skill。通道就绪不代表传输完成。失败时先区分下载记录、固定资源和 transfer 的阶段；若返回 transferId，按原 ID 查询 `transfer.get` 并核对 code、details.phase、bytesTransferred 与终态。HTTP 状态仅说明实际通道响应，不能据此认定网页未下载或重建 Offer。固定资源 MIME 与请求不符时使用实际 MIME 或省略覆盖值。
 
 如果动作已派发后超时、取消或断连，`effect: unknown` 表示不能证明网站副作用。先重新观察，不能自动重发点击、提交、文件选择或整个脚本。用户原生调试取消会使旧控制失效；不通过重新 get 恢复同一已交还的 run 目标。
 

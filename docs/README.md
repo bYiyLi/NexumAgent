@@ -3,7 +3,7 @@
 ## 给 AI 使用的运行资料
 
 - Cloud 的 `agent.list/open/run.*` 负责目标选择、执行与历史；Cloud 开启 Goal 时使用其当前独立 Goal 工具，两者不是 Agent JavaScript SDK。
-- 每次 `agent.open` 都会交付适用 Instructions、Skills 选择元数据及全部已发现且获准的可复用脚本摘要，不返回独立 Docs，扩展能力由本次启用状态决定。
+- 每次 `agent.open` 都会交付适用 Instructions、Skills 选择元数据及已获准的平台/扩展脚本及最多 100 条本地精选脚本摘要；完整目录按需用 nexum/script.list.js 查询，不返回独立 Docs，扩展能力由本次启用状态决定。
 - `src/runtime/scripts.ts` 依据有效 `.js` 头部生成独立脚本索引；每次打开另保存本次工作快照的 `scripts.index`；官方 [script-authoring](../skills/script-authoring/SKILL.md) 负责创建与维护可复用脚本。
 - `builtin/` 是 Nexum 官方内置脚本（`nexum/file.read.js`、`nexum/file.list.js`、`nexum/file.search.js`、`nexum/file.patch.js`、`nexum/script.metadata.js`、`nexum/resource.read.js`；另有 `nexum/sh.*.js` 六个及 `nexum/transfer.*.js` 三个固定控制脚本，普通 Run 满载时按实际索引调用）。它们由 ScriptCatalog 自动发现，在原有 `agent.run.start({contextId,scriptName,input})` 中运行并记录同一个 Run；不是新的 MCP Tool。先看 `agent.open.agent.scripts` 的实际描述，必要时按索引路径调用 `nexum/script.metadata.js` 获取完整头部。Git status/diff 等直接使用授权的 `sh.exec`，无需独立 Git 包装脚本。
 - `src/host/platform-materials.ts` 从实际 Registry 方法生成 `work/skills/.generated/platform/` 下的 Skill，按需引用真实签名、完整 Schema 及输出/错误合同；Go 负责 MCP/OpenAPI 来源目录及其批准配置。

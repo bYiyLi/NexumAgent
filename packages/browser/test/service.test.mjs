@@ -616,7 +616,8 @@ test("hello rejects mismatched profile, plugin version and protocol with distinc
     assert.equal(error.code,code);
     assert.deepEqual(f.service.list(),[]);
     if(code==="PLUGIN_VERSION_MISMATCH") {
-      assert.match(error.message,/Reload/);
+      assert.match(error.message,/if verified ready, reload the affected matching extension/);
+      assert.match(error.message,/Do not reload stale or unverified assets/);
       assert.throws(()=>f.service.requireCurrentAssets(),{code:"PLUGIN_VERSION_MISMATCH"});
     }
   }

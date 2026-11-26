@@ -570,6 +570,7 @@ function makeWebMcp(router: Router, target: TabTarget): t.WebMcpCapability {
     tools: readonly t.WebMcpTool[],
     name: string,
     args: unknown,
+    options?: { binding: "name" },
   ) => {
     const tool = tools.find((tool) => tool.name === name);
     requireArgument(
@@ -581,6 +582,7 @@ function makeWebMcp(router: Router, target: TabTarget): t.WebMcpCapability {
       name,
       args,
       tool,
+      ...(options ? { binding: options.binding } : {}),
     });
   };
   const api = {
@@ -588,9 +590,9 @@ function makeWebMcp(router: Router, target: TabTarget): t.WebMcpCapability {
       discovered = checked(await router.call("webmcp.listTools", { target }));
       return [...discovered];
     },
-    async invokeTool(name: string, args: unknown) {
+    async invokeTool(name: string, args: unknown, options?: { binding: "name" }) {
       const tools = discovered ?? (await api.listTools());
-      return invoke(tools, name, args);
+      return invoke(tools, name, args, options);
     },
     async fetchTools() {
       const value = await router.call<t.WebMcpToolsDescriptor>(

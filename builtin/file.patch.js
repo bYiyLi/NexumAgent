@@ -270,7 +270,7 @@ const root = await fs.realpath(context.project?.root ?? context.pwd);
 const identity = info => info.dev + ":" + info.ino;
 const revision = info => [identity(info), info.size, info.mtimeNs, info.ctimeNs, info.mode, info.nlink].join(":");
 const rootInfo = await fs.lstat(root, { bigint: true });
-if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw Error("file_path_escape: invalid file-script root");
+if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw Object.assign(Error("file_path_escape: invalid file-script root"), { nexumBuiltinFailure: { code: "file_path_escape" } });
 const directoryIds = new Map([["", identity(rootInfo)]]);
 const createdDirs = [];
 const applied = [];
@@ -449,16 +449,16 @@ async function observe(name, before, expected) {
   } catch { return "state unverified"; }
 }
 function throwRejected(error) {
-  // Only authored constant diagnostics cross the Worker exception boundary.
+  // Fixed codes are checked against the verified official script by Go.
   // The per-file, caller-supplied relative paths and factual report are logs.
   switch (error.patchCode) {
-    case "invalid_patch": throw Error("invalid_patch: Patch rejected before writing; inspect Run logs.");
-    case "file_path_escape": throw Error("file_path_escape: Patch rejected before writing; inspect Run logs.");
-    case "file_not_text": throw Error("file_not_text: Patch rejected before writing; inspect Run logs.");
-    case "file_too_large": throw Error("file_too_large: Patch rejected before writing; inspect Run logs.");
-    case "file_patch_budget": throw Error("file_patch_budget: Patch rejected before writing; inspect Run logs.");
-    case "file_patch_conflict": throw Error("file_patch_conflict: Patch rejected before writing; inspect Run logs.");
-    default: throw Error("file_patch_io_failed: Patch rejected before writing; inspect Run logs.");
+    case "invalid_patch": throw Object.assign(Error("invalid_patch: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "invalid_patch" } });
+    case "file_path_escape": throw Object.assign(Error("file_path_escape: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_path_escape" } });
+    case "file_not_text": throw Object.assign(Error("file_not_text: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_not_text" } });
+    case "file_too_large": throw Object.assign(Error("file_too_large: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_too_large" } });
+    case "file_patch_budget": throw Object.assign(Error("file_patch_budget: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_patch_budget" } });
+    case "file_patch_conflict": throw Object.assign(Error("file_patch_conflict: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_patch_conflict" } });
+    default: throw Object.assign(Error("file_patch_io_failed: Patch rejected before writing; inspect Run logs."), { nexumBuiltinFailure: { code: "file_patch_io_failed" } });
   }
 }
 
@@ -516,7 +516,7 @@ try {
   if (cleanupWarning) report.push("Temporary file cleanup unverified: " + label(cleanupWarning));
   report.push("Inspect actual state before retrying. No multi-file rollback is claimed.");
   console.log(report.join("\n"));
-  throw Error("file_patch_partial: Patch stopped during file operations; inspect Run logs and current files before retrying.");
+  throw Object.assign(Error("file_patch_partial: Patch stopped during file operations; inspect Run logs and current files before retrying."), { nexumBuiltinFailure: { code: "file_patch_partial" } });
 }
 
 /*

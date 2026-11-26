@@ -535,7 +535,7 @@ interface PromptDialog {
 | 窗口、标签、组、书签 | `selectedBrowser.management` 及 `windows/tabs/tabGroups/bookmarks` 便捷命名空间                                            | ManagementCapability 给出逐方法完整参数/返回；`tabs.select` 是显式激活，`tabs.new(url?,{active?})` 支持 HTTP(S)、省略 URL 或显式 `about:blank` 创建空白标签；不因此开放其他受保护协议或页面控制 |
 | 组织审计             | `selectedBrowser.management.getAuditTrail`                                                                                 | 有界 before/变更分页；不自动撤销                                                                                |
 | 页面资产与文件导出   | `tab.assets.list/download/bundle`、`tab.exportFile`                                                                        | inventory/页面修订绑定；实际文件、manifest、逐项失败，不把导航当下载                                            |
-| WebMCP               | `tab.webmcp.listTools/invokeTool/fetchTools`、返回门面的 `invokeTool`                                                      | 精确绑定 document/registration revision；先发现后调用，不自动改用同名新注册                                     |
+| WebMCP               | `tab.webmcp.listTools/invokeTool/fetchTools`、返回门面的 `invokeTool`                                                      | 默认精确绑定 document/registration revision；原生仅支持名称时显式选择 binding:name，保留竞态说明，不自动降级                                     |
 | CDP                  | `tab.cdp.send/events/cursor/readEvents`                                                                                    | 浏览器原生可达全域命令/事件、child target、分页/丢失信息；不以高级接口缺失要求用户自行写 CDP                    |
 | 可见性适配           | `selectedBrowser.visibility.get/set`                                                                                       | 读取/设置前台标签跟随开关；是 Avru 原生映射，不能宣称可隐藏/显示 OS 窗口                                        |
 | 能力发现             | Browser/Tab 的 `capabilities.list/get`                                                                                     | 元数据经受管方法返回；已知能力由客户端构造类型化门面，未知能力明确失败                                          |
@@ -598,7 +598,7 @@ capabilities.get 的受管结果只返回能力 ID/版本/支持状态及已声�
 4. get 从当前 run 的有界缓冲取精确事件；早到事件不丢失，重复 get 返回同一已消费事实，不再触发网页工作。最多每 run/target 32 个等待器，事件数据受连接预算；超量先拒绝再动作。下载/chooser 描述由客户端构造公开门面；有访问权的 ID 也不能跨 run/页面偷用。
 5. cancel 幂等，取消/到期/运行收尾清理远端监听、缓冲和关联；无所有权报 WAITER_GONE/权限错误。下载事件只证明原生下载已开始，path/saveDownload 还需实际完成证据；取消等待器不等于撤回网页下载。
 
-`waitForDownload/waitForFileChooser` 是 waitForEvent 的别名。浏览器事件等待与 runtime.requestInput 的单次用户输入等待是两种不同资源；不占用或替代平台唯一的输入槽。WebMCP 的 listTools/fetchTools 返回版本数据后，客户端缓存**这一份**注册描述；invokeTool 无先前发现则先完成发现并使用其返回描述，已有描述失效就报错，不能静默自动换成新版本。`fetchTools()` 返回门面的 invokeTool 永远绑定它那次获取的精确注册。
+`waitForDownload/waitForFileChooser` 是 waitForEvent 的别名。浏览器事件等待与 runtime.requestInput 的单次用户输入等待是两种不同资源；不占用或替代平台唯一的输入槽。WebMCP 的 listTools/fetchTools 返回版本数据后，客户端缓存**这一份**注册描述；invokeTool 无先前发现则先完成发现并使用其返回描述，已有描述失效就报错，不能静默自动换成新版本。`fetchTools()` 返回门面的 invokeTool 永远要求绑定它那次获取的精确注册。原生协议不提供 opaque toolId 时仍可发现工具，描述标注 `invocationBinding: "name"`；仅直接调用显式传 `{binding:"name"}` 才允许名称绑定，调用前仍核对文档与已观测修订，但不保证浏览器在检查和实际解析之间不会选择同名替换工具。不得将名称映射伪装成精确注册 ID。
 
 CDP readEvents 省略 afterSequence 时从当前游标开始；methods 若提供必须非空，过滤条件分页保持一致。已 detach child 的缓冲事件仍可按其原 target 筛选，但不能再对该 child send；游标/事件绑定当前门面的连接代次，旧门面不可跨重连复用。PageAssets inventory 是某次当前文档观察的固定集合，后续 list 不改写旧集合；bundle 按原 inventory 的真实 ID 下载，文档替换则明确失效，不能把新页面同 URL 的资源套入旧 inventory。
 
