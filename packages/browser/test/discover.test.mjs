@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { preparePlugin } from "../dist/extension/assets.js";
+import { scriptHeader } from "../../../dist/runtime/scripts.js";
 
 const source = await readFile(new URL("../scripts/discover.js", import.meta.url), "utf8");
 const run = new (Object.getPrototypeOf(async function () {}).constructor)("context", "browser", source);
@@ -136,7 +137,9 @@ test("discover retains a healthy peer and gives a targeted recovery path for a m
   assert.doesNotMatch(report, /SECRET/);
 });
 test("discover publishes a complete direct invocation contract and retains the empty object input", () => {
-  const metadata = JSON.parse(source.slice(3, source.indexOf("\n*/\n")));
+  const metadata = scriptHeader(source);
+  assert.ok(metadata);
+  assert.deepEqual(scriptHeader(source.replace(/\r?\n/g, "\r\n")), metadata);
   assert.deepEqual(metadata.scriptInputSchema, { type: "object", additionalProperties: false });
   assert.equal(metadata.scriptOutputSchema.type, "string");
   for (const phrase of ["输入 {}", "完整 browserId、tabId", "不取得页面控制", "不证明插件未安装或禁用",

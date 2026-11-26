@@ -14,7 +14,6 @@ import {
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { childEnvironment } from "./service.mjs";
 
 assert.equal(process.env.GITHUB_ACTIONS, "true");
 assert.equal(process.env.RUNNER_ENVIRONMENT, "github-hosted");
@@ -61,9 +60,18 @@ const root = await mkdtemp(path.join(temp, "nexum-browser-native-"));
 const zip = path.join(root, "chrome.zip");
 const extraction = path.join(root, "extracted");
 let prepared = false;
+// Keep the native CI subprocess environment independent of the removed
+// service installer. In particular, Windows PowerShell 5.1 must not inherit
+// PowerShell 7's module path, nor should extraction tools inherit credentials.
+const childEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([key]) =>
+      !/^(?:NODE_OPTIONS|NODE_PATH|NODE_REPL_EXTERNAL_MODULE|PSModulePath|NEXUM(?:_.*|$)|npm_config_.*auth.*|.*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION|API_?KEY|PRIVATE_?KEY).*)$/i.test(key),
+  ),
+);
 const run = (file, args) =>
   execFileSync(file, args, {
-    env: childEnvironment(),
+    env: childEnvironment,
     windowsHide: true,
     encoding: "utf8",
     timeout: 120000,

@@ -8,6 +8,7 @@ import { inspectInstallation, formatInstallationInspection } from "../dist/clien
 import { buildExtensions } from "../browser-extension/build.mjs";
 import { assetRevision, profileSource, revisionSource } from "../browser-extension/asset-revision.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { scriptHeader } from "../../../dist/runtime/scripts.js";
 
 const body = await readFile(new URL("../scripts/installation.js",import.meta.url),"utf8");
 const run = new (Object.getPrototypeOf(async function(){}).constructor)("context",body);
@@ -131,7 +132,9 @@ test("unreadable assets retain a read failure, not an incorrect integrity or ins
   });
 
 test("installation metadata and all diagnostic labels describe only observed evidence",()=>{
-  const meta=JSON.parse(body.slice(3,body.indexOf("\n*/\n")));
+  const meta=scriptHeader(body);
+  assert.ok(meta);
+  assert.deepEqual(scriptHeader(body.replace(/\r?\n/g,"\r\n")),meta);
   assert.deepEqual(meta.scriptInputSchema,{type:"object",additionalProperties:false});
   assert.equal(meta.scriptOutputSchema.type,"string");
   assert.equal(meta.scriptOpenDefault,true);

@@ -6,7 +6,7 @@ import path from "node:path";
 import { installMaterialDirectory } from "../dist/runtime/current-materials.js";
 
 test("current materials replace complete trees, discard failed candidates and remove retired files", (t) => {
-  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "nexum-current-materials-")));
+  const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nexum-current-materials-")));
   t.after(() => rmSync(root, {recursive:true, force:true}));
   const current = path.join(root,"sh");
   const make = (name, text) => {
@@ -30,12 +30,12 @@ test("current materials replace complete trees, discard failed candidates and re
 });
 
 test("a redirected current path cannot replace an outside directory", (t) => {
-  const root=realpathSync(mkdtempSync(path.join(tmpdir(),"nexum-current-materials-")));
+  const root=realpathSync.native(mkdtempSync(path.join(tmpdir(),"nexum-current-materials-")));
   t.after(()=>rmSync(root,{recursive:true,force:true}));
   const outside=path.join(root,"outside"), current=path.join(root,"sh"), stage=path.join(root,".prepare-stage");
   mkdirSync(outside); mkdirSync(stage);
   writeFileSync(path.join(outside,"SKILL.md"),"private");
   try { symlinkSync(outside,current,"junction"); } catch(e) { t.skip(String(e)); return; }
-  assert.throws(()=>installMaterialDirectory(current,stage));
+  assert.throws(()=>installMaterialDirectory(current,stage), {code:"material_path_escape", message:"A generated material directory cannot redirect."});
   assert.equal(readFileSync(path.join(outside,"SKILL.md"),"utf8"),"private");
 });

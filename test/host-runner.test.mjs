@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { access, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -386,7 +386,23 @@ test("filesystem exceptions preserve safe codes and omit private paths", async (
   await writeFile(file, "x");
   const wrong = run("run_non_directory", code);
   wrong.context.target = path.join(file, "child");
-  await assert.rejects(runner.start(wrong), error => error.code === "not_a_directory");
+  // libuv reports the same malformed path differently on Unix and Windows.
+  // Compare the public diagnostic against the actual native error, not an
+  // assumed POSIX errno; the runtime must preserve the observed distinction.
+  let nativeCode;
+  await assert.rejects(readFile(wrong.context.target), error => {
+    assert.ok(["ENOTDIR", "ENOENT"].includes(error.code));
+    nativeCode = error.code;
+    return true;
+  });
+  await assert.rejects(runner.start(wrong), error => {
+    assert.equal(error.code, nativeCode === "ENOTDIR" ? "not_a_directory" : "file_not_found");
+    assert.equal(error.details.osCode, nativeCode);
+    assert.equal(error.details.operation, "open");
+    assert.ok(!JSON.stringify(error.details).includes(wrong.context.target));
+    assert.ok(!error.message.includes(wrong.context.target));
+    return true;
+  });
   const existing = run("run_existing_file", 'const fs=await import("node:fs/promises"); await fs.writeFile(context.target,"y",{flag:"wx"});');
   existing.context.target = file;
   await assert.rejects(runner.start(existing), error => error.code === "file_already_exists");

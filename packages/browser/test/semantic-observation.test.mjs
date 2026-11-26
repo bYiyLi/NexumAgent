@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { compileInputSchema } from "../../../dist/contracts/validation.js";
+import { scriptHeader } from "../../../dist/runtime/scripts.js";
 import { BrowserActionError } from "../browser-extension/errors.js";
 import { decodeSemanticDocument, observeSemantic } from "../browser-extension/semantic-observation.js";
 import { formatSemanticObservation } from "../dist/client/index.js";
@@ -139,7 +140,9 @@ test("a known native dialog is a partial observation, never silently dismissed o
 });
 
 const source=await readFile(new URL("../scripts/observe.js",import.meta.url),"utf8");
-const metadata=JSON.parse(source.slice(3,source.indexOf("\n*/\n")));
+const metadata=scriptHeader(source);
+assert.ok(metadata);
+assert.deepEqual(scriptHeader(source.replace(/\r?\n/g,"\r\n")),metadata);
 const validate=compileInputSchema(metadata.scriptInputSchema);
 const execute=new (Object.getPrototypeOf(async function(){}).constructor)("context","browser",source);
 function scriptFixture(error){

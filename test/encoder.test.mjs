@@ -124,7 +124,7 @@ test("published Browser observation and download examples deliver native results
   const refs = new URL("../packages/browser/skills/browser-control/references/", import.meta.url);
   const example = (name) => {
     const text = readFileSync(new URL(name, refs), "utf8");
-    const source = text.match(/```javascript\n([\s\S]*?)\n```/);
+    const source = text.match(/```javascript\r?\n([\s\S]*?)\r?\n```/);
     assert.ok(source, "missing example " + name);
     return source[1];
   };
