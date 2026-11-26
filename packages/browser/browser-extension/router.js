@@ -2546,14 +2546,22 @@ export function createBrowserRouter(
       );
     waiter.cancelled = true;
   };
-  const finishNavigation = (details, stage) => {
-    if (details.frameId !== 0) return;
-    for (const waiter of waiters.values())
+  const activeNavigation = (details) =>
+    details.frameId === 0 &&
+    (!details.documentLifecycle || details.documentLifecycle === "active");
+  const currentNavigationDocument = (details) => {
+    const current = documents.get(String(details.tabId));
+    return !current || !details.documentId || current === details.documentId;
+  };
+  const finishNavigation = (details, stage, candidates = waiters.values()) => {
+    if (!activeNavigation(details) || !currentNavigationDocument(details)) return;
+    for (const waiter of candidates)
       if (
         !waiter.settled &&
         waiter.event === "navigation" &&
         waiter.tabId === details.tabId &&
-        waiter.waitUntil === stage &&
+        (waiter.waitUntil === stage ||
+          (stage === "load" && waiter.waitUntil === "domcontentloaded")) &&
         (!waiter.url || waiter.url === details.url)
       )
         settleWaiter(waiter, {
@@ -2562,6 +2570,23 @@ export function createBrowserRouter(
           url: details.url,
           pageVersion: version(details.tabId),
         });
+  };
+  const finishSameDocumentNavigation = (details) => {
+    if (!activeNavigation(details) || !currentNavigationDocument(details)) return;
+    // History/fragment changes have no new document load event. Confirm the
+    // same active URL is already complete, and only settle waiters present
+    // when the native event arrived (not waiters armed during the lookup).
+    const candidates = [...waiters.values()].filter((waiter) =>
+      !waiter.settled && waiter.event === "navigation" && waiter.tabId === details.tabId &&
+      (!waiter.url || waiter.url === details.url));
+    finishNavigation(details, "commit", candidates);
+    if (!candidates.some(waiter => !waiter.settled && ["load", "domcontentloaded"].includes(waiter.waitUntil))) return;
+    const pageVersion = version(details.tabId);
+    void chrome.tabs.get(details.tabId).then((tab) => {
+      if (version(details.tabId) === pageVersion && !tab.pendingUrl &&
+          tab.url === details.url && tab.status === "complete")
+        finishNavigation(details, "load", candidates);
+    }).catch(() => {});
   };
   const ownedSnapshot = () =>
     [...leases.values()].flatMap((lease) =>
@@ -2903,7 +2928,7 @@ export function createBrowserRouter(
       if (started) return;
       started = true;
       on(chrome.webNavigation?.onCommitted, (details) => {
-        if (details.frameId !== 0) return;
+        if (!activeNavigation(details)) return;
         const id = String(details.tabId);
         if (documents.get(id) !== details.documentId || !details.documentId) {
           documents.set(id, details.documentId);
@@ -2924,6 +2949,8 @@ export function createBrowserRouter(
       on(chrome.webNavigation?.onCompleted, (details) =>
         finishNavigation(details, "load"),
       );
+      on(chrome.webNavigation?.onHistoryStateUpdated, finishSameDocumentNavigation);
+      on(chrome.webNavigation?.onReferenceFragmentUpdated, finishSameDocumentNavigation);
       on(chrome.tabs.onRemoved, (id) => {
         pointerPositions.delete(id);
         versions.set(String(id), version(id) + 1);

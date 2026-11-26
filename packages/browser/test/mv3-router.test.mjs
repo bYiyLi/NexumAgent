@@ -87,6 +87,8 @@ function fixture(t, config = {}) {
     onCommitted = event(),
     onDOMContentLoaded = event(),
     onCompleted = event(),
+    onHistoryStateUpdated = event(),
+    onReferenceFragmentUpdated = event(),
     onEvent = event(),
     onDetach = event();
   let next = 4,
@@ -184,7 +186,7 @@ function fixture(t, config = {}) {
         calls.push(["tabs.goForward", id]);
       },
     },
-    webNavigation: { onCommitted, onDOMContentLoaded, onCompleted },
+    webNavigation: { onCommitted, onDOMContentLoaded, onCompleted, onHistoryStateUpdated, onReferenceFragmentUpdated },
     downloads: {
       onCreated: event(),
       onChanged: event(),
@@ -2246,6 +2248,55 @@ test("navigation waiter is armed before action, buffers early events, and get do
     f.call("waiters.get", { id: early.id }, { leaseId: "other", id: "2" }),
     { code: "WAITER_GONE" },
   );
+});
+
+test("history navigation accepts a completed restored document when DOMContentLoaded is omitted", async (t) => {
+  const f = fixture(t);
+  f.router.start(); f.router.bind(binding); f.open("lease");
+  const url = "https://example.com/restored";
+  const native = f.chrome.webNavigation;
+  f.chrome.tabs.goBack = async () => {
+    native.onCommitted.emit({ tabId: 1, frameId: 0, documentId: "restored", url, documentLifecycle: "active" });
+    native.onCompleted.emit({ tabId: 1, frameId: 0, documentId: "restored", url, documentLifecycle: "active" });
+  };
+  const result = await f.call("tab.goBack", { options: { waitUntil: "domcontentloaded", timeoutMs: 500 } });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+});
+
+test("navigation completion ignores subframes, stale documents and mismatched URLs, and does not weaken load waits", async (t) => {
+  const f = fixture(t);
+  f.router.start(); f.router.bind(binding); f.open("lease");
+  const native = f.chrome.webNavigation, url = "https://example.com/current";
+  const info = await f.call("waiters.arm", { event: "navigation", waitUntil: "domcontentloaded", url, timeoutMs: 1000 });
+  native.onCommitted.emit({ tabId: 1, frameId: 0, documentId: "current", url });
+  native.onCompleted.emit({ tabId: 1, frameId: 0, documentId: "old", url });
+  native.onCompleted.emit({ tabId: 1, frameId: 2, documentId: "current", url });
+  native.onCompleted.emit({ tabId: 2, frameId: 0, documentId: "current", url });
+  native.onCompleted.emit({ tabId: 1, frameId: 0, documentId: "current", url: url + "/other" });
+  await assert.rejects(f.call("waiters.get", { id: info.id }, { budgetMs: 25 }), { code: "TIMEOUT" });
+  native.onCompleted.emit({ tabId: 1, frameId: 0, documentId: "current", url });
+  assert.equal((await f.call("waiters.get", { id: info.id })).url, url);
+  const load = await f.call("waiters.arm", { event: "navigation", waitUntil: "load", timeoutMs: 1000 });
+  native.onDOMContentLoaded.emit({ tabId: 1, frameId: 0, documentId: "current", url });
+  await assert.rejects(f.call("waiters.get", { id: load.id }, { budgetMs: 25 }), { code: "TIMEOUT" });
+  native.onCompleted.emit({ tabId: 1, frameId: 0, documentId: "current", url });
+  assert.equal((await f.call("waiters.get", { id: load.id })).url, url);
+});
+
+test("same-document history completion uses the matching native ready document without replacing its references", async (t) => {
+  const f = fixture(t);
+  f.router.start(); f.router.bind(binding); f.open("lease");
+  const native = f.chrome.webNavigation, url = "https://example.com/restored#section";
+  native.onCommitted.emit({ tabId: 1, frameId: 0, documentId: "same", url: "https://example.com/restored" });
+  const version = f.router.version("1");
+  const get = f.chrome.tabs.get;
+  f.chrome.tabs.get = async id => ({ ...await get(id), ...(id === 1 ? { url, status: "complete" } : {}) });
+  f.chrome.tabs.goBack = async () => native.onReferenceFragmentUpdated.emit({ tabId: 1, frameId: 0, documentId: "same", url });
+  const result = await f.call("tab.goBack", { options: { waitUntil: "domcontentloaded", timeoutMs: 500 } });
+  assert.equal(result.ok, true);
+  assert.equal(f.router.version("1"), version);
+  assert.equal(result.changed, false);
 });
 
 test("filechooser readiness, original download events and cancellation keep identity without guessing local files", async (t) => {

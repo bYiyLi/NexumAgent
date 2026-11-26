@@ -20,6 +20,8 @@ Locator `click/dblclick` 的 `position` 是元素所在文档中、相对当前�
 
 `tab.navigate` 的原生导航允许正常 HTTP/站点重定向，等待该标签的顶层 `commit/domcontentloaded/load/networkidle` 阶段，不强求最终地址等于最初输入；最终地址由实际标签状态读取。独立 `waitForURL` 和显式 `url` 导航等待继续精确匹配，未观察到指定地址就不成功。
 
+历史恢复可能没有新的 `DOMContentLoaded` 事件；同一活动顶层文档的原生 `load` 完成事件也能确认 `domcontentloaded`，反向不成立。同文档历史状态或片段变化依据实际事件确认 `commit`，并在当前 URL、页面版本和完整加载状态一致时确认 `load` 或 `domcontentloaded`；不把它当作新文档替换。其他文档、子 frame 或迟到事件不能确认本次等待，原期限及显式 URL 约束继续生效。
+
 ## 虚拟鼠标
 
 配套插件注入 pointer-events:none、aria-hidden、打印隐藏的全屏高层覆盖层，不拦截用户输入。在目标页面绘制 24px 蓝色辉光箭头/气泡式指针；长距离平滑曲线、短距离直接移动，到位淡入淡出，静止保持思考态。默认启用，不要求 AI 手工操作 DOM 实现。

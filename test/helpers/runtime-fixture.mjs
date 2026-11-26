@@ -308,8 +308,16 @@ export class ExecutionFixture {
       clearTimeout(deadlineTimer);
       const cancelled = row.stop?.kind === "cancel";
       const expired = row.stop?.kind === "deadline";
+      // Derive the terminal receipt from the resource rows after confirmed
+      // closure, not the initial bounded cleanup attempt or an empty default.
+      const owned = this.store.resourcesForRun(run.runId).filter(resource => resource.ownerRunId === run.runId);
+      const cleanup = {
+        closed: owned.filter(resource => resource.closedAt !== null).length,
+        unconfirmed: owned.filter(resource => resource.closedAt === null).map(resource => ({id:resource.resourceId,status:resource.status,diagnostic:resource.diagnostic})),
+      };
       this.store.transitionRun(run.runId, row.revision, cancelled ? "cancelled" : expired || failure ? "failed" : "succeeded", {
         error: cancelled ? { code: "run_cancelled" } : expired ? { code: "run_deadline_exceeded" } : failure ? errorData(failure) : null,
+        cleanup,
       });
       if (failure || cancelled || expired) state.result = null;
     })();

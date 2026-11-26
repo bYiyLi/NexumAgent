@@ -1,5 +1,12 @@
 # Nexum browser 原生验收记录
 
+## 2026-11-26：正式版候选历史导航与取消恢复（本地源码，未发布）
+
+- Test Mac 的 next.37 历史回退/前进在 `domcontentloaded` 等待下曾出现 URL 已恢复但返回 TIMEOUT；旧模拟事件夹具的 3 个新增场景在修复前全部失败。完成阶段按真实活动顶层文档及 URL 核对，`load` 可以确认缺失的 `DOMContentLoaded`；同文档历史状态和片段事件确认实际页面状态，不提升文档版本。修复后 3 项及原有 2 项相关回归通过。
+- 隔离 Chrome for Testing 142.0.7444.162 原生专项 2/2 通过：交替等待 DOMContentLoaded/load 的 8 次回退/前进，片段历史的 URL 和文档版本，等待取消后的资源清理、另一 Run 对同一文档恰好点击一次。首次夹具未先建立可靠历史条目，随后发现共享 ExecutionFixture 未从已关闭资源行生成终态 cleanup；修正夹具并保留资源与原生所有权断言。未使用用户浏览器 Profile 或重启 Dev Agent。
+- 隔离 HostRunner 扩大压力测试共 2,228 次 Worker 创建/确认退出，峰值同时存在 16 个，期末活跃 Worker 为 0，临时根清理通过；期末 RSS 262.9 MiB，采样峰值 287 MiB，测试时长约 59 秒。此为短时进程测试，不能代替长期驻留 Agent、Browser 多平台或正式发布验收。
+- Windows 真机 next.37 依赖已安装但 Browser 未登记，原 Open 报 package_manifest_invalid；已增加 Windows 原生 pnpm Junction/Hardlink 与越界拒绝门禁，Windows amd64 测试制品交叉编译成功。设备上传授权返回 path_not_allowed，未运行该制品，也未替换实际 Agent。最终候选 SHA 的远程 CI 和 Windows 安装/升级/激活闭环仍未确认。
+
 ## 2026-11-25：插件构建资产一致性（本地候选，未发布）
 
 - 原 Dev Chrome 同版本号下仍出现下载精确授权失败；新加载的隔离插件交付正常，移除受管下载凭证的负对照复现拒绝，原 Chrome 重新加载后 HTTP、Data URL 下载及字节校验通过。由此优化实际构建身份校验，而非放宽下载授权。

@@ -263,6 +263,79 @@ test("native navigation follows actual HTTP redirects for commit, DOMContentLoad
   assert.deepEqual(requests, ["commit", "domcontentloaded", "load"]);
 });
 
+test("native history navigation completes restored and same-document history at DOMContentLoaded and load", { timeout: 60000 }, async t => {
+  const f = await nativeFixture(t, {
+    html: '<!doctype html><title>Native history regression</title><h1 id="content">Original history document</h1><a href="/next" id="next">Next</a><a href="#section" id="fragment">Fragment</a><div id="section">Section</div>',
+    handleRequest(req, res) {
+      if (new URL(req.url, "http://localhost").pathname !== "/next") return false;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end('<!doctype html><title>Native history next</title><h1>Next history document</h1>');
+      return true;
+    },
+  });
+  const view = await f.run(select + `
+    const base=context.input.base,next=base+'next',receipts=[];
+    await tab.playwright.waitForLoadState({state:'load',timeoutMs:5000});
+    await tab.playwright.expectNavigation(()=>tab.playwright.locator('#next').click(),{url:next,timeoutMs:5000});
+    for (const waitUntil of ['domcontentloaded','load','domcontentloaded','load']) {
+      const back=await tab.goBack({waitUntil,timeoutMs:4000});
+      receipts.push({direction:'back',waitUntil,ok:back.ok,url:await tab.url(),ready:await tab.evaluate('document.readyState')});
+      const forward=await tab.forward({waitUntil,timeoutMs:4000});
+      receipts.push({direction:'forward',waitUntil,ok:forward.ok,url:await tab.url(),ready:await tab.evaluate('document.readyState')});
+    }
+    await tab.goBack({waitUntil:'load',timeoutMs:4000});
+    await tab.playwright.locator('#fragment').click({timeoutMs:3000});
+    await tab.playwright.waitForURL(base+'#section',{timeoutMs:3000});
+    const before=await tab.snapshot();
+    await tab.goBack({waitUntil:'domcontentloaded',timeoutMs:4000});
+    const fragmentBack={url:await tab.url(),version:(await tab.snapshot()).pageVersion};
+    await tab.forward({waitUntil:'load',timeoutMs:4000});
+    const fragmentForward={url:await tab.url(),version:(await tab.snapshot()).pageVersion};
+    return {receipts,before:before.pageVersion,fragmentBack,fragmentForward};`, { base: f.base });
+  const data = view.result.data;
+  assert.equal(data.receipts.length, 8);
+  for (const receipt of data.receipts) {
+    assert.equal(receipt.ok, true);
+    assert.equal(receipt.url, f.base + (receipt.direction === "forward" ? "next" : ""));
+    assert.ok(["interactive", "complete"].includes(receipt.ready));
+  }
+  assert.deepEqual(data.fragmentBack, { url: f.base, version: data.before });
+  assert.deepEqual(data.fragmentForward, { url: f.base + "#section", version: data.before });
+  assert.deepEqual(view.run.cleanup.unconfirmed, []);
+});
+
+test("native cancelled locator wait permits a new Run to click the same document exactly once", { timeout: 60000 }, async t => {
+  const f = await nativeFixture(t, { html: '<!doctype html><title>Cancellation recovery</title><button id="click" onclick="this.dataset.count=String(Number(this.dataset.count||0)+1)">Click fixture</button>' });
+  const pending = await f.start(select + `await tab.semanticSnapshot(); await tab.playwright.locator('#absent').waitFor({state:'visible',timeoutMs:30000});`, { base: f.base });
+  let view = pending;
+  try {
+    const until = performance.now() + 5000;
+    while (!view.operations.items.some(op => op.method === "locator.waitFor" && !op.endedAt)) {
+      assert.ok(performance.now() < until, "Original wait did not dispatch");
+      view = await f.observe(pending.run.runId, 50);
+      await delay(10);
+    }
+    f.cancel(pending.run.runId);
+    const stopped = performance.now() + 10000;
+    while (view.run.endedAt === null) {
+      assert.ok(performance.now() < stopped, "Cancelled Run did not finish cleanup");
+      view = await f.observe(pending.run.runId);
+    }
+    assert.equal(view.run.status, "cancelled");
+    assert.deepEqual(view.run.cleanup.unconfirmed, []);
+    const cancelledNative = await f.cleanupFacts();
+    t.diagnostic(JSON.stringify({ cancelledNative }));
+    const after = await f.run(select + `await tab.semanticSnapshot(); await tab.playwright.locator('#click').click({timeoutMs:4000});return {count:await tab.playwright.locator('#click').getAttribute('data-count')};`, { base: f.base });
+    assert.deepEqual(after.result.data, { count: "1" });
+    assert.deepEqual(after.run.cleanup.unconfirmed, []);
+    const recoveredNative = await f.cleanupFacts();
+    assert.deepEqual(cancelledNative.owned, [], JSON.stringify(cancelledNative));
+    assert.deepEqual(recoveredNative.owned, [], JSON.stringify(recoveredNative));
+  } finally {
+    if (view.run.endedAt === null) f.cancel(pending.run.runId);
+  }
+});
+
 test(
   "native clicks wait for unobstructed input, time out behind persistent overlays and never dispatch after cancellation",
   { timeout: 60000 },
