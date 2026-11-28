@@ -117,7 +117,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
-          path: native-artifacts
+          path: ${{ runner.temp }}/nexum-desktop-native-artifacts
           merge-multiple: false
           github-token: ${{ github.token }}
           run-id: ${{ needs.plan.outputs.source_run_id }}
@@ -133,8 +133,8 @@ jobs:
           NEXUM_UPDATE_PRIVATE_KEY: ${{ secrets[format('NEXUM_DESKTOP_UPDATE_PRIVATE_KEY_{0}', needs.plan.outputs.profile == 'production' && 'PRODUCTION' || 'DEVELOPMENT')] }}
         run: |
           set -euo pipefail
-          node desktop/scripts/prepare-release.mjs native-artifacts packages
-          cd packages
+          node "$GITHUB_WORKSPACE/desktop/scripts/prepare-release.mjs" "$RUNNER_TEMP/nexum-desktop-native-artifacts" "$RUNNER_TEMP/nexum-desktop-release-packages"
+          cd "$RUNNER_TEMP/nexum-desktop-release-packages"
           prefix=NexumDesktop
           flags=()
           if [ "$PROFILE" = development ]; then
@@ -154,7 +154,7 @@ jobs:
             assets+=("$file" "$file.sha256")
           done
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq 12
-          node ../desktop/scripts/sign-update.mjs
+          node "$GITHUB_WORKSPACE/desktop/scripts/sign-update.mjs"
           assets+=("update.json" "update.json.sig")
           # Creating a draft first ensures failed uploads do not become a public release.
           # Never overwrite an existing release or its assets.
