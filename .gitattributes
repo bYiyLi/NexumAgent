@@ -1,0 +1,2 @@
+# Keep the hashed Desktop brand source byte-identical on Windows and macOS.
+/desktop/frontend/public/nexum-mark.svg text eol=lf
