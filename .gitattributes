@@ -1,2 +1,2 @@
-# Keep the hashed Desktop brand source byte-identical on Windows and macOS.
-/desktop/frontend/public/nexum-mark.svg text eol=lf
+# Desktop checks and generated-asset hashes require byte-stable source on every OS.
+/desktop/** text=auto eol=lf
