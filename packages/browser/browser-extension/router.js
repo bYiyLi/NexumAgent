@@ -4681,11 +4681,17 @@ export function createBrowserRouter(
           // A raw cdp.send Network.loadNetworkResource can also remain pending
           // after debugger detach (notably on Windows). The lease still confirms
           // native input release and debugger detach before reporting closure.
+          // Layout metrics and screenshot bytes are read-only native results:
+          // a late reply must not block cancellation or be published by a
+          // stopped lease. The existing releaseControl path still confirms
+          // actual debugger detach before closing the lease.
           // Internal document exports must await the native response so any
           // returned stream can be closed; IO.read and IO.close likewise retain
           // their actual settlement.
           result =
             method === "Runtime.evaluate" ||
+            method === "Page.getLayoutMetrics" ||
+            method === "Page.captureScreenshot" ||
             (ctx.method !== "cdp.send" && method === "Input.dispatchMouseEvent" && params.type === "mouseMoved") ||
             (method === "Network.loadNetworkResource" && ctx.method === "cdp.send")
               ? await nativeWithStop(ctx.signal, () =>
@@ -5547,6 +5553,27 @@ export function createBrowserRouter(
     },
     async screenshot(ctx, input) {
       requireValue(!(input.fullPage && input.clip));
+      // Fixed phase names only: diagnostics carry neither URLs nor image data.
+      // Send progress before native waits so a lost/late action reply still
+      // leaves the last observed phase in the original Run's logs.
+      const stage = (name) => {
+        try {
+          emit({
+            type: "event",
+            event: "screenshot_stage",
+            actionId: ctx.actionId,
+            leaseId: ctx.lease.id,
+            runId: ctx.runId,
+            operationId: ctx.operationId,
+            target: ctx.target,
+            stage: name,
+            elapsedMs: Math.max(0, Math.round(performance.now() - ctx.started)),
+          });
+        } catch {
+          // Diagnostic delivery cannot change screenshot or cleanup results.
+        }
+      };
+      stage("ready");
       await readyForInput(ctx);
       const readyBudget = remainingBudget(ctx);
       if (readyBudget > 130) await router.delay(ctx, 120);
@@ -5559,6 +5586,7 @@ export function createBrowserRouter(
           (maxEdgePx === undefined ||
             (Number.isInteger(maxEdgePx) && maxEdgePx > 0)),
       );
+      stage("layout");
       const metrics = await router.send(ctx, "Page.getLayoutMetrics", {});
       const size = input.fullPage
         ? (metrics.cssContentSize ?? metrics.contentSize)
@@ -5580,6 +5608,7 @@ export function createBrowserRouter(
       // downscaling. Shared transport and result delivery own their budgets.
       let scale = 1;
       if (maxEdgePx !== undefined) {
+        stage("scale");
         const pixelRatio = await router.page(ctx, {
           command: "devicePixelRatio",
         });
@@ -5593,6 +5622,7 @@ export function createBrowserRouter(
           maxEdgePx / (Math.max(clip.width, clip.height) * pixelRatio),
         );
       }
+      stage("capture");
       const result = await router.send(ctx, "Page.captureScreenshot", {
         format: "jpeg",
         quality,
@@ -5604,9 +5634,12 @@ export function createBrowserRouter(
         "PROTOCOL_MISMATCH",
         "The browser did not return screenshot bytes.",
       );
+      stage("decode");
       const decoded = atob(result.data);
       const data = new Uint8Array(decoded.length);
       for (let i = 0; i < data.length; i++) data[i] = decoded.charCodeAt(i);
+      requireBudget(ctx);
+      stage("complete");
       return data;
     },
     actionResult(ctx, id = ctx.target.tabId, before = version(id)) {

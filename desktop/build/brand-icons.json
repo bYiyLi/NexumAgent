@@ -1,0 +1,12 @@
+{
+  "source": {
+    "path": "frontend/public/nexum-mark.svg",
+    "sha256": "e6d117597f8c4369fed8e91665f733bbdef2c54e014c8ad2743d38f58aef211d"
+  },
+  "assets": {
+    "build/appicon.png": "a98a8cf6b3ef9634bc336532dac79e5715ce22b0806993cdfdd09e4fc5ea0421",
+    "build/darwin/icons.icns": "1ff5e711caaff1fe692427c2e1aa6f58ec10bc64c995bcd46de7218d91a032b6",
+    "build/windows/icon.ico": "f1dfd5c4fd7e38977f2c183d1368a02f2aa3dd2f2aa6528ef3c56bfa00daad71",
+    "build/tray-template.png": "82ae862c2d3370e060bf76697711a690015a5487639c8aa63f1e222dd0a6ccdd"
+  }
+}

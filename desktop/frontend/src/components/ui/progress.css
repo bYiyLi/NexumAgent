@@ -1,0 +1,24 @@
+.desktop-progress-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--progress-track);
+}
+.desktop-progress-indicator {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-gradient);
+  transition: width 200ms ease-out;
+}
+.desktop-progress[data-indeterminate] .desktop-progress-indicator {
+  width: 35%;
+  animation: desktop-progress-pulse 1.4s ease-in-out infinite alternate;
+}
+@keyframes desktop-progress-pulse {
+  from { transform: translateX(0); }
+  to { transform: translateX(185%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .desktop-progress-indicator { transition: none; }
+  .desktop-progress[data-indeterminate] .desktop-progress-indicator { animation: none; }
+}

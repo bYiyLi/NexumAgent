@@ -621,9 +621,10 @@ async function fixture(
     );
   let connection;
   const router = createBrowserRouter(chrome, {
-    ...(visualFailure
-      ? { emit: (message) => connection?.publish(message) }
-      : {}),
+    emit: (message) => {
+      if (visualFailure || message.event === "screenshot_stage")
+        connection?.publish(message);
+    },
     ...(visualFailure
       ? {
           visual: {
@@ -932,6 +933,19 @@ test("registered Browser scripts deliver real discovery data and the original JP
   assert.ok(image);
   assert.equal(image.mimeType, "image/jpeg");
   assert.deepEqual(Buffer.from(image.data, "base64"), Buffer.from(jpeg, "base64"));
+  const shotOperation = screenshot.operations.items.find((item) =>
+    item.method === "tab.screenshot" && item.status === "succeeded");
+  assert.ok(shotOperation);
+  const stages = f.logs.filter((item) =>
+    item.message === "Browser screenshot stage." &&
+    item.data.operationId === shotOperation.operationId);
+  assert.deepEqual(stages.map((entry) => entry.data.stage),
+    ["ready", "layout", "capture", "decode", "complete"]);
+  assert.ok(stages.every((entry, index) =>
+    entry.data.method === "tab.screenshot" &&
+    entry.data.browserId === browserId &&
+    Number.isSafeInteger(entry.data.elapsedMs) &&
+    entry.data.elapsedMs >= (index ? stages[index - 1].data.elapsedMs : 0)));
   assert.equal(f.attached.size, 0);
   assert.deepEqual(f.captures.at(-1), {
     format: "jpeg", quality: 75, captureBeyondViewport: false,

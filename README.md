@@ -1,16 +1,20 @@
 # NexumAgent
 
-Nexum Agent 的独立、公开 Node 执行宿主与扩展项目，面向多种 AI Host 与 Agent Runtime；可通过 Git Submodule 被主仓库引用。
+Nexum Agent 的独立、公开 Node 执行宿主与扩展项目，以及 Nexum Desktop 桌面管理客户端；可通过 Git Submodule 被主仓库引用。
 
 ## 当前状态
 
-**Phase 52 正在整合，整体验收尚未完成。** 常驻 Go Agent 拥有 Cloud 连接、当前授权、Run 生命周期、SQLite、MCP/OpenAPI 与受管资源；本包只提供 Node `24.22.1` 宿主、逐 Run Worker、JavaScript 模块加载、SDK/Browser 扩展及资料生成，不再提供与 Go 竞争的 `nexum-agent` npm CLI。
+**Phase 52 正在整合，整体验收尚未完成。** 常驻 Go Agent 拥有 Cloud 连接、当前授权、Run 生命周期、SQLite、MCP/OpenAPI 与受管资源；Node Host 只提供 Node `24.22.1` 宿主、逐 Run Worker、JavaScript 模块加载、SDK/Browser 扩展及资料生成，不再提供与 Go 竞争的 `nexum-agent` npm CLI。
 
 Go 与 Node 使用父子进程 stdin/stdout 上的逐行双向 JSON-RPC 2.0；日志走 stderr，大附件与媒体使用受管引用。Node 的就绪、真实结果与收尾由 Go 确认；Node 安装或初始化失败不应把 Go 在线误报为脚本可运行。
 
 旧 TypeScript Core、Cloud 编排、Node SQLite、MCP/OpenAPI 适配及维护执行后端已移除。Node 只通过现有 Host RPC 使用 Go 管理的运行事实和服务；扩展维护保留公开 facade，不在 Node 内执行配置变更。仍需按 Phase 52 完成全链路与原生平台验收，局部测试不等于完整交付或已发布。Node VM 不是恶意代码安全沙箱，系统隔离由目标 OS/容器承担。
 
 此仓库不包含 Nexum Cloud 的私有代码、配置、Token 或生产部署资源。
+
+## Nexum Desktop
+
+[Desktop](desktop/README.md) 是独立 Wails/Go/React 工程，采用自己的 Go Module、pnpm Workspace、SQLite 和生产/开发 Profile；不依赖私有主仓库构建。当前仅建设基础工程，Agent 管理业务与跨平台发行验收见其开发记录。
 
 ## 文档
 

@@ -1,0 +1,13 @@
+.task/
+.wails/
+.tools/
+bin/
+frontend/dist/
+frontend/bindings/
+node_modules/
+*.syso
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

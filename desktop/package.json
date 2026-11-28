@@ -1,0 +1,33 @@
+{
+  "name": "@nexum/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.22.1"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "dev": "node scripts/desktop.mjs dev",
+    "check": "node scripts/desktop.mjs check",
+    "build": "node scripts/desktop.mjs build production",
+    "build:dev": "node scripts/desktop.mjs build development",
+    "package": "node scripts/desktop.mjs package production",
+    "package:dev": "node scripts/desktop.mjs package development",
+    "bindings": "node scripts/desktop.mjs prepare",
+    "tools:install": "node scripts/desktop.mjs tools",
+    "icons:generate": "node scripts/brand-icons.mjs generate",
+    "icons:check": "node scripts/brand-icons.mjs check",
+    "build:hot": "node scripts/desktop.mjs build development hot",
+    "run:dev": "node scripts/desktop.mjs run development",
+    "preview:startup": "node scripts/desktop.mjs run development preview-startup",
+    "preview:agent-lifecycle": "node scripts/desktop.mjs run development preview-agent-lifecycle",
+    "preview:environment": "node scripts/desktop.mjs run development preview-environment",
+    "preview:environment-check": "node scripts/desktop.mjs run development preview-environment-check",
+    "preview:agent-upgrade": "node scripts/desktop.mjs run development preview-agent-upgrade",
+    "preview:agent-repair": "node scripts/desktop.mjs run development preview-agent-repair",
+    "preview:agent-start": "node scripts/desktop.mjs run development preview-agent-start",
+    "preview:agent-workspace": "node scripts/desktop.mjs run development preview-agent-workspace",
+    "test:update:mac": "node scripts/acceptance-update-mac.cjs"
+  }
+}

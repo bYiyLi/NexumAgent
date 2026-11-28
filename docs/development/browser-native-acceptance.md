@@ -660,3 +660,11 @@ Browser `pnpm check` typecheck/build/全量组件与 Worker 294/294 通过（无
 以 `--trace-warnings` 实测复现 Frame 渲染探测耗尽预算后 router.poll 仍按负数创建定时器（TimeoutNegativeWarning -176.022 ms）。统一插件单调截止计算，接收/校验附件、排队、原生探测及子等待均消耗原预算，探测后重新核对期限；事件迟到不能令已过期 waiter 成功。独立 arm 的有效期和 get 的单次观察期限分别保留，取消读取不撤销其他所有者的等待。Node 发送层独立停止已超时 action 的字节流及结果观察，未派发不补发 cancel；共享队列及租约仍按实际收尾确认。持久化附着意图期间过期则撤销未派发意图，已发起附着而取消则保留 UNKNOWN_RESULT 并等待实际释放。新增 7 项反例回归；公开接口、默认期限、既有授权边界不变。
 
 最终冻结源码后重新构建，Browser pnpm check（含 typecheck/build）302/302 通过，0 失败/取消/跳过，无 TimeoutNegativeWarning。Core pnpm check 678 项、650 通过、28 条件跳过、0 失败/取消；Core 验证后最后收尾仅改 MV3 源码与其专项测试，最终 Browser gate 已覆盖。macOS 隔离 Chrome for Testing 六项原生验收 6/6：真实等待/滚动/键盘、跨站嵌套 Frame 缩放输入、HTTP 重定向三种加载阶段、持续遮挡超时与取消后无迟到输入、文件/下载身份与 waiter 取消、并发 Run 的真实关闭回执（1→3，实际受管控制清单为空）。首轮最后一项读取旧 synthetic Run cleanup 字段，改查真实 MV3 受管清单及持久回执；复验期间修改源码导致旧构建字节不一致被拒绝，最终冻结后重建复验。最后附着 guard 的错误优先级回归已修复，Router 单独 100/100 通过并纳入最终全量检查。未执行 Windows/Linux/Edge、外部 Host 或部署验收；已派发网页效果仍可能未知，不承诺硬抢占或自动回滚。未提交、推送、发布、部署。
+
+### 截图取消收尾与阶段诊断（2026-11-27，本地候选）
+
+正式 Yi Mac 1.1.0 的 Run `run_b3e46af534897c6a92d2602673078f14` 在截图方法期限后仍占用 Browser RunScope 约 9 分钟，日志先后记录 TIMEOUT、Worker 未结算和 run_cleanup_unconfirmed。以发布源码（主仓 `2bc6d4a3a08261ae50591cd5d7bbd1d13f1fa57e`、Agent `4360274e572a80d430f70dd7cff00e3950eafad4`）现有 Router 夹具注入原生 capture Promise 不返回，取消后无 detach 且租约无法关闭；原生返回后才能关闭（诊断 Run `run_54cdab599a3a3483591199b9829a73b3`）。不由此推定真实 Chrome 超时的具体子阶段或黑屏触发条件。
+
+布局查询与截图捕获复用 nativeWithStop；放弃已取消只读结果等待，不提前伪造 Debugger 或 lease 关闭，不改变流式 IO/实际原生写入的收尾合同。新增回归覆盖原生读取悬挂、实际 detach 门控、新 Run 与迟到旧结果隔离。私有事件记录固定阶段和累计耗时；只对原在途 action 校验身份、顺序及耗时后投影 Run 日志，重复、错身份、倒序和迟到事件丢弃。Browser 解码完成不等于真实图像正确或 Host 已接收。新增隔离原生页面像素测试，覆盖原尺寸、缩放和区域截图及合法纯黑区域，不在生产运行中判黑色即失败或自动重试。
+
+本机最终 Browser `pnpm check`（含 typecheck/build）320/320 通过，0 失败/取消/跳过（Run `run_f0c8394c7ab8746363342af1279fe1e4`）；真实独立 Extension Worker 与 Core 夹具已验证截图阶段日志关联。Core `pnpm check` 694 项、666 通过、28 条件跳过、0 失败/取消（Run `run_a6325df9df0dde8d5f3a231b71513a7c`）；其后 Review 只收紧 Browser 自有事件校验并补 Worker 断言，最终 Browser 门禁已覆盖。原生 Chrome 专项启动因正式 Agent 的环境变量策略拒绝 `NEXUM_BROWSER_NATIVE_BINARY`（environment_variable_forbidden），未启动隔离浏览器，新增像素用例尚未实机执行；不绕过权限策略。未提交、推送、发布、部署或重启正式环境；偶发黑屏原因及新版真实浏览器/外部 Host 验收仍未确认。

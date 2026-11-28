@@ -687,6 +687,21 @@ export class BrowserRuntime {
             onDispatched: () => {
               dispatched = true;
             },
+            ...(["tab.screenshot", "playwright.elementScreenshot", "ax.get", "tab.semanticSnapshot"].includes(method)
+              ? { onScreenshotStage: (progress: { stage: string; elapsedMs: number }) =>
+                  call.log({
+                    level: "debug",
+                    message: "Browser screenshot stage.",
+                    data: {
+                      method,
+                      browserId: target.browserId,
+                      operationId: call.operationId,
+                      stage: progress.stage,
+                      elapsedMs: progress.elapsedMs,
+                    },
+                  }),
+                }
+              : {}),
           });
         },
         queued,

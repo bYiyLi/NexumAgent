@@ -1,0 +1,101 @@
+/* Settings is a flat application-level list on the shared Desktop canvas.
+   Only interactive controls have a surface; sections never become cards. */
+.settings-page { padding: 24px 24px 26px; }
+.settings-page .settings-section { margin-top: 17px; }
+.settings-page .settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.settings-page .desktop-section-title { margin-bottom: 8px; }
+.settings-group { display: flex; flex-direction: column; min-width: 0; }
+.settings-page .settings-field-title { font-size: 13px; font-weight: 500; }
+.settings-page .settings-theme-field { margin: 2px 0 7px; }
+.settings-page .desktop-segmented { margin-top: 8px; }
+.settings-option-row { min-height: 36px; padding: 4px 0; }
+.settings-option-row > .settings-field-title { min-width: 0; overflow-wrap: anywhere; }
+.settings-language-row { margin-top: 6px; }
+.settings-page .settings-language-trigger { padding-right: 0; }
+.settings-note {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.settings-switch {
+  position: relative;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 19px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--input);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.settings-switch[data-checked] { background: var(--primary); }
+.settings-switch-thumb {
+  display: block;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .12);
+  transform: translateX(0);
+  transition: transform 140ms ease;
+}
+.settings-switch[data-checked] .settings-switch-thumb { transform: translateX(13px); }
+.settings-switch[data-disabled] { cursor: default; opacity: .5; }
+.settings-switch:focus-visible, .settings-action-row:focus-visible, .settings-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.settings-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  width: 100%;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-action-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.settings-action-row svg { flex: none; color: var(--muted-foreground); }
+.settings-action-row:hover:not(:disabled) { color: var(--primary); }
+.settings-action-row:disabled { cursor: default; color: var(--muted-foreground); }
+.settings-action-end { display: flex; align-items: center; }
+.settings-page .settings-about-name { font-size: 14px; margin: 2px 0 5px; }
+.settings-page .settings-meta { margin-top: 6px; }
+.settings-links { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; margin-top: 12px; }
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  cursor: pointer;
+}
+.settings-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.desktop-shell[data-page="settings"] .desktop-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--input) transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-switch, .settings-switch-thumb { transition: none; }
+}
+
+.settings-status-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.settings-status-row > p { min-width: 0; }
+.settings-status-row > .settings-link { flex: none; }
+.settings-link:disabled { color: var(--muted-foreground); opacity: .65; cursor: default; text-decoration: none; }
+.settings-notice-error { color: var(--destructive); }

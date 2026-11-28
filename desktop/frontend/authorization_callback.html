@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="{{.Language}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{.Title}} · Nexum Desktop</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --canvas: #f8fafc;
+      --surface: #ffffff;
+      --text: #172033;
+      --secondary: #516179;
+      --border: #d9e0ee;
+      --shadow: #17203308;
+      --approved-background: #eaf0fd;
+      --approved-foreground: #1d4ed8;
+      --denied-background: #fff4dc;
+      --denied-foreground: #925600;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas: #141b2d;
+        --surface: #1b2639;
+        --text: #f1f5f9;
+        --secondary: #a1afc3;
+        --border: #334155;
+        --shadow: #07102240;
+        --approved-background: #293d60;
+        --approved-foreground: #bfdbfe;
+        --denied-background: #493923;
+        --denied-foreground: #ffd384;
+      }
+    }
+
+    body {
+      box-sizing: border-box;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0;
+      padding: clamp(24px, 7vw, 56px) 16px;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+
+    .receipt {
+      box-sizing: border-box;
+      width: min(100%, 420px);
+      padding: 26px clamp(16px, 5vw, 36px) 20px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: 0 6px 24px var(--shadow);
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .wordmark svg {
+      display: block;
+      width: 24px;
+      height: 24px;
+    }
+
+    .result {
+      padding: 30px 0 26px;
+    }
+
+    .status {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 16px;
+      border-radius: 16px;
+    }
+
+    .status-approved {
+      background: var(--approved-background);
+      color: var(--approved-foreground);
+    }
+
+    .status-denied {
+      background: var(--denied-background);
+      color: var(--denied-foreground);
+    }
+
+    h1 {
+      margin: 0 0 9px;
+      font-size: clamp(22px, 4vw, 26px);
+      font-weight: 650;
+      line-height: 1.3;
+      text-wrap: balance;
+    }
+
+    .result p {
+      margin: 0;
+      color: var(--secondary);
+      font-size: 15px;
+      line-height: 1.65;
+      white-space: pre-line;
+    }
+
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      color: var(--secondary);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    footer svg {
+      flex: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="receipt">
+    <header class="wordmark">
+      <span aria-hidden="true">{{.Mark}}</span>
+      <span>Nexum Desktop</span>
+    </header>
+    <div class="result">
+      <div class="status {{if .Approved}}status-approved{{else}}status-denied{{end}}" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22c-4.7-2.3-7-5.5-7-10V6l7-3 7 3v6c0 4.5-2.3 7.7-7 10Z"/>
+          {{if .Approved}}<path d="m9 12 2 2 4-4"/>{{else}}<path d="M9 12h6"/>{{end}}
+        </svg>
+      </div>
+      <h1>{{.Title}}</h1>
+      <p>{{.Message}}</p>
+    </div>
+    <footer>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <path d="M3 9h18"/>
+      </svg>
+      <span>{{.Close}}</span>
+    </footer>
+  </main>
+</body>
+</html>

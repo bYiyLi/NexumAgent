@@ -1,0 +1,26 @@
+version: '3'
+
+tasks:
+  build:
+    summary: Build Nexum Desktop
+    cmds:
+      - pnpm run build
+  build:hot:
+    summary: Build the development profile for Wails live reload
+    cmds:
+      - pnpm run build:hot
+  package:
+    summary: Build the production package candidate
+    cmds:
+      - pnpm run package
+  run:
+    summary: Run the already built development application
+    cmds:
+      - pnpm run run:dev
+  dev:frontend:
+    dir: frontend
+    cmds:
+      - pnpm dev --host 127.0.0.1 --port 9245 --strictPort
+  dev:
+    cmds:
+      - pnpm run dev

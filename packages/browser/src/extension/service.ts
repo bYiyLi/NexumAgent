@@ -62,6 +62,11 @@ export interface BrowserVisualDiagnostic {
   tabId: string | null;
   reason: string;
 }
+const screenshotStages = ["ready", "layout", "scale", "capture", "decode", "complete"];
+interface ScreenshotProgress {
+  stage: string;
+  elapsedMs: number;
+}
 interface Pending {
   actionId: string;
   operationId: string;
@@ -74,6 +79,9 @@ interface Pending {
   cleanup(): void;
   expire(): boolean;
   dispatched: boolean;
+  onScreenshotStage?: (progress: ScreenshotProgress) => void;
+  lastScreenshotStage?: number;
+  lastScreenshotElapsedMs?: number;
 }
 export interface BrowserPeer {
   readonly id: string;
@@ -858,6 +866,50 @@ export class BrowserService extends EventEmitter {
       );
       const event = data(message, limits.controlBytes);
       peer.sequence = Number(message.sequence);
+      if (message.event === "screenshot_stage") {
+        const pending = identifier(message.actionId)
+          ? peer.pending.get(message.actionId)
+          : undefined;
+        const target = record(message.target) ? message.target : undefined;
+        const lease = identifier(message.leaseId)
+          ? this.#leases.get(message.leaseId)
+          : undefined;
+        const stageIndex = typeof message.stage === "string"
+          ? screenshotStages.indexOf(message.stage)
+          : -1;
+        if (
+          pending?.onScreenshotStage && pending.dispatched &&
+          lease?.opened && lease.peer === peer &&
+          pending.leaseId === message.leaseId &&
+          pending.runId === message.runId && lease.runId === pending.runId &&
+          pending.operationId === message.operationId &&
+          pending.generation === peer.generation &&
+          target?.bootId === pending.target.bootId &&
+          target.browserId === pending.target.browserId &&
+          target.browserSessionId === pending.target.browserSessionId &&
+          target.generation === pending.target.generation &&
+          target.tabId === pending.target.tabId &&
+          target.controlEpoch === pending.target.controlEpoch &&
+          typeof message.stage === "string" &&
+          stageIndex > (pending.lastScreenshotStage ?? -1) &&
+          typeof message.elapsedMs === "number" &&
+          Number.isSafeInteger(message.elapsedMs) &&
+          message.elapsedMs >= (pending.lastScreenshotElapsedMs ?? 0) &&
+          message.elapsedMs <= 2147483647
+        ) {
+          pending.lastScreenshotStage = stageIndex;
+          pending.lastScreenshotElapsedMs = message.elapsedMs;
+          try {
+            pending.onScreenshotStage({
+              stage: message.stage,
+              elapsedMs: message.elapsedMs,
+            });
+          } catch {
+            // An expired or unavailable Run log is not a browser action failure.
+          }
+        }
+        return;
+      }
       if (
         message.event === "tab_closed" &&
         message.target &&
@@ -1138,6 +1190,7 @@ export class BrowserService extends EventEmitter {
       budgetMs: number;
       signal: AbortSignal;
       onDispatched?: () => void;
+      onScreenshotStage?: (progress: ScreenshotProgress) => void;
     },
   ): Promise<unknown> {
     input.signal.throwIfAborted();
@@ -1192,6 +1245,7 @@ export class BrowserService extends EventEmitter {
     const pending: Pending = {
       ...binding,runId:input.runId,leaseId:input.leaseId,target:{...input.target},
       resolve:result.resolve,reject:result.reject,dispatched:false,expire,
+      onScreenshotStage: input.onScreenshotStage,
       cleanup: () => {
         if (peer.pending.get(actionId)!==pending) return;
         clearTimeout(timer);

@@ -349,6 +349,43 @@ return {facts};`,
 );
 
 test(
+  "native viewport and scaled screenshots contain the expected dark-page visual content",
+  { timeout: 90000 },
+  async (t) => {
+    const f = await nativeFixture(t, {
+      html: '<!doctype html><title>Native dark screenshot content</title><style>html,body{margin:0;background:#000;color:white}main{position:relative;width:800px;height:600px}.marker{position:absolute;width:400px;height:300px}#red{top:0;left:0;background:rgb(220,30,35)}#green{top:0;left:400px;background:rgb(25,160,65)}#blue{top:300px;left:0;background:rgb(25,70,210)}#black{top:300px;left:400px;background:#000}</style><main><div class="marker" id="red"></div><div class="marker" id="green"></div><div class="marker" id="blue"></div><div class="marker" id="black"></div></main>',
+    });
+    const result = await f.run(
+      select + `
+await tab.cdp.send('Emulation.setDeviceMetricsOverride',{width:800,height:600,deviceScaleFactor:2,mobile:false});
+const facts=[];
+for(const options of [{quality:90},{quality:90,maxEdgePx:800},{quality:90,clip:{x:0,y:0,width:400,height:300}}]){
+  const bytes=await tab.screenshot(options);
+  const image=await tab.playwright.evaluate('async data=>{const bitmap=await createImageBitmap(new Blob([new Uint8Array(data)],{type:"image/jpeg"}));const canvas=new OffscreenCanvas(bitmap.width,bitmap.height);const ctx=canvas.getContext("2d");ctx.drawImage(bitmap,0,0);const pixels=[[.25,.25],[.75,.25],[.25,.75],[.75,.75]].map(([x,y])=>Array.from(ctx.getImageData(Math.floor(bitmap.width*x),Math.floor(bitmap.height*y),1,1).data));const value={width:bitmap.width,height:bitmap.height,pixels};bitmap.close();return value;}',Array.from(bytes));
+  facts.push({options,...image,byteLength:bytes.length});
+}
+return {facts};`,
+      { base: f.base },
+    );
+    const facts = result.result.data.facts;
+    t.diagnostic(JSON.stringify({ facts }));
+    const expected = [[220,30,35],[25,160,65],[25,70,210],[0,0,0]];
+    assert.equal(facts.length, 3);
+    for (const fact of facts) {
+      assert.ok(fact.width > 0 && fact.height > 0 && fact.byteLength > 0);
+      if (fact.options.maxEdgePx)
+        assert.ok(Math.max(fact.width, fact.height) <= fact.options.maxEdgePx);
+      for (const [i, pixel] of fact.pixels.entries()) {
+        const color = expected[fact.options.clip ? 0 : i];
+        assert.ok(color.every((value, channel) => Math.abs(pixel[channel] - value) < 25),
+          JSON.stringify({ options: fact.options, pixel, expected: color }));
+      }
+    }
+    assert.deepEqual((await f.cleanupFacts()).owned, []);
+  },
+);
+
+test(
   "native full-page JPEG above 40 megapixels survives original Core image delivery",
   { timeout: 90000 },
   async (t) => {

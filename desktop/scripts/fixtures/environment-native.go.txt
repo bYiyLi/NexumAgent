@@ -1,0 +1,121 @@
+
+type acceptanceSSHFixture struct {
+    listener net.Listener
+    value string
+    fingerprint string
+    count atomic.Int32
+    stop context.CancelFunc
+}
+
+func newAcceptanceSSHFixture() (*acceptanceSSHFixture,error) {
+    _, host, err := ed25519.GenerateKey(rand.Reader)
+    if err != nil { return nil,err }
+    key, err := ssh.NewSignerFromKey(host)
+    if err != nil { return nil,err }
+    listener, err := net.Listen("tcp","127.0.0.1:0")
+    if err != nil { return nil,err }
+    ctx, stop := context.WithCancel(context.Background())
+    f := &acceptanceSSHFixture{listener:listener,value:rand.Text(),fingerprint:ssh.FingerprintSHA256(key.PublicKey()),stop:stop}
+    config := &ssh.ServerConfig{PasswordCallback:func(c ssh.ConnMetadata, value []byte)(*ssh.Permissions,error){
+        f.count.Add(1)
+        if c.User()=="fixture" && string(value)==f.value { return nil,nil }
+        return nil,errors.New("fixture authentication rejected")
+    }}
+    config.AddHostKey(key)
+    go func() {
+        for {
+            raw, err := listener.Accept()
+            if err != nil { return }
+            go func(){
+                defer raw.Close()
+                release:=context.AfterFunc(ctx,func(){_ = raw.Close()})
+                defer release()
+                _ = raw.SetDeadline(time.Now().Add(90*time.Second))
+                conn, channels, requests, err:=ssh.NewServerConn(raw,config)
+                if err!=nil {return}
+                defer conn.Close()
+                go ssh.DiscardRequests(requests)
+                for ch := range channels {
+                    if ch.ChannelType()!="session" { _=ch.Reject(ssh.UnknownChannelType,"fixture sessions only"); continue }
+                    session, requests, err:=ch.Accept()
+                    if err!=nil {continue}
+                    go serveAcceptanceSession(session,requests)
+                }
+            }()
+        }
+    }()
+    return f,nil
+}
+
+func serveAcceptanceSession(ch ssh.Channel, requests <-chan *ssh.Request) {
+    defer ch.Close()
+    for req:=range requests {
+        switch req.Type {
+        case "exec":
+            var payload struct { Command string }
+            if ssh.Unmarshal(req.Payload,&payload)!=nil || payload.Command!="uname -s && uname -m && hostname && printf '%s\\n' \"$HOME\" && id -un" {
+                _=req.Reply(false,nil); continue
+            }
+            _=req.Reply(true,nil)
+            arch:="arm64"
+            if runtime.GOARCH=="amd64" {arch="x86_64"}
+            _,_=fmt.Fprintf(ch,"Darwin\n%s\nNexum-Environment-Fixture\n/tmp\nfixture\n",arch)
+            _,_=ch.SendRequest("exit-status",false,ssh.Marshal(struct{Status uint32}{0}))
+            return
+        case "subsystem":
+            var payload struct{Name string}
+            if ssh.Unmarshal(req.Payload,&payload)!=nil||payload.Name!="sftp" {
+                _=req.Reply(false,nil);continue
+            }
+            _=req.Reply(true,nil)
+            server,err:=sftp.NewServer(ch,sftp.ReadOnly())
+            if err==nil { defer server.Close(); _=server.Serve() }
+            return
+        default:
+            _=req.Reply(false,nil)
+        }
+    }
+}
+
+func installEnvironmentAcceptance(app *application.App, w *application.WebviewWindow, service *FoundationService) error {
+    fixture,err:=newAcceptanceSSHFixture()
+    if err!=nil{return err}
+    script,err:=os.ReadFile(acceptanceJSPath)
+    if err!=nil{fixture.listener.Close();fixture.stop();return err}
+    payload,err:=json.Marshal(map[string]any{"port":fixture.listener.Addr().(*net.TCPAddr).Port,
+        "fingerprint":fixture.fingerprint,"secret":fixture.value,"hostname":"Nexum-Environment-Fixture"})
+    if err!=nil{fixture.listener.Close();fixture.stop();return err}
+    var once sync.Once
+    finish:=func(report map[string]any) {
+        once.Do(func(){
+            state,e:=service.GetEnvironmentState()
+            report["backendReadOK"]=e==nil
+            report["environmentCount"]=len(state.Environments)
+            report["authCalls"]=fixture.count.Load()
+            report["passed"]=report["ok"]==true && e==nil && len(state.Environments)==1 && fixture.count.Load()==3
+            // Test-only profile: clean any unfinished attempt and generated vault entries.
+            if e==nil {
+                if state.Attempt!=nil {_=service.CancelEnvironmentConnection(state.Attempt.ID)}
+                for _,v:=range state.Environments {if v.Kind=="ssh" {_=service.RemoveEnvironment(v.ID)}}
+            }
+            after,cleanupErr:=service.GetEnvironmentState()
+            report["cleanupOK"]=cleanupErr==nil&&len(after.Environments)==1
+            if report["cleanupOK"]!=true {report["passed"]=false}
+            fixture.stop();_=fixture.listener.Close()
+            output,_:=json.MarshalIndent(report,"","  ")
+            _=os.WriteFile(acceptanceResultPath,output,0600)
+            go app.Quit()
+        })
+    }
+    app.Event.On("desktop:acceptance:environment",func(event *application.CustomEvent){
+        var report map[string]any
+        raw,_:=json.Marshal(event.Data)
+        if json.Unmarshal(raw,&report)!=nil {report=map[string]any{"ok":false,"step":"result decode"}}
+        finish(report)
+    })
+    w.OnWindowEvent(events.Common.WindowRuntimeReady,func(*application.WindowEvent){
+        w.ExecJS(string(script)+"("+string(payload)+")")
+    })
+    go func(){time.Sleep(100*time.Second);finish(map[string]any{"ok":false,"step":"native acceptance deadline"})}()
+    return nil
+}

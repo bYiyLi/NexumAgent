@@ -50,7 +50,7 @@
 7. Avru 的 Tab/Frame/Playwright 便捷入口、Tabs.new/select、截图 quality/maxEdgePx、clickCount/position、Locator type.delayMs/press.modifiers、DOM NodeId 与 node_id 同型且不和原生 CDP nodeId 混用、导航 options、selector/text/url 等待、Dialog message/快照 dialog、Browser 元数据逐项验证；force 和未知字段拒绝，AXPoint 具名坐标与剪贴板 bytes 按当前合同。
 8. AST 嵌套/跨 frame/跨目标/无效正则/环/上限、all() 固定成员与旧节点不重用；WebMCP 同名工具重新注册不得自动执行新版本，绑定门面保真；CDP 已 detach child 的缓冲事件仍可筛选，send 则明确失效。
 9. Locator 自动查询当前 scope 的开放 Shadow DOM，包括嵌套根与 Slot；CSS 保持各原生根的匹配语义，跨根通过宿主链式定位，Frame 仍显式进入。覆盖同名 ID/名称歧义、组合查询、根内 IDREF 与布局分隔的名称、Slot 限定作用域及动态重分配、失活嵌套 Slot、固定引用失效（含 adopt 到其他文档）、内外层遮挡、可信点击、键盘焦点丢失、表单回读、普通及跨源 Frame 中的开放根；观察不导出闭合根内容或宣称不可验证的定位能力。文件选择和媒体读取使用实际节点、原有授权及原始字节。
-10. 超时、等待与取消：从实际传输剩余时间到 MV3 原生队列、Frame 渲染、轮询和事件回执使用一致截止；测试探测耗尽预算后的真实失败和无负数定时器、过期事件与排队动作拒绝、延迟字节发送/租约确认取消后的收尾和其他任务正常执行。
+10. 超时、等待与取消：从实际传输剩余时间到 MV3 原生队列、Frame 渲染、轮询和事件回执使用一致截止；测试探测耗尽预算后的真实失败和无负数定时器、过期事件与排队动作拒绝、延迟字节发送/租约确认取消后的收尾和其他任务正常执行。截图专项故障注入覆盖布局尺寸查询及捕获命令长期未返回、实际 detach 前保持锁、迟到图片不得发布或污染新租约、诊断的原动作关联与顺序。原生截图除 JPEG 合法性和尺寸外还须解码核对已知页面实际像素（含正常深色区域），不得将格式正确当成画面正确。
 
 ## E. 文件、多媒体与 Host 交付
 

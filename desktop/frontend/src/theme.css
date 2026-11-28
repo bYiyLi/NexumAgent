@@ -1,0 +1,76 @@
+/* Shared Nexum palette: all Desktop pages, shell, and controls consume these tokens.
+   The canvas RGB comes from theme-palette.json (also embedded by the native window). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--muted);
+  --color-secondary-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+:root {
+  color-scheme: light;
+  --background: var(--desktop-canvas);
+  --foreground: #172033;
+  --card: #ffffff;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --border: #d9e0ee;
+  --input: #cbd5e1;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --accent: #eaf0fd;
+  --accent-foreground: #1d4ed8;
+  --ring: #2563eb;
+  --destructive: #e11d48;
+  --brand-start: #2563eb;
+  --brand-end: #7c3aed;
+  --brand-label: #4f46e5;
+  --brand-soft: #eae8fb;
+  --progress-track: #dfe3f7;
+  --brand-gradient: linear-gradient(90deg, var(--brand-start), var(--brand-end));
+  --radius: 0.625rem;
+  --desktop-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.dark {
+  color-scheme: dark;
+  --foreground: #f1f5f9;
+  --card: #1b2639;
+  --muted: #283447;
+  --muted-foreground: #a1afc3;
+  --border: #334155;
+  --input: #475569;
+  --primary: #60a5fa;
+  --primary-foreground: #0f172a;
+  --accent: #293d60;
+  --accent-foreground: #bfdbfe;
+  --ring: #60a5fa;
+  --destructive: #fb7185;
+  --brand-start: #3b82f6;
+  --brand-end: #8b5cf6;
+  --brand-label: #a5b4fc;
+  --brand-soft: #2c3058;
+  --progress-track: #364361;
+}
+
+/* Shared semantic accents. Gradients never paint an application background. */
+.brand-gradient-text {
+  background-image: var(--brand-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.desktop-brand-label { color: var(--brand-label); }

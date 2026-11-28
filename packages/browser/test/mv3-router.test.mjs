@@ -1577,6 +1577,105 @@ test("a user cancellation concurrent with an owned close still revokes the run; 
   });
 });
 
+test("cancelled screenshot reads do not block actual debugger release or deliver late images", async (t) => {
+  for (const method of ["Page.getLayoutMetrics", "Page.captureScreenshot"])
+    await t.test(method, async (t) => {
+      const f = fixture(t);
+      f.router.start();
+      f.router.bind(binding);
+      f.open("lease");
+      const entered = Promise.withResolvers(),
+        native = Promise.withResolvers(),
+        detach = Promise.withResolvers();
+      const send = f.chrome.debugger.sendCommand;
+      f.chrome.debugger.sendCommand = async (source, command, params) => {
+        if (command === method) {
+          entered.resolve();
+          return native.promise;
+        }
+        return send(source, command, params);
+      };
+      f.setDetachGate(detach);
+      const stop = new AbortController();
+      const request = f.call("tab.screenshot", {}, {
+        signal: stop.signal,
+        budgetMs: 5000,
+      });
+      const rejected = assert.rejects(request, {
+        message: "Screenshot deadline reached",
+      });
+      let closing;
+      try {
+        await Promise.race([
+          entered.promise,
+          delay(1500).then(() => { throw Error("Native screenshot stage did not start"); }),
+        ]);
+        stop.abort(Error("Screenshot deadline reached"));
+        let closed = false;
+        closing = f.router.endLease("lease").then((receipt) => {
+          closed = true;
+          return receipt;
+        });
+        await Promise.race([
+          rejected,
+          delay(1000).then(() => { throw Error("Screenshot still waits for the native reply after cancellation"); }),
+        ]);
+        const originalStages = f.emitted
+          .filter((event) => event.event === "screenshot_stage" && event.runId === "lease")
+          .map((event) => event.stage);
+        assert.deepEqual(originalStages, method === "Page.getLayoutMetrics"
+          ? ["ready", "layout"]
+          : ["ready", "layout", "capture"]);
+        // A cancelled observation is not proof of debugger detachment.
+        assert.equal(closed, false);
+        assert.equal(f.attached.size, 1);
+        assert.throws(() => f.open("other"), { code: "TAB_ALREADY_CLAIMED" });
+        detach.resolve();
+        const receipt = await Promise.race([
+          closing,
+          delay(1000).then(() => { throw Error("Screenshot blocked lease closure"); }),
+        ]);
+        assert.equal(receipt.closed, true);
+        assert.equal(f.attached.size, 0);
+        // The next Run may use the same tab only after the original receipt.
+        f.open("next");
+        f.chrome.debugger.sendCommand = send;
+        assert.deepEqual(
+          await f.call("tab.screenshot", {}, { leaseId: "next" }),
+          new Uint8Array([3, 7, 9]),
+        );
+        // The old read can finish after a fresh lease. It cannot affect its
+        // target, publish an old screenshot, or dispatch a late capture.
+        const captureCount = f.calls.filter(
+          (entry) => entry[0] === "debugger.sendCommand" && entry[2] === "Page.captureScreenshot",
+        ).length;
+        native.resolve(method === "Page.getLayoutMetrics"
+          ? { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 20, clientHeight: 20 } }
+          : { data: Buffer.from([1, 2, 3]).toString("base64") });
+        await delay(0);
+        assert.equal(
+          f.calls.filter((entry) => entry[0] === "debugger.sendCommand" && entry[2] === "Page.captureScreenshot").length,
+          captureCount,
+        );
+        assert.equal(f.attached.size, 1);
+        assert.deepEqual(
+          f.emitted.filter((event) => event.event === "screenshot_stage" && event.runId === "next")
+            .map((event) => event.stage),
+          ["ready", "layout", "capture", "decode", "complete"],
+        );
+        assert.equal(f.emitted.some((event) =>
+          event.event === "screenshot_stage" && event.runId === "lease" && event.stage === "complete"), false);
+        assert.equal((await f.router.endLease("next")).closed, true);
+        assert.equal(f.attached.size, 0);
+      } finally {
+        native.resolve({ data: "" });
+        detach.resolve();
+        await rejected.catch(() => {});
+        await closing?.catch(() => {});
+      }
+    });
+});
+
 test("native screenshot defaults produce byte results, locator collections preserve exact query scope, and user detach fences old writes", async (t) => {
   const f = fixture(t);
   f.router.start();

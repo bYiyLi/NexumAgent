@@ -217,6 +217,77 @@ test("Node sends bound wakeups only while a peer has an active action", async (t
   assert.equal(activePings, afterCancellation);
 });
 
+test("screenshot stage diagnostics belong only to the current in-flight action", async (t) => {
+  const f = await fixture(t);
+  await f.service.start(new AbortController().signal);
+  const peer = await connect(f), ready = await peer.ready();
+  snapshot(peer, ready);
+  await until(() => f.service.get(ready.browserId).tabsReady);
+  const browser = f.service.get(ready.browserId);
+  const opening = f.service.openLease(browser, {
+    id: "lease",
+    runId: "run-one",
+    operationId: "operation-one",
+    target: ready.target,
+    signal: new AbortController().signal,
+    onClosed() {},
+  });
+  const open = await peer.next("lease_open");
+  ready.send({
+    type: "lease_opened",
+    leaseId: open.leaseId,
+    runId: open.runId,
+    operationId: open.operationId,
+  });
+  await opening;
+  const diagnostics = [];
+  const publicEvents = [];
+  f.service.on("browser-event", (_peer, event) => publicEvents.push(event));
+  const pending = action(f.service, ready, {
+    method: "tab.screenshot",
+    budgetMs: 10000,
+    onScreenshotStage: (progress) => diagnostics.push(progress),
+  });
+  const request = await peer.next("action");
+  const message = {
+    type: "event",
+    event: "screenshot_stage",
+    actionId: request.actionId,
+    leaseId: request.leaseId,
+    runId: request.runId,
+    operationId: request.operationId,
+    target: ready.target,
+    stage: "capture",
+    elapsedMs: 25,
+  };
+  ready.send({ ...message, sequence: 1, extra: "private-page-data" });
+  ready.send({ ...message, sequence: 2, operationId: "other-operation" });
+  ready.send({ ...message, sequence: 3, target: { ...ready.target, tabId: "2" } });
+  ready.send({ ...message, sequence: 4, stage: "untrusted-stage" });
+  ready.send({ ...message, sequence: 5, elapsedMs: -1 });
+  ready.send({ ...message, sequence: 6, elapsedMs: 30 }); // duplicate phase
+  ready.send({ ...message, sequence: 7, stage: "layout", elapsedMs: 40 }); // stale phase
+  ready.send({ ...message, sequence: 8, stage: "decode", elapsedMs: 10 }); // backwards time
+  ready.send({ ...message, sequence: 9, stage: "complete", elapsedMs: 80 });
+  await until(() => browser.sequence === 9);
+  assert.deepEqual(diagnostics, [
+    { stage: "capture", elapsedMs: 25 },
+    { stage: "complete", elapsedMs: 80 },
+  ]);
+  assert.deepEqual(publicEvents, []);
+  ready.send({
+    type: "action_result",
+    actionId: request.actionId,
+    operationId: request.operationId,
+    ok: true,
+    value: null,
+  });
+  assert.equal(await pending, null);
+  ready.send({ ...message, sequence: 10, stage: "complete" });
+  await until(() => browser.sequence === 10);
+  assert.equal(diagnostics.length, 2, "a late event must not log against a completed action");
+});
+
 test("visual diagnostics correlate only a live lease and never log untrusted event data", async (t) => {
   const f = await fixture(t);
   await f.service.start(new AbortController().signal);

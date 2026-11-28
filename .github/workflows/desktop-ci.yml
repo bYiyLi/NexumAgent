@@ -1,0 +1,179 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - ".github/workflows/desktop-release.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - ".github/workflows/desktop-release.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: both
+      version:
+        type: string
+        default: ""
+      sign:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            platform: darwin
+            arch: arm64
+          - os: macos-26-intel
+            platform: darwin
+            arch: amd64
+          - os: windows-2025
+            platform: windows
+            arch: amd64
+          - os: windows-11-arm
+            platform: windows
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      NEXUM_DESKTOP_VERSION: ${{ inputs.version || '' }}
+      NEXUM_DESKTOP_PROFILE: ${{ inputs.profile || 'both' }}
+      NEXUM_DESKTOP_SIGNING: ${{ inputs.sign && 'required' || 'candidate' }}
+      NEXUM_DESKTOP_RELEASE_BUILD: ${{ inputs.version != '' && 'true' || 'false' }}
+      NEXUM_DESKTOP_UPDATE_PUBLIC_KEY_PRODUCTION: ${{ vars.NEXUM_DESKTOP_UPDATE_PUBLIC_KEY_PRODUCTION }}
+      NEXUM_DESKTOP_UPDATE_PUBLIC_KEY_DEVELOPMENT: ${{ vars.NEXUM_DESKTOP_UPDATE_PUBLIC_KEY_DEVELOPMENT }}
+      CGO_ENABLED: ${{ matrix.platform == 'darwin' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Verify native runner and release input
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
+          test "$(go env GOOS)" = "$EXPECTED_PLATFORM"
+          expected_node_arch="$EXPECTED_ARCH"
+          if [ "$EXPECTED_ARCH" = amd64 ]; then expected_node_arch=x64; fi
+          test "$(node -p process.arch)" = "$expected_node_arch"
+          case "$NEXUM_DESKTOP_PROFILE" in
+            both|production|development) ;;
+            *) exit 1 ;;
+          esac
+          if [ "$NEXUM_DESKTOP_SIGNING" = required ]; then
+            test "$NEXUM_DESKTOP_PROFILE" = production
+          fi
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm tools:install
+      - run: pnpm check
+      - name: Ensure Windows NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            $candidate = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+            if (-not (Test-Path $candidate)) {
+              choco install nsis --version=3.10 -y --no-progress
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            if (-not (Test-Path $candidate)) { throw 'NSIS executable unavailable' }
+            Split-Path $candidate | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+      - name: Import macOS signing certificate and notary credentials
+        if: inputs.sign && runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for var in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var}" ]; then echo "Missing signing secret: $var"; exit 1; fi
+          done
+          umask 077
+          keychain="$RUNNER_TEMP/nexum-desktop-signing.keychain-db"
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::$password"
+          cert="$RUNNER_TEMP/nexum-desktop.p12"
+          trap 'rm -f "$cert"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 -D > "$cert"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$cert" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          xcrun notarytool store-credentials nexum-desktop-ci --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+          printf '%s\n' "NEXUM_MAC_SIGN_IDENTITY=$APPLE_SIGNING_IDENTITY" "NEXUM_MAC_NOTARY_PROFILE=nexum-desktop-ci" >> "$GITHUB_ENV"
+      - name: Import Windows signing certificate
+        if: inputs.sign && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_PFX_BASE64 -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw 'Missing Windows signing secrets' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'nexum-desktop-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+            $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfx -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            if (-not $cert.HasPrivateKey) { throw 'Signing certificate has no private key' }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+          $tools = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending
+          if (-not $tools) { throw 'SignTool unavailable' }
+          "NEXUM_WINDOWS_SIGN_THUMBPRINT=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "NEXUM_WINDOWS_SIGNTOOL=$($tools[0].FullName)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build native production package
+        if: inputs.profile != 'development'
+        run: pnpm package
+      - name: Build native development package
+        if: inputs.profile != 'production'
+        run: pnpm package:dev
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: desktop/bin/*/release/*
+          if-no-files-found: error
+          retention-days: 14
