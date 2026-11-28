@@ -10,8 +10,8 @@
 | 独立 SQLite 和 Profile | Go 测试覆盖不同 Profile 持久化、外来数据库、另一 Profile 副本、无效配置 | Go 测试通过；Mac 同时启动两种 Profile，独立 HOME 中两个真实 SQLite 的 application_id 分别为 1314407504 / 1314407492，user_version=1，profile 与 theme 均读回正确 |
 | 基础窗口、托盘、原生绑定和热更新 | macOS 开发运行、两种 Profile 实际应用检查；`pnpm dev` | Mac 两种原生应用均运行并记录前端绑定 ready；开发模式 HTTP 200、Vite 实际 HMR 事件通过；测试进程均确认停止。托盘代码已构建，菜单点击仍需人工验证 |
 | 两种 Profile macOS 打包 | `pnpm package` / `pnpm package:dev`、签名与 DMG 校验 | Mac ARM64 0.1.0 / 0.1.0-dev 候选 DMG 均实际构建，ad-hoc codesign、plist、hdiutil 与 SHA-256 通过；非正式签名 |
-| 四平台 GitHub CI | Desktop CI 的实际 commit/run、制品 | 工作流已配置，actionlint 通过；未推送，GitHub Runner 尚未实际运行 |
-| 独立 GitHub Release | tag 选择、签名门禁、完整制品与摘要检查；实际发行需授权 | 工作流已配置，actionlint 通过；无发布 Tag、未实际发布、正式签名凭据未验证 |
+| 四平台 GitHub CI | Desktop CI 的实际 commit/run、制品 | Development 发行 Run 46116784477 的四个原生平台构建与 pnpm check 均通过；Production 发行未验收 |
+| 独立 GitHub Release | tag 选择、签名门禁、完整制品与摘要检查；实际发行需授权 | Development 0.1.0-next.2026112803 已公开预发行，10 个 assets 及 Ed25519 清单签名核验通过；正式 OS 签名与 Production 发行未验收 |
 | 保留现有 Node Host/Browser 与 Git 状态 | Agent 仓库根 `pnpm check` 与 Git diff | 仓库根 pnpm check exit 0；原有 Browser 修改保留；按任务范围检查 diff 与未跟踪文件 |
 
 ## 窗口外壳迭代（2026-11-27）
@@ -221,3 +221,9 @@
 配套 Cloud/Native `1.1.3-next.2026112702` 在 OpenClaw 从此前已部署的 Dev 快照叠加管理工作区源码构建。基准提交 `fc13da744d7f353cd281824eaf4945ecdf277db6`，源码归档 SHA-256 `c7d118ef2e07979848d5f6cb47f6f1123b7cbe153e72ba994a43d0e9536e7a3b`，Hosted 标签 `1.1.3-next.2026112702-c7d118ef`。Hosted/Group OCI index 摘要一致，为 `sha256:b2bac830c0724692d9952660a8192999369e7b0c67c866a4cd42930f8061fea7`。Dev 运行平台摘要为 `sha256:7ff58706e1a22f2bd5a3c2ee49420398c38d15de9ccc154e6ef927dc1bc76ad6`，迁移预检和备份通过，schema 保持 19。公开健康检查通过，Mac Agent 自动升级并恢复 Cloud 在线与执行就绪。
 
 Desktop `pnpm check` 通过，包含 19 个前端测试文件、78 项测试、ESLint、类型检查、Vite 以及三组 Go 标签。主仓 `go test ./...`、改动范围 `go vet`、Native 管理接口和 Desktop 生命周期专项 race 检查通过。使用 Dev 配套 Node Host 和隔离的 MCP/API 服务通过能力详情的真实运行时测试。Mac 独立候选包构建、签名校验和原生窗口验证通过。以上证据对应冻结的已部署版本和配套验收 App；冻结后的资料删除等并行工作仍需独立联调。实际 Dev 操作限 development Profile，本轮源码留在工作树，正式 Desktop 未发布。Windows 和真实 SSH 端到端仍待验收。
+
+## 首次 Development 公开发行（2026-11-28）
+
+- 发行版本：[`0.1.0-next.2026112803`](https://github.com/bYiyLi/NexumAgent/releases/tag/desktop/v0.1.0-next.2026112803)，2026-11-28 17:27:25 +08:00 已公开发布（Pre-release，非 Draft）。原生构建源提交 `7f0dfac0b77f169929d6c4a85d3e7fb10b811894`；[原构建 Run 46116784477](https://github.com/bYiyLi/NexumAgent/actions/runs/46116784477) 的四个原生 Runner 检查与打包成功，最终汇总失败。
+- 修复归档层级汇总、源码 packages/ 与暂存目录冲突；Development 恢复入口严格验证原 Tag、Commit、成功构建及未过期制品。8 项本机发布回归测试通过；[恢复 Run 46130529001](https://github.com/bYiyLi/NexumAgent/actions/runs/46130529001) 使用原归档完成签名及公开发行。恢复流程源码提交 `19d0dc17e34542d60f6943e69606434e06f58568`。
+- GitHub Release 实际包含四个安装包、四个 SHA-256 文件、update.json / update.json.sig 共 10 个 assets。公开下载清单及签名、四份 SHA-256 文件的字节已验证，签名公钥匹配原开发构建；安装包的 GitHub 摘要与原生构建及签名清单中的 SHA-256、大小全部一致。未在真机安装此次公开发行包；未执行 Production 发行、Apple 公证或 Windows Authenticode 签名。
