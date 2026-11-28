@@ -96,7 +96,7 @@ pnpm preview:startup
 
 ## CI 与发行
 
-[Desktop CI](../.github/workflows/desktop-ci.yml) 使用 macOS/Windows 原生 x64/ARM64 Runner；普通变更构建两个 Profile 的候选包并上传 Actions artifacts。[Desktop Release](../.github/workflows/desktop-release.yml) 只处理 `desktop/vX.Y.Z` 与 `desktop/vX.Y.Z-...` 标签，要求提交属于 main；不触发现有 npm 发布。
+[Desktop CI](../.github/workflows/desktop-ci.yml) 使用 macOS/Windows 原生 x64/ARM64 Runner；普通变更构建两个 Profile 的候选包并上传 Actions artifacts。[Desktop Release](../.github/workflows/desktop-release.yml) 处理 `desktop/vX.Y.Z` 与 `desktop/vX.Y.Z-...` 标签，要求提交属于 main；不触发现有 npm 发布。开发版若四个原生构建全部通过但最终 publish 失败，且对应制品未过期，可在 main 手动运行该工作流并填写原发行 Run ID（`recovery_run_id`）。恢复严格核验原 Tag、提交、四个构建任务及制品身份，不重建或覆盖原包，不允许恢复 Production 发行。
 
 - 带预发行后缀的标签生成 Development 包并作为 GitHub Pre-release 发布；正式标签生成 Production 包。
 - 正式发布强制签名：macOS Developer ID 和 Apple 公证，Windows Authenticode。配置仓库受保护的发布 Secrets：`APPLE_CERTIFICATE_P12_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_APP_PASSWORD`、`APPLE_TEAM_ID`、`WINDOWS_CERTIFICATE_PFX_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD`。缺少签名材料时正式发行失败关闭，不将未签名候选当作已正式发行。

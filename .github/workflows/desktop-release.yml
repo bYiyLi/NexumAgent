@@ -4,22 +4,34 @@ on:
   push:
     tags:
       - "desktop/v*"
+  workflow_dispatch:
+    inputs:
+      recovery_run_id:
+        description: "Failed Development release run with all four native builds successful"
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.recovery_run_id || github.ref }}
   cancel-in-progress: false
 
 jobs:
   plan:
     if: github.repository == 'bYiyLi/NexumAgent'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
       profile: ${{ steps.plan.outputs.profile }}
       sign: ${{ steps.plan.outputs.sign }}
+      tag: ${{ steps.plan.outputs.tag }}
+      source_run_id: ${{ steps.plan.outputs.source_run_id }}
+      recovery: ${{ steps.plan.outputs.recovery }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,15 +41,50 @@ jobs:
         id: plan
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^desktop/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+          tag="$GITHUB_REF_NAME"
+          source_run_id="$GITHUB_RUN_ID"
+          recovery=false
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = refs/heads/main
+            [[ "$RECOVERY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            source_run_id="$RECOVERY_RUN_ID"
+            recovery=true
+            run=$(gh api "repos/$GH_REPO/actions/runs/$source_run_id")
+            jq -e --arg repo "$GH_REPO" --arg id "$source_run_id" '
+              (.id|tostring) == $id and .repository.full_name == $repo and .head_repository.full_name == $repo
+              and .path == ".github/workflows/desktop-release.yml" and .event == "push"
+              and .status == "completed" and .conclusion == "failure"
+            ' <<< "$run" >/dev/null
+            tag=$(jq -er .head_branch <<< "$run")
+          fi
+          if [[ ! "$tag" =~ ^desktop/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "Invalid Desktop release tag"; exit 1
           fi
-          git merge-base --is-ancestor HEAD origin/main
-          version="${TAG#desktop/v}"
-          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          version="${tag#desktop/v}"
+          commit=$(git rev-parse "refs/tags/$tag^{commit}")
+          git merge-base --is-ancestor "$commit" origin/main
+          if [ "$recovery" = true ]; then
+            [[ "$version" == *-* ]] || { echo "Recovery is Development-only"; exit 1; }
+            test "$commit" = "$(jq -er .head_sha <<< "$run")"
+            gh api "repos/$GH_REPO/actions/runs/$source_run_id/jobs?filter=latest&per_page=100" | jq -e '
+              .total_count == 6 and ([.jobs[] | select(.status=="completed" and .conclusion=="success") | .name] | sort) ==
+              (["plan","build / build (macos-26, darwin, arm64)","build / build (macos-26-intel, darwin, amd64)","build / build (windows-2025, windows, amd64)","build / build (windows-11-arm, windows, arm64)"] | sort)
+              and ([.jobs[] | select(.name=="publish" and .status=="completed" and .conclusion=="failure")] | length) == 1
+            ' >/dev/null
+            gh api "repos/$GH_REPO/actions/runs/$source_run_id/artifacts?per_page=100" | jq -e --arg id "$source_run_id" --arg sha "$commit" --arg tag "$tag" '
+              .total_count == 4 and ([.artifacts[].name]|sort) == ["desktop-darwin-amd64","desktop-darwin-arm64","desktop-windows-amd64","desktop-windows-arm64"]
+              and all(.artifacts[]; .expired==false and (.digest|test("^sha256:[a-f0-9]{64}$")) and (.workflow_run.id|tostring)==$id and .workflow_run.head_sha==$sha and .workflow_run.head_branch==$tag)
+            ' >/dev/null
+            echo "Recovery validated: $tag from run $source_run_id ($commit)"
+          else
+            test "$commit" = "$(git rev-parse HEAD)"
+          fi
+          printf 'version=%s\ntag=%s\nsource_run_id=%s\nrecovery=%s\n' "$version" "$tag" "$source_run_id" "$recovery" >> "$GITHUB_OUTPUT"
           if [[ "$version" == *-* ]]; then
             printf 'profile=development\nsign=false\n' >> "$GITHUB_OUTPUT"
           else
@@ -45,6 +92,7 @@ jobs:
           fi
   build:
     needs: plan
+    if: needs.plan.outputs.recovery != 'true'
     uses: ./.github/workflows/desktop-ci.yml
     with:
       profile: ${{ needs.plan.outputs.profile }}
@@ -53,9 +101,11 @@ jobs:
     secrets: inherit
   publish:
     needs: [plan, build]
+    if: "!cancelled() && needs.plan.result == 'success' && (needs.build.result == 'success' || (needs.plan.outputs.recovery == 'true' && needs.build.result == 'skipped'))"
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,23 +113,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
+      - run: node --test desktop/scripts/prepare-release.test.mjs
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
-          path: packages
-          merge-multiple: true
+          path: native-artifacts
+          merge-multiple: false
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.plan.outputs.source_run_id }}
       - name: Verify complete package set and create release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
           PROFILE: ${{ needs.plan.outputs.profile }}
           NEXUM_UPDATE_PUBLIC_KEY: ${{ vars[format('NEXUM_DESKTOP_UPDATE_PUBLIC_KEY_{0}', needs.plan.outputs.profile == 'production' && 'PRODUCTION' || 'DEVELOPMENT')] }}
           NEXUM_UPDATE_PRIVATE_KEY: ${{ secrets[format('NEXUM_DESKTOP_UPDATE_PRIVATE_KEY_{0}', needs.plan.outputs.profile == 'production' && 'PRODUCTION' || 'DEVELOPMENT')] }}
         run: |
           set -euo pipefail
+          node desktop/scripts/prepare-release.mjs native-artifacts packages
           cd packages
           prefix=NexumDesktop
           flags=()
